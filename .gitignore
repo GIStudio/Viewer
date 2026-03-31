@@ -1,0 +1,36 @@
+node_modules/
+dist/
+tsconfig.tsbuildinfo
+.DS_Store
+*.local
+
+# 3D asset files - never commit models
+*.glb
+*.gltf
+*.obj
+*.fbx
+*.dae
+*.stl
+*.ply
+*.blend
+*.abc
+*.usd
+*.usda
+*.usdc
+*.usdz
+
+# Image/texture assets
+*.hdr
+*.exr
+*.tga
+
+# Data directories containing real assets
+data/
+assets/
+meshes/
+models/
+
+# Environment config
+.env
+.env.*
+!.env.example
