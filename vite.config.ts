@@ -5,21 +5,13 @@ import { URL, fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 
 const viewerRoot = fileURLToPath(new URL(".", import.meta.url));
+const repoRoot = path.resolve(viewerRoot, "..", "..");
 const RECENT_LAYOUT_LIMIT = 20;
-
-// Configure asset manifest paths via environment variables.
-// Copy .env.example to .env and adjust these paths for your local setup.
-const ASSET_MANIFESTS_DIR = path.resolve(
-  process.env.VIEWER_ASSET_MANIFESTS_DIR ?? path.join(viewerRoot, "data"),
-);
-const ASSET_MANIFEST_PATH = path.resolve(
-  process.env.VIEWER_ASSET_MANIFEST_PATH ?? path.join(ASSET_MANIFESTS_DIR, "assets_manifest.jsonl"),
-);
-const EXTRA_ASSET_MANIFEST_DIRS: string[] = (process.env.VIEWER_EXTRA_MANIFEST_DIRS ?? "")
-  .split(path.delimiter)
-  .map((p) => p.trim())
-  .filter(Boolean)
-  .map((p) => path.resolve(p));
+const ASSET_MANIFEST_PATH = path.resolve(repoRoot, "data", "real", "real_assets_manifest.jsonl");
+const ASSET_MANIFESTS_DIR = path.resolve(repoRoot, "data", "real");
+const EXTRA_ASSET_MANIFEST_DIRS = [
+  path.resolve(repoRoot, "data", "street_furniture"),
+];
 const IGNORED_DISCOVERY_DIRS = new Set([
   ".git",
   ".venv",
@@ -43,8 +35,7 @@ type StaticObjectDescription = {
 let cachedAssetDescriptionIndex: Map<string, JsonRecord> | null = null;
 
 function allowedRoots(): string[] {
-  // Start with the manifest dirs so assets inside them can be served
-  const roots: string[] = [ASSET_MANIFESTS_DIR, ...EXTRA_ASSET_MANIFEST_DIRS].filter(Boolean);
+  const roots = [repoRoot];
   // Add common external asset caches so the dev server can serve them
   const homeDir = process.env.HOME || process.env.USERPROFILE || "";
   const knownCaches = [
@@ -139,7 +130,23 @@ function displayPathFor(filePath: string, roots: string[]): string {
 function buildRecentLayoutsPayload(limit: number): { results: Array<Record<string, unknown>> } {
   const roots = allowedRoots();
   const safeLimit = Math.max(1, Number.isFinite(limit) ? Math.trunc(limit) : RECENT_LAYOUT_LIMIT);
+  
+  // Filter out L0 quality layouts (real_assets and v2 assets are low quality)
+  const isHighQualityLayout = (layoutPath: string): boolean => {
+    const pathLower = layoutPath.toLowerCase();
+    // Exclude real_assets manifest based layouts (L0 quality)
+    if (pathLower.includes("real_assets") || pathLower.includes("real-assets")) {
+      return false;
+    }
+    // Exclude v2 asset layouts (L0 quality)
+    if (pathLower.includes("_v2") || pathLower.includes("-v2") || pathLower.includes("/v2/")) {
+      return false;
+    }
+    return true;
+  };
+  
   const results = discoverSceneLayoutPaths(roots)
+    .filter(isHighQualityLayout)
     .map((layoutPath) => {
       const stats = fs.statSync(layoutPath);
       const relativePath = displayPathFor(layoutPath, roots);
@@ -219,6 +226,25 @@ function loadAssetDescriptionIndex(): Map<string, JsonRecord> {
     try {
       const parsed = JSON.parse(trimmed) as JsonRecord;
       const assetId = String(parsed.asset_id ?? "").trim();
+      
+      // Filter out L0 quality assets
+      const source = String(parsed.source ?? "").toLowerCase();
+      const generatorType = String(parsed.generator_type ?? "").toLowerCase();
+      const qualityTier = Number(parsed.quality_tier ?? 999);
+      
+      // Skip real_assets imports (L0 quality)
+      if (source.includes("real_asset") || source.includes("urbanverse_import")) {
+        continue;
+      }
+      // Skip v2 generation assets (L0 quality)
+      if (generatorType.includes("_v2") || generatorType.includes("-v2")) {
+        continue;
+      }
+      // Skip low quality tier (0 = L0, lower is worse)
+      if (qualityTier === 0) {
+        continue;
+      }
+      
       if (assetId) {
         index.set(assetId, parsed);
       }
@@ -503,6 +529,19 @@ function viewerApiPlugin(): Plugin {
     name: "roadgen3d-viewer-api",
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
+        const PRESETS = [
+          { id: "residential_narrow", name: "住宅区窄街道", description: "2车道, 1.5m人行道，安静住宅区风格", config: { lane_count: 2, sidewalk_width_m: 1.5, road_width_m: 6, density: 0.6, length_m: 60 } },
+          { id: "commercial_wide", name: "商业区宽街道", description: "4车道, 3m人行道，繁华商业区风格", config: { lane_count: 4, sidewalk_width_m: 3, road_width_m: 12, density: 1.2, length_m: 100 } },
+          { id: "park_boulevard", name: "公园大道", description: "绿化为主，宽敞林荫道", config: { lane_count: 2, sidewalk_width_m: 4, road_width_m: 8, density: 0.4, length_m: 120 } },
+          { id: "transit_corridor", name: "公交走廊", description: "公交优先，2车道+公交专用道", config: { lane_count: 2, sidewalk_width_m: 2.5, road_width_m: 10, density: 1.0, length_m: 80 } },
+          { id: "pedestrian_mall", name: "步行街", description: "纯步行区域，无机动车", config: { lane_count: 0, sidewalk_width_m: 8, road_width_m: 2, density: 1.5, length_m: 60 } },
+          { id: "waterfront_promenade", name: "滨水步道", description: "沿河景观步道，休闲为主", config: { lane_count: 1, sidewalk_width_m: 5, road_width_m: 4, density: 0.3, length_m: 150 } },
+          { id: "historic_district", name: "历史街区", description: "窄街小巷，文化保护风格", config: { lane_count: 1, sidewalk_width_m: 1.2, road_width_m: 4, density: 0.8, length_m: 50 } },
+          { id: "mixed_use_avenue", name: "混合用途大道", description: "功能混合，平衡交通与步行", config: { lane_count: 2, sidewalk_width_m: 3, road_width_m: 8, density: 1.0, length_m: 80 } },
+          { id: "industrial_road", name: "工业区道路", description: "货运优先，宽车道少家具", config: { lane_count: 4, sidewalk_width_m: 1.5, road_width_m: 14, density: 0.2, length_m: 120 } },
+          { id: "school_zone", name: "学区道路", description: "安全优先，低速限速区域", config: { lane_count: 1, sidewalk_width_m: 4, road_width_m: 4, density: 0.9, length_m: 60 } },
+        ];
+
         if (!req.url) {
           next();
           return;
@@ -564,8 +603,10 @@ function viewerApiPlugin(): Plugin {
             const instances = buildInstancePayloads(layoutPayload);
             const assetDescriptions = buildAssetDescriptions(layoutPayload);
             const staticObjectDescriptions = buildStaticObjectDescriptions();
+            const summary = (layoutPayload.summary ?? null) as JsonRecord | null;
             jsonResponse(res, 200, {
               layout_path: layoutPath,
+              summary,
               final_scene: {
                 label: "Final Scene",
                 glb_url: `${apiPrefix}/file?path=${encodeURIComponent(finalScenePath)}`,
@@ -913,6 +954,14 @@ function viewerApiPlugin(): Plugin {
           fs.writeFileSync(manifestPath, newLines.join("\n"), "utf-8");
           cachedAssetDescriptionIndex = null;
           jsonResponse(res, 200, { ok: true });
+          return;
+        }
+
+        const isPresetsRoute =
+          requestUrl.pathname === "/api/presets" ||
+          requestUrl.pathname === "/web-viewer/api/presets";
+        if (isPresetsRoute) {
+          jsonResponse(res, 200, { presets: PRESETS });
           return;
         }
 

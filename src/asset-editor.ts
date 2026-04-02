@@ -75,6 +75,7 @@ type AssetEditorState = {
   yawValue: number;
   frontDirection: string;
   modelDimensions: { width?: number; height?: number; depth?: number } | null;
+  originalDimensions: { width: number; height: number; depth: number } | null;
 };
 
 /* ── Helpers ───────────────────────────────────────────────────────── */
@@ -775,6 +776,7 @@ export function mountAssetEditor(root: HTMLElement): () => void {
     yawValue: 0,
     frontDirection: "+Z",
     modelDimensions: null,
+    originalDimensions: null,
   };
 
   let previewCtx: PreviewContext | null = null;
@@ -861,17 +863,16 @@ export function mountAssetEditor(root: HTMLElement): () => void {
 
             <!-- Actions -->
             <div class="ae-actions-bar">
-              <button id="ae-save-btn" class="ae-action-btn ae-btn-primary" disabled>Save Metadata</button>
+              <button id="ae-save-btn" class="ae-action-btn ae-btn-primary" disabled>Save</button>
+              <button id="ae-export-btn" class="ae-action-btn">Export GLB</button>
+              <span class="ae-actions-sep"></span>
               <div class="ae-scale-group">
                 <label class="ae-scale-label">Scale:</label>
                 <input id="ae-scale-input" type="number" class="ae-scale-input" value="1" min="0.01" max="100" step="0.1" />
-                <button id="ae-apply-scale" class="ae-action-btn">Apply</button>
-                <button id="ae-export-btn" class="ae-action-btn">Export GLB</button>
               </div>
               <div class="ae-orientation-group">
                 <label class="ae-yaw-label">Yaw (°):</label>
                 <input id="ae-yaw-input" type="number" class="ae-yaw-input" value="0" min="-180" max="360" step="1" />
-                <button id="ae-apply-yaw" class="ae-action-btn">Apply</button>
               </div>
               <div class="ae-front-group">
                 <label class="ae-front-label">Front:</label>
@@ -910,7 +911,6 @@ export function mountAssetEditor(root: HTMLElement): () => void {
   const dupCount = qs<HTMLSpanElement>(root, "#ae-dup-count");
   const saveBtn = qs<HTMLButtonElement>(root, "#ae-save-btn");
   const scaleInput = qs<HTMLInputElement>(root, "#ae-scale-input");
-  const applyScaleBtn = qs<HTMLButtonElement>(root, "#ae-apply-scale");
   const exportBtn = qs<HTMLButtonElement>(root, "#ae-export-btn");
   const removeDupsBtn = qs<HTMLButtonElement>(root, "#ae-remove-dups-btn");
   const splitBtn = qs<HTMLButtonElement>(root, "#ae-split-btn");
@@ -925,7 +925,6 @@ export function mountAssetEditor(root: HTMLElement): () => void {
   const loadMoreBtn = qs<HTMLButtonElement>(root, "#ae-load-more-btn");
   const loadMoreInfo = qs<HTMLSpanElement>(root, "#ae-load-more-info");
   const yawInput = qs<HTMLInputElement>(root, "#ae-yaw-input");
-  const applyYawBtn = qs<HTMLButtonElement>(root, "#ae-apply-yaw");
   const frontSelect = qs<HTMLSelectElement>(root, "#ae-front-select");
 
   /* ── Navigation ────────────────────────────────────────────────── */
@@ -1153,9 +1152,24 @@ export function mountAssetEditor(root: HTMLElement): () => void {
         // Compute and store model dimensions
         const dims = getModelDimensions(previewCtx);
         if (dims) {
-          state.modelDimensions = dims;
-          // Update dimensions display
-          updateDimensionsDisplay(dims);
+          // Store native GLB dimensions as the base for proportional scaling
+          state.originalDimensions = {
+            width: dims.width,
+            height: dims.height,
+            depth: dims.depth,
+          };
+          // Apply saved scale to preview
+          if (state.scaleValue !== 1) {
+            applyScale(previewCtx, state.scaleValue);
+          }
+          // Compute actual scene dimensions (native × scale)
+          state.modelDimensions = {
+            width: +(dims.width * state.scaleValue).toFixed(4),
+            height: +(dims.height * state.scaleValue).toFixed(4),
+            depth: +(dims.depth * state.scaleValue).toFixed(4),
+          };
+          updateDimensionsDisplay(state.modelDimensions);
+          syncSliderToScale(state.scaleValue);
         }
 
         // Apply existing yaw from asset record
@@ -1180,10 +1194,15 @@ export function mountAssetEditor(root: HTMLElement): () => void {
 
   /* ── Dimensions display ──────────────────────────────────────────── */
   function updateDimensionsDisplay(dims: { width?: number; height?: number; depth?: number } | null) {
-    const dimsEl = document.getElementById("ae-dimensions-value");
-    if (dimsEl && dims) {
-      dimsEl.textContent = `${(dims.width ?? 0).toFixed(2)} × ${(dims.height ?? 0).toFixed(2)} × ${(dims.depth ?? 0).toFixed(2)}`;
-    }
+    const wInput = document.getElementById("ae-dim-w") as HTMLInputElement | null;
+    const hInput = document.getElementById("ae-dim-h") as HTMLInputElement | null;
+    const dInput = document.getElementById("ae-dim-d") as HTMLInputElement | null;
+    const slider = document.getElementById("ae-dims-slider") as HTMLInputElement | null;
+    if (!dims) return;
+    if (wInput) { wInput.value = (dims.width ?? 0).toFixed(2); wInput.disabled = false; }
+    if (hInput) { hInput.value = (dims.height ?? 0).toFixed(2); hInput.disabled = false; }
+    if (dInput) { dInput.value = (dims.depth ?? 0).toFixed(2); dInput.disabled = false; }
+    if (slider) slider.disabled = false;
   }
 
   /* ── Info panel ────────────────────────────────────────────────── */
@@ -1212,7 +1231,29 @@ export function mountAssetEditor(root: HTMLElement): () => void {
       <div class="ae-info-row ae-info-value ae-mono">${fCount.toLocaleString()} / ${vCount.toLocaleString()}</div>
 
       <div class="ae-info-row ae-info-label">Dimensions (m)</div>
-      <div class="ae-info-row ae-info-value ae-mono" id="ae-dimensions-value">W×H×D: ${dimsText}</div>
+      <div class="ae-info-row ae-info-value">
+        <div class="ae-dims-scaler" id="ae-dims-scaler">
+          <div class="ae-dims-inputs">
+            <label class="ae-dims-field">
+              <span class="ae-dims-field-label">W</span>
+              <input type="number" id="ae-dim-w" class="ae-dims-input" step="0.01" min="0.01" value="${(dims?.width ?? 0).toFixed(2)}" ${dims ? "" : "disabled"} />
+            </label>
+            <label class="ae-dims-field">
+              <span class="ae-dims-field-label">H</span>
+              <input type="number" id="ae-dim-h" class="ae-dims-input" step="0.01" min="0.01" value="${(dims?.height ?? 0).toFixed(2)}" ${dims ? "" : "disabled"} />
+            </label>
+            <label class="ae-dims-field">
+              <span class="ae-dims-field-label">D</span>
+              <input type="number" id="ae-dim-d" class="ae-dims-input" step="0.01" min="0.01" value="${(dims?.depth ?? 0).toFixed(2)}" ${dims ? "" : "disabled"} />
+            </label>
+          </div>
+          <div class="ae-dims-slider-row">
+            <span class="ae-dims-slider-label">Scale</span>
+            <input type="range" id="ae-dims-slider" class="ae-dims-slider" min="0.1" max="10" step="0.01" value="1" ${dims ? "" : "disabled"} />
+            <span class="ae-dims-slider-value" id="ae-dims-slider-val">1.00x</span>
+          </div>
+        </div>
+      </div>
 
       <div class="ae-info-row ae-info-label">Mesh Path</div>
       <div class="ae-info-row ae-info-value ae-mono ae-path">${asset.mesh_path ?? "-"}</div>
@@ -1464,41 +1505,107 @@ export function mountAssetEditor(root: HTMLElement): () => void {
     }
   });
 
-  /* ── Scale ─────────────────────────────────────────────────────── */
-  applyScaleBtn.addEventListener("click", () => {
+  /* ── Scale input → live preview ───────────────────────────────── */
+  function syncSliderToScale(scale: number) {
+    const slider = document.getElementById("ae-dims-slider") as HTMLInputElement | null;
+    const sliderVal = document.getElementById("ae-dims-slider-val");
+    if (!slider) return;
+    // Dynamic range: 0.1x to 10x around current scale
+    const lo = scale * 0.1;
+    const hi = scale * 10;
+    const step = scale * 0.01;
+    slider.min = String(lo);
+    slider.max = String(hi);
+    slider.step = String(step);
+    slider.value = String(scale);
+    if (sliderVal) sliderVal.textContent = `${scale.toFixed(4)}x`;
+  }
+
+  scaleInput.addEventListener("input", () => {
     const val = parseFloat(scaleInput.value);
-    if (isNaN(val) || val <= 0) {
-      showToast(root, "Scale must be a positive number", "error");
-      return;
-    }
+    if (isNaN(val) || val <= 0) return;
     state.scaleValue = val;
     if (previewCtx) applyScale(previewCtx, val);
+    if (state.originalDimensions) {
+      state.modelDimensions = {
+        width: state.originalDimensions.width * val,
+        height: state.originalDimensions.height * val,
+        depth: state.originalDimensions.depth * val,
+      };
+      updateDimensionsDisplay(state.modelDimensions);
+    }
+    syncSliderToScale(val);
   });
 
-  /* ── Yaw (Orientation) ─────────────────────────────────────────── */
-  applyYawBtn.addEventListener("click", () => {
-    const val = parseFloat(yawInput.value);
-    if (isNaN(val)) {
-      showToast(root, "Yaw must be a number", "error");
-      return;
+  /* ── Proportional dimension scaling (live preview) ─────────────── */
+  function applyProportionalScale(ratio: number) {
+    if (!state.originalDimensions) return;
+    const orig = state.originalDimensions;
+    const newDims = {
+      width: +(orig.width * ratio).toFixed(4),
+      height: +(orig.height * ratio).toFixed(4),
+      depth: +(orig.depth * ratio).toFixed(4),
+    };
+    state.modelDimensions = newDims;
+    state.scaleValue = ratio;
+    scaleInput.value = ratio.toFixed(4);
+    updateDimensionsDisplay(newDims);
+    if (previewCtx) applyScale(previewCtx, ratio);
+    syncSliderToScale(ratio);
+  }
+
+  function handleDimInputChange(changedAxis: "w" | "h" | "d") {
+    if (!state.originalDimensions) return;
+    const orig = state.originalDimensions;
+    const wInput = document.getElementById("ae-dim-w") as HTMLInputElement | null;
+    const hInput = document.getElementById("ae-dim-h") as HTMLInputElement | null;
+    const dInput = document.getElementById("ae-dim-d") as HTMLInputElement | null;
+    if (!wInput || !hInput || !dInput) return;
+
+    let newValue: number;
+    let originalValue: number;
+    if (changedAxis === "w") {
+      newValue = parseFloat(wInput.value);
+      originalValue = orig.width;
+    } else if (changedAxis === "h") {
+      newValue = parseFloat(hInput.value);
+      originalValue = orig.height;
+    } else {
+      newValue = parseFloat(dInput.value);
+      originalValue = orig.depth;
     }
-    // Normalize to [0, 360)
+    if (isNaN(newValue) || newValue <= 0 || originalValue <= 0) return;
+    applyProportionalScale(newValue / originalValue);
+  }
+
+  root.addEventListener("input", (e) => {
+    const target = e.target as HTMLElement;
+    if (target.id === "ae-dim-w") handleDimInputChange("w");
+    else if (target.id === "ae-dim-h") handleDimInputChange("h");
+    else if (target.id === "ae-dim-d") handleDimInputChange("d");
+    else if (target.id === "ae-dims-slider") {
+      const val = parseFloat((target as HTMLInputElement).value);
+      if (!isNaN(val) && val > 0) applyProportionalScale(val);
+    }
+  });
+
+  /* ── Yaw → live preview ───────────────────────────────────────── */
+  yawInput.addEventListener("input", () => {
+    const val = parseFloat(yawInput.value);
+    if (isNaN(val)) return;
     const normalizedYaw = ((val % 360) + 360) % 360;
     state.yawValue = normalizedYaw;
-    yawInput.value = String(normalizedYaw);
     if (previewCtx) {
       applyYaw(previewCtx, normalizedYaw);
       updateFrontArrow(previewCtx, state.frontDirection, normalizedYaw);
     }
-    showToast(root, `Yaw set to ${normalizedYaw}°`);
   });
 
-  /* ── Front Direction ───────────────────────────────────────────── */
+  /* ── Front Direction → live preview ───────────────────────────── */
   frontSelect.addEventListener("change", () => {
     state.frontDirection = frontSelect.value;
     if (previewCtx) {
       updateFrontArrow(previewCtx, state.frontDirection, state.yawValue);
-      showToast(root, `Front direction set to ${state.frontDirection}`);
     }
   });
 
@@ -1517,7 +1624,7 @@ export function mountAssetEditor(root: HTMLElement): () => void {
     }
   });
 
-  /* ── Save metadata ─────────────────────────────────────────────── */
+  /* ── Unified Save ──────────────────────────────────────────────── */
   saveBtn.addEventListener("click", async () => {
     if (!state.selectedAssetId || !state.manifestName) return;
 
@@ -1531,14 +1638,8 @@ export function mountAssetEditor(root: HTMLElement): () => void {
     if (tierVal !== undefined) updates.quality_tier = tierVal;
     updates.scene_eligible = eligibleEl.checked;
     updates.tags = tagsEl.value.split(",").map((t) => t.trim()).filter(Boolean);
-
-    // Add scale, yaw, front direction, and dimensions
-    if (state.scaleValue !== 1) {
-      updates.scale = state.scaleValue;
-    }
-    if (state.yawValue !== 0) {
-      updates.yaw_deg = state.yawValue;
-    }
+    updates.scale = state.scaleValue;
+    updates.yaw_deg = state.yawValue;
     if (state.frontDirection !== "+Z") {
       updates.canonical_front = state.frontDirection;
     }
@@ -1552,19 +1653,18 @@ export function mountAssetEditor(root: HTMLElement): () => void {
 
     try {
       await saveAssetMetadata(state.manifestName, state.selectedAssetId, updates);
-      // Update local state
       const asset = state.assets.find((a) => a.asset_id === state.selectedAssetId);
       if (asset) {
         if (tierVal !== undefined) asset.quality_tier = tierVal;
         asset.scene_eligible = eligibleEl.checked;
         asset.tags = updates.tags as string[];
-        if (updates.scale) asset.scale = updates.scale as number;
-        if (updates.yaw_deg) asset.yaw_deg = updates.yaw_deg as number;
+        asset.scale = state.scaleValue;
+        asset.yaw_deg = state.yawValue;
         if (updates.canonical_front) asset.canonical_front = updates.canonical_front as string;
         if (updates.dimensions_m) asset.dimensions_m = updates.dimensions_m as { width?: number; height?: number; depth?: number };
       }
       renderGallery();
-      showToast(root, "Metadata saved");
+      showToast(root, "Saved");
     } catch (err) {
       showToast(root, `Save failed: ${err}`, "error");
     }
