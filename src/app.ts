@@ -104,6 +104,7 @@ type ViewerManifest = {
   instances?: Record<string, InstanceInfo>;
   asset_descriptions?: Record<string, AssetDescription>;
   static_object_descriptions?: Record<string, StaticObjectDescription>;
+  layout_overlay?: LayoutOverlayData | null;
 };
 
 type MovementState = {
@@ -112,6 +113,30 @@ type MovementState = {
   left: boolean;
   right: boolean;
   sprint: boolean;
+};
+
+type LayoutBand = {
+  name: string;
+  kind: string;
+  side: string;
+  width_m: number;
+  z_center_m: number;
+  allowed_categories?: string[];
+};
+
+type BuildingFootprint = {
+  footprint_id: string;
+  polygon_xz: number[][];
+  centroid_xz: number[];
+  target_height_m: number;
+  land_use_type?: string;
+  height_class?: string;
+};
+
+type LayoutOverlayData = {
+  bands: LayoutBand[];
+  building_footprints: BuildingFootprint[];
+  length_m: number;
 };
 
 type CameraMode = "first_person" | "third_person" | "frame" | "graph_overlay";
@@ -971,6 +996,12 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
             <input id="graph-overlay-enabled" type="checkbox" />
           </label>
         </div>
+        <div class="viewer-settings-section">
+          <label class="viewer-toggle-row" for="layout-overlay-enabled">
+            <span>Layout Overlay</span>
+            <input id="layout-overlay-enabled" type="checkbox" />
+          </label>
+        </div>
       </aside>
       <div id="viewer-status" class="viewer-status">Loading viewer…</div>
       <div id="viewer-overlay" class="viewer-overlay">Click scene to capture mouse</div>
@@ -1075,6 +1106,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const presetsGridEl = requireElement<HTMLElement>(root, "#viewer-presets-grid");
 
   const graphOverlayToggleEl = requireElement<HTMLInputElement>(root, "#graph-overlay-enabled");
+
+  const layoutOverlayToggleEl = requireElement<HTMLInputElement>(root, "#layout-overlay-enabled");
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#f7f6f3");
@@ -1290,6 +1323,10 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       clearGraphOverlay();
       graphOverlayActive = false;
     }
+    if (layoutOverlayToggleEl.checked) {
+      layoutOverlayToggleEl.checked = false;
+      clearLayoutOverlay();
+    }
   }
 
   function setEvaluateOpen(nextOpen: boolean): void {
@@ -1401,6 +1438,125 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         currentSceneBounds.center.z,
       );
       camera.lookAt(currentSceneBounds.center.x, 0, currentSceneBounds.center.z);
+    }
+  }
+
+  /* ── Layout Overlay ──────────────────────────────────────────── */
+
+  const BAND_COLORS: Record<string, number> = {
+    carriageway: 0x424a57,
+    drive_lane: 0x424a57,
+    bus_lane: 0xb7483a,
+    bike_lane: 0x39875a,
+    parking_lane: 0xa68256,
+    median: 0x6e7a5f,
+    nearroad_buffer: 0x989898,
+    furnishing: 0x7e6547,
+    clear_paths: 0xebe0ce,
+    clear_sidewalk: 0xebe0ce,
+    sidewalk: 0xebe0ce,
+    frontage_reserve: 0xb7d4e6,
+  };
+
+  const layoutOverlayObjects: THREE.Object3D[] = [];
+
+  function clearLayoutOverlay(): void {
+    for (const obj of layoutOverlayObjects) {
+      scene.remove(obj);
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry.dispose();
+        (obj.material as THREE.Material).dispose();
+      }
+      if (obj instanceof THREE.Sprite) {
+        obj.material.map?.dispose();
+        obj.material.dispose();
+      }
+    }
+    layoutOverlayObjects.length = 0;
+  }
+
+  function buildLayoutOverlay(): void {
+    clearLayoutOverlay();
+    if (!currentManifest?.layout_overlay) return;
+
+    const overlay = currentManifest.layout_overlay;
+    const lengthM = overlay.length_m || 0;
+
+    // 1. Bands — semi-transparent colored planes at ground level
+    for (const band of overlay.bands) {
+      if (!band.width_m || !Number.isFinite(band.width_m)) continue;
+      const planeGeo = new THREE.PlaneGeometry(lengthM, band.width_m);
+      const planeMat = new THREE.MeshBasicMaterial({
+        color: BAND_COLORS[band.kind] ?? 0x666666,
+        transparent: true,
+        opacity: 0.35,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+      planeMesh.rotation.x = -Math.PI / 2;
+      planeMesh.position.set(lengthM / 2, 0.05, band.z_center_m ?? 0);
+      planeMesh.userData.isLayoutOverlay = true;
+      scene.add(planeMesh);
+      layoutOverlayObjects.push(planeMesh);
+    }
+
+    // 2. Building footprints — extruded semi-transparent 3D blocks
+    for (const fp of overlay.building_footprints) {
+      const pts = fp.polygon_xz;
+      if (!Array.isArray(pts) || pts.length < 3) continue;
+      try {
+        const shape = new THREE.Shape();
+        shape.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) {
+          shape.lineTo(pts[i][0], pts[i][1]);
+        }
+        shape.closePath();
+        const extrudeSettings = { depth: fp.target_height_m || 6, bevelEnabled: false };
+        const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        geo.rotateX(-Math.PI / 2);
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0xa78bfa,
+          transparent: true,
+          opacity: 0.3,
+          depthWrite: false,
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.y = 0.05;
+        mesh.userData.isLayoutOverlay = true;
+        scene.add(mesh);
+        layoutOverlayObjects.push(mesh);
+      } catch {
+        // Skip invalid polygon shapes
+      }
+    }
+
+    // 3. Placement markers — colored cylinders with category labels
+    const instances = currentManifest.instances;
+    if (instances) {
+      const markerGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.2, 8);
+      for (const info of Object.values(instances)) {
+        const category = String(info.category || "").trim().toLowerCase();
+        const color = CATEGORY_COLORS[category] ?? 0x38bdf8;
+        const markerMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 });
+        const marker = new THREE.Mesh(markerGeo, markerMat);
+        if (info.position_xyz) {
+          marker.position.set(
+            info.position_xyz[0],
+            (info.position_xyz[1] || 0) + 0.6,
+            info.position_xyz[2],
+          );
+        }
+        marker.userData.isLayoutOverlay = true;
+        scene.add(marker);
+        layoutOverlayObjects.push(marker);
+
+        const label = createTextSprite(category, color);
+        label.position.set(marker.position.x, marker.position.y + 1.2, marker.position.z);
+        label.userData.isLayoutOverlay = true;
+        scene.add(label);
+        layoutOverlayObjects.push(label);
+      }
     }
   }
 
@@ -1845,6 +2001,17 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           (child.material as THREE.Material).dispose();
         }
       }
+      if (child.userData.isLayoutOverlay) {
+        scene.remove(child);
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          (child.material as THREE.Material).dispose();
+        }
+        if (child instanceof THREE.Sprite) {
+          child.material.map?.dispose();
+          child.material.dispose();
+        }
+      }
     });
     
     clearInfoCard();
@@ -1994,6 +2161,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       currentCameraMode = thirdPersonToggleEl.checked ? "third_person" : "first_person";
       syncCameraRig();
     }
+    // Reset layout overlay if active
+    if (layoutOverlayToggleEl.checked) {
+      layoutOverlayToggleEl.checked = false;
+      clearLayoutOverlay();
+    }
   }
 
   /* ── Evaluate ────────────────────────────────────────────── */
@@ -2125,9 +2297,10 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
     html += `</tbody></table></div>`;
 
-    // PNG thumbnails
-    const imgA = a.final_scene?.glb_url ? a.final_scene.glb_url.replace(/\.glb$/i, ".png") : "";
-    const imgB = b.final_scene?.glb_url ? b.final_scene.glb_url.replace(/\.glb$/i, ".png") : "";
+    // PNG thumbnails — scene.glb sits next to preview.png in each iteration directory
+    const toPreviewUrl = (glbUrl: string) => glbUrl.replace(/%2F[^%]*\.glb$/i, "%2Fpreview.png").replace(/\/[^/]*\.glb$/i, "/preview.png");
+    const imgA = a.final_scene?.glb_url ? toPreviewUrl(a.final_scene.glb_url) : "";
+    const imgB = b.final_scene?.glb_url ? toPreviewUrl(b.final_scene.glb_url) : "";
     html += `<div class="viewer-compare-images">
       <div class="viewer-compare-col">
         <div class="viewer-compare-thumb-label">${escapeHtml(compactUiLabel(a.layout_path))}</div>
@@ -2528,6 +2701,20 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     { signal },
   );
 
+  layoutOverlayToggleEl.addEventListener(
+    "change",
+    () => {
+      if (layoutOverlayToggleEl.checked) {
+        buildLayoutOverlay();
+        flashStatus("Layout overlay enabled");
+      } else {
+        clearLayoutOverlay();
+        flashStatus("Layout overlay disabled");
+      }
+    },
+    { signal },
+  );
+
   const handleControlsLock = () => updateOverlay();
   const handleControlsUnlock = () => updateOverlay();
   controls.addEventListener("lock", handleControlsLock);
@@ -2632,6 +2819,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       controls.unlock();
     }
     clearGraphOverlay();
+    clearLayoutOverlay();
     renderer.dispose();
     minimapRenderer.dispose();
   };

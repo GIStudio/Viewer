@@ -604,6 +604,14 @@ function viewerApiPlugin(): Plugin {
             const assetDescriptions = buildAssetDescriptions(layoutPayload);
             const staticObjectDescriptions = buildStaticObjectDescriptions();
             const summary = (layoutPayload.summary ?? null) as JsonRecord | null;
+
+            // Build layout overlay data (bands, building footprints, road length)
+            const streetProgram = (layoutPayload.street_program ?? {}) as JsonRecord;
+            const layoutBands = Array.isArray(streetProgram.bands) ? streetProgram.bands : [];
+            const buildingFootprints = Array.isArray(layoutPayload.building_footprints) ? layoutPayload.building_footprints : [];
+            const layoutConfig = (layoutPayload.config ?? {}) as JsonRecord;
+            const overlayLengthM = asNumber(layoutConfig.length_m, 0);
+
             jsonResponse(res, 200, {
               layout_path: layoutPath,
               summary,
@@ -619,6 +627,11 @@ function viewerApiPlugin(): Plugin {
               instances,
               asset_descriptions: assetDescriptions,
               static_object_descriptions: staticObjectDescriptions,
+              layout_overlay: {
+                bands: layoutBands,
+                building_footprints: buildingFootprints,
+                length_m: overlayLengthM,
+              },
             });
             return;
           } catch (error) {
