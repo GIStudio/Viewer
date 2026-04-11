@@ -1047,7 +1047,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         <div class="viewer-slide-panel-header">
           <div>
             <div class="viewer-slide-panel-title">Scene Presets</div>
-            <div class="viewer-slide-panel-subtitle">Quick-start scene generation configurations</div>
+            <div class="viewer-slide-panel-subtitle">Pre-configured scene styles. The highlighted card matches the currently loaded scene's generation preset.</div>
           </div>
           <button id="viewer-presets-close" class="viewer-settings-close" type="button" aria-label="Close presets">x</button>
         </div>
@@ -2357,12 +2357,17 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   ];
 
   function populatePresetsGrid(): void {
-    presetsGridEl.innerHTML = BUILTIN_PRESETS.map(preset => `
-      <button class="viewer-preset-card" data-preset-id="${escapeHtml(preset.id)}" type="button">
+    const activePresetId = (currentManifest?.summary as Record<string, unknown> | undefined)?.preset_id as string | undefined || null;
+    presetsGridEl.innerHTML = BUILTIN_PRESETS.map(preset => {
+      const isActive = activePresetId && activePresetId === preset.id;
+      return `
+      <button class="viewer-preset-card${isActive ? " viewer-preset-card--active" : ""}" data-preset-id="${escapeHtml(preset.id)}" type="button">
         <div class="viewer-preset-name">${escapeHtml(preset.name)}</div>
         <div class="viewer-preset-desc">${escapeHtml(preset.description)}</div>
+        ${isActive ? `<div class="viewer-preset-badge">Currently viewing</div>` : ""}
       </button>
-    `).join("");
+    `;
+    }).join("");
   }
 
   async function applyPreset(presetId: string): Promise<void> {
