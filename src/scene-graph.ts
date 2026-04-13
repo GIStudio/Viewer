@@ -7,6 +7,7 @@ import type {
   FurnitureKind,
   AnnotatedCrossSectionStrip,
   AnnotatedStreetFurnitureInstance,
+  ZoneFurnitureInstance,
   AnnotatedCenterline,
   LaneProfile,
   AnnotatedMarker,
@@ -457,6 +458,12 @@ function stripPreviewFillColor(kind: StripKind): string {
       return "rgba(169, 188, 202, 0.18)";
     case "frontage_reserve":
       return "rgba(183, 212, 230, 0.24)";
+    case "grass_belt":
+      return "rgba(100, 150, 80, 0.22)";
+    case "shared_street_surface":
+      return "rgba(180, 160, 140, 0.20)";
+    case "colored_pavement":
+      return "rgba(200, 175, 150, 0.20)";
     default:
       return "rgba(102, 102, 102, 0.12)";
   }
@@ -672,11 +679,24 @@ function normalizeFunctionalZone(value: unknown, index: number): AnnotatedFuncti
   const id = asString(record.id, `functional_zone_${String(index + 1).padStart(2, "0")}`);
   const kind = asString(record.kind, "plaza");
   const rawPoints = Array.isArray(record.points) ? record.points : [];
+  const rawFurniture = Array.isArray(record.furniture_instances) ? record.furniture_instances : [];
   return {
     id,
     label: asString(record.label, id),
     kind: isFunctionalZoneKind(kind) ? kind : "plaza",
     points: rawPoints.map((item) => normalizePoint(item)),
+    furniture_instances: rawFurniture.map((item, i) => normalizeZoneFurnitureInstance(item, i, id)),
+  };
+}
+
+function normalizeZoneFurnitureInstance(value: unknown, index: number, zoneId: string): ZoneFurnitureInstance {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    instance_id: asString(record.instance_id ?? record.id, `${zoneId}_furniture_${String(index + 1).padStart(2, "0")}`),
+    kind: isFurnitureKind(asString(record.kind, "bench")) ? asString(record.kind, "bench") as FurnitureKind : "bench" as FurnitureKind,
+    x_px: asNumber(record.x_px ?? record.x, 0),
+    y_px: asNumber(record.y_px ?? record.y, 0),
+    yaw_deg: asNullableNumber(record.yaw_deg),
   };
 }
 
@@ -988,6 +1008,7 @@ function buildAnnotationSummaryMarkup(annotation: ReferenceAnnotation): string {
   const detailedRoadCount = annotation.centerlines.filter((item) => resolvedCrossSectionMode(item) === CROSS_SECTION_MODE_DETAILED).length;
   const stripCount = annotation.centerlines.reduce((sum, item) => sum + item.cross_section_strips.length, 0);
   const furnitureCount = annotation.centerlines.reduce((sum, item) => sum + item.street_furniture_instances.length, 0);
+  const zoneFurnitureCount = annotation.functional_zones.reduce((sum, zone) => sum + zone.furniture_instances.length, 0);
   const buildingRegionCount = annotation.building_regions.length;
   const functionalZoneCount = annotation.functional_zones.length;
   const junctionStats = deriveJunctionStats(annotation);
@@ -1048,6 +1069,12 @@ function buildAnnotationSummaryMarkup(annotation: ReferenceAnnotation): string {
       <span class="scene-metric-label">Furniture</span>
       <strong>${furnitureCount}</strong>
     </div>
+    ${zoneFurnitureCount > 0 ? `
+    <div>
+      <span class="scene-metric-label">Zone Furn.</span>
+      <strong>${zoneFurnitureCount}</strong>
+    </div>
+    ` : ""}
     <div>
       <span class="scene-metric-label">Bldg Regions</span>
       <strong>${buildingRegionCount}</strong>
@@ -1210,7 +1237,7 @@ function buildFeatureTableMarkup(annotation: ReferenceAnnotation): string {
         <td>functional zone</td>
         <td>${escapeHtml(item.id)}</td>
         <td>${escapeHtml(item.label)}</td>
-        <td>${escapeHtml(item.kind)} · ${item.points.length} pts</td>
+        <td>${escapeHtml(item.kind)} · ${item.points.length} pts · ${item.furniture_instances.length} furn.</td>
       </tr>
     `);
   }
@@ -1230,9 +1257,11 @@ function buildSelectOptions<T extends string>(
     .join("");
 }
 
+const NO_DIRECTION_STRIP_KINDS = new Set<StripKind>(["median", "grass_belt", "shared_street_surface", "colored_pavement"]);
+
 function stripDirectionMarkup(strip: AnnotatedCrossSectionStrip): string {
   const options =
-    strip.zone === "center" && strip.kind !== "median"
+    strip.zone === "center" && !NO_DIRECTION_STRIP_KINDS.has(strip.kind)
       ? STRIP_DIRECTION_OPTIONS
       : (["none"] as const);
   return buildSelectOptions(options, strip.direction, {
@@ -1499,8 +1528,8 @@ function buildSelectedStripEditorMarkup(
           <select data-strip-field="kind" data-strip-id="${escapeHtml(strip.strip_id)}">
             ${buildSelectOptions(
               strip.zone === "center"
-                ? (["drive_lane", "bus_lane", "bike_lane", "parking_lane", "median"] as StripKind[])
-                : (["nearroad_buffer", "nearroad_furnishing", "clear_sidewalk", "farfromroad_buffer", "frontage_reserve"] as StripKind[]),
+                ? (["drive_lane", "bus_lane", "bike_lane", "parking_lane", "median", "grass_belt", "shared_street_surface", "colored_pavement"] as StripKind[])
+                : (["nearroad_buffer", "nearroad_furnishing", "clear_sidewalk", "farfromroad_buffer", "frontage_reserve", "colored_pavement"] as StripKind[]),
               strip.kind,
               STRIP_KIND_LABELS,
             )}
@@ -1756,6 +1785,25 @@ function buildFunctionalZoneInspectorMarkup(zone: AnnotatedFunctionalZone): stri
           <strong>Double-click the canvas to finish drawing a polygon zone. Minimum 3 points required.</strong>
         </div>
       </div>
+      ${zone.furniture_instances.length > 0 ? `
+        <div class="annotation-furniture-section" style="margin-top:0.75rem">
+          <div class="annotation-strip-section-header">
+            <h3>Zone Furniture</h3>
+            <span class="scene-micro-note">${zone.furniture_instances.length} items</span>
+          </div>
+          <div class="annotation-furniture-list">
+            ${zone.furniture_instances.map((instance) => `
+              <div class="annotation-furniture-row">
+                <div class="annotation-furniture-row-header">
+                  <strong>${escapeHtml(instance.instance_id)}</strong>
+                  <span class="scene-micro-note">${escapeHtml(FURNITURE_KIND_LABELS[instance.kind])} · (${instance.x_px.toFixed(0)}, ${instance.y_px.toFixed(0)})</span>
+                  <button type="button" class="scene-icon-button" data-action="delete-zone-furniture" data-zone-id="${escapeHtml(zone.id)}" data-instance-id="${escapeHtml(instance.instance_id)}">×</button>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      ` : ""}
     </section>
   `;
 }
@@ -2200,6 +2248,12 @@ function stripStrokeColor(kind: StripKind): string {
       return "rgba(169, 188, 202, 0.42)";
     case "frontage_reserve":
       return "rgba(183, 212, 230, 0.58)";
+    case "grass_belt":
+      return "rgba(100, 150, 80, 0.72)";
+    case "shared_street_surface":
+      return "rgba(180, 160, 140, 0.70)";
+    case "colored_pavement":
+      return "rgba(200, 175, 150, 0.70)";
     default:
       return "rgba(102, 102, 102, 0.6)";
   }
@@ -2649,6 +2703,19 @@ function buildFunctionalZoneOverlayMarkup(
         )
         .join("")
     : "";
+
+  // Render furniture instances inside the zone
+  const furnitureMarkup = zone.furniture_instances
+    .map((instance) => `
+      <g class="annotation-feature-group">
+        <circle class="annotation-furniture-point annotation-furniture-zone-point" cx="${instance.x_px}" cy="${instance.y_px}" r="6" />
+        <text class="annotation-furniture-label" x="${instance.x_px + 10}" y="${instance.y_px - 8}">
+          ${escapeHtml(FURNITURE_KIND_LABELS[instance.kind])}
+        </text>
+      </g>
+    `)
+    .join("");
+
   return `
     <g class="annotation-feature-group">
       <polygon
@@ -2661,6 +2728,7 @@ function buildFunctionalZoneOverlayMarkup(
         ${escapeHtml(zone.label || zone.id)}
       </text>
       ${vertexMarkup}
+      ${furnitureMarkup}
     </g>
   `;
 }
@@ -3274,32 +3342,57 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
           </div>
 
           <div class="scene-bottom-toolbar">
-            <div class="scene-tool-row">
-              <button id="annotation-tool-select" class="scene-tool-button" data-tool="select" type="button">Select</button>
-              <button id="annotation-tool-adjust" class="scene-tool-button" data-tool="adjust" type="button">Adjust</button>
-              <button id="annotation-tool-centerline" class="scene-tool-button" data-tool="centerline" type="button">Centerline</button>
-              <button id="annotation-tool-branch" class="scene-tool-button" data-tool="branch" type="button">Branch</button>
-              <button id="annotation-tool-cross" class="scene-tool-button" data-tool="cross" type="button">Cross</button>
-              <button id="annotation-tool-roundabout" class="scene-tool-button" data-tool="roundabout" type="button">Roundabout</button>
-              <button id="annotation-tool-control-point" class="scene-tool-button" data-tool="control_point" type="button">Control Point</button>
-              <button id="annotation-tool-building-region" class="scene-tool-button" data-tool="building_region" type="button">Building Region</button>
-              <button id="annotation-tool-functional-zone" class="scene-tool-button" data-tool="functional_zone" type="button">Functional Zone</button>
-              <button id="annotation-tool-tree" class="scene-tool-button" data-tool="tree" type="button">Tree</button>
-              <button id="annotation-tool-lamp" class="scene-tool-button" data-tool="lamp" type="button">Lamp</button>
-              <button id="annotation-tool-bench" class="scene-tool-button" data-tool="bench" type="button">Bench</button>
-              <button id="annotation-tool-trash" class="scene-tool-button" data-tool="trash" type="button">Trash</button>
-              <button id="annotation-tool-bus-stop" class="scene-tool-button" data-tool="bus_stop" type="button">Bus Stop</button>
-              <button id="annotation-tool-bollard" class="scene-tool-button" data-tool="bollard" type="button">Bollard</button>
-              <button id="annotation-tool-mailbox" class="scene-tool-button" data-tool="mailbox" type="button">Mailbox</button>
-              <button id="annotation-tool-hydrant" class="scene-tool-button" data-tool="hydrant" type="button">Hydrant</button>
-              <button id="annotation-tool-sign" class="scene-tool-button" data-tool="sign" type="button">Sign</button>
+            <div class="scene-tool-group">
+              <div class="scene-tool-group-label">选择 / Select</div>
+              <div class="scene-tool-row">
+                <button id="annotation-tool-select" class="scene-tool-button" data-tool="select" type="button">Select<span class="tool-label-zh">选择</span></button>
+                <button id="annotation-tool-adjust" class="scene-tool-button" data-tool="adjust" type="button">Adjust<span class="tool-label-zh">调整</span></button>
+                <button id="annotation-tool-control-point" class="scene-tool-button" data-tool="control_point" type="button">Control Point<span class="tool-label-zh">控制点</span></button>
+              </div>
             </div>
-            <div class="scene-layer-toolbar scene-layer-toolbar-secondary" style="padding:0;background:transparent;box-shadow:none">
-              <button id="annotation-finish-centerline" class="scene-toolbar-button" type="button">Finish Centerline</button>
-              <button id="annotation-select-all-roads" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">All Roads</button>
-              <button id="annotation-undo-point" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Undo Point</button>
-              <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Delete Selected</button>
-              <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Reset Annotation</button>
+            <div class="scene-tool-group">
+              <div class="scene-tool-group-label">道路 / Road</div>
+              <div class="scene-tool-row">
+                <button id="annotation-tool-centerline" class="scene-tool-button" data-tool="centerline" type="button">Centerline<span class="tool-label-zh">中心线</span></button>
+                <button id="annotation-tool-branch" class="scene-tool-button" data-tool="branch" type="button">Branch<span class="tool-label-zh">分支</span></button>
+                <button id="annotation-tool-cross" class="scene-tool-button" data-tool="cross" type="button">Cross<span class="tool-label-zh">交叉</span></button>
+                <button id="annotation-tool-roundabout" class="scene-tool-button" data-tool="roundabout" type="button">Roundabout<span class="tool-label-zh">环岛</span></button>
+              </div>
+            </div>
+            <div class="scene-tool-group">
+              <div class="scene-tool-group-label">区域 / Zone</div>
+              <div class="scene-tool-row">
+                <button id="annotation-tool-building-region" class="scene-tool-button" data-tool="building_region" type="button">Building Region<span class="tool-label-zh">建筑区域</span></button>
+                <button id="annotation-tool-functional-zone" class="scene-tool-button" data-tool="functional_zone" type="button">Functional Zone<span class="tool-label-zh">功能区域</span></button>
+              </div>
+            </div>
+            <div class="scene-tool-group">
+              <div class="scene-tool-group-label">家具 / Furniture</div>
+              <div class="scene-tool-row">
+                <button id="annotation-tool-tree" class="scene-tool-button" data-tool="tree" type="button">Tree<span class="tool-label-zh">树木</span></button>
+                <button id="annotation-tool-lamp" class="scene-tool-button" data-tool="lamp" type="button">Lamp<span class="tool-label-zh">路灯</span></button>
+                <button id="annotation-tool-bench" class="scene-tool-button" data-tool="bench" type="button">Bench<span class="tool-label-zh">长椅</span></button>
+                <button id="annotation-tool-trash" class="scene-tool-button" data-tool="trash" type="button">Trash<span class="tool-label-zh">垃圾桶</span></button>
+                <button id="annotation-tool-bus-stop" class="scene-tool-button" data-tool="bus_stop" type="button">Bus Stop<span class="tool-label-zh">公交站</span></button>
+                <button id="annotation-tool-bollard" class="scene-tool-button" data-tool="bollard" type="button">Bollard<span class="tool-label-zh">隔离桩</span></button>
+                <button id="annotation-tool-mailbox" class="scene-tool-button" data-tool="mailbox" type="button">Mailbox<span class="tool-label-zh">邮筒</span></button>
+                <button id="annotation-tool-hydrant" class="scene-tool-button" data-tool="hydrant" type="button">Hydrant<span class="tool-label-zh">消防栓</span></button>
+                <button id="annotation-tool-sign" class="scene-tool-button" data-tool="sign" type="button">Sign<span class="tool-label-zh">标识牌</span></button>
+              </div>
+            </div>
+            <div class="scene-tool-group">
+              <div class="scene-tool-group-label">操作 / Action</div>
+              <div class="scene-layer-toolbar scene-layer-toolbar-secondary" style="padding:0;background:transparent;box-shadow:none">
+                <button id="annotation-finish-centerline" class="scene-toolbar-button" type="button">Finish Centerline<span class="tool-label-zh">完成中心线</span></button>
+                <button id="annotation-select-all-roads" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">All Roads<span class="tool-label-zh">全部道路</span></button>
+                <button id="annotation-undo-point" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Undo Point<span class="tool-label-zh">撤销节点</span></button>
+                <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Delete Selected<span class="tool-label-zh">删除选中</span></button>
+                <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Reset Annotation<span class="tool-label-zh">重置标注</span></button>
+                <label class="scene-layer-toggle" style="margin-left:0.5rem;gap:0.35rem;">
+                  <input id="annotation-snap-to-road" type="checkbox" checked />
+                  <span>Snap to Road<span class="tool-label-zh">吸附到道路</span></span>
+                </label>
+              </div>
             </div>
             <div id="annotation-image-meta" class="scene-image-meta" style="margin:0">
               选择参考 plan 或导入 PNG 后，就可以在图上开始标注。
@@ -3382,11 +3475,11 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
           <details class="scene-collapsible-panel" open>
             <summary class="scene-collapsible-summary">Selected Feature</summary>
             <div class="scene-collapsible-body" style="padding:0">
-              <div id="annotation-inspector" class="scene-inspector-wrap" style="padding:0.5rem 0"></div>
+              <div id="annotation-inspector" class="scene-inspector-wrap"></div>
             </div>
           </details>
 
-          <details class="scene-collapsible-panel" open>
+          <details class="scene-collapsible-panel">
             <summary class="scene-collapsible-summary">Import / Export</summary>
             <div class="scene-collapsible-body">
               <div class="scene-import-toolbar" style="padding:0">
@@ -3494,6 +3587,7 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
   const undoPointButton = requireElement<HTMLButtonElement>(root, "#annotation-undo-point");
   const deleteSelectedButton = requireElement<HTMLButtonElement>(root, "#annotation-delete-selected");
   const resetAnnotationButton = requireElement<HTMLButtonElement>(root, "#annotation-reset");
+  const snapToRoadInput = requireElement<HTMLInputElement>(root, "#annotation-snap-to-road");
   const imageMetaEl = requireElement<HTMLElement>(root, "#annotation-image-meta");
   const stageEl = requireElement<HTMLElement>(root, "#annotation-stage");
   const stageEmptyEl = requireElement<HTMLElement>(root, "#annotation-stage-empty");
@@ -3565,6 +3659,7 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
     branchDraft: null as BranchDraft | null,
     crossHoverSnap: null as BranchSnapTarget | null,
     crossDraft: null as CrossDraft | null,
+    snapToRoadEnabled: true,
   };
 
   function clearGraphResult(reason: string): void {
@@ -3615,6 +3710,7 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
       label: id,
       kind: "plaza",
       points: points.map((p) => ({ ...p })),
+      furniture_instances: [],
     });
     state.selection = { kind: "functional_zone", id };
     state.selectedStripId = null;
@@ -4176,6 +4272,20 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
             }
             centerline.street_furniture_instances = centerline.street_furniture_instances.filter((item) => item.instance_id !== instanceId);
             markAnnotationChanged("Deleted furniture instance.");
+            renderAll();
+          }
+          if (action === "delete-zone-furniture") {
+            const instanceId = button.dataset.instanceId;
+            const zoneId = button.dataset.zoneId;
+            if (!instanceId || !zoneId) {
+              return;
+            }
+            const zone = state.annotation.functional_zones.find((z) => z.id === zoneId);
+            if (!zone) {
+              return;
+            }
+            zone.furniture_instances = zone.furniture_instances.filter((item) => item.instance_id !== instanceId);
+            markAnnotationChanged("Deleted zone furniture instance.");
             renderAll();
           }
         },
@@ -5173,16 +5283,54 @@ function buildingRegionHandleFromTarget(
     if (!state.furniturePlacement) {
       return false;
     }
+
+    // Check if click is inside a functional zone when snap is OFF
+    const insideFunctionalZone = !state.snapToRoadEnabled && state.annotation.functional_zones.some(
+      (zone) => zone.points.length >= 3 && pointInPolygon(point, zone.points)
+    );
+
+    // If inside functional zone with snap OFF, place furniture directly in the zone
+    if (insideFunctionalZone) {
+      const targetZone = state.annotation.functional_zones.find(
+        (zone) => zone.points.length >= 3 && pointInPolygon(point, zone.points)
+      );
+      if (targetZone) {
+        const instanceId = nextFeatureId(state.annotation, "zone_furniture");
+        targetZone.furniture_instances.push({
+          instance_id: instanceId,
+          kind: state.furniturePlacement.kind,
+          x_px: point.x,
+          y_px: point.y,
+          yaw_deg: null,
+        });
+        clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+        setStatus(
+          statusEl,
+          `Placed ${state.furniturePlacement.kind} in ${targetZone.label}. Click again to place another.`,
+          "success",
+        );
+        renderAll();
+        return true;
+      }
+    }
+
+    // Normal road-based furniture placement
     const centerline = state.annotation.centerlines.find((item) => item.id === state.furniturePlacement?.centerlineId);
     if (!centerline) {
-      clearFurniturePlacement();
+      setStatus(statusEl, "No road selected. Select a road first to place furniture.", "error");
       return false;
     }
-    const strip = centerline.cross_section_strips.find((item) => item.strip_id === state.furniturePlacement?.stripId);
+
+    let strip = centerline.cross_section_strips.find((item) => item.strip_id === state.furniturePlacement?.stripId);
     if (!strip || !FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind)) {
-      clearFurniturePlacement();
+      strip = centerline.cross_section_strips.find((item) => FURNITURE_COMPATIBLE_STRIP_KINDS.has(item.kind));
+    }
+
+    if (!strip || !FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind)) {
+      setStatus(statusEl, "No furnishing strip on this road. Add a nearroad_furnishing or frontage_reserve strip first.", "error");
       return false;
     }
+
     const projection = projectPointOntoPolyline(centerline.points, point);
     const ppm = Math.max(state.annotation.pixels_per_meter, 0.0001);
     const stripBounds = stripCenterOffsetMeters(centerline)[strip.strip_id];
@@ -5214,66 +5362,142 @@ function buildingRegionHandleFromTarget(
     return true;
   }
 
+  function pointInPolygon(point: AnnotationPoint, polygon: AnnotationPoint[]): boolean {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x;
+      const yi = polygon[i].y;
+      const xj = polygon[j].x;
+      const yj = polygon[j].y;
+      const intersect = ((yi > point.y) !== (yj > point.y)) &&
+        (point.x < (xj - xi) * (point.y - yi) / (yj - yi + 1e-12) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
   function placeFurnitureQuick(point: AnnotationPoint, kind: FurnitureKind): boolean {
     const ppm = Math.max(state.annotation.pixels_per_meter, 0.0001);
-    // 1. Find nearest centerline by projecting point onto each
-    let bestCenterline: AnnotatedCenterline | null = null;
-    let bestProjection: ReturnType<typeof projectPointOntoPolyline> | null = null;
-    for (const cl of state.annotation.centerlines) {
-      if (cl.points.length < 2) {
-        continue;
+    let targetCenterline: AnnotatedCenterline | null = null;
+    let targetProjection: ReturnType<typeof projectPointOntoPolyline> | null = null;
+    let targetStrip: AnnotatedCrossSectionStrip | null = null;
+
+    // Check if clicked inside a functional zone to allow freer placement when snap is off
+    const insideFunctionalZone = state.annotation.functional_zones.some(
+      (zone) => zone.points.length >= 3 && pointInPolygon(point, zone.points)
+    );
+
+    // 0. If snap is off and clicked inside a functional zone, place directly in the zone.
+    if (!state.snapToRoadEnabled && insideFunctionalZone) {
+      // Prefer currently selected zone, otherwise any zone containing the point
+      let targetZone = state.selection?.kind === "functional_zone"
+        ? state.annotation.functional_zones.find((z) => z.id === state.selection!.id) ?? null
+        : null;
+      if (!targetZone || !pointInPolygon(point, targetZone.points)) {
+        targetZone = state.annotation.functional_zones.find(
+          (z) => z.points.length >= 3 && pointInPolygon(point, z.points)
+        ) ?? null;
       }
-      const proj = projectPointOntoPolyline(cl.points, point);
-      if (!bestProjection || proj.distancePx < bestProjection.distancePx) {
-        bestCenterline = cl;
-        bestProjection = proj;
+      if (targetZone) {
+        const instanceId = nextFeatureId(state.annotation, "zone_furniture");
+        targetZone.furniture_instances.push({
+          instance_id: instanceId,
+          kind,
+          x_px: point.x,
+          y_px: point.y,
+          yaw_deg: null,
+        });
+        clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+        setStatus(statusEl, `Placed ${FURNITURE_KIND_LABELS[kind]} in ${targetZone.label}.`, "success");
+        renderAll();
+        return true;
       }
     }
-    if (!bestCenterline || !bestProjection || bestProjection.distancePx > 200) {
-      setStatus(statusEl, "No road nearby. Click closer to a centerline.", "error");
+
+    // 1. If snap is off but a centerline is explicitly selected, prefer it.
+    if (!state.snapToRoadEnabled && state.selection?.kind === "centerline") {
+      targetCenterline = state.annotation.centerlines.find((item) => item.id === state.selection?.id) ?? null;
+      if (targetCenterline) {
+        targetProjection = projectPointOntoPolyline(targetCenterline.points, point);
+        const selectedStrip = state.selectedStripId
+          ? targetCenterline.cross_section_strips.find((item) => item.strip_id === state.selectedStripId)
+          : null;
+        if (selectedStrip && FURNITURE_COMPATIBLE_STRIP_KINDS.has(selectedStrip.kind)) {
+          targetStrip = selectedStrip;
+        } else {
+          targetStrip = targetCenterline.cross_section_strips.find((strip) => FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind)) ?? null;
+        }
+      }
+    }
+
+    // 2. Otherwise fall back to nearest-road search.
+    if (!targetCenterline) {
+      for (const cl of state.annotation.centerlines) {
+        if (cl.points.length < 2) {
+          continue;
+        }
+        const proj = projectPointOntoPolyline(cl.points, point);
+        if (!targetProjection || proj.distancePx < targetProjection.distancePx) {
+          targetCenterline = cl;
+          targetProjection = proj;
+        }
+      }
+      const maxDistancePx = state.snapToRoadEnabled
+        ? 200
+        : (insideFunctionalZone ? Number.POSITIVE_INFINITY : 80);
+      if (!targetCenterline || !targetProjection || targetProjection.distancePx > maxDistancePx) {
+        const msg = state.snapToRoadEnabled
+          ? "No road nearby. Click closer to a centerline."
+          : "Road snap is off. Select a centerline first, or click closer to a road.";
+        setStatus(statusEl, msg, "error");
+        return false;
+      }
+      const offsets = stripCenterOffsetMeters(targetCenterline);
+      const clickLateralM = targetProjection.lateralPx / ppm;
+      let bestDist = Infinity;
+      for (const strip of targetCenterline.cross_section_strips) {
+        if (!FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind)) {
+          continue;
+        }
+        const info = offsets[strip.strip_id];
+        if (!info) {
+          continue;
+        }
+        const dist = Math.abs(info.centerOffsetM - clickLateralM);
+        if (dist < bestDist) {
+          bestDist = dist;
+          targetStrip = strip;
+        }
+      }
+    }
+
+    if (!targetCenterline || !targetProjection) {
       return false;
     }
-    // 2. Find nearest furniture-compatible strip
-    const offsets = stripCenterOffsetMeters(bestCenterline);
-    const clickLateralM = bestProjection.lateralPx / ppm;
-    let bestStrip: AnnotatedCrossSectionStrip | null = null;
-    let bestDist = Infinity;
-    for (const strip of bestCenterline.cross_section_strips) {
-      if (!FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind)) {
-        continue;
-      }
-      const info = offsets[strip.strip_id];
-      if (!info) {
-        continue;
-      }
-      const dist = Math.abs(info.centerOffsetM - clickLateralM);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestStrip = strip;
-      }
-    }
-    if (!bestStrip) {
+    if (!targetStrip) {
       setStatus(statusEl, "No furnishing strip on this road. Add a nearroad_furnishing or frontage_reserve strip first.", "error");
       return false;
     }
-    // 3. Compute position and create instance
-    const stripBounds = offsets[bestStrip.strip_id];
-    const halfW = stripBounds ? stripBounds.widthM * 0.5 : bestStrip.width_m * 0.5;
+
+    const offsets = stripCenterOffsetMeters(targetCenterline);
+    const stripBounds = offsets[targetStrip.strip_id];
+    const halfW = stripBounds ? stripBounds.widthM * 0.5 : targetStrip.width_m * 0.5;
     const centerOff = stripBounds ? stripBounds.centerOffsetM : 0;
+    const clickLateralM = targetProjection.lateralPx / ppm;
     const absLateral = clamp(clickLateralM, centerOff - halfW, centerOff + halfW);
     const lateralOffsetM = absLateral - centerOff;
-    bestCenterline.street_furniture_instances.push({
-      instance_id: nextFurnitureInstanceId(bestCenterline),
-      centerline_id: bestCenterline.id,
-      strip_id: bestStrip.strip_id,
+    targetCenterline.street_furniture_instances.push({
+      instance_id: nextFurnitureInstanceId(targetCenterline),
+      centerline_id: targetCenterline.id,
+      strip_id: targetStrip.strip_id,
       kind,
-      station_m: bestProjection.stationPx / ppm,
+      station_m: targetProjection.stationPx / ppm,
       lateral_offset_m: lateralOffsetM,
       yaw_deg: null,
     });
-    syncCenterlineDerivedFields(bestCenterline);
+    syncCenterlineDerivedFields(targetCenterline);
     clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
-    setStatus(statusEl, `Placed ${FURNITURE_KIND_LABELS[kind]} on ${bestStrip.strip_id}.`, "success");
+    setStatus(statusEl, `Placed ${FURNITURE_KIND_LABELS[kind]} on ${targetStrip.strip_id}.`, "success");
     renderAll();
     return true;
   }
@@ -5503,6 +5727,10 @@ function buildingRegionHandleFromTarget(
   );
   deleteSelectedButton.addEventListener("click", deleteSelection, { signal });
   resetAnnotationButton.addEventListener("click", resetAnnotation, { signal });
+  snapToRoadInput.addEventListener("change", () => {
+    state.snapToRoadEnabled = snapToRoadInput.checked;
+    setStatus(statusEl, state.snapToRoadEnabled ? "Road snap enabled." : "Road snap disabled. Furniture will place on selected road/strip.", "neutral");
+  }, { signal });
 
   overlayHostEl.addEventListener(
     "dblclick",

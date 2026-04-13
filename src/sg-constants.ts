@@ -86,6 +86,9 @@ export const NOMINAL_STRIP_WIDTHS: Record<StripKind, number> = {
   clear_sidewalk: 2.5,
   farfromroad_buffer: 0.5,
   frontage_reserve: 2.0,
+  grass_belt: 2.0,
+  shared_street_surface: 4.0,
+  colored_pavement: 1.5,
 };
 export const DEFAULT_ROAD_WIDTH_M =
   (DEFAULT_FORWARD_DRIVE_LANE_COUNT + DEFAULT_REVERSE_DRIVE_LANE_COUNT) * DEFAULT_DRIVE_LANE_WIDTH_M +
@@ -105,6 +108,9 @@ export const STRIP_KIND_LABELS: Record<StripKind, string> = {
   clear_sidewalk: "Clear Sidewalk",
   farfromroad_buffer: "Far-From-Road Buffer",
   frontage_reserve: "Frontage Reserve",
+  grass_belt: "Central Green Belt",
+  shared_street_surface: "Shared Street Surface",
+  colored_pavement: "Colored Pavement",
 };
 export const METAAURBAN_STRIP_DISPLAY_LABELS: Record<StripKind, string> = {
   drive_lane: "Drive Lane",
@@ -117,6 +123,9 @@ export const METAAURBAN_STRIP_DISPLAY_LABELS: Record<StripKind, string> = {
   clear_sidewalk: "Main Sidewalk",
   farfromroad_buffer: "Outer Buffer",
   frontage_reserve: "Valid Region",
+  grass_belt: "Central Green Belt",
+  shared_street_surface: "Shared Street Surface",
+  colored_pavement: "Colored Pavement",
 };
 export const METAAURBAN_STRIP_ZONE_LABELS: Record<StripKind, string> = {
   drive_lane: "carriageway",
@@ -129,6 +138,9 @@ export const METAAURBAN_STRIP_ZONE_LABELS: Record<StripKind, string> = {
   clear_sidewalk: "main_sidewalk",
   farfromroad_buffer: "farfromroad_sidewalk",
   frontage_reserve: "valid_region",
+  grass_belt: "median",
+  shared_street_surface: "mixed_use",
+  colored_pavement: "decorative_surface",
 };
 export const METAAURBAN_STRIP_ASSET_BADGES: Record<StripKind, MetaurbanAssetBadge[]> = {
   drive_lane: [],
@@ -157,6 +169,11 @@ export const METAAURBAN_STRIP_ASSET_BADGES: Record<StripKind, MetaurbanAssetBadg
   frontage_reserve: [
     { key: "building", label: "Building", shortLabel: "BLDG" },
   ],
+  grass_belt: [
+    { key: "tree", label: "Tree", shortLabel: "TREE" },
+  ],
+  shared_street_surface: [],
+  colored_pavement: [],
 };
 export const METAAURBAN_STRIP_GUIDANCE: Record<StripKind, string> = {
   drive_lane: "Vehicular through-movement space.",
@@ -169,6 +186,9 @@ export const METAAURBAN_STRIP_GUIDANCE: Record<StripKind, string> = {
   clear_sidewalk: "MetaUrban main_sidewalk pedestrian flows and mailbox-scale objects typically sit here.",
   farfromroad_buffer: "MetaUrban farfromroad_sidewalk furniture or planting can extend here.",
   frontage_reserve: "MetaUrban valid_region buildings and frontage reserve typically start here.",
+  grass_belt: "Central grass or planted median strip.",
+  shared_street_surface: "Shared pedestrian/vehicle street surface.",
+  colored_pavement: "Decorative colored paving band.",
 };
 export const METAAURBAN_ASSET_GUIDE_LINES = [
   "MetaUrban real assets are optional for this annotator.",

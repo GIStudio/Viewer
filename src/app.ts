@@ -141,6 +141,8 @@ type LayoutOverlayData = {
 
 type CameraMode = "first_person" | "third_person" | "frame" | "graph_overlay";
 
+// Forward declaration for currentManifest (defined later in the file)
+let currentManifest: ViewerManifest | null = null;
 
 type LightingPresetValues = {
   exposure: number;
@@ -565,6 +567,431 @@ function disposeObject(root: THREE.Object3D): void {
       material.dispose();
     }
   });
+}
+
+// Enhanced export colors for top-down view
+const EXPORT_COLORS = {
+  carriageway: "#424a57",
+  drive_lane: "#424a57",
+  bus_lane: "#b7483a",
+  bike_lane: "#39875a",
+  parking_lane: "#a68256",
+  median: "#6e7a5f",
+  nearroad_buffer: "#c4c4c4",
+  nearroad_furnishing: "#b5a28a",
+  clear_sidewalk: "#d4d0c8",
+  sidewalk: "#d4d0c8",
+  frontage_reserve: "#b7d4e6",
+  grass_belt: "#8cb369",
+  shared_street: "#c9b896",
+  colored_pavement: "#e8dcc8",
+  zebra_stripe: "#ffffff",
+  zebra_stripe_dark: "#424a57",
+};
+
+function exportTopDownMapEnhanced(scene: THREE.Scene, root: THREE.Object3D | null): void {
+  if (!root) {
+    alert("No scene loaded. Please load a layout first.");
+    return;
+  }
+  const bbox = new THREE.Box3().setFromObject(root);
+  const center = bbox.getCenter(new THREE.Vector3());
+  const size = bbox.getSize(new THREE.Vector3());
+  const maxExtent = Math.max(size.x, size.z);
+  if (!isFinite(maxExtent) || maxExtent <= 0) {
+    alert("Scene bounds are too small to export.");
+    return;
+  }
+
+  const padding = maxExtent * 0.15;
+  const viewSize = maxExtent + padding * 2;
+
+  const camera = new THREE.OrthographicCamera(
+    -viewSize / 2,
+    viewSize / 2,
+    viewSize / 2,
+    -viewSize / 2,
+    0.1,
+    5000,
+  );
+  camera.position.set(center.x, center.y + size.y * 0.5 + viewSize * 1.2, center.z);
+  camera.lookAt(center.x, center.y, center.z);
+  camera.updateProjectionMatrix();
+
+  const resolution = 4096;
+  const exportRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  exportRenderer.setSize(resolution, resolution);
+  exportRenderer.setPixelRatio(1);
+  exportRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  exportRenderer.shadowMap.enabled = false;
+  exportRenderer.toneMapping = THREE.NoToneMapping;
+  const bgColor = scene.background instanceof THREE.Color ? scene.background : new THREE.Color("#f7f6f3");
+  exportRenderer.setClearColor(bgColor);
+  exportRenderer.clear();
+  exportRenderer.render(scene, camera);
+
+  // Get the rendered canvas
+  const canvas = exportRenderer.domElement;
+  const ctx = canvas.getContext("2d")!;
+
+  // Calculate scale
+  const pixelsPerUnit = resolution / viewSize;
+  const scaleBarLength = Math.pow(10, Math.floor(Math.log10(maxExtent))) / 4;
+  const scaleBarPixels = scaleBarLength * pixelsPerUnit;
+
+  // Add legend in bottom-right corner
+  const legendWidth = 280;
+  const legendHeight = 220;
+  const legendX = resolution - legendWidth - 40;
+  const legendY = resolution - legendHeight - 40;
+
+  // Draw legend background
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.strokeStyle = "#cccccc";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(legendX, legendY, legendWidth, legendHeight, 8);
+  ctx.fill();
+  ctx.stroke();
+
+  // Legend title
+  ctx.fillStyle = "#1a1a1a";
+  ctx.font = "bold 16px sans-serif";
+  ctx.fillText("图例 Legend", legendX + 15, legendY + 28);
+
+  // Legend items
+  const legendItems = [
+    { color: EXPORT_COLORS.drive_lane, label: "机动车道 Drive Lane" },
+    { color: EXPORT_COLORS.clear_sidewalk, label: "人行道 Sidewalk" },
+    { color: EXPORT_COLORS.bike_lane, label: "自行车道 Bike Lane" },
+    { color: EXPORT_COLORS.bus_lane, label: "公交专用道 Bus Lane" },
+    { color: EXPORT_COLORS.median, label: "中央分隔带 Median" },
+    { color: EXPORT_COLORS.grass_belt, label: "绿化带 Green Belt" },
+    { color: EXPORT_COLORS.nearroad_furnishing, label: "路缘设施带 Furnishing" },
+  ];
+
+  let legendItemY = legendY + 55;
+  for (const item of legendItems) {
+    // Color box
+    ctx.fillStyle = item.color;
+    ctx.fillRect(legendX + 15, legendItemY - 12, 20, 14);
+    ctx.strokeStyle = "#999999";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(legendX + 15, legendItemY - 12, 20, 14);
+    // Label
+    ctx.fillStyle = "#333333";
+    ctx.font = "12px sans-serif";
+    ctx.fillText(item.label, legendX + 45, legendItemY);
+    legendItemY += 22;
+  }
+
+  // Draw zebra crossing pattern (example pattern)
+  ctx.fillStyle = "#333333";
+  ctx.font = "12px sans-serif";
+  ctx.fillText("斑马线 Zebra Crossing", legendX + 15, legendItemY + 5);
+  const zebraY = legendItemY + 15;
+  for (let i = 0; i < 6; i++) {
+    ctx.fillStyle = i % 2 === 0 ? EXPORT_COLORS.zebra_stripe_dark : EXPORT_COLORS.zebra_stripe;
+    ctx.fillRect(legendX + 15 + i * 5, zebraY, 5, 15);
+  }
+
+  // Draw scale bar
+  const scaleBarX = 40;
+  const scaleBarY = resolution - 50;
+
+  // Scale bar background
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.strokeStyle = "#cccccc";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(scaleBarX - 10, scaleBarY - 35, 180, 45, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  // Scale bar line
+  ctx.strokeStyle = "#1a1a1a";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(scaleBarX, scaleBarY);
+  ctx.lineTo(scaleBarX + scaleBarPixels, scaleBarY);
+  ctx.stroke();
+
+  // End ticks
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(scaleBarX, scaleBarY - 8);
+  ctx.lineTo(scaleBarX, scaleBarY + 8);
+  ctx.moveTo(scaleBarX + scaleBarPixels, scaleBarY - 8);
+  ctx.lineTo(scaleBarX + scaleBarPixels, scaleBarY + 8);
+  ctx.stroke();
+
+  // Scale label
+  ctx.fillStyle = "#1a1a1a";
+  ctx.font = "bold 14px sans-serif";
+  ctx.textAlign = "center";
+  const scaleLabel = scaleBarLength >= 100 ? `${scaleBarLength.toFixed(0)}m` : `${scaleBarLength.toFixed(0)}m`;
+  ctx.fillText(scaleLabel, scaleBarX + scaleBarPixels / 2, scaleBarY - 15);
+  ctx.textAlign = "left";
+
+  // North arrow in top-left
+  const northX = 60;
+  const northY = 60;
+  const arrowSize = 30;
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.strokeStyle = "#cccccc";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(northX, northY, 35, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // North arrow
+  ctx.fillStyle = "#1a1a1a";
+  ctx.beginPath();
+  ctx.moveTo(northX, northY - arrowSize);
+  ctx.lineTo(northX - arrowSize * 0.4, northY + arrowSize * 0.5);
+  ctx.lineTo(northX, northY + arrowSize * 0.2);
+  ctx.lineTo(northX + arrowSize * 0.4, northY + arrowSize * 0.5);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.font = "bold 14px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("N", northX, northY - arrowSize - 8);
+  ctx.textAlign = "left";
+
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      alert("Failed to generate image.");
+      exportRenderer.dispose();
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    a.download = `road_scene_topdown_${timestamp}.png`;
+    a.click();
+    URL.revokeObjectURL(url);
+    exportRenderer.dispose();
+  }, "image/png");
+}
+
+function exportTopDownSvg(scene: THREE.Scene, root: THREE.Object3D | null): void {
+  if (!root) {
+    alert("No scene loaded. Please load a layout first.");
+    return;
+  }
+  if (!currentManifest?.layout_overlay) {
+    alert("No layout overlay data available. Please load a scene with layout data.");
+    return;
+  }
+
+  const bbox = new THREE.Box3().setFromObject(root);
+  const center = bbox.getCenter(new THREE.Vector3());
+  const size = bbox.getSize(new THREE.Vector3());
+  const maxExtent = Math.max(size.x, size.z);
+  if (!isFinite(maxExtent) || maxExtent <= 0) {
+    alert("Scene bounds are too small to export.");
+    return;
+  }
+
+  const overlay = currentManifest.layout_overlay;
+
+  // Calculate scale: 1 unit in scene = pixels in SVG
+  const padding = maxExtent * 0.15;
+  const viewSize = maxExtent + padding * 2;
+  const pixelsPerUnit = 2048 / viewSize;
+  const width = 2048;
+  const height = 2048;
+
+  // Get the full road extent from scene bounding box
+  const roadMinX = center.x - size.x / 2;
+  const roadMaxX = center.x + size.x / 2;
+  const roadMinZ = center.z - size.z / 2;
+  const roadMaxZ = center.z + size.z / 2;
+
+  // Coordinate conversion: scene to SVG
+  // Scene: X is along road, Z is lateral, Y is up
+  // SVG: X is horizontal, Y is vertical
+  const toSvgX = (sceneX: number) => (sceneX - center.x + viewSize / 2) * pixelsPerUnit;
+  const toSvgY = (sceneZ: number) => (viewSize / 2 - (sceneZ - center.z)) * pixelsPerUnit;
+  const toSvgSize = (s: number) => s * pixelsPerUnit;
+
+  // Build SVG
+  let svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+  <title>Road Scene Top-Down Map</title>
+  <defs>
+    <style>
+      .road { fill: ${EXPORT_COLORS.drive_lane}; stroke: #333; stroke-width: 1; }
+      .sidewalk { fill: ${EXPORT_COLORS.clear_sidewalk}; stroke: #999; stroke-width: 0.5; }
+      .bikelane { fill: ${EXPORT_COLORS.bike_lane}; stroke: #267a4a; stroke-width: 0.5; }
+      .buslane { fill: ${EXPORT_COLORS.bus_lane}; stroke: #8a2a1a; stroke-width: 0.5; }
+      .median { fill: ${EXPORT_COLORS.median}; stroke: #555; stroke-width: 0.5; }
+      .furnishing { fill: ${EXPORT_COLORS.nearroad_furnishing}; stroke: #8a7050; stroke-width: 0.5; }
+      .greenzone { fill: ${EXPORT_COLORS.grass_belt}; stroke: #6a9050; stroke-width: 0.5; }
+      .parking { fill: ${EXPORT_COLORS.parking_lane}; stroke: #7a6240; stroke-width: 0.5; }
+      .buffer { fill: ${EXPORT_COLORS.nearroad_buffer}; stroke: #888; stroke-width: 0.5; }
+      .frontage { fill: ${EXPORT_COLORS.frontage_reserve}; stroke: #8ab4c6; stroke-width: 0.5; }
+      .shared { fill: ${EXPORT_COLORS.shared_street}; stroke: #a99876; stroke-width: 0.5; }
+      .building { fill: #b8b8c8; stroke: #808090; stroke-width: 1; }
+      .tree { fill: #5a9a4a; stroke: #3a7a3a; stroke-width: 1; }
+      .lamp { fill: #f0d040; stroke: #b0a020; stroke-width: 0.5; }
+      .bench { fill: #8a6040; stroke: #5a4030; stroke-width: 0.5; }
+      .crosswalk { fill: url(#zebraPattern); }
+      .legend-bg { fill: rgba(255,255,255,0.95); stroke: #ccc; stroke-width: 1; }
+      .legend-title { font: bold 16px sans-serif; fill: #1a1a1a; }
+      .legend-item { font: 12px sans-serif; fill: #333; }
+      .scalebar { stroke: #1a1a1a; stroke-width: 3; fill: none; }
+      .scale-tick { stroke: #1a1a1a; stroke-width: 2; }
+      .scale-label { font: bold 14px sans-serif; fill: #1a1a1a; text-anchor: middle; }
+      .north-arrow { fill: #1a1a1a; }
+      .north-label { font: bold 14px sans-serif; fill: #1a1a1a; text-anchor: middle; }
+    </style>
+    <pattern id="zebraPattern" x="0" y="0" width="10" height="10" patternUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="5" height="10" fill="${EXPORT_COLORS.zebra_stripe_dark}"/>
+      <rect x="5" y="0" width="5" height="10" fill="${EXPORT_COLORS.zebra_stripe}"/>
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="${width}" height="${height}" fill="#f7f6f3"/>`;
+
+  // 1. Draw road bands - spanning the full scene extent
+  const bandKindToClass: Record<string, string> = {
+    carriageway: "road",
+    drive_lane: "road",
+    bus_lane: "buslane",
+    bike_lane: "bikelane",
+    parking_lane: "parking",
+    median: "median",
+    nearroad_buffer: "buffer",
+    nearroad_furnishing: "furnishing",
+    clear_sidewalk: "sidewalk",
+    sidewalk: "sidewalk",
+    frontage_reserve: "frontage",
+    grass_belt: "greenzone",
+    shared_street_surface: "shared",
+    colored_pavement: "sidewalk",
+  };
+
+  for (const band of overlay.bands) {
+    if (!band.width_m || !Number.isFinite(band.width_m)) continue;
+    // Draw band spanning the full road extent
+    const x1 = toSvgX(roadMinX);
+    const x2 = toSvgX(roadMaxX);
+    const y = toSvgY(band.z_center_m);
+    const h = toSvgSize(band.width_m);
+    const cssClass = bandKindToClass[band.kind] || "road";
+    const bandWidth = x2 - x1;
+    svg += `\n  <rect x="${x1}" y="${y - h/2}" width="${bandWidth}" height="${h}" class="${cssClass}"/>`;
+  }
+
+  // 2. Draw building footprints
+  for (const fp of overlay.building_footprints) {
+    const pts = fp.polygon_xz;
+    if (!Array.isArray(pts) || pts.length < 3) continue;
+    const points = pts.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+    svg += `\n  <polygon points="${points}" class="building"/>`;
+  }
+
+  // 3. Draw furniture instances
+  const instances = currentManifest.instances;
+  if (instances) {
+    const categoryToClass: Record<string, string> = {
+      tree: "tree",
+      lamp: "lamp",
+      bench: "bench",
+      trash: "bench",
+      bollard: "lamp",
+      bus_stop: "lamp",
+    };
+
+    for (const [id, info] of Object.entries(instances)) {
+      const instanceInfo = info as InstanceInfo;
+      if (!instanceInfo.position_xyz) continue;
+      const x = toSvgX(instanceInfo.position_xyz[0]);
+      const y = toSvgY(instanceInfo.position_xyz[2]);
+      const category = String(instanceInfo.category || "").toLowerCase();
+      const cssClass = categoryToClass[category] || "lamp";
+      // Draw as small circle for furniture
+      svg += `\n  <circle cx="${x}" cy="${y}" r="4" class="${cssClass}"/>`;
+    }
+  }
+
+  // 4. Draw legend
+  const legendX = width - 300;
+  const legendY = height - 280;
+  const legendW = 280;
+  const legendH = 260;
+
+  svg += `
+  <!-- Legend -->
+  <rect x="${legendX}" y="${legendY}" width="${legendW}" height="${legendH}" rx="8" class="legend-bg"/>
+  <text x="${legendX + 15}" y="${legendY + 25}" class="legend-title">图例 Legend</text>`;
+
+  const legendItems = [
+    { class: "road", label: "机动车道 Drive Lane" },
+    { class: "sidewalk", label: "人行道 Sidewalk" },
+    { class: "bikelane", label: "自行车道 Bike Lane" },
+    { class: "buslane", label: "公交专用道 Bus Lane" },
+    { class: "median", label: "中央分隔带 Median" },
+    { class: "greenzone", label: "绿化带 Green Belt" },
+    { class: "furnishing", label: "路缘设施带 Furnishing" },
+    { class: "parking", label: "停车带 Parking" },
+  ];
+
+  let itemY = legendY + 55;
+  for (const item of legendItems) {
+    svg += `
+  <rect x="${legendX + 15}" y="${itemY - 12}" width="20" height="14" class="${item.class}" stroke="#999" stroke-width="0.5"/>
+  <text x="${legendX + 45}" y="${itemY}" class="legend-item">${item.label}</text>`;
+    itemY += 24;
+  }
+
+  // Zebra crossing example
+  svg += `
+  <text x="${legendX + 15}" y="${itemY + 5}" class="legend-item">斑马线 Zebra Crossing</text>
+  <rect x="${legendX + 15}" y="${itemY + 15}" width="60" height="15" class="crosswalk" rx="2"/>`;
+
+  // Scale bar
+  const scaleBarX = 50;
+  const scaleBarY = height - 70;
+  const scaleBarLength = Math.pow(10, Math.floor(Math.log10(maxExtent))) / 4;
+  const scaleBarPixels = scaleBarLength * pixelsPerUnit;
+
+  svg += `
+  <!-- Scale Bar -->
+  <rect x="${scaleBarX - 10}" y="${scaleBarY - 50}" width="200" height="55" rx="6" class="legend-bg"/>
+  <line x1="${scaleBarX}" y1="${scaleBarY}" x2="${scaleBarX + scaleBarPixels}" y2="${scaleBarY}" class="scalebar"/>
+  <line x1="${scaleBarX}" y1="${scaleBarY - 10}" x2="${scaleBarX}" y2="${scaleBarY + 10}" class="scale-tick"/>
+  <line x1="${scaleBarX + scaleBarPixels}" y1="${scaleBarY - 10}" x2="${scaleBarX + scaleBarPixels}" y2="${scaleBarY + 10}" class="scale-tick"/>
+  <text x="${scaleBarX + scaleBarPixels / 2}" y="${scaleBarY - 18}" class="scale-label">${scaleBarLength.toFixed(0)}m</text>`;
+
+  // North arrow
+  const northX = 80;
+  const northY = 80;
+  const arrowSize = 25;
+
+  svg += `
+  <!-- North Arrow -->
+  <circle cx="${northX}" cy="${northY}" r="45" class="legend-bg"/>
+  <polygon points="${northX},${northY - arrowSize} ${northX - arrowSize * 0.4},${northY + arrowSize * 0.5} ${northX},${northY + arrowSize * 0.2} ${northX + arrowSize * 0.4},${northY + arrowSize * 0.5}" class="north-arrow"/>
+  <text x="${northX}" y="${northY - arrowSize - 12}" class="north-label">N</text>`;
+
+  svg += "\n</svg>";
+
+  // Download SVG
+  const blob = new Blob([svg], { type: "image/svg+xml" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  a.download = `road_scene_topdown_${timestamp}.svg`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function inferSpawnFromBbox(
@@ -1023,6 +1450,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
             <button id="viewer-presets-toggle" class="viewer-nav-button viewer-menu-button" type="button">Presets</button>
             <button id="viewer-compare-toggle" class="viewer-nav-button viewer-menu-button" type="button">Compare</button>
             <button id="viewer-evaluate-toggle" class="viewer-nav-button viewer-menu-button" type="button">Evaluate</button>
+            <button id="viewer-export-topdown-map" class="viewer-nav-button viewer-menu-button" type="button">Export PNG</button>
+            <button id="viewer-export-topdown-svg" class="viewer-nav-button viewer-menu-button" type="button">Export SVG</button>
           </div>
         </div>
       </div>
@@ -1219,6 +1648,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const compareSelectBEl = requireElement<HTMLSelectElement>(root, "#compare-layout-b");
   const compareResultsEl = requireElement<HTMLElement>(root, "#viewer-compare-results");
 
+  const exportTopdownMapEl = requireElement<HTMLButtonElement>(root, "#viewer-export-topdown-map");
+  const exportTopdownSvgEl = requireElement<HTMLButtonElement>(root, "#viewer-export-topdown-svg");
   const presetsToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-presets-toggle");
   const presetsPanelEl = requireElement<HTMLElement>(root, "#viewer-presets-panel");
   const presetsCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-presets-close");
@@ -1313,7 +1744,6 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   scene.add(laserHitDot);
 
   let currentRoot: THREE.Object3D | null = null;
-  let currentManifest: ViewerManifest | null = null;
   let currentLayoutPath = "";
   let currentSpawn = new THREE.Vector3(0, 1.65, 0);
   let currentForward = new THREE.Vector3(1, 0, 0);
@@ -2572,6 +3002,18 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     },
     { signal },
   );
+
+  exportTopdownMapEl.addEventListener("click", () => {
+    exportTopDownMapEnhanced(scene, currentRoot);
+    menuDropdownEl.hidden = true;
+    menuToggleEl.setAttribute("aria-expanded", "false");
+  }, { signal });
+
+  exportTopdownSvgEl.addEventListener("click", () => {
+    exportTopDownSvg(scene, currentRoot);
+    menuDropdownEl.hidden = true;
+    menuToggleEl.setAttribute("aria-expanded", "false");
+  }, { signal });
 
   menuToggleEl.addEventListener("click", () => {
     const willOpen = menuDropdownEl.hidden;

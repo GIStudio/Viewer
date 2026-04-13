@@ -1523,9 +1523,9 @@ export function splitCenterlineAtSnap(
 export function findNearestBranchSnapTarget(
   annotation: ReferenceAnnotation,
   point: AnnotationPoint,
-  options: { excludeCenterlineId?: string } = {},
+  options: { excludeCenterlineId?: string; maxDistancePx?: number } = {},
 ): BranchSnapTarget | null {
-  const { excludeCenterlineId } = options;
+  const { excludeCenterlineId, maxDistancePx = BRANCH_SNAP_TOLERANCE_PX } = options;
   let best: BranchSnapTarget | null = null;
   for (const centerline of annotation.centerlines) {
     if (excludeCenterlineId && centerline.id === excludeCenterlineId) {
@@ -1535,7 +1535,7 @@ export function findNearestBranchSnapTarget(
       continue;
     }
     const projection = projectPointOntoPolyline(centerline.points, point);
-    if (projection.distancePx > BRANCH_SNAP_TOLERANCE_PX) {
+    if (projection.distancePx > maxDistancePx) {
       continue;
     }
     if (!best || projection.distancePx < best.distancePx) {

@@ -16,7 +16,10 @@ export type StripKind =
   | "nearroad_furnishing"
   | "clear_sidewalk"
   | "farfromroad_buffer"
-  | "frontage_reserve";
+  | "frontage_reserve"
+  | "grass_belt"
+  | "shared_street_surface"
+  | "colored_pavement";
 export type FurnitureKind =
   | "bench"
   | "lamp"
@@ -56,6 +59,18 @@ export type AnnotatedStreetFurnitureInstance = {
   kind: FurnitureKind;
   station_m: number;
   lateral_offset_m: number;
+  yaw_deg: number | null;
+};
+
+/**
+ * Furniture instance placed inside a functional zone.
+ * Uses pixel coordinates relative to the image.
+ */
+export type ZoneFurnitureInstance = {
+  instance_id: string;
+  kind: FurnitureKind;
+  x_px: number;
+  y_px: number;
   yaw_deg: number | null;
 };
 
@@ -131,6 +146,7 @@ export type AnnotatedFunctionalZone = {
   label: string;
   kind: FunctionalZoneKind;
   points: AnnotationPoint[];
+  furniture_instances: ZoneFurnitureInstance[];
 };
 
 export type ReferenceAnnotation = {
