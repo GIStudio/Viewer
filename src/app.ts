@@ -867,34 +867,39 @@ function exportTopDownSvg(scene: THREE.Scene, root: THREE.Object3D | null): void
   <!-- Background -->
   <rect x="0" y="0" width="${width}" height="${height}" fill="#f7f6f3"/>`;
 
-  // 1. Draw road bands - spanning the full scene extent
-  const bandKindToClass: Record<string, string> = {
-    carriageway: "road",
-    drive_lane: "road",
-    bus_lane: "buslane",
-    bike_lane: "bikelane",
-    parking_lane: "parking",
-    median: "median",
-    nearroad_buffer: "buffer",
-    nearroad_furnishing: "furnishing",
-    clear_sidewalk: "sidewalk",
-    sidewalk: "sidewalk",
-    frontage_reserve: "frontage",
-    grass_belt: "greenzone",
-    shared_street_surface: "shared",
-    colored_pavement: "sidewalk",
-  };
+  // 1. Draw road bands - only if no carriageway_rings available
+  // Use carriagewayRings from osm_geometry for accurate polygon shapes
+  const hasCarriagewayRings = carriagewayRings.length > 0;
 
-  for (const band of overlay.bands) {
-    if (!band.width_m || !Number.isFinite(band.width_m)) continue;
-    // Draw band spanning the full road extent
-    const x1 = toSvgX(roadMinX);
-    const x2 = toSvgX(roadMaxX);
-    const y = toSvgY(band.z_center_m);
-    const h = toSvgSize(band.width_m);
-    const cssClass = bandKindToClass[band.kind] || "road";
-    const bandWidth = x2 - x1;
-    svg += `\n  <rect x="${x1}" y="${y - h/2}" width="${bandWidth}" height="${h}" class="${cssClass}"/>`;
+  if (!hasCarriagewayRings) {
+    // Fallback: draw bands as rectangles (less accurate)
+    const bandKindToClass: Record<string, string> = {
+      carriageway: "road",
+      drive_lane: "road",
+      bus_lane: "buslane",
+      bike_lane: "bikelane",
+      parking_lane: "parking",
+      median: "median",
+      nearroad_buffer: "buffer",
+      nearroad_furnishing: "furnishing",
+      clear_sidewalk: "sidewalk",
+      sidewalk: "sidewalk",
+      frontage_reserve: "frontage",
+      grass_belt: "greenzone",
+      shared_street_surface: "shared",
+      colored_pavement: "sidewalk",
+    };
+
+    for (const band of overlay.bands) {
+      if (!band.width_m || !Number.isFinite(band.width_m)) continue;
+      const x1 = toSvgX(roadMinX);
+      const x2 = toSvgX(roadMaxX);
+      const y = toSvgY(band.z_center_m);
+      const h = toSvgSize(band.width_m);
+      const cssClass = bandKindToClass[band.kind] || "road";
+      const bandWidth = x2 - x1;
+      svg += `\n  <rect x="${x1}" y="${y - h/2}" width="${bandWidth}" height="${h}" class="${cssClass}"/>`;
+    }
   }
 
   // 1.5. Draw junctions from manifest data
