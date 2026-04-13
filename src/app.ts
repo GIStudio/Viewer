@@ -819,65 +819,12 @@ function exportTopDownSvg(scene: THREE.Scene, root: THREE.Object3D | null): void
   const toSvgY = (sceneZ: number) => (viewSize / 2 - (sceneZ - center.z)) * pixelsPerUnit;
   const toSvgSize = (s: number) => s * pixelsPerUnit;
 
-  // Collect junction and crosswalk geometry from scene meshes
-  interface JunctionMesh {
-    points: [number, number][];
-    isCrosswalk: boolean;
-  }
-  const junctionMeshes: JunctionMesh[] = [];
-
-  // Traverse scene to find junction and crosswalk meshes
-  root.traverse((child: THREE.Object3D) => {
-    if (!(child instanceof THREE.Mesh) || !child.geometry) return;
-
-    // Get mesh bounding box
-    const meshBbox = new THREE.Box3().setFromObject(child);
-    const meshCenter = new THREE.Vector3();
-    meshBbox.getCenter(meshCenter);
-    const meshSize = new THREE.Vector3();
-    meshBbox.getSize(meshSize);
-
-    // Check if mesh is at ground level (y near 0)
-    if (Math.abs(meshCenter.y) > 2) return;
-
-    // Get mesh name to determine type
-    const name = child.name?.toLowerCase() || "";
-    const isCrosswalk = name.includes("crosswalk") || name.includes("zebra") || name.includes("crossing");
-
-    // Check if this is a junction mesh (large flat mesh at ground)
-    if (meshSize.y < 0.5 && (meshSize.x > 5 || meshSize.z > 5)) {
-      // Extract polygon from geometry
-      const geometry = child.geometry;
-      const positionAttr = geometry.getAttribute("position");
-      if (!positionAttr) return;
-
-      const positions: [number, number][] = [];
-      const indexAttr = geometry.getIndex();
-      if (indexAttr) {
-        // Indexed geometry - extract unique vertices
-        const uniqueVertices = new Map<string, [number, number]>();
-        for (let i = 0; i < indexAttr.count; i++) {
-          const idx = indexAttr.getX(i);
-          const x = positionAttr.getX(idx);
-          const z = positionAttr.getZ(idx);
-          const key = `${x.toFixed(2)},${z.toFixed(2)}`;
-          if (!uniqueVertices.has(key)) {
-            uniqueVertices.set(key, [x, z]);
-          }
-        }
-        positions.push(...uniqueVertices.values());
-      } else {
-        // Non-indexed geometry
-        for (let i = 0; i < positionAttr.count; i++) {
-          positions.push([positionAttr.getX(i), positionAttr.getZ(i)]);
-        }
-      }
-
-      if (positions.length >= 3) {
-        junctionMeshes.push({ points: positions, isCrosswalk });
-      }
-    }
-  });
+  // Collect junction and crosswalk data from manifest summary
+  const summary = (currentManifest.summary ?? {}) as Record<string, unknown>;
+  const osmGeom = (summary.osm_geometry ?? {}) as Record<string, unknown>;
+  const junctions = (osmGeom.junction_geometries ?? []) as Array<Record<string, unknown>>;
+  const carriagewayRings = (osmGeom.carriageway_rings ?? []) as number[][][];
+  const sidewalkRings = (osmGeom.sidewalk_rings ?? []) as number[][][];
 
   // Build SVG
   let svg = `<?xml version="1.0" encoding="UTF-8"?>
@@ -950,15 +897,49 @@ function exportTopDownSvg(scene: THREE.Scene, root: THREE.Object3D | null): void
     svg += `\n  <rect x="${x1}" y="${y - h/2}" width="${bandWidth}" height="${h}" class="${cssClass}"/>`;
   }
 
-  // 1.5. Draw junction/crosswalk meshes from scene
-  for (const jm of junctionMeshes) {
-    if (jm.points.length < 3) continue;
-    const points = jm.points.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
-    if (jm.isCrosswalk) {
-      svg += `\n  <polygon points="${points}" class="crosswalk" opacity="0.9"/>`;
-    } else {
+  // 1.5. Draw junctions from manifest data
+  // Junction carriageway cores
+  for (const junction of junctions) {
+    const coreRings = (junction.carriageway_core_rings ?? []) as number[][][];
+    for (const ring of coreRings) {
+      if (ring.length < 3) continue;
+      const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
       svg += `\n  <polygon points="${points}" class="junction"/>`;
     }
+    // Crosswalk patches from junction
+    const crosswalkPatches = (junction.crosswalk_patches ?? []) as Array<Record<string, unknown>>;
+    for (const patch of crosswalkPatches) {
+      const rings = (patch.rings ?? []) as number[][][];
+      for (const ring of rings) {
+        if (ring.length < 3) continue;
+        const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+        svg += `\n  <polygon points="${points}" class="crosswalk"/>`;
+      }
+    }
+    // Sidewalk corner patches
+    const sidewalkPatches = (junction.sidewalk_corner_patches ?? []) as Array<Record<string, unknown>>;
+    for (const patch of sidewalkPatches) {
+      const rings = (patch.rings ?? []) as number[][][];
+      for (const ring of rings) {
+        if (ring.length < 3) continue;
+        const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+        svg += `\n  <polygon points="${points}" class="sidewalk" opacity="0.8"/>`;
+      }
+    }
+  }
+
+  // 1.6. Draw carriageway rings from OSM geometry (non-junction roads)
+  for (const ring of carriagewayRings) {
+    if (ring.length < 3) continue;
+    const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+    svg += `\n  <polygon points="${points}" class="road"/>`;
+  }
+
+  // 1.7. Draw sidewalk rings from OSM geometry
+  for (const ring of sidewalkRings) {
+    if (ring.length < 3) continue;
+    const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+    svg += `\n  <polygon points="${points}" class="sidewalk"/>`;
   }
 
   // 2. Draw building footprints
