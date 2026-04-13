@@ -13,6 +13,7 @@ import type {
   AnnotatedJunction,
   AnnotatedRoundabout,
   AnnotatedBuildingRegion,
+  AnnotatedFunctionalZone,
   ReferenceAnnotation,
   ReferencePlan,
   ReferencePlansPayload,
@@ -72,6 +73,8 @@ import {
   DEFAULT_SEGMENT_LENGTH_M,
   DEFAULT_SIDEWALK_WIDTH_M,
   FALLBACK_REFERENCE_PLAN,
+  FUNCTIONAL_ZONE_KINDS,
+  FUNCTIONAL_ZONE_KIND_LABELS,
   FURNITURE_COMPATIBLE_STRIP_KINDS,
   FURNITURE_KINDS,
   FURNITURE_KIND_LABELS,
@@ -107,6 +110,7 @@ import {
   getCenterlineCrossSectionWidth,
   insertSharedVertexAtSnap,
   isFurnitureKind,
+  isFunctionalZoneKind,
   isStripDirection,
   isStripKind,
   isStripZone,
@@ -142,6 +146,8 @@ import {
   buildingRegionResizeHandlePoint,
   buildingRegionRotateHandlePoint,
   buildBuildingRegionFromDraft,
+  functionalZonePolygonPoints,
+  functionalZoneCentroid,
   centerlineSideStripLayouts,
   crossAxisNormalAtSnap,
   deriveExplicitJunctionOverlayGeometries,
@@ -524,6 +530,7 @@ function createEmptyAnnotation(planId = "", imagePath = "", imageWidthPx = 0, im
     roundabouts: [],
     control_points: [],
     building_regions: [],
+    functional_zones: [],
   };
 }
 
@@ -660,35 +667,59 @@ function normalizeBuildingRegion(value: unknown, index: number): AnnotatedBuildi
   };
 }
 
+function normalizeFunctionalZone(value: unknown, index: number): AnnotatedFunctionalZone {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const id = asString(record.id, `functional_zone_${String(index + 1).padStart(2, "0")}`);
+  const kind = asString(record.kind, "plaza");
+  const rawPoints = Array.isArray(record.points) ? record.points : [];
+  return {
+    id,
+    label: asString(record.label, id),
+    kind: isFunctionalZoneKind(kind) ? kind : "plaza",
+    points: rawPoints.map((item) => normalizePoint(item)),
+  };
+}
+
 function normalizeAnnotation(value: unknown): ReferenceAnnotation {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  const centerlines = Array.isArray(record.centerlines)
-    ? record.centerlines.map((item, index) => normalizeCenterline(item, index))
+
+  // Handle both flat format and annotation wrapper format (e.g., from graph_templates.py export)
+  const inner: Record<string, unknown> =
+    record.annotation && typeof record.annotation === "object"
+      ? (record.annotation as Record<string, unknown>)
+      : record;
+
+  const centerlines = Array.isArray(inner.centerlines)
+    ? inner.centerlines.map((item, index) => normalizeCenterline(item, index))
     : [];
-  const junctions = Array.isArray(record.junctions)
-    ? record.junctions.map((item, index) => normalizeJunction(item, index))
+  const junctions = Array.isArray(inner.junctions)
+    ? inner.junctions.map((item, index) => normalizeJunction(item, index))
     : [];
-  const roundabouts = Array.isArray(record.roundabouts)
-    ? record.roundabouts.map((item, index) => normalizeRoundabout(item, index))
+  const roundabouts = Array.isArray(inner.roundabouts)
+    ? inner.roundabouts.map((item, index) => normalizeRoundabout(item, index))
     : [];
-  const controlPoints = Array.isArray(record.control_points)
-    ? record.control_points.map((item, index) => normalizeMarker(item, index, "control_point"))
+  const controlPoints = Array.isArray(inner.control_points)
+    ? inner.control_points.map((item, index) => normalizeMarker(item, index, "control_point"))
     : [];
-  const buildingRegions = Array.isArray(record.building_regions)
-    ? record.building_regions.map((item, index) => normalizeBuildingRegion(item, index))
+  const buildingRegions = Array.isArray(inner.building_regions)
+    ? inner.building_regions.map((item, index) => normalizeBuildingRegion(item, index))
+    : [];
+  const functionalZones = Array.isArray(inner.functional_zones)
+    ? inner.functional_zones.map((item, index) => normalizeFunctionalZone(item, index))
     : [];
   return {
-    version: asString(record.version, ANNOTATION_SCHEMA_VERSION),
-    plan_id: asString(record.plan_id, "custom_annotation"),
-    image_path: asString(record.image_path, ""),
-    image_width_px: Math.max(0, Math.round(asNumber(record.image_width_px, 0))),
-    image_height_px: Math.max(0, Math.round(asNumber(record.image_height_px, 0))),
-    pixels_per_meter: Math.max(0.1, asNumber(record.pixels_per_meter, DEFAULT_PIXELS_PER_METER)),
+    version: asString(inner.version, ANNOTATION_SCHEMA_VERSION),
+    plan_id: asString(inner.plan_id, "custom_annotation"),
+    image_path: asString(inner.image_path, ""),
+    image_width_px: Math.max(0, Math.round(asNumber(inner.image_width_px, 0))),
+    image_height_px: Math.max(0, Math.round(asNumber(inner.image_height_px, 0))),
+    pixels_per_meter: Math.max(0.1, asNumber(inner.pixels_per_meter, DEFAULT_PIXELS_PER_METER)),
     centerlines,
     junctions,
     roundabouts,
     control_points: controlPoints,
     building_regions: buildingRegions,
+    functional_zones: functionalZones,
   };
 }
 
@@ -722,6 +753,9 @@ function nextFeatureId(annotation: ReferenceAnnotation, prefix: string): string 
   for (const item of annotation.building_regions) {
     ids.add(item.id);
   }
+  for (const item of annotation.functional_zones) {
+    ids.add(item.id);
+  }
   let counter = 1;
   while (true) {
     const candidate = `${prefix}_${String(counter).padStart(2, "0")}`;
@@ -738,13 +772,15 @@ function getFeatureCount(annotation: ReferenceAnnotation): number {
     annotation.junctions.length +
     annotation.roundabouts.length +
     annotation.control_points.length +
-    annotation.building_regions.length
+    annotation.building_regions.length +
+    annotation.functional_zones.length
   );
 }
 
 function getSelectedFeature(annotation: ReferenceAnnotation, selection: Selection):
   | AnnotatedCenterline
   | AnnotatedBuildingRegion
+  | AnnotatedFunctionalZone
   | AnnotatedJunction
   | AnnotatedMarker
   | AnnotatedRoundabout
@@ -767,6 +803,9 @@ function getSelectedFeature(annotation: ReferenceAnnotation, selection: Selectio
   }
   if (selection.kind === "building_region") {
     return annotation.building_regions.find((item) => item.id === selection.id) ?? null;
+  }
+  if (selection.kind === "functional_zone") {
+    return annotation.functional_zones.find((item) => item.id === selection.id) ?? null;
   }
   if (selection.kind === "derived_junction") {
     return getJunctionOverlay(annotation, selection.id);
@@ -950,6 +989,7 @@ function buildAnnotationSummaryMarkup(annotation: ReferenceAnnotation): string {
   const stripCount = annotation.centerlines.reduce((sum, item) => sum + item.cross_section_strips.length, 0);
   const furnitureCount = annotation.centerlines.reduce((sum, item) => sum + item.street_furniture_instances.length, 0);
   const buildingRegionCount = annotation.building_regions.length;
+  const functionalZoneCount = annotation.functional_zones.length;
   const junctionStats = deriveJunctionStats(annotation);
   return `
     <div>
@@ -1011,6 +1051,10 @@ function buildAnnotationSummaryMarkup(annotation: ReferenceAnnotation): string {
     <div>
       <span class="scene-metric-label">Bldg Regions</span>
       <strong>${buildingRegionCount}</strong>
+    </div>
+    <div>
+      <span class="scene-metric-label">Func Zones</span>
+      <strong>${functionalZoneCount}</strong>
     </div>
     <div>
       <span class="scene-metric-label">Scale</span>
@@ -1157,6 +1201,16 @@ function buildFeatureTableMarkup(annotation: ReferenceAnnotation): string {
         <td>${escapeHtml(item.id)}</td>
         <td>${escapeHtml(item.label)}</td>
         <td>${item.width_px.toFixed(0)} × ${item.height_px.toFixed(0)}px · yaw ${item.yaw_deg.toFixed(0)}° · (${item.center_px.x.toFixed(0)}, ${item.center_px.y.toFixed(0)})</td>
+      </tr>
+    `);
+  }
+  for (const item of annotation.functional_zones) {
+    rows.push(`
+      <tr>
+        <td>functional zone</td>
+        <td>${escapeHtml(item.id)}</td>
+        <td>${escapeHtml(item.label)}</td>
+        <td>${escapeHtml(item.kind)} · ${item.points.length} pts</td>
       </tr>
     `);
   }
@@ -1660,6 +1714,52 @@ function buildBuildingRegionInspectorMarkup(region: AnnotatedBuildingRegion): st
   `;
 }
 
+function buildFunctionalZoneInspectorMarkup(zone: AnnotatedFunctionalZone): string {
+  const pointCount = zone.points.length;
+  const centroid = functionalZoneCentroid(zone);
+  return `
+    <section class="annotation-cross-preview-section">
+      <div class="annotation-cross-preview-header">
+        <div>
+          <h3>Functional Zone</h3>
+          <div class="scene-micro-note">Polygon zone for special functional areas like plazas, gardens, and playgrounds.</div>
+        </div>
+        <div class="annotation-cross-preview-stats">
+          <span class="annotation-cross-preview-stat">${pointCount} pts</span>
+        </div>
+      </div>
+      <div class="scene-inspector-grid">
+        <label class="scene-form-field">
+          <span>ID</span>
+          <input id="annotation-zone-id" type="text" value="${escapeHtml(zone.id)}" />
+        </label>
+        <label class="scene-form-field scene-form-field-wide">
+          <span>Label</span>
+          <input id="annotation-zone-label" type="text" value="${escapeHtml(zone.label)}" />
+        </label>
+        <label class="scene-form-field scene-form-field-wide">
+          <span>Kind</span>
+          <select id="annotation-zone-kind">
+            ${buildSelectOptions(FUNCTIONAL_ZONE_KINDS, zone.kind, FUNCTIONAL_ZONE_KIND_LABELS)}
+          </select>
+        </label>
+        <label class="scene-form-field">
+          <span>Centroid X</span>
+          <input id="annotation-zone-center-x" type="number" step="1" value="${centroid.x.toFixed(0)}" readonly />
+        </label>
+        <label class="scene-form-field">
+          <span>Centroid Y</span>
+          <input id="annotation-zone-center-y" type="number" step="1" value="${centroid.y.toFixed(0)}" readonly />
+        </label>
+        <div class="scene-fact-card scene-form-field-wide">
+          <span class="scene-fact-label">Hint</span>
+          <strong>Double-click the canvas to finish drawing a polygon zone. Minimum 3 points required.</strong>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function buildJunctionInspectorMarkup(
   junction: AnnotatedJunction,
   overlay: DerivedJunctionOverlay | null,
@@ -1874,6 +1974,9 @@ function buildInspectorMarkup(
   }
   if (selection.kind === "building_region") {
     return buildBuildingRegionInspectorMarkup(feature as AnnotatedBuildingRegion);
+  }
+  if (selection.kind === "functional_zone") {
+    return buildFunctionalZoneInspectorMarkup(feature as AnnotatedFunctionalZone);
   }
   if (selection.kind === "centerline") {
     const centerline = feature as AnnotatedCenterline;
@@ -2522,6 +2625,78 @@ function buildBuildingRegionDraftMarkup(drag: Extract<DragState, { kind: "buildi
   `;
 }
 
+function buildFunctionalZoneOverlayMarkup(
+  zone: AnnotatedFunctionalZone,
+  isSelected: boolean,
+): string {
+  const polygon = functionalZonePolygonPoints(zone);
+  const polygonPoints = polygon.map((point) => `${point.x},${point.y}`).join(" ");
+  const labelPoint = polygon[0] ?? functionalZoneCentroid(zone);
+  const vertexMarkup = isSelected
+    ? zone.points
+        .map(
+          (point, index) => `
+            <circle
+              class="annotation-functional-zone-vertex"
+              cx="${point.x}"
+              cy="${point.y}"
+              r="5"
+              data-feature-kind="functional_zone"
+              data-feature-id="${escapeHtml(zone.id)}"
+              data-zone-vertex-index="${index}"
+            />
+          `,
+        )
+        .join("")
+    : "";
+  return `
+    <g class="annotation-feature-group">
+      <polygon
+        class="annotation-functional-zone${isSelected ? " annotation-functional-zone-selected" : ""}"
+        points="${polygonPoints}"
+        data-feature-kind="functional_zone"
+        data-feature-id="${escapeHtml(zone.id)}"
+      />
+      <text class="annotation-label" x="${labelPoint.x}" y="${labelPoint.y - 10}">
+        ${escapeHtml(zone.label || zone.id)}
+      </text>
+      ${vertexMarkup}
+    </g>
+  `;
+}
+
+function buildFunctionalZoneDraftMarkup(drag: Extract<DragState, { kind: "functional_zone_draw" }> | null): string {
+  if (!drag) {
+    return "";
+  }
+  const points = [...drag.points, drag.currentPoint];
+  if (points.length < 2) {
+    return "";
+  }
+  const polygonPoints = points.map((point) => `${point.x},${point.y}`).join(" ");
+  const lineFragments: string[] = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    lineFragments.push(
+      `<line class="annotation-functional-zone-draft-line" x1="${points[i].x}" y1="${points[i].y}" x2="${points[i + 1].x}" y2="${points[i + 1].y}" />`,
+    );
+  }
+  return `
+    <g class="annotation-feature-group">
+      <polygon
+        class="annotation-functional-zone annotation-functional-zone-draft"
+        points="${polygonPoints}"
+      />
+      ${lineFragments.join("")}
+      ${points
+        .map(
+          (point, index) =>
+            `<circle class="annotation-functional-zone-draft-vertex" cx="${point.x}" cy="${point.y}" r="4" data-index="${index}" />`,
+        )
+        .join("")}
+    </g>
+  `;
+}
+
 function buildBranchPreviewMarkup(
   branchHoverSnap: BranchSnapTarget | null,
   branchDraft: BranchDraft | null,
@@ -2906,6 +3081,7 @@ function buildOverlayMarkup(
   crossHoverSnap: BranchSnapTarget | null,
   crossDraft: CrossDraft | null,
   buildingRegionDraft: Extract<DragState, { kind: "building_region_draw" }> | null,
+  functionalZoneDraft: Extract<DragState, { kind: "functional_zone_draw" }> | null,
 ): string {
   const width = Math.max(annotation.image_width_px, 1);
   const height = Math.max(annotation.image_height_px, 1);
@@ -3001,6 +3177,10 @@ function buildOverlayMarkup(
     .map((region) => buildBuildingRegionOverlayMarkup(region, selectedKey === `building_region:${region.id}`))
     .join("");
 
+  const functionalZoneMarkup = annotation.functional_zones
+    .map((zone) => buildFunctionalZoneOverlayMarkup(zone, selectedKey === `functional_zone:${zone.id}`))
+    .join("");
+
   const draftMarkup =
     draftCenterline.length > 0
       ? `
@@ -3039,11 +3219,13 @@ function buildOverlayMarkup(
       ${centerlineMarkup}
       ${derivedJunctionMarkup}
       ${buildingRegionMarkup}
+      ${functionalZoneMarkup}
       ${markerMarkup}
       ${roundaboutMarkup}
       ${buildBranchPreviewMarkup(branchHoverSnap, branchDraft)}
       ${buildCrossPreviewMarkup(crossHoverSnap, crossDraft)}
       ${buildBuildingRegionDraftMarkup(buildingRegionDraft)}
+      ${buildFunctionalZoneDraftMarkup(functionalZoneDraft)}
       ${draftMarkup}
     </svg>
   `;
@@ -3079,107 +3261,9 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
         </div>
       </div>
 
-      <div id="annotation-page-layout" class="scene-page-layout" data-sidebar-collapsed="false">
-        <div class="scene-main-column">
-          <section class="scene-panel scene-panel-canvas">
-          <div class="scene-panel-header">
-            <h2>Reference Board</h2>
-            <p>先选参考图并标中心线，调好 Pixels / Meter 和总宽度后，再进入详细 strip 模式拆分车道、人行道、frontage reserve 和街道家具。</p>
-          </div>
-
-          <div class="scene-layer-toolbar">
-            <label class="scene-select-wrap">
-              <span class="scene-select-label">Reference Plan</span>
-              <select id="annotation-plan-select" class="scene-select"></select>
-            </label>
-            <label class="scene-file-button" for="annotation-image-input">Import PNG</label>
-            <input id="annotation-image-input" class="scene-file-input" type="file" accept="image/png,image/*" />
-            <button id="annotation-image-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">
-              Clear Image
-            </button>
-          </div>
-
-          <div class="scene-tool-row">
-            <button id="annotation-tool-select" class="scene-tool-button" data-tool="select" type="button">Select</button>
-            <button id="annotation-tool-adjust" class="scene-tool-button" data-tool="adjust" type="button">Adjust</button>
-            <button id="annotation-tool-centerline" class="scene-tool-button" data-tool="centerline" type="button">Centerline</button>
-            <button id="annotation-tool-branch" class="scene-tool-button" data-tool="branch" type="button">Branch</button>
-            <button id="annotation-tool-cross" class="scene-tool-button" data-tool="cross" type="button">Cross</button>
-            <button id="annotation-tool-roundabout" class="scene-tool-button" data-tool="roundabout" type="button">Roundabout</button>
-            <button id="annotation-tool-control-point" class="scene-tool-button" data-tool="control_point" type="button">Control Point</button>
-            <button id="annotation-tool-building-region" class="scene-tool-button" data-tool="building_region" type="button">Building Region</button>
-            <button id="annotation-tool-tree" class="scene-tool-button" data-tool="tree" type="button">Tree</button>
-            <button id="annotation-tool-lamp" class="scene-tool-button" data-tool="lamp" type="button">Lamp</button>
-          </div>
-
-          <div class="scene-layer-controls scene-layer-controls-annotation">
-            <label class="scene-layer-toggle" for="annotation-show-original">
-              <input id="annotation-show-original" type="checkbox" checked />
-              <span>Original Image</span>
-            </label>
-            <label class="scene-layer-toggle" for="annotation-show-overlay">
-              <input id="annotation-show-overlay" type="checkbox" checked />
-              <span>Annotation Overlay</span>
-            </label>
-            <label class="scene-layer-toggle" for="annotation-show-junction-core">
-              <input id="annotation-show-junction-core" type="checkbox" />
-              <span>Junction Core</span>
-            </label>
-            <label class="scene-layer-toggle" for="annotation-show-junction-connectors">
-              <input id="annotation-show-junction-connectors" type="checkbox" />
-              <span>Junction Connectors</span>
-            </label>
-            <label class="scene-layer-toggle" for="annotation-show-junction-outlines">
-              <input id="annotation-show-junction-outlines" type="checkbox" />
-              <span>Junction Outlines</span>
-            </label>
-            <label class="scene-layer-toggle" for="annotation-show-junction-crosswalks">
-              <input id="annotation-show-junction-crosswalks" type="checkbox" />
-              <span>Crosswalks</span>
-            </label>
-            <label class="scene-layer-toggle" for="annotation-show-junction-boundaries">
-              <input id="annotation-show-junction-boundaries" type="checkbox" />
-              <span>Approach Boundaries</span>
-            </label>
-            <label class="scene-layer-toggle" for="annotation-show-junction-labels">
-              <input id="annotation-show-junction-labels" type="checkbox" />
-              <span>Junction Labels</span>
-            </label>
-            <label class="scene-layer-toggle" for="annotation-show-junction-debug">
-              <input id="annotation-show-junction-debug" type="checkbox" />
-              <span>Junction Debug</span>
-            </label>
-            <label class="scene-range-control" for="annotation-original-opacity">
-              <span>Original Opacity</span>
-              <input id="annotation-original-opacity" type="range" min="0" max="100" value="100" />
-            </label>
-            <label class="scene-range-control" for="annotation-overlay-opacity">
-              <span>Overlay Opacity</span>
-              <input id="annotation-overlay-opacity" type="range" min="0" max="100" value="88" />
-            </label>
-            <label class="scene-form-field scene-form-field-inline">
-              <span>Pixels / Meter</span>
-              <input id="annotation-pixels-per-meter" type="number" min="0.1" step="0.1" value="${DEFAULT_PIXELS_PER_METER}" />
-            </label>
-            <label class="scene-form-field scene-form-field-inline">
-              <span>Default Roundabout Radius</span>
-              <input id="annotation-roundabout-radius" type="number" min="8" step="1" value="${DEFAULT_ROUNDABOUT_RADIUS_PX}" />
-            </label>
-          </div>
-
-          <div class="scene-layer-toolbar scene-layer-toolbar-secondary">
-            <button id="annotation-finish-centerline" class="scene-toolbar-button" type="button">Finish Centerline</button>
-            <button id="annotation-select-all-roads" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">All Roads</button>
-            <button id="annotation-undo-point" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Undo Point</button>
-            <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Delete Selected</button>
-            <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Reset Annotation</button>
-          </div>
-
-          <div id="annotation-image-meta" class="scene-image-meta">
-            选择参考 plan 或导入 PNG 后，就可以在图上开始标注。
-          </div>
-
-          <div id="annotation-stage" class="scene-layer-stage" data-has-image="false" data-loading="true" data-empty-state="loading">
+      <div class="scene-page-layout scene-page-layout-flex">
+        <div class="scene-canvas-column">
+          <div id="annotation-stage" class="scene-layer-stage scene-canvas-stage" data-has-image="false" data-loading="true" data-empty-state="loading">
             <div id="annotation-stage-empty" class="scene-image-empty">
               Loading default reference plan...
             </div>
@@ -3188,67 +3272,175 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
               <div id="annotation-overlay-host" class="scene-graph-overlay"></div>
             </div>
           </div>
-          </section>
 
-          <section class="scene-panel scene-panel-selected-feature">
-            <div class="scene-panel-header">
-              <h2>Selected Feature</h2>
-              <p>中心线支持 Coarse / Detailed 两阶段编辑。Detailed 模式下可以手工拆 strip、调方向、放置街道家具，也可以绘制建筑区域并手工指定建筑朝向。</p>
+          <div class="scene-bottom-toolbar">
+            <div class="scene-tool-row">
+              <button id="annotation-tool-select" class="scene-tool-button" data-tool="select" type="button">Select</button>
+              <button id="annotation-tool-adjust" class="scene-tool-button" data-tool="adjust" type="button">Adjust</button>
+              <button id="annotation-tool-centerline" class="scene-tool-button" data-tool="centerline" type="button">Centerline</button>
+              <button id="annotation-tool-branch" class="scene-tool-button" data-tool="branch" type="button">Branch</button>
+              <button id="annotation-tool-cross" class="scene-tool-button" data-tool="cross" type="button">Cross</button>
+              <button id="annotation-tool-roundabout" class="scene-tool-button" data-tool="roundabout" type="button">Roundabout</button>
+              <button id="annotation-tool-control-point" class="scene-tool-button" data-tool="control_point" type="button">Control Point</button>
+              <button id="annotation-tool-building-region" class="scene-tool-button" data-tool="building_region" type="button">Building Region</button>
+              <button id="annotation-tool-functional-zone" class="scene-tool-button" data-tool="functional_zone" type="button">Functional Zone</button>
+              <button id="annotation-tool-tree" class="scene-tool-button" data-tool="tree" type="button">Tree</button>
+              <button id="annotation-tool-lamp" class="scene-tool-button" data-tool="lamp" type="button">Lamp</button>
+              <button id="annotation-tool-bench" class="scene-tool-button" data-tool="bench" type="button">Bench</button>
+              <button id="annotation-tool-trash" class="scene-tool-button" data-tool="trash" type="button">Trash</button>
+              <button id="annotation-tool-bus-stop" class="scene-tool-button" data-tool="bus_stop" type="button">Bus Stop</button>
+              <button id="annotation-tool-bollard" class="scene-tool-button" data-tool="bollard" type="button">Bollard</button>
+              <button id="annotation-tool-mailbox" class="scene-tool-button" data-tool="mailbox" type="button">Mailbox</button>
+              <button id="annotation-tool-hydrant" class="scene-tool-button" data-tool="hydrant" type="button">Hydrant</button>
+              <button id="annotation-tool-sign" class="scene-tool-button" data-tool="sign" type="button">Sign</button>
             </div>
-            <div id="annotation-inspector" class="scene-inspector-wrap"></div>
-          </section>
+            <div class="scene-layer-toolbar scene-layer-toolbar-secondary" style="padding:0;background:transparent;box-shadow:none">
+              <button id="annotation-finish-centerline" class="scene-toolbar-button" type="button">Finish Centerline</button>
+              <button id="annotation-select-all-roads" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">All Roads</button>
+              <button id="annotation-undo-point" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Undo Point</button>
+              <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Delete Selected</button>
+              <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Reset Annotation</button>
+            </div>
+            <div id="annotation-image-meta" class="scene-image-meta" style="margin:0">
+              选择参考 plan 或导入 PNG 后，就可以在图上开始标注。
+            </div>
+          </div>
         </div>
 
-        <aside id="annotation-sidebar" class="scene-sidebar" data-collapsed="false">
-          <div class="scene-sidebar-rail">
-            <button id="annotation-sidebar-toggle" class="scene-sidebar-toggle" type="button" aria-expanded="true" aria-label="Collapse sidebar panels">
-              <span class="scene-sidebar-toggle-icon" aria-hidden="true">></span>
-              <span class="scene-sidebar-toggle-label">Hide Panels</span>
-            </button>
-          </div>
-          <div class="scene-sidebar-content">
-            <section class="scene-panel scene-panel-compact scene-metrics">
-              <div class="scene-panel-header">
-                <h2>Annotation Summary</h2>
-                <p>当前手工标注的统计概览。</p>
+        <aside class="scene-sidebar-right">
+          <details class="scene-collapsible-panel" open>
+            <summary class="scene-collapsible-summary">View & Layer Options</summary>
+            <div class="scene-collapsible-body">
+              <div class="scene-import-toolbar" style="padding:0">
+                <label class="scene-select-wrap" style="min-width:0;flex:1 1 auto">
+                  <span class="scene-select-label">Reference Plan</span>
+                  <select id="annotation-plan-select" class="scene-select"></select>
+                </label>
+                <label class="scene-file-button" for="annotation-image-input">Import PNG</label>
+                <input id="annotation-image-input" class="scene-file-input" type="file" accept="image/png,image/*" />
+                <button id="annotation-image-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">
+                  Clear Image
+                </button>
               </div>
-              <div id="annotation-summary-grid" class="scene-metric-grid"></div>
-            </section>
+              <div class="scene-layer-controls scene-layer-controls-annotation" style="padding:0">
+                <label class="scene-layer-toggle" for="annotation-show-original">
+                  <input id="annotation-show-original" type="checkbox" checked />
+                  <span>Original Image</span>
+                </label>
+                <label class="scene-layer-toggle" for="annotation-show-overlay">
+                  <input id="annotation-show-overlay" type="checkbox" checked />
+                  <span>Annotation Overlay</span>
+                </label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-core">
+                  <input id="annotation-show-junction-core" type="checkbox" />
+                  <span>Junction Core</span>
+                </label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-connectors">
+                  <input id="annotation-show-junction-connectors" type="checkbox" />
+                  <span>Junction Connectors</span>
+                </label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-outlines">
+                  <input id="annotation-show-junction-outlines" type="checkbox" />
+                  <span>Junction Outlines</span>
+                </label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-crosswalks">
+                  <input id="annotation-show-junction-crosswalks" type="checkbox" />
+                  <span>Crosswalks</span>
+                </label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-boundaries">
+                  <input id="annotation-show-junction-boundaries" type="checkbox" />
+                  <span>Approach Boundaries</span>
+                </label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-labels">
+                  <input id="annotation-show-junction-labels" type="checkbox" />
+                  <span>Junction Labels</span>
+                </label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-debug">
+                  <input id="annotation-show-junction-debug" type="checkbox" />
+                  <span>Junction Debug</span>
+                </label>
+                <label class="scene-range-control" for="annotation-original-opacity">
+                  <span>Original Opacity</span>
+                  <input id="annotation-original-opacity" type="range" min="0" max="100" value="100" />
+                </label>
+                <label class="scene-range-control" for="annotation-overlay-opacity">
+                  <span>Overlay Opacity</span>
+                  <input id="annotation-overlay-opacity" type="range" min="0" max="100" value="88" />
+                </label>
+                <label class="scene-form-field scene-form-field-inline">
+                  <span>Pixels / Meter</span>
+                  <input id="annotation-pixels-per-meter" type="number" min="0.1" step="0.1" value="${DEFAULT_PIXELS_PER_METER}" />
+                </label>
+                <label class="scene-form-field scene-form-field-inline">
+                  <span>Default Roundabout Radius</span>
+                  <input id="annotation-roundabout-radius" type="number" min="8" step="1" value="${DEFAULT_ROUNDABOUT_RADIUS_PX}" />
+                </label>
+              </div>
+            </div>
+          </details>
 
-            <section class="scene-panel scene-panel-compact">
-              <div class="scene-panel-header">
-                <h2>Graph Conversion</h2>
-                <p>把当前 annotation JSON 直接送进后端 converter，生成保留详细横断面与家具实例的 segment graph。</p>
+          <details class="scene-collapsible-panel" open>
+            <summary class="scene-collapsible-summary">Selected Feature</summary>
+            <div class="scene-collapsible-body" style="padding:0">
+              <div id="annotation-inspector" class="scene-inspector-wrap" style="padding:0.5rem 0"></div>
+            </div>
+          </details>
+
+          <details class="scene-collapsible-panel" open>
+            <summary class="scene-collapsible-summary">Import / Export</summary>
+            <div class="scene-collapsible-body">
+              <div class="scene-import-toolbar" style="padding:0">
+                <label class="scene-file-button" for="annotation-json-input">Import JSON</label>
+                <input id="annotation-json-input" class="scene-file-input" type="file" accept=".json,application/json" />
+                <button id="annotation-apply-json" class="scene-toolbar-button" type="button">Apply JSON</button>
+                <button id="annotation-download-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">
+                  Download JSON
+                </button>
+                <button id="annotation-copy-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">
+                  Copy JSON
+                </button>
               </div>
-              <div class="scene-import-toolbar">
-                <label class="scene-form-field scene-form-field-inline">
-                  <span>Segment Length (m)</span>
-                  <input id="annotation-segment-length" type="number" min="4" step="1" value="${DEFAULT_SEGMENT_LENGTH_M}" />
-                </label>
-                <label class="scene-form-field scene-form-field-inline">
-                  <span>Sidewalk Width (m)</span>
-                  <input id="annotation-sidewalk-width" type="number" min="1" step="0.5" value="${DEFAULT_SIDEWALK_WIDTH_M}" />
-                </label>
+              <div class="scene-import-toolbar" style="padding:0">
                 <button id="annotation-convert-graph" class="scene-toolbar-button" type="button">Convert to Graph</button>
                 <button id="annotation-download-graph" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">
                   Download Graph
                 </button>
               </div>
-              <div id="annotation-graph-status" class="scene-status" data-tone="neutral">
+            </div>
+          </details>
+
+          <details class="scene-collapsible-panel">
+            <summary class="scene-collapsible-summary">Graph Conversion</summary>
+            <div class="scene-collapsible-body">
+              <label class="scene-form-field scene-form-field-inline" style="padding:0;background:transparent;box-shadow:none">
+                <span>Segment Length (m)</span>
+                <input id="annotation-segment-length" type="number" min="4" step="1" value="${DEFAULT_SEGMENT_LENGTH_M}" />
+              </label>
+              <label class="scene-form-field scene-form-field-inline" style="padding:0;background:transparent;box-shadow:none">
+                <span>Sidewalk Width (m)</span>
+                <input id="annotation-sidewalk-width" type="number" min="1" step="0.5" value="${DEFAULT_SIDEWALK_WIDTH_M}" />
+              </label>
+              <div id="annotation-graph-status" class="scene-status" data-tone="neutral" style="margin:0">
                 Convert 后会在这里显示 graph 结果。
               </div>
-              <div id="annotation-graph-summary" class="scene-metric-grid"></div>
-              <div class="scene-json-wrap">
+              <div id="annotation-graph-summary" class="scene-metric-grid scene-metric-grid-compact"></div>
+              <div class="scene-json-wrap scene-json-wrap-compact" style="padding:0">
                 <textarea id="annotation-graph-json" class="scene-json-input" spellcheck="false" readonly></textarea>
               </div>
-            </section>
+            </div>
+          </details>
 
-            <section class="scene-panel scene-panel-compact">
-              <div class="scene-panel-header">
-                <h2>Feature Table</h2>
-                <p>快速检查当前所有要素及其核心属性。</p>
-              </div>
-              <div class="scene-table-wrap scene-table-wrap-compact">
+          <details class="scene-collapsible-panel">
+            <summary class="scene-collapsible-summary">Annotation Summary</summary>
+            <div class="scene-collapsible-body">
+              <div id="annotation-summary-grid" class="scene-metric-grid scene-metric-grid-compact"></div>
+            </div>
+          </details>
+
+          <details class="scene-collapsible-panel">
+            <summary class="scene-collapsible-summary">Feature Table</summary>
+            <div class="scene-collapsible-body">
+              <div class="scene-table-wrap scene-table-wrap-compact" style="padding:0">
                 <table class="scene-table scene-table-compact">
                   <thead>
                     <tr>
@@ -3261,39 +3453,26 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
                   <tbody id="annotation-feature-table"></tbody>
                 </table>
               </div>
-            </section>
+            </div>
+          </details>
 
-            <section class="scene-panel scene-panel-compact">
-            <div class="scene-panel-header">
-              <h2>Annotation JSON</h2>
-              <p>可以从这里导入、导出或直接修改标注 JSON。</p>
+          <details class="scene-collapsible-panel">
+            <summary class="scene-collapsible-summary">Annotation JSON</summary>
+            <div class="scene-collapsible-body">
+              <div class="scene-json-wrap scene-json-wrap-compact" style="padding:0">
+                <textarea id="annotation-json" class="scene-json-input" spellcheck="false"></textarea>
+              </div>
+              <div id="annotation-status" class="scene-status" data-tone="neutral" style="margin:0.5rem 0 0">
+                Waiting for a reference image.
+              </div>
             </div>
-            <div class="scene-import-toolbar">
-              <label class="scene-file-button" for="annotation-json-input">Import JSON</label>
-              <input id="annotation-json-input" class="scene-file-input" type="file" accept=".json,application/json" />
-              <button id="annotation-apply-json" class="scene-toolbar-button" type="button">Apply JSON</button>
-              <button id="annotation-download-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">
-                Download JSON
-              </button>
-              <button id="annotation-copy-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">
-                Copy JSON
-              </button>
-            </div>
-            <div class="scene-json-wrap">
-              <textarea id="annotation-json" class="scene-json-input" spellcheck="false"></textarea>
-            </div>
-            <div id="annotation-status" class="scene-status" data-tone="neutral">
-              Waiting for a reference image.
-            </div>
-            </section>
-          </div>
+          </details>
         </aside>
       </div>
     </div>
   `;
 
   const backButton = requireElement<HTMLButtonElement>(root, "#scene-page-back");
-  const pageLayoutEl = requireElement<HTMLElement>(root, "#annotation-page-layout");
   const planSelect = requireElement<HTMLSelectElement>(root, "#annotation-plan-select");
   const imageInput = requireElement<HTMLInputElement>(root, "#annotation-image-input");
   const imageResetButton = requireElement<HTMLButtonElement>(root, "#annotation-image-reset");
@@ -3337,8 +3516,6 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
   const graphSummaryEl = requireElement<HTMLElement>(root, "#annotation-graph-summary");
   const graphTextarea = requireElement<HTMLTextAreaElement>(root, "#annotation-graph-json");
   const featureTableEl = requireElement<HTMLElement>(root, "#annotation-feature-table");
-  const sidebarEl = requireElement<HTMLElement>(root, "#annotation-sidebar");
-  const sidebarToggleButton = requireElement<HTMLButtonElement>(root, "#annotation-sidebar-toggle");
 
   const toolButtons = Array.from(root.querySelectorAll<HTMLButtonElement>(".scene-tool-button"));
 
@@ -3367,7 +3544,6 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
     defaultRoundaboutRadiusPx: DEFAULT_ROUNDABOUT_RADIUS_PX,
     isReferenceImageLoading: true,
     referenceImageLoadingMessage: "Loading default reference plan...",
-    isSidebarCollapsed: false,
     previewResize: null as null | {
       pointerId: number;
       centerlineId: string;
@@ -3424,6 +3600,30 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
     state.crossDraft = null;
   }
 
+  function commitFunctionalZoneDraft(): void {
+    if (state.drag?.kind !== "functional_zone_draw") {
+      return;
+    }
+    const points = state.drag.points;
+    if (points.length < 3) {
+      setStatus(statusEl, "Functional zone needs at least 3 points. Keep clicking to add vertices.", "neutral");
+      return;
+    }
+    const id = nextFeatureId(state.annotation, "functional_zone");
+    state.annotation.functional_zones.push({
+      id,
+      label: id,
+      kind: "plaza",
+      points: points.map((p) => ({ ...p })),
+    });
+    state.selection = { kind: "functional_zone", id };
+    state.selectedStripId = null;
+    clearFurniturePlacement();
+    state.drag = null;
+    markAnnotationChanged(`Added functional zone ${id}.`);
+    renderAll();
+  }
+
   function markAnnotationChanged(statusMessage?: string): void {
     clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
     if (statusMessage) {
@@ -3466,22 +3666,6 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
   function renderToolButtons(): void {
     for (const button of toolButtons) {
       button.dataset.active = button.dataset.tool === state.selectedTool ? "true" : "false";
-    }
-  }
-
-  function renderSidebar(): void {
-    const collapsed = state.isSidebarCollapsed;
-    pageLayoutEl.dataset.sidebarCollapsed = collapsed ? "true" : "false";
-    sidebarEl.dataset.collapsed = collapsed ? "true" : "false";
-    sidebarToggleButton.setAttribute("aria-expanded", collapsed ? "false" : "true");
-    sidebarToggleButton.setAttribute("aria-label", collapsed ? "Expand sidebar panels" : "Collapse sidebar panels");
-    const iconEl = sidebarToggleButton.querySelector<HTMLElement>(".scene-sidebar-toggle-icon");
-    const labelEl = sidebarToggleButton.querySelector<HTMLElement>(".scene-sidebar-toggle-label");
-    if (iconEl) {
-      iconEl.textContent = collapsed ? "<" : ">";
-    }
-    if (labelEl) {
-      labelEl.textContent = collapsed ? "Show Panels" : "Hide Panels";
     }
   }
 
@@ -3571,6 +3755,37 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
         regionYawInput,
       ]) {
         input?.addEventListener("input", updateRegion, { signal });
+      }
+      return;
+    }
+    if (state.selection.kind === "functional_zone") {
+      const zone = selectedFeature as AnnotatedFunctionalZone;
+      const zoneIdInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-zone-id");
+      const zoneLabelInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-zone-label");
+      const zoneKindSelect = inspectorEl.querySelector<HTMLSelectElement>("#annotation-zone-kind");
+      const updateZone = (): void => {
+        if (zoneIdInput) {
+          const nextId = zoneIdInput.value.trim();
+          if (nextId) {
+            zone.id = nextId;
+            state.selection = { kind: "functional_zone", id: nextId };
+          }
+        }
+        if (zoneLabelInput) {
+          zone.label = zoneLabelInput.value.trim() || zone.id;
+        }
+        if (zoneKindSelect) {
+          const nextKind = zoneKindSelect.value;
+          if (isFunctionalZoneKind(nextKind)) {
+            zone.kind = nextKind;
+          }
+        }
+        markAnnotationChanged();
+        renderAll();
+      };
+      for (const input of [zoneIdInput, zoneLabelInput, zoneKindSelect]) {
+        input?.addEventListener("input", updateZone, { signal });
+        input?.addEventListener("change", updateZone, { signal });
       }
       return;
     }
@@ -4028,13 +4243,13 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
       state.crossHoverSnap,
       state.crossDraft,
       state.drag?.kind === "building_region_draw" ? state.drag : null,
+      state.drag?.kind === "functional_zone_draw" ? state.drag : null,
     );
     updateStageVisibility();
   }
 
   function renderAll(): void {
     renderToolButtons();
-    renderSidebar();
     summaryGridEl.innerHTML = buildAnnotationSummaryMarkup(state.annotation);
     featureTableEl.innerHTML = buildFeatureTableMarkup(state.annotation);
     graphSummaryEl.innerHTML = buildGraphSummaryMarkup(state.graphResult);
@@ -4097,10 +4312,26 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
       setStatus(statusEl, "Centerline Tool: draw approach roads only. Use Branch Tool or Cross Tool to create intersections explicitly.", "neutral");
     } else if (tool === "building_region") {
       setStatus(statusEl, "Building Region Tool: drag on the canvas to draw a rotatable building-generation region.", "neutral");
+    } else if (tool === "functional_zone") {
+      setStatus(statusEl, "Functional Zone Tool: click to add polygon vertices, double-click or press Enter to finish.", "neutral");
     } else if (tool === "tree") {
       setStatus(statusEl, "Tree Tool: click near a road to place a tree on the nearest furnishing strip.", "neutral");
     } else if (tool === "lamp") {
       setStatus(statusEl, "Lamp Tool: click near a road to place a lamp on the nearest furnishing strip.", "neutral");
+    } else if (tool === "bench") {
+      setStatus(statusEl, "Bench Tool: click near a road to place a bench on the nearest furnishing strip.", "neutral");
+    } else if (tool === "trash") {
+      setStatus(statusEl, "Trash Tool: click near a road to place a trash bin on the nearest furnishing strip.", "neutral");
+    } else if (tool === "bus_stop") {
+      setStatus(statusEl, "Bus Stop Tool: click near a road to place a bus stop on the nearest furnishing strip.", "neutral");
+    } else if (tool === "bollard") {
+      setStatus(statusEl, "Bollard Tool: click near a road to place a bollard on the nearest furnishing strip.", "neutral");
+    } else if (tool === "mailbox") {
+      setStatus(statusEl, "Mailbox Tool: click near a road to place a mailbox on the nearest furnishing strip.", "neutral");
+    } else if (tool === "hydrant") {
+      setStatus(statusEl, "Hydrant Tool: click near a road to place a hydrant on the nearest furnishing strip.", "neutral");
+    } else if (tool === "sign") {
+      setStatus(statusEl, "Sign Tool: click near a road to place a sign on the nearest furnishing strip.", "neutral");
     }
     renderAll();
   }
@@ -4145,7 +4376,8 @@ function hitFromTarget(target: EventTarget | null): Selection {
       featureKind === "roundabout" ||
       featureKind === "control_point" ||
       featureKind === "derived_junction" ||
-      featureKind === "building_region"
+      featureKind === "building_region" ||
+      featureKind === "functional_zone"
     ) {
       return { kind: featureKind, id: featureId };
     }
@@ -4351,6 +4583,7 @@ function buildingRegionHandleFromTarget(
     state.annotation.roundabouts = [];
     state.annotation.control_points = [];
     state.annotation.building_regions = [];
+    state.annotation.functional_zones = [];
     state.selection = null;
     state.selectedStripId = null;
     state.draftCenterline = [];
@@ -4404,6 +4637,10 @@ function buildingRegionHandleFromTarget(
       state.annotation.building_regions = state.annotation.building_regions.filter((item) => item.id !== state.selection?.id);
       state.selection = null;
       setStatus(statusEl, "Deleted building region.", "success");
+    } else if (state.selection.kind === "functional_zone") {
+      state.annotation.functional_zones = state.annotation.functional_zones.filter((item) => item.id !== state.selection?.id);
+      state.selection = null;
+      setStatus(statusEl, "Deleted functional zone.", "success");
     } else if (state.selection.kind === "derived_junction") {
       setStatus(statusEl, "Derived junctions come from shared road vertices. Edit the connected centerlines instead.", "neutral");
     }
@@ -5058,15 +5295,6 @@ function buildingRegionHandleFromTarget(
     { signal },
   );
 
-  sidebarToggleButton.addEventListener(
-    "click",
-    () => {
-      state.isSidebarCollapsed = !state.isSidebarCollapsed;
-      renderAll();
-    },
-    { signal },
-  );
-
   planSelect.addEventListener(
     "change",
     async () => {
@@ -5277,6 +5505,37 @@ function buildingRegionHandleFromTarget(
   resetAnnotationButton.addEventListener("click", resetAnnotation, { signal });
 
   overlayHostEl.addEventListener(
+    "dblclick",
+    (event) => {
+      if (!state.currentImageUrl) {
+        return;
+      }
+      if (state.drag?.kind === "functional_zone_draw") {
+        event.preventDefault();
+        commitFunctionalZoneDraft();
+      }
+    },
+    { signal },
+  );
+
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (state.drag?.kind === "functional_zone_draw" && event.key === "Enter") {
+        event.preventDefault();
+        commitFunctionalZoneDraft();
+      }
+      if (state.drag?.kind === "functional_zone_draw" && event.key === "Escape") {
+        event.preventDefault();
+        state.drag = null;
+        renderAll();
+        setStatus(statusEl, "Cancelled functional zone drawing.", "neutral");
+      }
+    },
+    { signal },
+  );
+
+  overlayHostEl.addEventListener(
     "pointerdown",
     (event) => {
       if (!state.currentImageUrl) {
@@ -5430,12 +5689,61 @@ function buildingRegionHandleFromTarget(
         return;
       }
 
+      if (state.selectedTool === "functional_zone") {
+        state.selection = null;
+        state.selectedStripId = null;
+        clearFurniturePlacement();
+        if (state.drag?.kind === "functional_zone_draw" && state.drag.pointerId === event.pointerId) {
+          state.drag = {
+            ...state.drag,
+            points: [...state.drag.points, point],
+          };
+        } else {
+          state.drag = {
+            kind: "functional_zone_draw",
+            pointerId: event.pointerId,
+            points: [point],
+            currentPoint: point,
+          };
+        }
+        renderAll();
+        return;
+      }
+
       if (state.selectedTool === "tree") {
         placeFurnitureQuick(point, "tree");
         return;
       }
       if (state.selectedTool === "lamp") {
         placeFurnitureQuick(point, "lamp");
+        return;
+      }
+      if (state.selectedTool === "bench") {
+        placeFurnitureQuick(point, "bench");
+        return;
+      }
+      if (state.selectedTool === "trash") {
+        placeFurnitureQuick(point, "trash");
+        return;
+      }
+      if (state.selectedTool === "bus_stop") {
+        placeFurnitureQuick(point, "bus_stop");
+        return;
+      }
+      if (state.selectedTool === "bollard") {
+        placeFurnitureQuick(point, "bollard");
+        return;
+      }
+      if (state.selectedTool === "mailbox") {
+        placeFurnitureQuick(point, "mailbox");
+        return;
+      }
+      if (state.selectedTool === "hydrant") {
+        placeFurnitureQuick(point, "hydrant");
+        return;
+      }
+      if (state.selectedTool === "sign") {
+        placeFurnitureQuick(point, "sign");
         return;
       }
 
@@ -5515,6 +5823,13 @@ function buildingRegionHandleFromTarget(
         return;
       }
       if (drag.kind === "building_region_draw") {
+        if (point) {
+          drag.currentPoint = point;
+          renderAll();
+        }
+        return;
+      }
+      if (drag.kind === "functional_zone_draw") {
         if (point) {
           drag.currentPoint = point;
           renderAll();
@@ -5634,6 +5949,9 @@ function buildingRegionHandleFromTarget(
         return;
       }
       if (state.drag && state.drag.pointerId === event.pointerId) {
+        if (state.drag.kind === "functional_zone_draw") {
+          return;
+        }
         if (state.drag.kind === "building_region_translate") {
           setStatus(statusEl, "Moved building region.", "success");
         } else if (state.drag.kind === "building_region_resize") {

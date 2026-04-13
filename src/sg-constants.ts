@@ -1,4 +1,4 @@
-import type { CrossSectionMode, StripKind, StripDirection, FurnitureKind, MetaurbanAssetBadge, ReferencePlan } from "./sg-types";
+import type { CrossSectionMode, StripKind, StripDirection, FurnitureKind, FunctionalZoneKind, MetaurbanAssetBadge, ReferencePlan } from "./sg-types";
 
 export const API_BASE = (import.meta.env.VITE_ROADGEN_API_BASE as string | undefined) || "http://127.0.0.1:8010";
 export const ANNOTATION_SCHEMA_VERSION = "roadgen3d_reference_annotation_v2";
@@ -71,6 +71,8 @@ export const FURNITURE_KINDS: FurnitureKind[] = [
   "hydrant",
   "bus_stop",
   "tree",
+  "kiosk",
+  "sculpture",
 ];
 export const STRIP_DIRECTION_OPTIONS: StripDirection[] = ["forward", "reverse", "bidirectional", "none"];
 export const NOMINAL_STRIP_WIDTHS: Record<StripKind, number> = {
@@ -173,6 +175,28 @@ export const METAAURBAN_ASSET_GUIDE_LINES = [
   "To add them later, run `python metaurban/pull_asset.py --update`.",
   "Place assets under `metaurban/assets` and `metaurban/assets_pedestrian`.",
 ];
+export const FUNCTIONAL_ZONE_KINDS: FunctionalZoneKind[] = [
+  "plaza",
+  "garden",
+  "playground",
+  "amphitheater",
+  "outdoor_seating",
+  "parking",
+  "kiosk",
+  "sculpture",
+];
+
+export const FUNCTIONAL_ZONE_KIND_LABELS: Record<FunctionalZoneKind, string> = {
+  plaza: "Plaza",
+  garden: "Garden",
+  playground: "Playground",
+  amphitheater: "Amphitheater",
+  outdoor_seating: "Outdoor Seating",
+  parking: "Parking",
+  kiosk: "Kiosk",
+  sculpture: "Sculpture",
+};
+
 export const FURNITURE_KIND_LABELS: Record<FurnitureKind, string> = {
   bench: "Bench",
   lamp: "Lamp",
@@ -183,4 +207,6 @@ export const FURNITURE_KIND_LABELS: Record<FurnitureKind, string> = {
   hydrant: "Hydrant",
   bus_stop: "Bus Stop",
   tree: "Tree",
+  kiosk: "Kiosk",
+  sculpture: "Sculpture",
 };

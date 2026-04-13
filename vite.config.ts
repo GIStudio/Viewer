@@ -11,6 +11,7 @@ const ASSET_MANIFEST_PATH = path.resolve(repoRoot, "data", "real", "real_assets_
 const ASSET_MANIFESTS_DIR = path.resolve(repoRoot, "data", "real");
 const EXTRA_ASSET_MANIFEST_DIRS = [
   path.resolve(repoRoot, "data", "street_furniture"),
+  path.resolve(repoRoot, "assets", "building"),
 ];
 const IGNORED_DISCOVERY_DIRS = new Set([
   ".git",

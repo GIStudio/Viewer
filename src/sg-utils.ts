@@ -29,6 +29,7 @@ import {
   CROSS_SECTION_MODE_DETAILED,
   DEFAULT_FORWARD_DRIVE_LANE_COUNT,
   DEFAULT_REVERSE_DRIVE_LANE_COUNT,
+  FUNCTIONAL_ZONE_KINDS,
   FURNITURE_COMPATIBLE_STRIP_KINDS,
   FURNITURE_KINDS,
   NOMINAL_STRIP_WIDTHS,
@@ -78,6 +79,10 @@ export function isStripDirection(value: string): value is StripDirection {
 
 export function isFurnitureKind(value: string): value is FurnitureKind {
   return FURNITURE_KINDS.includes(value as FurnitureKind);
+}
+
+export function isFunctionalZoneKind(value: string): value is import("./sg-types").FunctionalZoneKind {
+  return FUNCTIONAL_ZONE_KINDS.includes(value as import("./sg-types").FunctionalZoneKind);
 }
 
 export function resolveDriveLaneDefaults(record: Record<string, unknown>): {

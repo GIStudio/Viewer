@@ -170,15 +170,18 @@ type HitDescriptor =
       instanceId: string;
       instanceInfo: InstanceInfo;
       assetDescription?: AssetDescription;
+      hitPoint?: THREE.Vector3;
     }
   | {
       kind: "static";
       nodeName: string;
       staticDescription: StaticObjectDescription;
+      hitPoint?: THREE.Vector3;
     }
   | {
       kind: "generic";
       nodeName: string;
+      hitPoint?: THREE.Vector3;
     };
 
 const LIGHTING_PRESETS: Record<string, LightingPresetValues> = {
@@ -422,6 +425,59 @@ function renderMetricsPanel(summary: Record<string, unknown>): string {
 const CATEGORY_COLORS: Record<string, number> = {
   bench: 0x4ade80, lamp: 0xfbbf24, trash: 0xf87171, tree: 0x22c55e,
   mailbox: 0x60a5fa, hydrant: 0xef4444, bollard: 0xa78bfa, bus_stop: 0xfb923c,
+};
+
+const SYSTEM_NODE_DESCRIPTIONS: Record<string, StaticObjectDescription> = {
+  carriageway_arm_: {
+    match: "prefix",
+    title: "Road Carriageway Arm",
+    category: "road",
+    intro: "Individual road arm carriageway surface (one per road segment).",
+    design_note: "Previously merged into a single unified mesh; now split for easier inspection.",
+  },
+  carriageway_: {
+    match: "prefix",
+    title: "Road Carriageway Surface",
+    category: "road",
+    intro: "Unified carriageway surface across connected road segments.",
+    design_note: "May span multiple road arms and junction cores.",
+  },
+  sidewalk_: {
+    match: "prefix",
+    title: "Sidewalk Surface",
+    category: "sidewalk",
+    intro: "Pedestrian sidewalk surface.",
+  },
+  curb_: {
+    match: "prefix",
+    title: "Curb Stone",
+    category: "landscape",
+    intro: "Edge curb separating carriageway from sidewalk.",
+  },
+  junction_carriageway_core_: {
+    match: "prefix",
+    title: "Junction Core Surface",
+    category: "road",
+    intro: "Central intersection junction core surface.",
+  },
+  junction_crosswalk_: {
+    match: "prefix",
+    title: "Crosswalk",
+    category: "crossing",
+    intro: "Pedestrian crossing markings at junction.",
+  },
+  road_slab: {
+    match: "exact",
+    title: "Road Surface",
+    category: "road",
+    intro: "Template-mode road surface slab.",
+  },
+  context_ground: {
+    match: "exact",
+    title: "Ground Context",
+    category: "scene_object",
+    intro: "Surrounding ground plane.",
+  },
 };
 
 function comparisonDiffArrow(a: number, b: number): string {
@@ -675,16 +731,96 @@ function composeInstanceInfoText(
   ].filter(Boolean).join("\n");
 }
 
-function composeStaticInfoHtml(nodeName: string, description: StaticObjectDescription): string {
+function pointInPolygonRing(x: number, z: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0];
+    const zi = ring[i][1];
+    const xj = ring[j][0];
+    const zj = ring[j][1];
+    const intersect = ((zi > z) !== (zj > z)) && (x < (xj - xi) * (z - zi) / (zj - zi + 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function findZoneForPoint(x: number, z: number, manifest: ViewerManifest): { zone: string; details: string } | null {
+  const osm = (manifest.summary ?? {}) as Record<string, unknown>;
+  const osmGeom = (osm.osm_geometry ?? {}) as Record<string, unknown>;
+  const cwRings = (osmGeom.carriageway_rings ?? []) as number[][][];
+  for (let i = 0; i < cwRings.length; i++) {
+    if (pointInPolygonRing(x, z, cwRings[i])) {
+      return { zone: `Carriageway ${i}`, details: "Inside carriageway surface polygon" };
+    }
+  }
+  const swRings = (osmGeom.sidewalk_rings ?? []) as number[][][];
+  for (let i = 0; i < swRings.length; i++) {
+    if (pointInPolygonRing(x, z, swRings[i])) {
+      return { zone: `Sidewalk ${i}`, details: "Inside sidewalk surface polygon" };
+    }
+  }
+  const junctions = (osmGeom.junction_geometries ?? []) as Array<Record<string, unknown>>;
+  for (let i = 0; i < junctions.length; i++) {
+    const coreRings = (junctions[i].carriageway_core_rings ?? []) as number[][][];
+    for (let r = 0; r < coreRings.length; r++) {
+      if (pointInPolygonRing(x, z, coreRings[r])) {
+        return { zone: `Junction Core ${i}`, details: `Kind: ${junctions[i].kind ?? "unknown"}` };
+      }
+    }
+  }
+  return null;
+}
+
+function buildRoadAnalysisHtml(hitPoint: THREE.Vector3, manifest: ViewerManifest): string {
+  const summary = (manifest.summary ?? {}) as Record<string, unknown>;
+  const osm = (summary.osm_geometry ?? {}) as Record<string, unknown>;
+  const rows: string[] = [];
+
+  const zone = findZoneForPoint(hitPoint.x, hitPoint.z, manifest);
+  if (zone) {
+    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Zone</span><span class="viewer-analysis-value">${escapeHtml(zone.zone)}</span></div>`);
+    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Details</span><span class="viewer-analysis-value">${escapeHtml(zone.details)}</span></div>`);
+  }
+
+  const cwWidth = Number(summary.carriageway_width_m ?? summary.road_width_m ?? 0);
+  if (cwWidth > 0) {
+    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Carriageway Width</span><span class="viewer-analysis-value">${cwWidth.toFixed(2)} m</span></div>`);
+  }
+  const rowWidth = Number(summary.row_width_m ?? 0);
+  if (rowWidth > 0) {
+    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Total Row Width</span><span class="viewer-analysis-value">${rowWidth.toFixed(2)} m</span></div>`);
+  }
+  const lengthM = Number(summary.length_m ?? 0);
+  if (lengthM > 0) {
+    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Segment Length</span><span class="viewer-analysis-value">${lengthM.toFixed(1)} m</span></div>`);
+  }
+
+  const jCount = (osm.junction_geometries as unknown[] | undefined)?.length ?? 0;
+  if (jCount > 0) {
+    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Junctions</span><span class="viewer-analysis-value">${jCount}</span></div>`);
+  }
+
+  if (rows.length === 0) return "";
+  return `<div class="viewer-card-section viewer-analysis-section"><div class="viewer-analysis-title">Road Analysis</div>${rows.join("")}</div>`;
+}
+
+function composeStaticInfoHtml(
+  nodeName: string,
+  description: StaticObjectDescription,
+  hitPoint?: THREE.Vector3,
+  manifest?: ViewerManifest,
+): string {
   const subtitle = [
     `类别：${categoryLabel(description.category)}`,
     description.source ? `来源：${prettifySource(description.source)}` : "来源：系统构件",
   ].join(" · ");
+  const analysis = hitPoint && manifest ? buildRoadAnalysisHtml(hitPoint, manifest) : "";
   return `
     <div class="viewer-card-title">${escapeHtml(description.title)}</div>
     <div class="viewer-card-subtitle">${escapeHtml(subtitle)}</div>
     <div class="viewer-card-section">${escapeHtml(description.intro || "这是场景中的基础构件。")}</div>
     <div class="viewer-card-section viewer-card-highlight">${escapeHtml(description.design_note || "用于支撑街道空间组织与交通可读性。")}</div>
+    ${analysis}
     <dl class="viewer-card-metrics">
       <div><dt>node</dt><dd>${escapeHtml(nodeName)}</dd></div>
     </dl>
@@ -725,7 +861,10 @@ function composeGenericInfoText(nodeName: string): string {
   ].join("\n");
 }
 
-function buildHitDescriptorContent(descriptor: HitDescriptor): { html: string; text: string } {
+function buildHitDescriptorContent(
+  descriptor: HitDescriptor,
+  manifest?: ViewerManifest,
+): { html: string; text: string } {
   if (descriptor.kind === "instance") {
     return {
       html: composeInstanceInfoHtml(
@@ -742,7 +881,7 @@ function buildHitDescriptorContent(descriptor: HitDescriptor): { html: string; t
   }
   if (descriptor.kind === "static") {
     return {
-      html: composeStaticInfoHtml(descriptor.nodeName, descriptor.staticDescription),
+      html: composeStaticInfoHtml(descriptor.nodeName, descriptor.staticDescription, descriptor.hitPoint, manifest),
       text: composeStaticInfoText(descriptor.nodeName, descriptor.staticDescription),
     };
   }
@@ -861,52 +1000,30 @@ function mountViewer(root: HTMLElement): Promise<() => void> {
 async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   root.innerHTML = `
     <div class="viewer-shell">
-      <div class="scene-page-topbar">
-        <div>
-          <div class="scene-page-kicker">Viewer / 3D Viewer</div>
-          <h1 class="scene-page-title">3D Road Viewer</h1>
-          <p class="scene-page-subtitle">Navigate through road scenes with WASD movement, inspect assets, and explore detailed urban environments.</p>
-          <div class="viewer-controls-group">
-            <div class="viewer-controls">
-              <label class="viewer-label" for="layout-select">Recent Result</label>
-              <select id="layout-select" class="viewer-select"></select>
-            </div>
-            <div class="viewer-controls">
-              <label class="viewer-label" for="scene-select">Scene</label>
-              <select id="scene-select" class="viewer-select"></select>
-            </div>
+      <div class="scene-page-topbar viewer-header-compact">
+        <div class="viewer-header-left">
+          <button id="viewer-menu-toggle" class="viewer-hamburger" type="button" aria-label="Menu" aria-expanded="false">☰</button>
+          <div class="viewer-header-brand">
+            <div class="scene-page-kicker viewer-header-kicker">Viewer</div>
+            <h1 class="scene-page-title viewer-header-title">3D Road Viewer</h1>
           </div>
         </div>
-        <div class="scene-page-actions">
-          <div class="viewer-help">
-            Click to capture mouse · WASD move · Shift sprint · Esc unlock · R reset · P panel · Ctrl/Cmd+C copy target
+        <div class="viewer-header-controls">
+          <select id="layout-select" class="viewer-select viewer-select-inline" title="Recent Result"></select>
+          <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene"></select>
+        </div>
+        <div class="viewer-header-actions">
+          <button id="viewer-settings-toggle" class="viewer-settings-toggle" type="button" aria-expanded="false">Settings</button>
+        </div>
+        <div id="viewer-menu-dropdown" class="viewer-menu-dropdown" hidden>
+          <div class="viewer-menu-help">Click to capture mouse · WASD move · Shift sprint · Esc unlock · R reset · P panel · Ctrl/Cmd+C copy target</div>
+          <div class="viewer-menu-buttons">
+            <button id="viewer-scene-graph-link" class="viewer-nav-button viewer-menu-button" type="button">Annotation</button>
+            <button id="viewer-asset-editor-link" class="viewer-nav-button viewer-menu-button" type="button">Asset Editor</button>
+            <button id="viewer-presets-toggle" class="viewer-nav-button viewer-menu-button" type="button">Presets</button>
+            <button id="viewer-compare-toggle" class="viewer-nav-button viewer-menu-button" type="button">Compare</button>
+            <button id="viewer-evaluate-toggle" class="viewer-nav-button viewer-menu-button" type="button">Evaluate</button>
           </div>
-          <button
-            id="viewer-scene-graph-link"
-            class="viewer-nav-button"
-            type="button"
-          >
-            Annotation
-          </button>
-          <button
-            id="viewer-asset-editor-link"
-            class="viewer-nav-button"
-            type="button"
-          >
-            Asset Editor
-          </button>
-          <button id="viewer-presets-toggle" class="viewer-nav-button" type="button">
-            Presets
-          </button>
-          <button id="viewer-compare-toggle" class="viewer-nav-button" type="button">
-            Compare
-          </button>
-          <button id="viewer-evaluate-toggle" class="viewer-nav-button" type="button">
-            Evaluate
-          </button>
-          <button id="viewer-settings-toggle" class="viewer-settings-toggle" type="button" aria-expanded="false">
-            Settings
-          </button>
         </div>
       </div>
       <div id="viewer-canvas" class="viewer-canvas"></div>
@@ -1064,6 +1181,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const selectEl = requireElement<HTMLSelectElement>(root, "#scene-select");
   const sceneGraphLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-scene-graph-link");
   const assetEditorLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-asset-editor-link");
+  const menuToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-menu-toggle");
+  const menuDropdownEl = requireElement<HTMLElement>(root, "#viewer-menu-dropdown");
   const settingsToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-settings-toggle");
   const settingsPanelEl = requireElement<HTMLElement>(root, "#viewer-settings-panel");
   const settingsCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-settings-close");
@@ -1886,10 +2005,19 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         return description;
       }
     }
+    // Fallback to system node descriptions
+    for (const [prefix, description] of Object.entries(SYSTEM_NODE_DESCRIPTIONS)) {
+      if (description.match === "exact" && nodeName === prefix) {
+        return description;
+      }
+      if (description.match === "prefix" && nodeName.startsWith(prefix)) {
+        return description;
+      }
+    }
     return null;
   }
 
-  function resolveHitDescriptor(object: THREE.Object3D): HitDescriptor | null {
+  function resolveHitDescriptor(object: THREE.Object3D, hitPoint?: THREE.Vector3): HitDescriptor | null {
     let cursor: THREE.Object3D | null = object;
     const names: string[] = [];
     while (cursor) {
@@ -1912,9 +2040,10 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           instanceId,
           instanceInfo,
           assetDescription: currentManifest?.asset_descriptions?.[instanceInfo.asset_id],
+          hitPoint,
         };
       }
-      return { kind: "generic", nodeName };
+      return { kind: "generic", nodeName, hitPoint };
     }
 
     for (const nodeName of names) {
@@ -1924,6 +2053,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           kind: "static",
           nodeName,
           staticDescription: description,
+          hitPoint,
         };
       }
     }
@@ -1970,12 +2100,12 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     laserHitDot.visible = true;
     laserHitDot.position.copy(hit.point);
 
-    const descriptor = resolveHitDescriptor(hit.object);
+    const descriptor = resolveHitDescriptor(hit.object, hit.point.clone());
     if (!descriptor) {
       clearInfoCard();
       return;
     }
-    const content = buildHitDescriptorContent(descriptor);
+    const content = buildHitDescriptorContent(descriptor, currentManifest ?? undefined);
     currentLaserCopyText = content.text;
     setInfoCardContent(content.html);
   }
@@ -2442,6 +2572,19 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     },
     { signal },
   );
+
+  menuToggleEl.addEventListener("click", () => {
+    const willOpen = menuDropdownEl.hidden;
+    menuDropdownEl.hidden = !willOpen;
+    menuToggleEl.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  }, { signal });
+
+  document.addEventListener("click", (event) => {
+    if (!menuDropdownEl.hidden && !menuToggleEl.contains(event.target as Node) && !menuDropdownEl.contains(event.target as Node)) {
+      menuDropdownEl.hidden = true;
+      menuToggleEl.setAttribute("aria-expanded", "false");
+    }
+  }, { signal });
 
   settingsToggleEl.addEventListener("click", () => {
     if (settingsOpen) {

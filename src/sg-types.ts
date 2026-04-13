@@ -26,7 +26,19 @@ export type FurnitureKind =
   | "sign"
   | "hydrant"
   | "bus_stop"
-  | "tree";
+  | "tree"
+  | "kiosk"
+  | "sculpture";
+
+export type FunctionalZoneKind =
+  | "plaza"
+  | "garden"
+  | "playground"
+  | "amphitheater"
+  | "outdoor_seating"
+  | "parking"
+  | "kiosk"
+  | "sculpture";
 
 export type AnnotatedCrossSectionStrip = {
   strip_id: string;
@@ -114,6 +126,13 @@ export type AnnotatedBuildingRegion = {
   yaw_deg: number;
 };
 
+export type AnnotatedFunctionalZone = {
+  id: string;
+  label: string;
+  kind: FunctionalZoneKind;
+  points: AnnotationPoint[];
+};
+
 export type ReferenceAnnotation = {
   version: string;
   plan_id: string;
@@ -126,6 +145,7 @@ export type ReferenceAnnotation = {
   roundabouts: AnnotatedRoundabout[];
   control_points: AnnotatedMarker[];
   building_regions: AnnotatedBuildingRegion[];
+  functional_zones: AnnotatedFunctionalZone[];
 };
 
 export type ReferencePlan = {
@@ -325,7 +345,7 @@ export type MetaurbanAssetBadge = {
   shortLabel: string;
 };
 
-export type Tool = "select" | "adjust" | "centerline" | "branch" | "cross" | "roundabout" | "control_point" | "building_region" | "tree" | "lamp";
+export type Tool = "select" | "adjust" | "centerline" | "branch" | "cross" | "roundabout" | "control_point" | "building_region" | "functional_zone" | "tree" | "lamp" | "bench" | "trash" | "bus_stop" | "bollard" | "mailbox" | "hydrant" | "sign";
 
 export type Selection =
   | {
@@ -338,7 +358,7 @@ export type Selection =
       id: string;
     }
   | {
-      kind: "junction" | "roundabout" | "control_point" | "derived_junction" | "building_region";
+      kind: "junction" | "roundabout" | "control_point" | "derived_junction" | "building_region" | "functional_zone";
       id: string;
     }
   | null;
@@ -385,6 +405,12 @@ export type DragState =
       kind: "building_region_draw";
       pointerId: number;
       startPoint: AnnotationPoint;
+      currentPoint: AnnotationPoint;
+    }
+  | {
+      kind: "functional_zone_draw";
+      pointerId: number;
+      points: AnnotationPoint[];
       currentPoint: AnnotationPoint;
     }
   | null;

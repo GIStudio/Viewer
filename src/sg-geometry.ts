@@ -3,6 +3,7 @@ import type {
   AnnotatedCenterline,
   AnnotatedCrossSectionStrip,
   AnnotatedBuildingRegion,
+  AnnotatedFunctionalZone,
   AnnotatedJunction,
   BuildingRegionResizeHandle,
   BranchSnapTarget,
@@ -237,6 +238,34 @@ export function buildBuildingRegionFromDraft(
     height_px: Math.max(maxY - minY, BUILDING_REGION_MIN_SIZE_PX),
     yaw_deg: 0,
   };
+}
+
+export function functionalZonePolygonPoints(zone: AnnotatedFunctionalZone): AnnotationPoint[] {
+  return zone.points.length >= 3 ? zone.points : [];
+}
+
+export function functionalZoneCentroid(zone: AnnotatedFunctionalZone): AnnotationPoint {
+  const points = zone.points;
+  if (points.length === 0) {
+    return { x: 0, y: 0 };
+  }
+  const sumX = points.reduce((sum, p) => sum + p.x, 0);
+  const sumY = points.reduce((sum, p) => sum + p.y, 0);
+  return { x: sumX / points.length, y: sumY / points.length };
+}
+
+export function functionalZoneAreaPx2(zone: AnnotatedFunctionalZone): number {
+  const points = zone.points;
+  if (points.length < 3) {
+    return 0;
+  }
+  let area = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const j = (i + 1) % points.length;
+    area += points[i].x * points[j].y;
+    area -= points[j].x * points[i].y;
+  }
+  return Math.abs(area) * 0.5;
 }
 
 export function centerlineSideStripLayouts(centerline: AnnotatedCenterline): SideStripLayouts {
