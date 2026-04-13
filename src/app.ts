@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { AudioManager } from "./audio-manager";
 
 type SceneOption = {
   key: string;
@@ -85,6 +86,20 @@ type SummaryMetrics = {
   [key: string]: unknown;
 };
 
+type AudioProfile = {
+  ambient: {
+    traffic: number;
+    nature: number;
+    urban: number;
+    transit: number;
+  };
+  point_sources: Array<{
+    type: string;
+    position: [number, number, number];
+    radius_m: number;
+  }>;
+};
+
 type ViewerManifest = {
   layout_path: string;
   summary?: SummaryMetrics | null;
@@ -105,6 +120,7 @@ type ViewerManifest = {
   asset_descriptions?: Record<string, AssetDescription>;
   static_object_descriptions?: Record<string, StaticObjectDescription>;
   layout_overlay?: LayoutOverlayData | null;
+  audio_profile?: AudioProfile | null;
 };
 
 type MovementState = {
@@ -1606,6 +1622,12 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
             <input id="layout-overlay-enabled" type="checkbox" />
           </label>
         </div>
+        <div class="viewer-settings-section">
+          <label class="viewer-toggle-row" for="audio-enabled">
+            <span>Ambient Audio</span>
+            <input id="audio-enabled" type="checkbox" />
+          </label>
+        </div>
       </aside>
       <div id="viewer-status" class="viewer-status">Loading viewer…</div>
       <div id="viewer-overlay" class="viewer-overlay">Click scene to capture mouse</div>
@@ -1716,11 +1738,34 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const graphOverlayToggleEl = requireElement<HTMLInputElement>(root, "#graph-overlay-enabled");
 
   const layoutOverlayToggleEl = requireElement<HTMLInputElement>(root, "#layout-overlay-enabled");
+  const audioToggleEl = requireElement<HTMLInputElement>(root, "#audio-enabled");
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#f7f6f3");
 
   const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 2000);
+  const audioManager = new AudioManager(camera, scene);
+
+  function applyAudioProfile(): void {
+    const profile = currentManifest?.audio_profile;
+    if (profile) {
+      audioManager.applyProfile(profile);
+      if (audioToggleEl.checked) {
+        audioManager.play();
+      }
+    } else {
+      audioManager.stop();
+    }
+  }
+
+  audioToggleEl.addEventListener("change", () => {
+    if (audioToggleEl.checked) {
+      audioManager.play();
+    } else {
+      audioManager.stop();
+    }
+  });
+
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -2057,6 +2102,9 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     bike_lane: 0x39875a,
     parking_lane: 0xa68256,
     median: 0x6e7a5f,
+    grass_belt: 0x8cb369,
+    shared_street_surface: 0xc9b896,
+    colored_pavement: 0xe8dcc8,
     nearroad_buffer: 0x989898,
     furnishing: 0x7e6547,
     clear_paths: 0xebe0ce,
@@ -2631,7 +2679,9 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         }
       }
     });
-    
+
+    applyAudioProfile();
+
     clearInfoCard();
     currentLaserHitPoint = null;
     laserHitDot.visible = false;
@@ -2784,6 +2834,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       layoutOverlayToggleEl.checked = false;
       clearLayoutOverlay();
     }
+    applyAudioProfile();
   }
 
   /* ── Evaluate ────────────────────────────────────────────── */

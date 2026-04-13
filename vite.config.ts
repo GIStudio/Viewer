@@ -613,6 +613,8 @@ function viewerApiPlugin(): Plugin {
             const layoutConfig = (layoutPayload.config ?? {}) as JsonRecord;
             const overlayLengthM = asNumber(layoutConfig.length_m, 0);
 
+            const audioProfile = (summary?.audio_profile ?? null) as JsonRecord | null;
+
             jsonResponse(res, 200, {
               layout_path: layoutPath,
               summary,
@@ -633,6 +635,7 @@ function viewerApiPlugin(): Plugin {
                 building_footprints: buildingFootprints,
                 length_m: overlayLengthM,
               },
+              audio_profile: audioProfile,
             });
             return;
           } catch (error) {
