@@ -819,6 +819,66 @@ function exportTopDownSvg(scene: THREE.Scene, root: THREE.Object3D | null): void
   const toSvgY = (sceneZ: number) => (viewSize / 2 - (sceneZ - center.z)) * pixelsPerUnit;
   const toSvgSize = (s: number) => s * pixelsPerUnit;
 
+  // Collect junction and crosswalk geometry from scene meshes
+  interface JunctionMesh {
+    points: [number, number][];
+    isCrosswalk: boolean;
+  }
+  const junctionMeshes: JunctionMesh[] = [];
+
+  // Traverse scene to find junction and crosswalk meshes
+  root.traverse((child: THREE.Object3D) => {
+    if (!(child instanceof THREE.Mesh) || !child.geometry) return;
+
+    // Get mesh bounding box
+    const meshBbox = new THREE.Box3().setFromObject(child);
+    const meshCenter = new THREE.Vector3();
+    meshBbox.getCenter(meshCenter);
+    const meshSize = new THREE.Vector3();
+    meshBbox.getSize(meshSize);
+
+    // Check if mesh is at ground level (y near 0)
+    if (Math.abs(meshCenter.y) > 2) return;
+
+    // Get mesh name to determine type
+    const name = child.name?.toLowerCase() || "";
+    const isCrosswalk = name.includes("crosswalk") || name.includes("zebra") || name.includes("crossing");
+
+    // Check if this is a junction mesh (large flat mesh at ground)
+    if (meshSize.y < 0.5 && (meshSize.x > 5 || meshSize.z > 5)) {
+      // Extract polygon from geometry
+      const geometry = child.geometry;
+      const positionAttr = geometry.getAttribute("position");
+      if (!positionAttr) return;
+
+      const positions: [number, number][] = [];
+      const indexAttr = geometry.getIndex();
+      if (indexAttr) {
+        // Indexed geometry - extract unique vertices
+        const uniqueVertices = new Map<string, [number, number]>();
+        for (let i = 0; i < indexAttr.count; i++) {
+          const idx = indexAttr.getX(i);
+          const x = positionAttr.getX(idx);
+          const z = positionAttr.getZ(idx);
+          const key = `${x.toFixed(2)},${z.toFixed(2)}`;
+          if (!uniqueVertices.has(key)) {
+            uniqueVertices.set(key, [x, z]);
+          }
+        }
+        positions.push(...uniqueVertices.values());
+      } else {
+        // Non-indexed geometry
+        for (let i = 0; i < positionAttr.count; i++) {
+          positions.push([positionAttr.getX(i), positionAttr.getZ(i)]);
+        }
+      }
+
+      if (positions.length >= 3) {
+        junctionMeshes.push({ points: positions, isCrosswalk });
+      }
+    }
+  });
+
   // Build SVG
   let svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
@@ -841,6 +901,7 @@ function exportTopDownSvg(scene: THREE.Scene, root: THREE.Object3D | null): void
       .lamp { fill: #f0d040; stroke: #b0a020; stroke-width: 0.5; }
       .bench { fill: #8a6040; stroke: #5a4030; stroke-width: 0.5; }
       .crosswalk { fill: url(#zebraPattern); }
+      .junction { fill: ${EXPORT_COLORS.drive_lane}; stroke: #333; stroke-width: 1; opacity: 0.9; }
       .legend-bg { fill: rgba(255,255,255,0.95); stroke: #ccc; stroke-width: 1; }
       .legend-title { font: bold 16px sans-serif; fill: #1a1a1a; }
       .legend-item { font: 12px sans-serif; fill: #333; }
@@ -887,6 +948,17 @@ function exportTopDownSvg(scene: THREE.Scene, root: THREE.Object3D | null): void
     const cssClass = bandKindToClass[band.kind] || "road";
     const bandWidth = x2 - x1;
     svg += `\n  <rect x="${x1}" y="${y - h/2}" width="${bandWidth}" height="${h}" class="${cssClass}"/>`;
+  }
+
+  // 1.5. Draw junction/crosswalk meshes from scene
+  for (const jm of junctionMeshes) {
+    if (jm.points.length < 3) continue;
+    const points = jm.points.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+    if (jm.isCrosswalk) {
+      svg += `\n  <polygon points="${points}" class="crosswalk" opacity="0.9"/>`;
+    } else {
+      svg += `\n  <polygon points="${points}" class="junction"/>`;
+    }
   }
 
   // 2. Draw building footprints
