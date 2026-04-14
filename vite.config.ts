@@ -636,6 +636,7 @@ function viewerApiPlugin(): Plugin {
                 length_m: overlayLengthM,
               },
               audio_profile: audioProfile,
+              lighting_preset: String(outputs.lighting_preset ?? "bright_day"),
             });
             return;
           } catch (error) {
@@ -971,6 +972,71 @@ function viewerApiPlugin(): Plugin {
           fs.writeFileSync(manifestPath, newLines.join("\n"), "utf-8");
           cachedAssetDescriptionIndex = null;
           jsonResponse(res, 200, { ok: true });
+          return;
+        }
+
+        const isScenesDiffImageRoute =
+          requestUrl.pathname === "/api/scenes/diff/image" ||
+          requestUrl.pathname === "/web-viewer/api/scenes/diff/image";
+        if (isScenesDiffImageRoute) {
+          const layoutA = requestUrl.searchParams.get("layout_a") ?? "";
+          const layoutB = requestUrl.searchParams.get("layout_b") ?? "";
+          const mode = requestUrl.searchParams.get("mode") ?? "overlay";
+          const layoutAPath = resolveAllowedPath(layoutA);
+          const layoutBPath = resolveAllowedPath(layoutB);
+          if (!layoutAPath || !layoutBPath) {
+            jsonResponse(res, 403, { error: "Layout paths must stay inside allowed roots." });
+            return;
+          }
+          if (!fs.existsSync(layoutAPath) || !fs.existsSync(layoutBPath)) {
+            jsonResponse(res, 404, { error: "One or both layout files not found." });
+            return;
+          }
+          if (mode !== "overlay" && mode !== "delta") {
+            jsonResponse(res, 400, { error: "Invalid mode. Use overlay or delta." });
+            return;
+          }
+
+          const crypto = await import("node:crypto");
+          const hash = crypto
+            .createHash("sha256")
+            .update(`${layoutAPath}|${layoutBPath}|${mode}`)
+            .digest("hex")
+            .slice(0, 16);
+          const cacheDir = path.resolve(repoRoot, "artifacts", "diff_images");
+          fs.mkdirSync(cacheDir, { recursive: true });
+          const cachePath = path.resolve(cacheDir, `${hash}_${mode}.png`);
+
+          if (fs.existsSync(cachePath)) {
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "image/png");
+            const stats = fs.statSync(cachePath);
+            res.setHeader("Content-Length", String(stats.size));
+            res.setHeader("Cache-Control", "public, max-age=3600");
+            fs.createReadStream(cachePath).pipe(res);
+            return;
+          }
+
+          const pythonBin = process.env.ROADGEN_PYTHON_BIN || "python3";
+          const scriptPath = path.resolve(repoRoot, "scripts", "render_diff_image.py");
+          const { spawnSync } = await import("node:child_process");
+          const result = spawnSync(
+            pythonBin,
+            [scriptPath, "--mode", mode, "--layout-a", layoutAPath, "--layout-b", layoutBPath, "--out", cachePath],
+            { encoding: "utf-8", timeout: 120000 },
+          );
+
+          if (result.status !== 0 || !fs.existsSync(cachePath)) {
+            jsonResponse(res, 500, { error: "Diff rendering failed.", stderr: result.stderr });
+            return;
+          }
+
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "image/png");
+          const stats = fs.statSync(cachePath);
+          res.setHeader("Content-Length", String(stats.size));
+          res.setHeader("Cache-Control", "public, max-age=3600");
+          fs.createReadStream(cachePath).pipe(res);
           return;
         }
 

@@ -121,6 +121,7 @@ type ViewerManifest = {
   static_object_descriptions?: Record<string, StaticObjectDescription>;
   layout_overlay?: LayoutOverlayData | null;
   audio_profile?: AudioProfile | null;
+  lighting_preset?: string;
 };
 
 type MovementState = {
@@ -1530,6 +1531,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         </div>
       </div>
       <div id="viewer-canvas" class="viewer-canvas"></div>
+      <button id="viewer-exit-compare3d" class="viewer-exit-compare3d" type="button" hidden>Exit Split View</button>
       <div id="viewer-crosshair" class="viewer-crosshair" hidden></div>
       <div id="viewer-info-card" class="viewer-info-card" hidden></div>
       <div id="viewer-minimap" class="viewer-minimap">
@@ -1727,6 +1729,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const compareSelectAEl = requireElement<HTMLSelectElement>(root, "#compare-layout-a");
   const compareSelectBEl = requireElement<HTMLSelectElement>(root, "#compare-layout-b");
   const compareResultsEl = requireElement<HTMLElement>(root, "#viewer-compare-results");
+  const exitCompare3dEl = requireElement<HTMLButtonElement>(root, "#viewer-exit-compare3d");
 
   const exportTopdownMapEl = requireElement<HTMLButtonElement>(root, "#viewer-export-topdown-map");
   const exportTopdownSvgEl = requireElement<HTMLButtonElement>(root, "#viewer-export-topdown-svg");
@@ -1774,6 +1777,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setSize(canvasHost.clientWidth, canvasHost.clientHeight);
   canvasHost.appendChild(renderer.domElement);
+
+  const canvasResizeObserver = new ResizeObserver(() => {
+    resizeRenderer();
+  });
+  canvasResizeObserver.observe(canvasHost);
 
   const minimapRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   minimapRenderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1855,6 +1863,12 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   let currentSceneBounds: MinimapBounds | null = null;
   let currentLaserHitPoint: THREE.Vector3 | null = null;
   let currentLaserCopyText = "";
+  let compare3dActive = false;
+  let compareRootA: THREE.Object3D | null = null;
+  let compareRootB: THREE.Object3D | null = null;
+  const compareCameraA = camera.clone();
+  const compareCameraB = camera.clone();
+  let flyAnimation: { startPos: THREE.Vector3; targetPos: THREE.Vector3; startTime: number; duration: number } | null = null;
   let settingsOpen = false;
   let resumeRoamAfterSettingsClose = false;
   let statusResetHandle: number | null = null;
@@ -1957,6 +1971,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     setSettingsOpen(true);
   }
 
+  function updateCanvasSlideOpenState(): void {
+    const anyOpen = evaluateOpen || compareOpen || presetsOpen;
+    canvasHost.dataset.slideOpen = anyOpen ? "true" : "false";
+  }
+
   function closeAllSlidePanels(): void {
     if (settingsOpen) setSettingsOpen(false);
     if (evaluateOpen) {
@@ -1979,12 +1998,14 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       layoutOverlayToggleEl.checked = false;
       clearLayoutOverlay();
     }
+    updateCanvasSlideOpenState();
   }
 
   function setEvaluateOpen(nextOpen: boolean): void {
     if (nextOpen) closeAllSlidePanels();
     evaluateOpen = nextOpen;
     evaluatePanelEl.dataset.open = nextOpen ? "true" : "false";
+    updateCanvasSlideOpenState();
   }
 
   function setCompareOpen(nextOpen: boolean): void {
@@ -1994,6 +2015,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
     compareOpen = nextOpen;
     comparePanelEl.dataset.open = nextOpen ? "true" : "false";
+    updateCanvasSlideOpenState();
   }
 
   function setPresetsOpen(nextOpen: boolean): void {
@@ -2003,6 +2025,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
     presetsOpen = nextOpen;
     presetsPanelEl.dataset.open = nextOpen ? "true" : "false";
+    updateCanvasSlideOpenState();
   }
 
   /* ── Graph Overlay ──────────────────────────────────────────── */
@@ -2754,8 +2777,49 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     currentForward = spawn.forward;
     updateMinimapCamera(sceneBoundsFromManifest(bbox, currentManifest), bbox);
     resetView();
-    applyLightingState();
+    const presetKey = currentManifest?.lighting_preset;
+    if (presetKey && LIGHTING_PRESETS[presetKey]) {
+      lightingState.preset = presetKey;
+      Object.assign(lightingState, LIGHTING_PRESETS[presetKey]);
+    }
+    syncLightingUi();
     setStatus(`Viewing ${option.label}`);
+  }
+
+  async function loadCompareScene(glbUrl: string, side: "a" | "b"): Promise<void> {
+    return new Promise((resolve, reject) => {
+      loader.load(
+        glbUrl,
+        (gltf) => {
+          const root = gltf.scene;
+          root.traverse((child) => {
+            const mesh = child as THREE.Mesh;
+            if (mesh.isMesh) {
+              mesh.castShadow = true;
+              mesh.receiveShadow = true;
+            }
+          });
+          if (side === "a") {
+            if (compareRootA) {
+              scene.remove(compareRootA);
+              disposeObject(compareRootA);
+            }
+            compareRootA = root;
+          } else {
+            if (compareRootB) {
+              scene.remove(compareRootB);
+              disposeObject(compareRootB);
+            }
+            compareRootB = root;
+          }
+          root.visible = false;
+          scene.add(root);
+          resolve();
+        },
+        undefined,
+        (err) => reject(err),
+      );
+    });
   }
 
   function populateRecentLayoutOptions(layouts: RecentLayout[], selectedPath: string): void {
@@ -2902,6 +2966,183 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
 
   /* ── Compare ────────────────────────────────────────────── */
 
+  function isNumeric(value: unknown): boolean {
+    return typeof value === "number" && Number.isFinite(value);
+  }
+
+  function computeConfigDiff(
+    oldConfig: Record<string, unknown>,
+    newConfig: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const diff: Record<string, unknown> = { added: {}, removed: {}, changed: {} };
+    const allKeys = new Set([...Object.keys(oldConfig), ...Object.keys(newConfig)]);
+    for (const key of Array.from(allKeys).sort()) {
+      const inOld = key in oldConfig;
+      const inNew = key in newConfig;
+      if (inOld && !inNew) {
+        (diff.removed as Record<string, unknown>)[key] = oldConfig[key];
+      } else if (inNew && !inOld) {
+        (diff.added as Record<string, unknown>)[key] = newConfig[key];
+      } else if (oldConfig[key] !== newConfig[key]) {
+        (diff.changed as Record<string, unknown>)[key] = { old: oldConfig[key], new: newConfig[key] };
+      }
+    }
+    return diff;
+  }
+
+  function computeMetricsDiff(
+    oldSummary: Record<string, unknown>,
+    newSummary: Record<string, unknown>,
+  ): Array<Record<string, unknown>> {
+    const allKeys = new Set([...Object.keys(oldSummary), ...Object.keys(newSummary)]);
+    const results: Array<Record<string, unknown>> = [];
+    for (const key of Array.from(allKeys).sort()) {
+      const oldVal = oldSummary[key];
+      const newVal = newSummary[key];
+      const oldNum = isNumeric(oldVal) ? Number(oldVal) : null;
+      const newNum = isNumeric(newVal) ? Number(newVal) : null;
+      if (oldNum === null && newNum === null) continue;
+      const oldF = oldNum ?? 0;
+      const newF = newNum ?? 0;
+      const delta = newF - oldF;
+      let deltaPct = 0;
+      if (oldF !== 0) {
+        deltaPct = delta / oldF;
+      } else if (newF !== 0) {
+        deltaPct = delta > 0 ? Infinity : -Infinity;
+      }
+      results.push({
+        key,
+        old: oldNum,
+        new: newNum,
+        delta: Math.round(delta * 1e6) / 1e6,
+        deltaPct: Number.isFinite(deltaPct) ? Math.round(deltaPct * 1e6) / 1e6 : null,
+      });
+    }
+    return results;
+  }
+
+  function positionXz(placement: Record<string, unknown>): [number, number] {
+    const pos = Array.isArray(placement.position_xyz) ? placement.position_xyz : [];
+    return [typeof pos[0] === "number" ? pos[0] : 0, typeof pos[2] === "number" ? pos[2] : 0];
+  }
+
+  function matchPlacementsGreedy(
+    aPlacements: Array<Record<string, unknown>>,
+    bPlacements: Array<Record<string, unknown>>,
+  ): { matched: Array<[number, number]>; aUnmatched: number[]; bUnmatched: number[] } {
+    if (!aPlacements.length || !bPlacements.length) {
+      return {
+        matched: [],
+        aUnmatched: aPlacements.map((_, i) => i),
+        bUnmatched: bPlacements.map((_, i) => i),
+      };
+    }
+    const aPos = aPlacements.map(positionXz);
+    const bPos = bPlacements.map(positionXz);
+    const pairs: Array<[number, number, number]> = [];
+    for (let i = 0; i < aPos.length; i++) {
+      for (let j = 0; j < bPos.length; j++) {
+        const dist = Math.hypot(aPos[i][0] - bPos[j][0], aPos[i][1] - bPos[j][1]);
+        pairs.push([dist, i, j]);
+      }
+    }
+    pairs.sort((a, b) => a[0] - b[0]);
+    const matched: Array<[number, number]> = [];
+    const aMatched = new Set<number>();
+    const bMatched = new Set<number>();
+    for (const [, i, j] of pairs) {
+      if (aMatched.has(i) || bMatched.has(j)) continue;
+      matched.push([i, j]);
+      aMatched.add(i);
+      bMatched.add(j);
+    }
+    const aUnmatched = aPlacements.map((_, i) => i).filter(i => !aMatched.has(i));
+    const bUnmatched = bPlacements.map((_, i) => i).filter(i => !bMatched.has(i));
+    return { matched, aUnmatched, bUnmatched };
+  }
+
+  function computePlacementsDiff(
+    aPayload: Record<string, unknown>,
+    bPayload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const aPlacements = Array.isArray(aPayload.placements)
+      ? (aPayload.placements as Array<Record<string, unknown>>)
+      : [];
+    const bPlacements = Array.isArray(bPayload.placements)
+      ? (bPayload.placements as Array<Record<string, unknown>>)
+      : [];
+
+    const aByCat: Record<string, Array<Record<string, unknown>>> = {};
+    const bByCat: Record<string, Array<Record<string, unknown>>> = {};
+    for (const p of aPlacements) {
+      const cat = String(p.category ?? "unknown").trim().toLowerCase() || "unknown";
+      (aByCat[cat] ||= []).push(p);
+    }
+    for (const p of bPlacements) {
+      const cat = String(p.category ?? "unknown").trim().toLowerCase() || "unknown";
+      (bByCat[cat] ||= []).push(p);
+    }
+    const allCats = Array.from(new Set([...Object.keys(aByCat), ...Object.keys(bByCat)])).sort();
+
+    const categoryStats: Array<Record<string, unknown>> = [];
+    const addedInstances: Array<Record<string, unknown>> = [];
+    const deletedInstances: Array<Record<string, unknown>> = [];
+    const movedInstances: Array<Record<string, unknown>> = [];
+
+    for (const cat of allCats) {
+      const aList = aByCat[cat] || [];
+      const bList = bByCat[cat] || [];
+      const { matched, aUnmatched, bUnmatched } = matchPlacementsGreedy(aList, bList);
+      const shifts: number[] = [];
+      for (const [ai, bi] of matched) {
+        const [ax, az] = positionXz(aList[ai]);
+        const [bx, bz] = positionXz(bList[bi]);
+        const dist = Math.hypot(ax - bx, az - bz);
+        shifts.push(dist);
+        if (dist > 0.3) {
+          movedInstances.push({
+            category: cat,
+            distance_m: Math.round(dist * 1e4) / 1e4,
+            a: { position_xyz: aList[ai].position_xyz },
+            b: { position_xyz: bList[bi].position_xyz },
+          });
+        }
+      }
+      for (const ai of aUnmatched) {
+        deletedInstances.push({ category: cat, position_xyz: aList[ai].position_xyz });
+      }
+      for (const bi of bUnmatched) {
+        addedInstances.push({ category: cat, position_xyz: bList[bi].position_xyz });
+      }
+      const meanShift = shifts.length ? shifts.reduce((sum, v) => sum + v, 0) / shifts.length : 0;
+      categoryStats.push({
+        category: cat,
+        count_a: aList.length,
+        count_b: bList.length,
+        delta: bList.length - aList.length,
+        matched: matched.length,
+        added: bUnmatched.length,
+        deleted: aUnmatched.length,
+        moved: shifts.filter(s => s > 0.3).length,
+        mean_position_shift_m: Math.round(meanShift * 1e4) / 1e4,
+      });
+    }
+
+    const totalA = categoryStats.reduce((sum, s) => sum + (s.count_a as number), 0);
+    const totalB = categoryStats.reduce((sum, s) => sum + (s.count_b as number), 0);
+
+    return {
+      total_count_a: totalA,
+      total_count_b: totalB,
+      total_delta: totalB - totalA,
+      category_stats: categoryStats,
+      added_instances: addedInstances,
+      deleted_instances: deletedInstances,
+      moved_instances: movedInstances,
+    };
+  }
+
   function populateCompareSelectors(): void {
     const layouts = Array.from(recentLayoutsByPath.values());
     const optionsHtml = layouts
@@ -2928,60 +3169,246 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     compareResultsEl.innerHTML = `<div class="viewer-evaluate-loading">Loading layouts for comparison...</div>`;
 
     try {
-      const [manifestA, manifestB] = await Promise.all([
+      const [manifestA, manifestB, layoutJsonA, layoutJsonB] = await Promise.all([
         loadManifest(pathA),
         loadManifest(pathB),
+        fetch(`./api/file?path=${encodeURIComponent(pathA)}`).then(r => r.json() as Promise<Record<string, unknown>>),
+        fetch(`./api/file?path=${encodeURIComponent(pathB)}`).then(r => r.json() as Promise<Record<string, unknown>>),
       ]);
-      renderComparisonResults(manifestA, manifestB);
+      renderComparisonResults(manifestA, manifestB, layoutJsonA, layoutJsonB);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load layouts for comparison.";
       compareResultsEl.innerHTML = `<div class="viewer-evaluate-error">${escapeHtml(message)}</div>`;
     }
   }
 
-  function renderComparisonResults(a: ViewerManifest, b: ViewerManifest): void {
+  function renderComparisonResults(
+    a: ViewerManifest,
+    b: ViewerManifest,
+    layoutA: Record<string, unknown>,
+    layoutB: Record<string, unknown>,
+  ): void {
     const summaryA = (a.summary ?? {}) as Record<string, unknown>;
     const summaryB = (b.summary ?? {}) as Record<string, unknown>;
-    const keys = new Set([...Object.keys(summaryA), ...Object.keys(summaryB)]);
-    // Filter to numeric metric keys
-    const metricKeys = Array.from(keys).filter(k => {
-      const va = summaryA[k];
-      const vb = summaryB[k];
-      return (Number.isFinite(Number(va)) || Number.isFinite(Number(vb)));
-    }).sort();
+    const configA = (layoutA.config ?? {}) as Record<string, unknown>;
+    const configB = (layoutB.config ?? {}) as Record<string, unknown>;
 
-    let html = `<div class="viewer-compare-table-wrap"><table class="viewer-compare-table">
-      <thead><tr><th>Metric</th><th>Layout A</th><th>Layout B</th><th>Diff</th></tr></thead><tbody>`;
+    const metricsDiff = computeMetricsDiff(summaryA, summaryB);
+    const configDiff = computeConfigDiff(configA, configB);
+    const placementsDiff = computePlacementsDiff(layoutA, layoutB);
 
-    for (const key of metricKeys) {
-      const va = Number(summaryA[key] ?? 0);
-      const vb = Number(summaryB[key] ?? 0);
-      const diff = comparisonDiffArrow(va, vb);
-      html += `<tr>
-        <td class="viewer-compare-metric-label">${escapeHtml(key)}</td>
-        <td>${va.toFixed(3)}</td>
-        <td>${vb.toFixed(3)}</td>
-        <td>${diff}</td>
-      </tr>`;
-    }
-    html += `</tbody></table></div>`;
-
-    // PNG thumbnails — scene.glb sits next to preview.png in each iteration directory
-    const toPreviewUrl = (glbUrl: string) => glbUrl.replace(/%2F[^%]*\.glb$/i, "%2Fpreview.png").replace(/\/[^/]*\.glb$/i, "/preview.png");
+    const toPreviewUrl = (glbUrl: string) =>
+      glbUrl.replace(/%2F[^%]*\.glb$/i, "%2Fpreview.png").replace(/\/[^/]*\.glb$/i, "/preview.png");
     const imgA = a.final_scene?.glb_url ? toPreviewUrl(a.final_scene.glb_url) : "";
     const imgB = b.final_scene?.glb_url ? toPreviewUrl(b.final_scene.glb_url) : "";
-    html += `<div class="viewer-compare-images">
-      <div class="viewer-compare-col">
-        <div class="viewer-compare-thumb-label">${escapeHtml(compactUiLabel(a.layout_path))}</div>
-        ${imgA ? `<img class="viewer-compare-thumb" src="${escapeHtml(imgA)}" alt="Layout A" />` : "<div class='viewer-compare-no-img'>No preview</div>"}
+
+    const tabIds = ["metrics", "config", "placements", "diff2d", "preview"];
+    const tabLabels = ["Metrics", "Config", "Placements", "2D Diff", "Preview"];
+
+    let html = `<div class="viewer-compare-tabs">`;
+    for (let i = 0; i < tabIds.length; i++) {
+      html += `<button class="viewer-compare-tab" data-tab="${tabIds[i]}" ${i === 0 ? 'data-active="true"' : ""}>${tabLabels[i]}</button>`;
+    }
+    html += `</div>`;
+    html += `<div class="viewer-compare-actions"><button id="viewer-open-compare3d" class="viewer-nav-button" type="button">Open Split 3D View</button></div>`;
+
+    // Metrics tab
+    const metricsRows = metricsDiff
+      .map(m => {
+        const diffHtml = comparisonDiffArrow(Number(m.old ?? 0), Number(m.new ?? 0));
+        return `<tr>
+        <td class="viewer-compare-metric-label">${escapeHtml(String(m.key))}</td>
+        <td>${m.old !== null ? Number(m.old).toFixed(3) : "-"}</td>
+        <td>${m.new !== null ? Number(m.new).toFixed(3) : "-"}</td>
+        <td>${diffHtml}</td>
+      </tr>`;
+      })
+      .join("");
+
+    html += `<div class="viewer-compare-tab-panel" data-tab="metrics" data-active="true">
+      <div class="viewer-compare-table-wrap"><table class="viewer-compare-table">
+        <thead><tr><th>Metric</th><th>Layout A</th><th>Layout B</th><th>Diff</th></tr></thead><tbody>${metricsRows}</tbody>
+      </table></div>
+    </div>`;
+
+    // Config tab
+    let configHtml = "";
+    const configAdded = Object.entries((configDiff.added ?? {}) as Record<string, unknown>);
+    const configRemoved = Object.entries((configDiff.removed ?? {}) as Record<string, unknown>);
+    const configChanged = Object.entries((configDiff.changed ?? {}) as Record<string, unknown>);
+
+    if (configAdded.length || configRemoved.length || configChanged.length) {
+      configHtml += `<div class="viewer-diff-list">`;
+      for (const [k, v] of configAdded) {
+        configHtml += `<div class="viewer-diff-item viewer-diff-added"><span class="viewer-diff-badge">+</span> <code>${escapeHtml(k)}</code> = ${escapeHtml(JSON.stringify(v))}</div>`;
+      }
+      for (const [k, v] of configRemoved) {
+        configHtml += `<div class="viewer-diff-item viewer-diff-removed"><span class="viewer-diff-badge">−</span> <code>${escapeHtml(k)}</code> = ${escapeHtml(JSON.stringify(v))}</div>`;
+      }
+      for (const [k, v] of configChanged) {
+        const changed = v as { old: unknown; new: unknown };
+        configHtml += `<div class="viewer-diff-item viewer-diff-changed"><span class="viewer-diff-badge">~</span> <code>${escapeHtml(k)}</code><div class="viewer-diff-values"><span class="viewer-diff-old">${escapeHtml(JSON.stringify(changed.old))}</span> → <span class="viewer-diff-new">${escapeHtml(JSON.stringify(changed.new))}</span></div></div>`;
+      }
+      configHtml += `</div>`;
+    } else {
+      configHtml = `<div class="viewer-evaluate-empty">No config differences.</div>`;
+    }
+    html += `<div class="viewer-compare-tab-panel" data-tab="config">${configHtml}</div>`;
+
+    // Placements tab
+    const pd = placementsDiff;
+    const catStats = (pd.category_stats as Array<Record<string, unknown>>) ?? [];
+    let placementsHtml = `<div class="viewer-compare-table-wrap"><table class="viewer-compare-table">
+      <thead><tr><th>Category</th><th>A</th><th>B</th><th>Δ</th><th>Matched</th><th>Added</th><th>Deleted</th><th>Moved</th><th>Mean Shift (m)</th></tr></thead><tbody>`;
+    for (const s of catStats) {
+      placementsHtml += `<tr>
+        <td class="viewer-compare-metric-label">${escapeHtml(String(s.category))}</td>
+        <td>${s.count_a}</td><td>${s.count_b}</td><td>${s.delta}</td>
+        <td>${s.matched}</td><td>${s.added}</td><td>${s.deleted}</td><td>${s.moved}</td>
+        <td>${Number(s.mean_position_shift_m).toFixed(3)}</td>
+      </tr>`;
+    }
+    placementsHtml += `</tbody></table></div>`;
+    placementsHtml += `<div class="viewer-placements-totals">Total: ${pd.total_count_a} → ${pd.total_count_b} (Δ ${pd.total_delta})</div>`;
+    html += `<div class="viewer-compare-tab-panel" data-tab="placements">${placementsHtml}</div>`;
+
+    // 2D Diff tab
+    html += `<div class="viewer-compare-tab-panel" data-tab="diff2d">
+      <div class="viewer-diff2d-controls">
+        <label class="viewer-settings-label">Diff Mode</label>
+        <select id="diff2d-mode" class="viewer-select viewer-select-compact">
+          <option value="overlay">Overlay (red/green)</option>
+          <option value="delta">Delta Map (arrows)</option>
+        </select>
+        <button id="diff2d-render" class="viewer-nav-button" type="button">Render Diff</button>
       </div>
-      <div class="viewer-compare-col">
-        <div class="viewer-compare-thumb-label">${escapeHtml(compactUiLabel(b.layout_path))}</div>
-        ${imgB ? `<img class="viewer-compare-thumb" src="${escapeHtml(imgB)}" alt="Layout B" />` : "<div class='viewer-compare-no-img'>No preview</div>"}
+      <div id="diff2d-image-host" class="viewer-diff2d-host">
+        <div class="viewer-evaluate-empty">Select a mode and click Render Diff.</div>
+      </div>
+    </div>`;
+
+    // Preview tab
+    html += `<div class="viewer-compare-tab-panel" data-tab="preview">
+      <div class="viewer-compare-images">
+        <div class="viewer-compare-col">
+          <div class="viewer-compare-thumb-label">${escapeHtml(compactUiLabel(a.layout_path))}</div>
+          ${imgA ? `<img class="viewer-compare-thumb" src="${escapeHtml(imgA)}" alt="Layout A" />` : "<div class='viewer-compare-no-img'>No preview</div>"}
+        </div>
+        <div class="viewer-compare-col">
+          <div class="viewer-compare-thumb-label">${escapeHtml(compactUiLabel(b.layout_path))}</div>
+          ${imgB ? `<img class="viewer-compare-thumb" src="${escapeHtml(imgB)}" alt="Layout B" />` : "<div class='viewer-compare-no-img'>No preview</div>"}
+        </div>
       </div>
     </div>`;
 
     compareResultsEl.innerHTML = html;
+
+    const tabs = compareResultsEl.querySelectorAll<HTMLButtonElement>(".viewer-compare-tab");
+    const panels = compareResultsEl.querySelectorAll<HTMLElement>(".viewer-compare-tab-panel");
+    tabs.forEach(tab => {
+      tab.addEventListener("click", () => {
+        const target = tab.dataset.tab!;
+        tabs.forEach(t => (t.dataset.active = String(t.dataset.tab === target)));
+        panels.forEach(p => (p.dataset.active = String(p.dataset.tab === target)));
+      });
+    });
+
+    const openCompare3dEl = compareResultsEl.querySelector<HTMLButtonElement>("#viewer-open-compare3d");
+    openCompare3dEl?.addEventListener("click", () => void enterCompare3d(a, b));
+
+    // Wire up 2D diff rendering
+    const diff2dModeEl = compareResultsEl.querySelector<HTMLSelectElement>("#diff2d-mode");
+    const diff2dRenderEl = compareResultsEl.querySelector<HTMLButtonElement>("#diff2d-render");
+    const diff2dHostEl = compareResultsEl.querySelector<HTMLElement>("#diff2d-image-host");
+
+    async function renderDiff2d(): Promise<void> {
+      if (!diff2dModeEl || !diff2dHostEl) return;
+      const mode = diff2dModeEl.value;
+      diff2dHostEl.innerHTML = `<div class="viewer-evaluate-loading">Rendering ${mode} diff…</div>`;
+      try {
+        const url = `./api/scenes/diff/image?layout_a=${encodeURIComponent(a.layout_path)}&layout_b=${encodeURIComponent(b.layout_path)}&mode=${encodeURIComponent(mode)}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error || `HTTP ${response.status}`);
+        }
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        diff2dHostEl.innerHTML = `<img class="viewer-diff2d-image" src="${escapeHtml(objectUrl)}" alt="${escapeHtml(mode)} diff" />`;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Rendering failed.";
+        diff2dHostEl.innerHTML = `<div class="viewer-evaluate-error">${escapeHtml(message)}</div>`;
+      }
+    }
+
+    diff2dRenderEl?.addEventListener("click", () => void renderDiff2d());
+    // Auto-render overlay when switching to diff2d for the first time
+    const diff2dTab = Array.from(tabs).find(t => t.dataset.tab === "diff2d");
+    diff2dTab?.addEventListener("click", () => {
+      if (diff2dHostEl && diff2dHostEl.querySelector(".viewer-evaluate-empty")) {
+        void renderDiff2d();
+      }
+    });
+  }
+
+  async function enterCompare3d(a: ViewerManifest, b: ViewerManifest): Promise<void> {
+    if (!a.final_scene?.glb_url || !b.final_scene?.glb_url) {
+      flashStatus("Both layouts must have a GLB scene.");
+      return;
+    }
+    setStatus("Loading split-screen comparison…");
+    try {
+      await Promise.all([
+        loadCompareScene(a.final_scene.glb_url, "a"),
+        loadCompareScene(b.final_scene.glb_url, "b"),
+      ]);
+      compare3dActive = true;
+      if (currentRoot) currentRoot.visible = false;
+      exitCompare3dEl.hidden = false;
+      flashStatus("Split-screen mode active. WASD moves both views.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load scenes.";
+      flashStatus(msg);
+    }
+  }
+
+  function exitCompare3d(): void {
+    compare3dActive = false;
+    if (currentRoot) currentRoot.visible = true;
+    if (compareRootA) compareRootA.visible = false;
+    if (compareRootB) compareRootB.visible = false;
+    exitCompare3dEl.hidden = true;
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, renderer.domElement.clientWidth, renderer.domElement.clientHeight);
+    flashStatus("Exited split-screen mode.");
+  }
+
+  exitCompare3dEl.addEventListener("click", exitCompare3d);
+
+  function flyCameraTo(x: number, y: number, z: number, durationMs = 900): void {
+    if (flyAnimation) return;
+    flyAnimation = {
+      startPos: camera.position.clone(),
+      targetPos: new THREE.Vector3(x, y, z),
+      startTime: performance.now(),
+      duration: durationMs,
+    };
+    if (controls.isLocked) {
+      controls.unlock();
+    }
+  }
+
+  function minimapToWorld(mx: number, my: number): { x: number; z: number } | null {
+    if (!currentSceneBounds) return null;
+    const width = minimapOverlayEl.clientWidth;
+    const height = minimapOverlayEl.clientHeight;
+    if (width <= 0 || height <= 0) return null;
+    const u = clamp(mx / width, 0, 1);
+    const v = clamp(my / height, 0, 1);
+    return {
+      x: currentSceneBounds.minX + u * (currentSceneBounds.maxX - currentSceneBounds.minX),
+      z: currentSceneBounds.minZ + v * (currentSceneBounds.maxZ - currentSceneBounds.minZ),
+    };
   }
 
   /* ── Presets ────────────────────────────────────────────── */
@@ -3182,8 +3609,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       const nz = clamp((event.clientY - rect.top) / rect.height, 0, 1);
       const worldX = currentSceneBounds.minX + nx * (currentSceneBounds.maxX - currentSceneBounds.minX);
       const worldZ = currentSceneBounds.minZ + nz * (currentSceneBounds.maxZ - currentSceneBounds.minZ);
-      currentAvatarPosition.set(worldX, currentAvatarPosition.y, worldZ);
-      syncCameraRig();
+      flyCameraTo(worldX, Math.max(0, currentSpawn.y - AVATAR_EYE_HEIGHT_M), worldZ);
     },
     { signal },
   );
@@ -3464,7 +3890,16 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       return;
     }
     const delta = clock.getDelta();
-    if (controls.isLocked) {
+
+    if (flyAnimation) {
+      const elapsed = performance.now() - flyAnimation.startTime;
+      const t = Math.min(elapsed / flyAnimation.duration, 1);
+      const ease = 1 - Math.pow(1 - t, 3);
+      camera.position.lerpVectors(flyAnimation.startPos, flyAnimation.targetPos, ease);
+      if (t >= 1) {
+        flyAnimation = null;
+      }
+    } else if (controls.isLocked) {
       const moveSpeed = moveState.sprint ? 8.5 : 4.5;
       const forwardAxis = Number(moveState.forward) - Number(moveState.backward);
       const sideAxis = Number(moveState.right) - Number(moveState.left);
@@ -3479,9 +3914,44 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       currentAvatarPosition.y = Math.max(0, currentSpawn.y - AVATAR_EYE_HEIGHT_M);
       syncCameraRig();
     }
+
     updateAssetBboxHelpers();
     updateLaserPointer();
-    renderer.render(scene, camera);
+
+    if (compare3dActive && compareRootA && compareRootB) {
+      if (currentRoot) currentRoot.visible = false;
+      compareCameraA.position.copy(camera.position);
+      compareCameraA.quaternion.copy(camera.quaternion);
+      compareCameraB.position.copy(camera.position);
+      compareCameraB.quaternion.copy(camera.quaternion);
+
+      const width = renderer.domElement.clientWidth;
+      const height = renderer.domElement.clientHeight;
+      renderer.setScissorTest(true);
+
+      // Left half – Scene A
+      renderer.setViewport(0, 0, width / 2, height);
+      renderer.setScissor(0, 0, width / 2, height);
+      compareRootA.visible = true;
+      compareRootB.visible = false;
+      renderer.render(scene, compareCameraA);
+
+      // Right half – Scene B
+      renderer.setViewport(width / 2, 0, width / 2, height);
+      renderer.setScissor(width / 2, 0, width / 2, height);
+      compareRootA.visible = false;
+      compareRootB.visible = true;
+      renderer.render(scene, compareCameraB);
+
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, width, height);
+    } else {
+      if (compareRootA) compareRootA.visible = false;
+      if (compareRootB) compareRootB.visible = false;
+      if (currentRoot) currentRoot.visible = true;
+      renderer.render(scene, camera);
+    }
+
     renderMinimap();
     animationFrameId = requestAnimationFrame(animate);
   }
