@@ -997,10 +997,12 @@ function viewerApiPlugin(): Plugin {
             return;
           }
 
+          const statA = fs.statSync(layoutAPath);
+          const statB = fs.statSync(layoutBPath);
           const crypto = await import("node:crypto");
           const hash = crypto
             .createHash("sha256")
-            .update(`${layoutAPath}|${layoutBPath}|${mode}`)
+            .update(`${layoutAPath}:${statA.mtimeMs}:${statA.size}|${layoutBPath}:${statB.mtimeMs}:${statB.size}|${mode}`)
             .digest("hex")
             .slice(0, 16);
           const cacheDir = path.resolve(repoRoot, "artifacts", "diff_images");
