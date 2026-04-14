@@ -100,6 +100,14 @@ export type LayoutOverlayData = {
   length_m: number;
 };
 
+export type LightingPresetValues = {
+  exposure: number;
+  keyLightIntensity: number;
+  fillLightIntensity: number;
+  warmth: number;
+  shadowStrength: number;
+};
+
 export type ViewerManifest = {
   layout_path: string;
   summary?: SummaryMetrics | null;
@@ -122,4 +130,5 @@ export type ViewerManifest = {
   layout_overlay?: LayoutOverlayData | null;
   audio_profile?: AudioProfile | null;
   lighting_preset?: string;
+  lighting_params?: LightingPresetValues;
 };

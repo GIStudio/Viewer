@@ -637,6 +637,7 @@ function viewerApiPlugin(): Plugin {
               },
               audio_profile: audioProfile,
               lighting_preset: String(outputs.lighting_preset ?? "bright_day"),
+              lighting_params: (outputs.lighting_params ?? null) as JsonRecord | null,
             });
             return;
           } catch (error) {

@@ -2664,10 +2664,20 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     currentForward = spawn.forward;
     updateMinimapCamera(sceneBoundsFromManifest(bbox, currentManifest), bbox);
     resetView();
-    const presetKey = currentManifest?.lighting_preset;
-    if (presetKey && LIGHTING_PRESETS[presetKey]) {
-      lightingState.preset = presetKey;
-      Object.assign(lightingState, LIGHTING_PRESETS[presetKey]);
+    const params = currentManifest?.lighting_params;
+    if (params) {
+      lightingState.preset = currentManifest?.lighting_preset || "custom";
+      lightingState.exposure = params.exposure;
+      lightingState.keyLightIntensity = params.keyLightIntensity;
+      lightingState.fillLightIntensity = params.fillLightIntensity;
+      lightingState.warmth = params.warmth;
+      lightingState.shadowStrength = params.shadowStrength;
+    } else {
+      const presetKey = currentManifest?.lighting_preset;
+      if (presetKey && LIGHTING_PRESETS[presetKey]) {
+        lightingState.preset = presetKey;
+        Object.assign(lightingState, LIGHTING_PRESETS[presetKey]);
+      }
     }
     syncLightingUi();
     setStatus(`Viewing ${option.label}`);
