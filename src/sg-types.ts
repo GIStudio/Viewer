@@ -149,6 +149,41 @@ export type AnnotatedFunctionalZone = {
   furniture_instances: ZoneFurnitureInstance[];
 };
 
+export type BezierCurve3 = {
+  start: AnnotationPoint;
+  end: AnnotationPoint;
+  control1: AnnotationPoint;
+  control2: AnnotationPoint;
+};
+
+export type JunctionQuadrantBezierPatch = {
+  patchId: string;
+  stripKind: StripKind;
+  innerCurve: BezierCurve3;
+  outerCurve: BezierCurve3;
+};
+
+export type JunctionQuadrantSkeletonLine = {
+  lineId: string;
+  stripKind: StripKind;
+  curve: BezierCurve3;
+  widthM: number;
+};
+
+export type JunctionQuadrantComposition = {
+  quadrantId: string;
+  armAId: string;
+  armBId: string;
+  patches: JunctionQuadrantBezierPatch[];
+  skeletonLines: JunctionQuadrantSkeletonLine[];
+};
+
+export type JunctionComposition = {
+  junctionId: string;
+  kind: "cross_junction" | "t_junction" | "complex_junction";
+  quadrants: JunctionQuadrantComposition[];
+};
+
 export type ReferenceAnnotation = {
   version: string;
   plan_id: string;
@@ -162,6 +197,7 @@ export type ReferenceAnnotation = {
   control_points: AnnotatedMarker[];
   building_regions: AnnotatedBuildingRegion[];
   functional_zones: AnnotatedFunctionalZone[];
+  junction_compositions?: JunctionComposition[];
 };
 
 export type ReferencePlan = {

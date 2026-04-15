@@ -1,5 +1,6 @@
 import type {
   AnnotationPoint,
+  BezierCurve3,
   AnnotatedCenterline,
   AnnotatedCrossSectionStrip,
   AnnotatedBuildingRegion,
@@ -1796,4 +1797,141 @@ export function stripDisplayPoint(
     x: sample.point.x + sample.leftNormal.x * offsetPx,
     y: sample.point.y + sample.leftNormal.y * offsetPx,
   };
+}
+
+// ------------------------------------------------------------------
+// Bezier curve utilities for Junction Composer
+// ------------------------------------------------------------------
+
+export function sampleBezierPoints(curve: BezierCurve3, segmentCount: number): AnnotationPoint[] {
+  const points: AnnotationPoint[] = [];
+  const n = Math.max(2, segmentCount);
+  for (let i = 0; i <= n; i += 1) {
+    const t = i / n;
+    const u = 1 - t;
+    const u2 = u * u;
+    const u3 = u2 * u;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const x = u3 * curve.start.x + 3 * u2 * t * curve.control1.x + 3 * u * t2 * curve.control2.x + t3 * curve.end.x;
+    const y = u3 * curve.start.y + 3 * u2 * t * curve.control1.y + 3 * u * t2 * curve.control2.y + t3 * curve.end.y;
+    points.push({ x, y });
+  }
+  return points;
+}
+
+export function bezierPathD(curve: BezierCurve3): string {
+  return `M ${curve.start.x.toFixed(2)},${curve.start.y.toFixed(2)} C ${curve.control1.x.toFixed(2)},${curve.control1.y.toFixed(2)} ${curve.control2.x.toFixed(2)},${curve.control2.y.toFixed(2)} ${curve.end.x.toFixed(2)},${curve.end.y.toFixed(2)}`;
+}
+
+/**
+ * Approximate a circular arc with a cubic Bezier curve.
+ * center: arc center in px
+ * radiusPx: arc radius in px
+ * startAngleRad: start angle in radians
+ * endAngleRad: end angle in radians
+ * clockwise: direction
+ */
+export function arcToBezier(
+  center: AnnotationPoint,
+  radiusPx: number,
+  startAngleRad: number,
+  endAngleRad: number,
+  clockwise: boolean,
+): BezierCurve3 {
+  const r = Math.max(radiusPx, 1e-6);
+  let sweep = clockwise ? startAngleRad - endAngleRad : endAngleRad - startAngleRad;
+  while (sweep <= 0) {
+    sweep += Math.PI * 2;
+  }
+  // If sweep is > 90°, we only return the first 90° segment. Caller can subdivide if needed.
+  // For junction corners, sweep is ~90° so this is fine.
+  const theta = Math.min(sweep, Math.PI / 2);
+
+  const start = {
+    x: center.x + r * Math.cos(startAngleRad),
+    y: center.y + r * Math.sin(startAngleRad),
+  };
+  const end = {
+    x: center.x + r * Math.cos(startAngleRad + (clockwise ? -theta : theta)),
+    y: center.y + r * Math.sin(startAngleRad + (clockwise ? -theta : theta)),
+  };
+
+  const k = (4 / 3) * Math.tan(theta / 4);
+  const a1 = startAngleRad;
+  const a2 = startAngleRad + (clockwise ? -theta : theta);
+
+  const control1 = {
+    x: center.x + r * (Math.cos(a1) - k * Math.sin(a1)),
+    y: center.y + r * (Math.sin(a1) + k * Math.cos(a1)),
+  };
+  const control2 = {
+    x: center.x + r * (Math.cos(a2) + k * Math.sin(a2)),
+    y: center.y + r * (Math.sin(a2) - k * Math.cos(a2)),
+  };
+
+  if (clockwise) {
+    // When clockwise, the control-point tangent signs need to be swapped
+    // compared to the standard counter-clockwise formula above.
+    // Recompute with correct signs for clockwise.
+    const ck = (4 / 3) * Math.tan(theta / 4);
+    return {
+      start,
+      end,
+      control1: {
+        x: center.x + r * (Math.cos(a1) + ck * Math.sin(a1)),
+        y: center.y + r * (Math.sin(a1) - ck * Math.cos(a1)),
+      },
+      control2: {
+        x: center.x + r * (Math.cos(a2) - ck * Math.sin(a2)),
+        y: center.y + r * (Math.sin(a2) + ck * Math.cos(a2)),
+      },
+    };
+  }
+
+  return { start, end, control1, control2 };
+}
+
+export function cloneBezier(curve: BezierCurve3): BezierCurve3 {
+  return {
+    start: clonePoint(curve.start),
+    end: clonePoint(curve.end),
+    control1: clonePoint(curve.control1),
+    control2: clonePoint(curve.control2),
+  };
+}
+
+export function translateBezier(curve: BezierCurve3, dx: number, dy: number): BezierCurve3 {
+  return {
+    start: { x: curve.start.x + dx, y: curve.start.y + dy },
+    end: { x: curve.end.x + dx, y: curve.end.y + dy },
+    control1: { x: curve.control1.x + dx, y: curve.control1.y + dy },
+    control2: { x: curve.control2.x + dx, y: curve.control2.y + dy },
+  };
+}
+
+export function pointOnBezier(curve: BezierCurve3, t: number): AnnotationPoint {
+  const u = 1 - t;
+  const u2 = u * u;
+  const u3 = u2 * u;
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return {
+    x: u3 * curve.start.x + 3 * u2 * t * curve.control1.x + 3 * u * t2 * curve.control2.x + t3 * curve.end.x,
+    y: u3 * curve.start.y + 3 * u2 * t * curve.control1.y + 3 * u * t2 * curve.control2.y + t3 * curve.end.y,
+  };
+}
+
+export function evaluateBezierTangent(curve: BezierCurve3, t: number): AnnotationPoint {
+  const u = 1 - t;
+  const dx =
+    3 * u * u * (curve.control1.x - curve.start.x) +
+    6 * u * t * (curve.control2.x - curve.control1.x) +
+    3 * t * t * (curve.end.x - curve.control2.x);
+  const dy =
+    3 * u * u * (curve.control1.y - curve.start.y) +
+    6 * u * t * (curve.control2.y - curve.control1.y) +
+    3 * t * t * (curve.end.y - curve.control2.y);
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: dx / len, y: dy / len };
 }

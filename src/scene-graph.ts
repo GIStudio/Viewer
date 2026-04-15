@@ -158,6 +158,7 @@ import {
   junctionProfileWidths,
   pointOnAxis,
   rectanglePolygonPoints,
+  sampleBezierPoints,
   stripDisplayPoint,
 } from "./sg-geometry";
 
@@ -1856,6 +1857,11 @@ function buildJunctionInspectorMarkup(
           <span class="annotation-cross-preview-stat">${overlay.crosswalks.length} crossings</span>
         </div>
       </div>
+      ${overlay.kind === "cross_junction" ? `
+        <div style="margin:0.5rem 0 0.25rem">
+          <button id="annotation-open-junction-composer" class="scene-toolbar-button" type="button">Edit Junction Corners</button>
+        </div>
+      ` : ""}
       <div class="scene-inspector-grid">
         <div class="scene-fact-card">
           <span class="scene-fact-label">Anchor</span>
@@ -2864,6 +2870,7 @@ function buildDerivedJunctionOverlayMarkup(
     showJunctionLabels: boolean;
     showJunctionDebug: boolean;
   },
+  manualJunctionIds: Set<string> = new Set(),
 ): string {
   if (overlays.length === 0) {
     return "";
@@ -3120,7 +3127,7 @@ function buildDerivedJunctionOverlayMarkup(
             data-feature-kind="${featureKind}"
             data-feature-id="${escapeHtml(overlay.junctionId)}"
           >
-            ${escapeHtml(derivedJunctionKindLabel(overlay.kind))}
+            ${escapeHtml(derivedJunctionKindLabel(overlay.kind))}${manualJunctionIds.has(overlay.junctionId) ? " ✎" : ""}
           </text>`
               : ""
           }
@@ -3272,7 +3279,72 @@ function buildOverlayMarkup(
       `
       : "";
 
-  const derivedJunctionMarkup = buildDerivedJunctionOverlayMarkup(junctionOverlays, selection, junctionOverlayOptions);
+  const manualJunctionIds = new Set((annotation.junction_compositions ?? []).map((c) => c.junctionId));
+  const derivedJunctionMarkup = buildDerivedJunctionOverlayMarkup(junctionOverlays, selection, junctionOverlayOptions, manualJunctionIds);
+
+  const manualCompositionMarkup = (annotation.junction_compositions ?? [])
+    .flatMap((comp) =>
+      comp.quadrants.flatMap((q) => {
+        const isSelected =
+          selection?.kind === "junction" && selection.id === comp.junctionId;
+        const patchesMarkup = q.patches
+          .map((patch) => {
+            const innerPts = sampleBezierPoints(patch.innerCurve, 12);
+            const outerPts = sampleBezierPoints(patch.outerCurve, 12);
+            const d = [
+              `M ${innerPts[0].x.toFixed(2)},${innerPts[0].y.toFixed(2)}`,
+              ...innerPts.slice(1).map((p) => `L ${p.x.toFixed(2)},${p.y.toFixed(2)}`),
+              ...outerPts
+                .slice()
+                .reverse()
+                .map((p) => `L ${p.x.toFixed(2)},${p.y.toFixed(2)}`),
+              "Z",
+            ].join(" ");
+            const fillColor =
+              patch.stripKind === "clear_sidewalk"
+                ? "rgba(232, 213, 181, 0.5)"
+                : patch.stripKind === "nearroad_furnishing"
+                  ? "rgba(196, 168, 130, 0.5)"
+                  : "rgba(168, 196, 212, 0.5)";
+            return `
+              <path
+                d="${d}"
+                fill="${fillColor}"
+                stroke="rgba(90,90,90,0.6)"
+                stroke-width="1"
+                data-feature-kind="junction"
+                data-feature-id="${escapeHtml(comp.junctionId)}"
+              />
+            `;
+          })
+          .join("");
+        const skeletonMarkup = q.skeletonLines
+          .map((sl) => {
+            const pts = sampleBezierPoints(sl.curve, 16);
+            const d = `M ${pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" L ")}`;
+            const strokeColor =
+              sl.stripKind === "clear_sidewalk"
+                ? "#d4b080"
+                : sl.stripKind === "nearroad_furnishing"
+                  ? "#8b6f4e"
+                  : "#6b8fa3";
+            return `
+              <path
+                d="${d}"
+                fill="none"
+                stroke="${strokeColor}"
+                stroke-width="${Math.max(1, sl.widthM * annotation.pixels_per_meter).toFixed(1)}"
+                stroke-opacity="0.8"
+                data-feature-kind="junction"
+                data-feature-id="${escapeHtml(comp.junctionId)}"
+              />
+            `;
+          })
+          .join("");
+        return [`<g class="annotation-feature-group">`, patchesMarkup, skeletonMarkup, `</g>`];
+      }),
+    )
+    .join("");
 
   return `
     <svg
@@ -3286,6 +3358,7 @@ function buildOverlayMarkup(
       <rect x="0" y="0" width="${width}" height="${height}" fill="transparent" />
       ${centerlineMarkup}
       ${derivedJunctionMarkup}
+      ${manualCompositionMarkup}
       ${buildingRegionMarkup}
       ${functionalZoneMarkup}
       ${markerMarkup}
@@ -4003,6 +4076,34 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
       },
       { signal },
     );
+
+    const openComposerButton = inspectorEl.querySelector<HTMLButtonElement>("#annotation-open-junction-composer");
+    openComposerButton?.addEventListener("click", () => {
+      const junction = state.annotation.junctions.find((j) => j.id === state.selection?.id);
+      if (!junction) return;
+      const overlay = getJunctionOverlay(state.annotation, junction.id);
+      if (!overlay || overlay.kind !== "cross_junction") return;
+      void import("./junction-composer").then((mod) => {
+        mod.mountJunctionComposer({
+          root,
+          annotation: state.annotation,
+          junction,
+          overlay,
+          imageUrl: state.currentImageUrl,
+          onSave: (composition) => {
+            const existing = state.annotation.junction_compositions ?? [];
+            const next = existing.filter((c) => c.junctionId !== composition.junctionId);
+            next.push(composition);
+            state.annotation.junction_compositions = next;
+            markAnnotationChanged(`Updated junction composition for ${composition.junctionId}.`);
+            renderAll();
+          },
+          onCancel: () => {
+            // no-op
+          },
+        });
+      });
+    }, { signal });
 
     const centerline = selectedCenterline();
     if (!centerline) {
