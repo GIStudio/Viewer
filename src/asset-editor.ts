@@ -4,6 +4,9 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { CSS2DRenderer, CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 
+// Unified UI components
+import { setupMenuToggle, setupNavigation } from "./ui";
+
 /* ── Types ─────────────────────────────────────────────────────────── */
 
 type AssetRecord = {
@@ -782,21 +785,37 @@ export function mountAssetEditor(root: HTMLElement): () => void {
   let previewCtx: PreviewContext | null = null;
   let destroyed = false;
 
-  root.innerHTML = `
-    <div class="scene-page">
-      <div class="scene-page-topbar">
-        <div>
-          <div class="scene-page-kicker">Viewer / 3D Asset Editor</div>
+  // Build the unified header
+  const headerHTML = `
+    <div class="scene-page-topbar viewer-header-full">
+      <div class="viewer-header-full-left">
+        <button id="viewer-menu-toggle" class="viewer-hamburger" type="button" aria-label="Menu" aria-expanded="false">☰</button>
+        <div class="viewer-header-full-info">
+          <div class="scene-page-kicker">Viewer / 3D Assets</div>
           <h1 class="scene-page-title">3D Asset Editor</h1>
           <p class="scene-page-subtitle">Browse, inspect, and manage project 3D assets</p>
         </div>
-        <div class="scene-page-actions">
-          <select id="ae-manifest-select" class="ae-manifest-select">
-            <option value="">-- Select Manifest --</option>
-          </select>
-          <button id="ae-back-btn" class="viewer-nav-button" type="button">Back to Viewer</button>
+      </div>
+      <div class="viewer-header-full-actions">
+        <select id="ae-manifest-select" class="ae-manifest-select">
+          <option value="">-- Select Manifest --</option>
+        </select>
+        <button id="ae-back-btn" class="viewer-nav-button" type="button">Back to Viewer</button>
+      </div>
+      <div id="viewer-menu-dropdown" class="viewer-menu-dropdown" hidden>
+        <div class="viewer-menu-help">Click to select · Scroll to zoom · Drag to orbit · Esc to deselect</div>
+        <div class="viewer-menu-buttons">
+          <button data-nav="viewer" class="viewer-nav-button viewer-menu-button" type="button">3D Viewer</button>
+          <button data-nav="scene-graph" class="viewer-nav-button viewer-menu-button" type="button">Annotation</button>
+          <button class="viewer-nav-button viewer-menu-button viewer-menu-button-active" type="button" disabled>Asset Editor</button>
         </div>
       </div>
+    </div>
+  `;
+
+  root.innerHTML = `
+    <div class="scene-page">
+      ${headerHTML}
 
       <div class="asset-editor-layout">
         <!-- Left: Gallery -->
@@ -926,6 +945,10 @@ export function mountAssetEditor(root: HTMLElement): () => void {
   const loadMoreInfo = qs<HTMLSpanElement>(root, "#ae-load-more-info");
   const yawInput = qs<HTMLInputElement>(root, "#ae-yaw-input");
   const frontSelect = qs<HTMLSelectElement>(root, "#ae-front-select");
+
+  /* ── Unified Menu Setup ───────────────────────────────────────────── */
+  setupMenuToggle(root);
+  setupNavigation(root);
 
   /* ── Navigation ────────────────────────────────────────────────── */
   backBtn.addEventListener("click", () => {

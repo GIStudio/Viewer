@@ -162,6 +162,9 @@ import {
   stripDisplayPoint,
 } from "./sg-geometry";
 
+// Unified UI components
+import { mountAppHeader, setupMenuToggle, setupNavigation } from "./ui";
+
 function nextStripId(centerline: AnnotatedCenterline, zone: StripZone): string {
   const used = new Set(centerline.cross_section_strips.map((strip) => strip.strip_id));
   let counter = centerline.cross_section_strips.filter((strip) => strip.zone === zone).length + 1;
@@ -3386,21 +3389,37 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
   const eventController = new AbortController();
   const { signal } = eventController;
 
-  root.innerHTML = `
-    <div class="scene-page">
-      <div class="scene-page-topbar">
-        <div>
-          <div class="scene-page-kicker">Viewer / Reference Annotation</div>
+  // Build the unified header
+  const headerHTML = `
+    <div class="scene-page-topbar viewer-header-full">
+      <div class="viewer-header-full-left">
+        <button id="viewer-menu-toggle" class="viewer-hamburger" type="button" aria-label="Menu" aria-expanded="false">☰</button>
+        <div class="viewer-header-full-info">
+          <div class="scene-page-kicker">Viewer / Reference</div>
           <h1 class="scene-page-title">Reference Plan Annotator</h1>
           <p class="scene-page-subtitle">
             先校准道路总宽与参考图，再把中心线拆成车道、步行带、门前预留和街道家具点位，最后导出 JSON 并转换成带详细横断面的道路 graph。
           </p>
         </div>
-        <div class="scene-page-actions">
-          <button id="scene-page-asset-editor" class="viewer-nav-button" type="button">Asset Editor</button>
-          <button id="scene-page-back" class="viewer-nav-button" type="button">Back to Viewer</button>
+      </div>
+      <div class="viewer-header-full-actions">
+        <button id="scene-page-asset-editor" class="viewer-nav-button" type="button">Asset Editor</button>
+        <button id="scene-page-back" class="viewer-nav-button" type="button">Back to Viewer</button>
+      </div>
+      <div id="viewer-menu-dropdown" class="viewer-menu-dropdown" hidden>
+        <div class="viewer-menu-help">Click to select · Scroll to zoom · Drag to pan · Esc to deselect</div>
+        <div class="viewer-menu-buttons">
+          <button data-nav="viewer" class="viewer-nav-button viewer-menu-button" type="button">3D Viewer</button>
+          <button data-nav="asset-editor" class="viewer-nav-button viewer-menu-button" type="button">Asset Editor</button>
+          <button class="viewer-nav-button viewer-menu-button viewer-menu-button-active" type="button" disabled>Annotation</button>
         </div>
       </div>
+    </div>
+  `;
+
+  root.innerHTML = `
+    <div class="scene-page">
+      ${headerHTML}
 
       <div class="scene-page-layout scene-page-layout-flex">
         <div class="scene-canvas-column">
@@ -5611,6 +5630,10 @@ function buildingRegionHandleFromTarget(
     },
     { signal },
   );
+
+  // Setup unified menu toggle and navigation
+  setupMenuToggle(root);
+  setupNavigation(root);
 
   backButton.addEventListener(
     "click",

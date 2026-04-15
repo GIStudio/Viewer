@@ -3,6 +3,7 @@ import "./style.css";
 import { mountViewer } from "./app";
 import { mountSceneGraphPage } from "./scene-graph";
 import { mountAssetEditor } from "./asset-editor";
+import "./ui"; // Initialize unified UI components
 
 const appRoot = document.querySelector<HTMLElement>("#app");
 
