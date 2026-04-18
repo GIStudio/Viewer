@@ -2424,6 +2424,13 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
 
     const overlay = currentManifest.layout_overlay;
 
+    // Debug: log manifest info for coordinate system understanding
+    console.log("[FloatingLane] Manifest info:", {
+      spawn_point: currentManifest.spawn_point,
+      forward_vector: currentManifest.forward_vector,
+      scene_bounds: currentManifest.scene_bounds,
+    });
+
     // Get OSM geometry for carriageway rings (road polygons)
     const summary = (currentManifest.summary ?? {}) as Record<string, unknown>;
     const osmGeom = (summary.osm_geometry ?? {}) as Record<string, unknown>;
@@ -2444,13 +2451,19 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     const height = floatingLaneConfig.height;
 
     // Helper function to convert ring coordinates relative to scene center
+    // Note: ring data format is [x, z] where x=East/West, z=North/South in scene coords
     const toSceneCoords = (point: number[]): number[] => {
       return [point[0] - sceneCenterX, point[1] - sceneCenterZ];
     };
 
     // ========== 1. Render road polygons using carriagewayRings ==========
-    // Note: carriagewayRings are relative to scene center
+    // Note: ring data format is [x, z] = [East, North]
     if (carriagewayRings.length > 0) {
+      // Debug: log first ring's first few points
+      console.log("[FloatingLane] Scene center:", { sceneCenterX, sceneCenterZ });
+      console.log("[FloatingLane] First carriageway ring (raw):", carriagewayRings[0]?.slice(0, 3));
+      console.log("[FloatingLane] First carriageway ring (offset):", carriagewayRings[0]?.slice(0, 3).map(toSceneCoords));
+
       for (const ring of carriagewayRings) {
         if (ring.length < 3) continue;
         // Convert ring coordinates to scene space
