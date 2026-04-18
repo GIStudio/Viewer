@@ -2211,6 +2211,10 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     animated: false,
     colorScheme: "semantic",
     selectedLaneIndex: -1,
+    showBuildings: true,
+    showFeatures: true,
+    buildingOpacity: 0.4,
+    featureOpacity: 0.6,
   };
   let visibleLaneKinds: Set<string> = new Set([
     "carriageway", "drive_lane", "clear_path", "furnishing", "sidewalk",
@@ -2284,132 +2288,367 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     ctx.closePath();
   }
 
+  function buildPolygonShape(points: number[][]): THREE.Shape {
+    const shape = new THREE.Shape();
+    if (points.length < 3) return shape;
+    shape.moveTo(points[0][0], points[0][1]);
+    for (let i = 1; i < points.length; i++) {
+      shape.lineTo(points[i][0], points[i][1]);
+    }
+    shape.closePath();
+    return shape;
+  }
+
   function buildFloatingLaneOverlay(): void {
     clearFloatingLaneOverlay();
     if (!currentManifest?.layout_overlay) return;
 
     const overlay = currentManifest.layout_overlay;
-    const lengthM = overlay.length_m || 0;
 
-    // Create lanes for each band
-    for (let bandIdx = 0; bandIdx < overlay.bands.length; bandIdx++) {
-      const band = overlay.bands[bandIdx];
-      if (!band.width_m || !Number.isFinite(band.width_m)) continue;
-      if (!visibleLaneKinds.has(band.kind) && band.kind !== "default") continue;
+    // Get scene center for proper positioning
+    let sceneCenterX = 0;
+    let sceneCenterZ = 0;
+    if (currentRoot) {
+      const bbox = new THREE.Box3().setFromObject(currentRoot);
+      const center = bbox.getCenter(new THREE.Vector3());
+      sceneCenterX = center.x;
+      sceneCenterZ = center.z;
+    }
 
-      const isSelected = floatingLaneConfig.selectedLaneIndex === bandIdx;
-      const baseColor = getFloatingLaneColor(band.kind);
-      const opacity = isSelected
-        ? Math.min(floatingLaneConfig.opacity * 1.5, 0.9)
-        : floatingLaneConfig.opacity * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
+    // Get OSM geometry for carriageway rings (road polygons)
+    const summary = (currentManifest.summary ?? {}) as Record<string, unknown>;
+    const osmGeom = (summary.osm_geometry ?? {}) as Record<string, unknown>;
+    const carriagewayRings = (osmGeom.carriageway_rings ?? []) as number[][][];
+    const sidewalkRings = (osmGeom.sidewalk_rings ?? []) as number[][][];
+    const junctions = (osmGeom.junction_geometries ?? []) as Array<Record<string, unknown>>;
 
-      // 1. Main lane plane
-      const planeGeo = new THREE.PlaneGeometry(lengthM, band.width_m);
-      const planeMat = new THREE.MeshBasicMaterial({
-        color: baseColor,
-        transparent: true,
-        opacity: opacity * 0.7,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      const planeMesh = new THREE.Mesh(planeGeo, planeMat);
-      planeMesh.rotation.x = -Math.PI / 2;
-      planeMesh.position.set(lengthM / 2, floatingLaneConfig.height, band.z_center_m ?? 0);
-      planeMesh.userData.isFloatingLane = true;
-      planeMesh.userData.bandIndex = bandIdx;
-      planeMesh.userData.bandKind = band.kind;
-      scene.add(planeMesh);
-      floatingLaneObjects.push(planeMesh);
+    const height = floatingLaneConfig.height;
 
-      // 2. Edge lines (left and right borders)
-      if (floatingLaneConfig.showEdgeLines) {
-        const halfWidth = band.width_m / 2;
-        const edgeHeight = floatingLaneConfig.height;
-        const leftZ = (band.z_center_m ?? 0) - halfWidth;
-        const rightZ = (band.z_center_m ?? 0) + halfWidth;
-
-        const edgeLineMat = new THREE.LineBasicMaterial({
-          color: isSelected ? 0xffffff : baseColor,
+    // ========== 1. Render road polygons using carriagewayRings ==========
+    if (carriagewayRings.length > 0) {
+      for (const ring of carriagewayRings) {
+        if (ring.length < 3) continue;
+        // ring format: [[x, z], [x, z], ...] - already in scene coordinates
+        const shape = buildPolygonShape(ring);
+        const geometry = new THREE.ShapeGeometry(shape);
+        const material = new THREE.MeshBasicMaterial({
+          color: FLOATING_COLORS.carriageway,
           transparent: true,
-          opacity: opacity * 0.9,
-          linewidth: 2,
-        });
-
-        // Left edge
-        const leftEdgePoints = [
-          new THREE.Vector3(0, edgeHeight, leftZ),
-          new THREE.Vector3(lengthM, edgeHeight, leftZ),
-        ];
-        const leftEdgeGeo = new THREE.BufferGeometry().setFromPoints(leftEdgePoints);
-        const leftEdge = new THREE.Line(leftEdgeGeo, edgeLineMat);
-        leftEdge.userData.isFloatingLane = true;
-        scene.add(leftEdge);
-        floatingLaneObjects.push(leftEdge);
-
-        // Right edge
-        const rightEdgePoints = [
-          new THREE.Vector3(0, edgeHeight, rightZ),
-          new THREE.Vector3(lengthM, edgeHeight, rightZ),
-        ];
-        const rightEdgeGeo = new THREE.BufferGeometry().setFromPoints(rightEdgePoints);
-        const rightEdge = new THREE.Line(rightEdgeGeo, edgeLineMat);
-        rightEdge.userData.isFloatingLane = true;
-        scene.add(rightEdge);
-        floatingLaneObjects.push(rightEdge);
-
-        // Top edge
-        const topEdgePoints = [
-          new THREE.Vector3(0, edgeHeight, leftZ),
-          new THREE.Vector3(0, edgeHeight, rightZ),
-        ];
-        const topEdgeGeo = new THREE.BufferGeometry().setFromPoints(topEdgePoints);
-        const topEdge = new THREE.Line(topEdgeGeo, edgeLineMat);
-        topEdge.userData.isFloatingLane = true;
-        scene.add(topEdge);
-        floatingLaneObjects.push(topEdge);
-
-        // Bottom edge
-        const bottomEdgePoints = [
-          new THREE.Vector3(lengthM, edgeHeight, leftZ),
-          new THREE.Vector3(lengthM, edgeHeight, rightZ),
-        ];
-        const bottomEdgeGeo = new THREE.BufferGeometry().setFromPoints(bottomEdgePoints);
-        const bottomEdge = new THREE.Line(bottomEdgeGeo, edgeLineMat);
-        bottomEdge.userData.isFloatingLane = true;
-        scene.add(bottomEdge);
-        floatingLaneObjects.push(bottomEdge);
-      }
-
-      // 3. Lane label
-      if (floatingLaneConfig.showLabels) {
-        const labelSprite = createFloatingLaneLabel(
-          band.kind,
-          lengthM / 2,
-          floatingLaneConfig.height + 1.5,
-          band.z_center_m ?? 0
-        );
-        labelSprite.userData.isFloatingLane = true;
-        labelSprite.userData.bandIndex = bandIdx;
-        scene.add(labelSprite);
-        floatingLaneObjects.push(labelSprite);
-      }
-
-      // 4. Selection highlight glow
-      if (isSelected) {
-        const glowGeo = new THREE.PlaneGeometry(lengthM + 0.5, band.width_m + 0.5);
-        const glowMat = new THREE.MeshBasicMaterial({
-          color: baseColor,
-          transparent: true,
-          opacity: 0.2,
+          opacity: floatingLaneConfig.opacity * 0.7,
           depthWrite: false,
           side: THREE.DoubleSide,
         });
-        const glowMesh = new THREE.Mesh(glowGeo, glowMat);
-        glowMesh.rotation.x = -Math.PI / 2;
-        glowMesh.position.set(lengthM / 2, floatingLaneConfig.height - 0.01, band.z_center_m ?? 0);
-        glowMesh.userData.isFloatingLane = true;
-        scene.add(glowMesh);
-        floatingLaneObjects.push(glowMesh);
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(sceneCenterX, height, sceneCenterZ);
+        mesh.userData.isFloatingLane = true;
+        mesh.userData.overlayType = "road";
+        scene.add(mesh);
+        floatingLaneObjects.push(mesh);
+
+        // Add edge lines for road polygon
+        if (floatingLaneConfig.showEdgeLines) {
+          const edgeMaterial = new THREE.LineBasicMaterial({
+            color: FLOATING_COLORS.carriageway,
+            transparent: true,
+            opacity: floatingLaneConfig.opacity * 0.9,
+          });
+          const points: THREE.Vector3[] = [];
+          for (const point of ring) {
+            points.push(new THREE.Vector3(point[0], height, point[1]));
+          }
+          points.push(points[0].clone()); // close the loop
+          const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
+          const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
+          edgeLine.userData.isFloatingLane = true;
+          scene.add(edgeLine);
+          floatingLaneObjects.push(edgeLine);
+        }
+      }
+    }
+
+    // ========== 2. Render sidewalk rings ==========
+    if (floatingLaneConfig.showEdgeLines && sidewalkRings.length > 0) {
+      for (const ring of sidewalkRings) {
+        if (ring.length < 3) continue;
+        const edgeMaterial = new THREE.LineBasicMaterial({
+          color: FLOATING_COLORS.sidewalk,
+          transparent: true,
+          opacity: floatingLaneConfig.opacity * 0.8,
+        });
+        const points: THREE.Vector3[] = [];
+        for (const point of ring) {
+          points.push(new THREE.Vector3(point[0], height, point[1]));
+        }
+        points.push(points[0].clone());
+        const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
+        const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
+        edgeLine.userData.isFloatingLane = true;
+        scene.add(edgeLine);
+        floatingLaneObjects.push(edgeLine);
+      }
+    }
+
+    // ========== 3. Render junctions from junction_geometries ==========
+    for (const junction of junctions) {
+      const coreRings = (junction.carriageway_core_rings ?? []) as number[][][];
+      for (const ring of coreRings) {
+        if (ring.length < 3) continue;
+        const shape = buildPolygonShape(ring);
+        const geometry = new THREE.ShapeGeometry(shape);
+        const material = new THREE.MeshBasicMaterial({
+          color: FLOATING_COLORS.carriageway,
+          transparent: true,
+          opacity: floatingLaneConfig.opacity * 0.75,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(sceneCenterX, height, sceneCenterZ);
+        mesh.userData.isFloatingLane = true;
+        mesh.userData.overlayType = "junction";
+        scene.add(mesh);
+        floatingLaneObjects.push(mesh);
+
+        // Edge lines for junction
+        if (floatingLaneConfig.showEdgeLines) {
+          const edgeMaterial = new THREE.LineBasicMaterial({
+            color: FLOATING_COLORS.carriageway,
+            transparent: true,
+            opacity: floatingLaneConfig.opacity * 0.9,
+          });
+          const points: THREE.Vector3[] = [];
+          for (const point of ring) {
+            points.push(new THREE.Vector3(point[0], height, point[1]));
+          }
+          points.push(points[0].clone());
+          const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
+          const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
+          edgeLine.userData.isFloatingLane = true;
+          scene.add(edgeLine);
+          floatingLaneObjects.push(edgeLine);
+        }
+      }
+    }
+
+    // ========== 4. Fallback: render bands as rectangles if no carriagewayRings ==========
+    if (carriagewayRings.length === 0 && junctions.length === 0) {
+      // Get road extent from bands
+      let roadMinX = Infinity, roadMaxX = -Infinity, roadMinZ = Infinity, roadMaxZ = -Infinity;
+      for (const band of overlay.bands) {
+        if (!band.width_m || !Number.isFinite(band.width_m)) continue;
+        const halfWidth = band.width_m / 2;
+        const zCenter = band.z_center_m ?? 0;
+        roadMinZ = Math.min(roadMinZ, zCenter - halfWidth);
+        roadMaxZ = Math.max(roadMaxZ, zCenter + halfWidth);
+      }
+      roadMinX = sceneCenterX - 50; // Default length
+      roadMaxX = sceneCenterX + 50;
+
+      for (let bandIdx = 0; bandIdx < overlay.bands.length; bandIdx++) {
+        const band = overlay.bands[bandIdx];
+        if (!band.width_m || !Number.isFinite(band.width_m)) continue;
+        if (!visibleLaneKinds.has(band.kind) && band.kind !== "default") continue;
+
+        const isSelected = floatingLaneConfig.selectedLaneIndex === bandIdx;
+        const baseColor = getFloatingLaneColor(band.kind);
+        const opacity = isSelected
+          ? Math.min(floatingLaneConfig.opacity * 1.5, 0.9)
+          : floatingLaneConfig.opacity * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
+
+        const length = roadMaxX - roadMinX;
+        const planeGeo = new THREE.PlaneGeometry(length, band.width_m);
+        const planeMat = new THREE.MeshBasicMaterial({
+          color: baseColor,
+          transparent: true,
+          opacity: opacity * 0.7,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+        planeMesh.rotation.x = -Math.PI / 2;
+        planeMesh.position.set((roadMinX + roadMaxX) / 2, height, band.z_center_m ?? 0);
+        planeMesh.userData.isFloatingLane = true;
+        planeMesh.userData.bandIndex = bandIdx;
+        planeMesh.userData.bandKind = band.kind;
+        planeMesh.userData.overlayType = "band";
+        scene.add(planeMesh);
+        floatingLaneObjects.push(planeMesh);
+
+        // Edge lines
+        if (floatingLaneConfig.showEdgeLines) {
+          const halfWidth = band.width_m / 2;
+          const leftZ = (band.z_center_m ?? 0) - halfWidth;
+          const rightZ = (band.z_center_m ?? 0) + halfWidth;
+          const edgeLineMat = new THREE.LineBasicMaterial({
+            color: isSelected ? 0xffffff : baseColor,
+            transparent: true,
+            opacity: opacity * 0.9,
+          });
+
+          const addEdgeLine = (x1: number, z1: number, x2: number, z2: number) => {
+            const points = [new THREE.Vector3(x1, height, z1), new THREE.Vector3(x2, height, z2)];
+            const geo = new THREE.BufferGeometry().setFromPoints(points);
+            const line = new THREE.Line(geo, edgeLineMat);
+            line.userData.isFloatingLane = true;
+            scene.add(line);
+            floatingLaneObjects.push(line);
+          };
+
+          addEdgeLine(roadMinX, leftZ, roadMaxX, leftZ);
+          addEdgeLine(roadMinX, rightZ, roadMaxX, rightZ);
+          addEdgeLine(roadMinX, leftZ, roadMinX, rightZ);
+          addEdgeLine(roadMaxX, leftZ, roadMaxX, rightZ);
+        }
+
+        // Label
+        if (floatingLaneConfig.showLabels) {
+          const labelSprite = createFloatingLaneLabel(
+            band.kind,
+            (roadMinX + roadMaxX) / 2,
+            height + 1.5,
+            band.z_center_m ?? 0
+          );
+          labelSprite.userData.isFloatingLane = true;
+          labelSprite.userData.bandIndex = bandIdx;
+          scene.add(labelSprite);
+          floatingLaneObjects.push(labelSprite);
+        }
+
+        // Selection glow
+        if (isSelected) {
+          const glowGeo = new THREE.PlaneGeometry(length + 0.5, band.width_m + 0.5);
+          const glowMat = new THREE.MeshBasicMaterial({
+            color: baseColor,
+            transparent: true,
+            opacity: 0.2,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+          });
+          const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+          glowMesh.rotation.x = -Math.PI / 2;
+          glowMesh.position.set((roadMinX + roadMaxX) / 2, height - 0.01, band.z_center_m ?? 0);
+          glowMesh.userData.isFloatingLane = true;
+          scene.add(glowMesh);
+          floatingLaneObjects.push(glowMesh);
+        }
+      }
+    }
+
+    // ========== 5. Render buildings as floating overlays ==========
+    if (floatingLaneConfig.showBuildings) {
+      for (let i = 0; i < overlay.building_footprints.length; i++) {
+        const fp = overlay.building_footprints[i];
+        const pts = fp.polygon_xz;
+        if (!Array.isArray(pts) || pts.length < 3) continue;
+
+        const shape = buildPolygonShape(pts);
+        const geometry = new THREE.ShapeGeometry(shape);
+        const landUseType = fp.land_use_type?.toLowerCase() ?? "";
+        const colorKey = landUseType.includes("residential") ? "building_residential"
+          : landUseType.includes("commercial") ? "building_commercial"
+          : landUseType.includes("industrial") ? "building_industrial"
+          : "building";
+        const baseColor = FLOATING_COLORS[colorKey] ?? FLOATING_COLORS.building;
+
+        const material = new THREE.MeshBasicMaterial({
+          color: baseColor,
+          transparent: true,
+          opacity: floatingLaneConfig.buildingOpacity,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(sceneCenterX, height, sceneCenterZ);
+        mesh.userData.isFloatingLane = true;
+        mesh.userData.overlayType = "building";
+        mesh.userData.buildingIndex = i;
+        scene.add(mesh);
+        floatingLaneObjects.push(mesh);
+
+        // Building edge lines
+        if (floatingLaneConfig.showEdgeLines) {
+          const edgeMaterial = new THREE.LineBasicMaterial({
+            color: baseColor,
+            transparent: true,
+            opacity: floatingLaneConfig.buildingOpacity * 1.2,
+          });
+          const points: THREE.Vector3[] = [];
+          for (const point of pts) {
+            points.push(new THREE.Vector3(point[0], height, point[1]));
+          }
+          points.push(points[0].clone());
+          const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
+          const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
+          edgeLine.userData.isFloatingLane = true;
+          scene.add(edgeLine);
+          floatingLaneObjects.push(edgeLine);
+        }
+
+        // Building label at centroid
+        if (floatingLaneConfig.showLabels && fp.centroid_xz) {
+          const labelSprite = createFloatingLaneLabel(
+            "building",
+            fp.centroid_xz[0],
+            height + 2,
+            fp.centroid_xz[1]
+          );
+          labelSprite.userData.isFloatingLane = true;
+          labelSprite.userData.buildingIndex = i;
+          scene.add(labelSprite);
+          floatingLaneObjects.push(labelSprite);
+        }
+      }
+    }
+
+    // ========== 6. Render features (trees, lamps, etc.) ==========
+    const instances = currentManifest.instances;
+    if (floatingLaneConfig.showFeatures && instances) {
+      const featureCategories = ["tree", "lamp", "bench", "trash", "bollard", "bus_stop"];
+      for (const [id, info] of Object.entries(instances)) {
+        const instanceInfo = info as InstanceInfo;
+        if (!instanceInfo.position_xyz) continue;
+        const category = String(instanceInfo.category || "").toLowerCase();
+        if (!featureCategories.includes(category)) continue;
+
+        const x = instanceInfo.position_xyz[0];
+        const z = instanceInfo.position_xyz[2];
+        const baseColor = FLOATING_COLORS[category] ?? FLOATING_COLORS.default;
+
+        // Feature marker (small circle/disc)
+        const radius = category === "tree" ? 1.5 : 0.5;
+        const geometry = new THREE.CircleGeometry(radius, 16);
+        const material = new THREE.MeshBasicMaterial({
+          color: baseColor,
+          transparent: true,
+          opacity: floatingLaneConfig.featureOpacity,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(x, height, z);
+        mesh.userData.isFloatingLane = true;
+        mesh.userData.overlayType = "feature";
+        mesh.userData.featureCategory = category;
+        scene.add(mesh);
+        floatingLaneObjects.push(mesh);
+
+        // Feature label
+        if (floatingLaneConfig.showLabels) {
+          const labelSprite = createFloatingLaneLabel(
+            category,
+            x,
+            height + 1,
+            z
+          );
+          labelSprite.userData.isFloatingLane = true;
+          labelSprite.userData.featureCategory = category;
+          scene.add(labelSprite);
+          floatingLaneObjects.push(labelSprite);
+        }
       }
     }
   }
@@ -2444,8 +2683,29 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           <input type="range" id="flp-height" min="0.1" max="3" step="0.1" value="${floatingLaneConfig.height}">
         </div>
         <div class="flp-slider-group">
-          <label>Opacity: <span id="flp-opacity-val">${(floatingLaneConfig.opacity * 100).toFixed(0)}%</span></label>
+          <label>Road Opacity: <span id="flp-opacity-val">${(floatingLaneConfig.opacity * 100).toFixed(0)}%</span></label>
           <input type="range" id="flp-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.opacity}">
+        </div>
+        <div class="flp-section">
+          <label>Visible Elements:</label>
+          <div class="flp-checkboxes-row">
+            <label class="flp-checkbox">
+              <input type="checkbox" id="flp-buildings" ${floatingLaneConfig.showBuildings ? "checked" : ""}>
+              Buildings
+            </label>
+            <label class="flp-checkbox">
+              <input type="checkbox" id="flp-features" ${floatingLaneConfig.showFeatures ? "checked" : ""}>
+              Features (Trees)
+            </label>
+          </div>
+        </div>
+        <div class="flp-slider-group" id="flp-building-opacity-group">
+          <label>Building Opacity: <span id="flp-building-opacity-val">${(floatingLaneConfig.buildingOpacity * 100).toFixed(0)}%</span></label>
+          <input type="range" id="flp-building-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.buildingOpacity}">
+        </div>
+        <div class="flp-slider-group" id="flp-feature-opacity-group">
+          <label>Feature Opacity: <span id="flp-feature-opacity-val">${(floatingLaneConfig.featureOpacity * 100).toFixed(0)}%</span></label>
+          <input type="range" id="flp-feature-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.featureOpacity}">
         </div>
         <div class="flp-section">
           <label>Visible Lane Types:</label>
@@ -2480,7 +2740,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           <input type="checkbox" id="flp-animated" ${floatingLaneConfig.animated ? "checked" : ""}>
           Animated Pulse
         </label>
-        <div class="flp-hint">Click lane to select | Press L to toggle</div>
+        <div class="flp-hint">Press L to toggle | Use carriagewayRings</div>
       </div>
     `;
 
@@ -2533,6 +2793,28 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
 
     document.getElementById("flp-animated")?.addEventListener("change", (e) => {
       floatingLaneConfig.animated = (e.target as HTMLInputElement).checked;
+      buildFloatingLaneOverlay();
+    });
+
+    document.getElementById("flp-buildings")?.addEventListener("change", (e) => {
+      floatingLaneConfig.showBuildings = (e.target as HTMLInputElement).checked;
+      buildFloatingLaneOverlay();
+    });
+
+    document.getElementById("flp-features")?.addEventListener("change", (e) => {
+      floatingLaneConfig.showFeatures = (e.target as HTMLInputElement).checked;
+      buildFloatingLaneOverlay();
+    });
+
+    document.getElementById("flp-building-opacity")?.addEventListener("input", (e) => {
+      floatingLaneConfig.buildingOpacity = parseFloat((e.target as HTMLInputElement).value);
+      document.getElementById("flp-building-opacity-val")!.textContent = `${(floatingLaneConfig.buildingOpacity * 100).toFixed(0)}%`;
+      buildFloatingLaneOverlay();
+    });
+
+    document.getElementById("flp-feature-opacity")?.addEventListener("input", (e) => {
+      floatingLaneConfig.featureOpacity = parseFloat((e.target as HTMLInputElement).value);
+      document.getElementById("flp-feature-opacity-val")!.textContent = `${(floatingLaneConfig.featureOpacity * 100).toFixed(0)}%`;
       buildFloatingLaneOverlay();
     });
 

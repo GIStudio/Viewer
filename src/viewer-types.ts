@@ -95,6 +95,10 @@ export type FloatingLaneConfig = {
   animated: boolean;        // 动画脉冲效果
   colorScheme: "semantic" | "functional" | "safety";
   selectedLaneIndex: number;
+  showBuildings: boolean;    // 显示建筑物悬浮层
+  showFeatures: boolean;    // 显示地物悬浮层（树木等）
+  buildingOpacity: number;   // 建筑物透明度
+  featureOpacity: number;    // 地物透明度
 };
 
 export type FloatingLaneState = FloatingLaneConfig & {
@@ -121,6 +125,20 @@ export const FLOATING_LANE_COLORS: Record<string, number> = {
   frontage: 0x06b6d4,      // 青色
   shared: 0xa78bfa,        // 薰衣草
 
+  // Building types
+  building: 0x8b5cf6,      // 紫色 - 建筑物
+  building_residential: 0x6366f1, // 靛蓝 - 住宅
+  building_commercial: 0xf43f5e,   // 玫红 - 商业
+  building_industrial: 0x78716c,   // 灰棕 - 工业
+
+  // Feature types
+  tree: 0x16a34a,         // 深绿 - 树木
+  lamp: 0xeab308,         // 黄色 - 路灯
+  bench: 0x78350f,        // 深棕 - 长椅
+  trash: 0x6b7280,        // 灰色 - 垃圾桶
+  bollard: 0xf59e0b,       // 橙色 - 阻车桩
+  bus_stop: 0x3b82f6,      // 蓝色 - 公交站
+
   // 默认
   default: 0x94a3b8,
 };
@@ -140,6 +158,15 @@ export const FLOATING_LANE_LABELS: Record<string, string> = {
   frontage: "退缩带",
   shared: "共享街道",
   default: "道路",
+  // Building types
+  building: "建筑物",
+  // Feature types
+  tree: "树木",
+  lamp: "路灯",
+  bench: "长椅",
+  trash: "垃圾桶",
+  bollard: "阻车桩",
+  bus_stop: "公交站",
 };
 
 export type BuildingFootprint = {
