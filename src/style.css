@@ -4311,14 +4311,15 @@ body {
   border: 1px solid rgba(42, 110, 220, 0.18);
 }
 
-/* ── Axis HUD (Camera-relative) ──────────────────────────────────────────── */
+/* ── Heading/HUD Indicators ───────────────────────────────────────────────── */
 
 .viewer-axis-hud {
   position: fixed;
-  bottom: 80px;
-  left: 16px;
-  width: 120px;
-  height: 120px;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  height: 60px;
   pointer-events: none;
   z-index: 100;
 }

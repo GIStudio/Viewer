@@ -2299,8 +2299,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
 
     // Setup high DPI
     const dpr = window.devicePixelRatio || 1;
-    const displayWidth = 120;
-    const displayHeight = 120;
+    const displayWidth = 200;
+    const displayHeight = 60;
     axisHudEl.width = Math.round(displayWidth * dpr);
     axisHudEl.height = Math.round(displayHeight * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -2311,78 +2311,94 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     // Only show when floating lane overlay is enabled
     if (!floatingLaneConfig.enabled) return;
 
-    const centerX = 25;
-    const centerY = displayHeight - 25;
-    const axisLength = 40;
-
-    // Background circle
-    ctx.fillStyle = "rgba(15, 23, 42, 0.8)";
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, 55, 0, Math.PI * 2);
+    // Background panel
+    ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+    roundRect(ctx, 0, 0, displayWidth, displayHeight, 12);
     ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
 
-    // Border
+    // Get camera heading angle (0° = North = +Z in world space)
+    const forward = cameraForwardHorizontal();
+    const headingRad = Math.atan2(forward.x, forward.z);
+    let headingDeg = (-headingRad * 180 / Math.PI + 360) % 360;
+
+    // Compass circle
+    const compassX = 35;
+    const compassY = 30;
+    const compassRadius = 22;
+
+    // Compass background
+    ctx.fillStyle = "rgba(30, 41, 59, 0.9)";
+    ctx.beginPath();
+    ctx.arc(compassX, compassY, compassRadius, 0, Math.PI * 2);
+    ctx.fill();
     ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // X axis (red) - pointing right in screen space
-    ctx.strokeStyle = "#ef4444";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(centerX, centerY);
-    ctx.lineTo(centerX + axisLength, centerY);
-    ctx.stroke();
+    // Draw compass tick marks and labels
+    const directions = [
+      { angle: 0, label: "N", color: "#ef4444" },      // North - red
+      { angle: 90, label: "E", color: "#ffffff" },    // East
+      { angle: 180, label: "S", color: "#ffffff" },   // South
+      { angle: 270, label: "W", color: "#ffffff" },   // West
+    ];
 
-    // X arrow head
-    ctx.beginPath();
-    ctx.moveTo(centerX + axisLength, centerY);
-    ctx.lineTo(centerX + axisLength - 8, centerY - 5);
-    ctx.lineTo(centerX + axisLength - 8, centerY + 5);
-    ctx.closePath();
-    ctx.fillStyle = "#ef4444";
-    ctx.fill();
+    // Draw tick marks
+    for (let i = 0; i < 36; i++) {
+      const tickAngle = (i * 10 - headingDeg) * Math.PI / 180 - Math.PI / 2;
+      const isMajor = i % 9 === 0;
+      const tickLen = isMajor ? 6 : 3;
+      const x1 = compassX + Math.cos(tickAngle) * (compassRadius - tickLen);
+      const y1 = compassY + Math.sin(tickAngle) * (compassRadius - tickLen);
+      const x2 = compassX + Math.cos(tickAngle) * compassRadius;
+      const y2 = compassY + Math.sin(tickAngle) * compassRadius;
+      ctx.strokeStyle = isMajor ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.3)";
+      ctx.lineWidth = isMajor ? 2 : 1;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
 
-    // X label
-    ctx.fillStyle = "#ef4444";
-    ctx.font = "bold 14px sans-serif";
+    // Draw direction labels
+    ctx.font = "bold 10px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("X", centerX + axisLength + 12, centerY);
+    for (const dir of directions) {
+      const labelAngle = (dir.angle - headingDeg) * Math.PI / 180 - Math.PI / 2;
+      const labelX = compassX + Math.cos(labelAngle) * (compassRadius - 12);
+      const labelY = compassY + Math.sin(labelAngle) * (compassRadius - 12);
+      ctx.fillStyle = dir.color;
+      ctx.fillText(dir.label, labelX, labelY);
+    }
 
-    // Z axis (blue) - pointing up in screen space (represents 3D Z)
-    ctx.strokeStyle = "#3b82f6";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(centerX, centerY);
-    ctx.lineTo(centerX, centerY - axisLength);
-    ctx.stroke();
-
-    // Z arrow head
-    ctx.beginPath();
-    ctx.moveTo(centerX, centerY - axisLength);
-    ctx.lineTo(centerX - 5, centerY - axisLength + 8);
-    ctx.lineTo(centerX + 5, centerY - axisLength + 8);
-    ctx.closePath();
-    ctx.fillStyle = "#3b82f6";
-    ctx.fill();
-
-    // Z label
-    ctx.fillStyle = "#3b82f6";
-    ctx.fillText("Z", centerX, centerY - axisLength - 12);
-
-    // Origin dot
+    // Center dot
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
-    ctx.arc(centerX, centerY, 3, 0, Math.PI * 2);
+    ctx.arc(compassX, compassY, 3, 0, Math.PI * 2);
     ctx.fill();
 
-    // Title
-    ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-    ctx.font = "10px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    ctx.fillText("Scene Axis", centerX, 5);
+    // Heading angle text
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 18px monospace";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`${headingDeg.toFixed(0)}°`, 70, 22);
+
+    // Heading label
+    ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+    ctx.font = "11px sans-serif";
+    ctx.fillText("HEADING", 70, 42);
+
+    // Scene center info
+    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.font = "10px monospace";
+    ctx.textAlign = "right";
+    ctx.fillText(`X: ${currentSceneBounds ? currentSceneBounds.center.x.toFixed(1) : "N/A"}`, 195, 18);
+    ctx.fillText(`Z: ${currentSceneBounds ? currentSceneBounds.center.z.toFixed(1) : "N/A"}`, 195, 32);
   }
 
   function buildPolygonShape(points: number[][]): THREE.Shape {
