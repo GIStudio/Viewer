@@ -85,6 +85,63 @@ export type LayoutBand = {
   allowed_categories?: string[];
 };
 
+// Floating Lane Overlay types
+export type FloatingLaneConfig = {
+  enabled: boolean;
+  height: number;           // 悬浮高度 (m)
+  opacity: number;         // 透明度 0-1
+  showEdgeLines: boolean;   // 显示边界线
+  showLabels: boolean;       // 显示车道标签
+  animated: boolean;        // 动画脉冲效果
+  colorScheme: "semantic" | "functional" | "safety";
+  selectedLaneIndex: number;
+};
+
+export type FloatingLaneState = FloatingLaneConfig & {
+  visibleLaneKinds: Set<string>;
+};
+
+export const FLOATING_LANE_COLORS: Record<string, number> = {
+  // 车道类型 - Semantic
+  carriageway: 0x3b82f6,    // 蓝色 - 机动车道
+  drive_lane: 0x60a5fa,     // 浅蓝
+  bike_lane: 0x22c55e,      // 绿色 - 自行车道
+  bus_lane: 0xf59e0b,      // 橙色 - 公交专用
+  parking_lane: 0x6b7280,   // 灰色
+
+  // 行人区 - Semantic
+  clear_path: 0xfaf5e6,     // 米白 - 清晰路径
+  furnishing: 0x92400e,     // 棕色 - 设施带
+  sidewalk: 0xd4c4a8,      // 浅棕
+
+  // 特殊 - Semantic
+  median: 0xf97316,        // 橙红
+  greenzone: 0x16a34a,     // 深绿
+  buffer: 0x8b5cf6,        // 紫色
+  frontage: 0x06b6d4,      // 青色
+  shared: 0xa78bfa,        // 薰衣草
+
+  // 默认
+  default: 0x94a3b8,
+};
+
+export const FLOATING_LANE_LABELS: Record<string, string> = {
+  carriageway: "机动车道",
+  drive_lane: "行车道",
+  bike_lane: "自行车道",
+  bus_lane: "公交专用",
+  parking_lane: "停车带",
+  clear_path: "人行区",
+  furnishing: "设施带",
+  sidewalk: "人行道",
+  median: "中央分隔带",
+  greenzone: "绿化带",
+  buffer: "缓冲带",
+  frontage: "退缩带",
+  shared: "共享街道",
+  default: "道路",
+};
+
 export type BuildingFootprint = {
   footprint_id: string;
   polygon_xz: number[][];

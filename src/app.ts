@@ -3,7 +3,15 @@ import { PointerLockControls } from "three/examples/jsm/controls/PointerLockCont
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { AudioManager } from "./audio-manager";
 import { createCompareMode } from "./compare-mode";
-import type { ViewerManifest, InstanceInfo, AssetDescription, StaticObjectDescription } from "./viewer-types";
+import type {
+  ViewerManifest,
+  InstanceInfo,
+  AssetDescription,
+  StaticObjectDescription,
+  FloatingLaneConfig,
+  FLOATING_LANE_COLORS,
+  FLOATING_LANE_LABELS,
+} from "./viewer-types";
 
 type SceneOption = {
   key: string;
@@ -1416,6 +1424,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
             <button id="viewer-presets-toggle" class="viewer-nav-button viewer-menu-button" type="button">Presets</button>
             <button id="viewer-compare-toggle" class="viewer-nav-button viewer-menu-button" type="button">Compare</button>
             <button id="viewer-evaluate-toggle" class="viewer-nav-button viewer-menu-button" type="button">Evaluate</button>
+            <button id="viewer-floating-lane-toggle" class="viewer-nav-button viewer-menu-button" type="button">Floating Lane</button>
             <button id="viewer-export-topdown-map" class="viewer-nav-button viewer-menu-button" type="button">Export PNG</button>
             <button id="viewer-export-topdown-svg" class="viewer-nav-button viewer-menu-button" type="button">Export SVG</button>
           </div>
@@ -2143,6 +2152,430 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
   }
 
+  /* ── Floating Lane Overlay ─────────────────────────────────── */
+
+  // Floating lane colors - HDR style (bright, saturated)
+  const FLOATING_COLORS: Record<string, number> = {
+    carriageway: 0x3b82f6,   // Blue
+    drive_lane: 0x60a5fa,    // Light blue
+    bike_lane: 0x22c55e,    // Green
+    bus_lane: 0xf59e0b,     // Orange
+    parking_lane: 0x6b7280,  // Gray
+    clear_path: 0xfaf5e6,    // Cream
+    furnishing: 0x92400e,    // Brown
+    sidewalk: 0xd4c4a8,     // Tan
+    median: 0xf97316,       // Orange-red
+    greenzone: 0x16a34a,    // Dark green
+    buffer: 0x8b5cf6,       // Purple
+    frontage: 0x06b6d4,     // Cyan
+    shared: 0xa78bfa,       // Lavender
+    default: 0x94a3b8,
+  };
+
+  // Safety color scheme
+  const SAFETY_COLORS: Record<string, number> = {
+    carriageway: 0xef4444,   // Red - dangerous
+    bike_lane: 0x22c55e,    // Green - safe
+    clear_path: 0x22c55e,   // Green - safe
+    sidewalk: 0x22c55e,     // Green - safe
+    furnishing: 0xeab308,   // Yellow - caution
+    default: 0x94a3b8,
+  };
+
+  // Lane kind labels
+  const LANE_LABELS: Record<string, string> = {
+    carriageway: "机动车道",
+    drive_lane: "行车道",
+    bike_lane: "自行车道",
+    bus_lane: "公交专用",
+    parking_lane: "停车带",
+    clear_path: "人行区",
+    furnishing: "设施带",
+    sidewalk: "人行道",
+    median: "中央分隔带",
+    greenzone: "绿化带",
+    buffer: "缓冲带",
+    frontage: "退缩带",
+    shared: "共享街道",
+    default: "道路",
+  };
+
+  // Floating lane overlay state
+  let floatingLaneObjects: THREE.Object3D[] = [];
+  let floatingLaneConfig: FloatingLaneConfig = {
+    enabled: false,
+    height: 0.5,
+    opacity: 0.5,
+    showEdgeLines: true,
+    showLabels: true,
+    animated: false,
+    colorScheme: "semantic",
+    selectedLaneIndex: -1,
+  };
+  let visibleLaneKinds: Set<string> = new Set([
+    "carriageway", "drive_lane", "clear_path", "furnishing", "sidewalk",
+  ]);
+  let floatingLaneAnimTime = 0;
+
+  function getFloatingLaneColor(kind: string): number {
+    const colors = floatingLaneConfig.colorScheme === "safety" ? SAFETY_COLORS : FLOATING_COLORS;
+    return colors[kind] ?? colors["default"] ?? 0x94a3b8;
+  }
+
+  function clearFloatingLaneOverlay(): void {
+    for (const obj of floatingLaneObjects) {
+      scene.remove(obj);
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry.dispose();
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(m => m.dispose());
+        } else {
+          (obj.material as THREE.Material).dispose();
+        }
+      }
+      if (obj instanceof THREE.Sprite) {
+        obj.material.map?.dispose();
+        obj.material.dispose();
+      }
+      if (obj instanceof THREE.LineSegments) {
+        obj.geometry.dispose();
+        (obj.material as THREE.Material).dispose();
+      }
+    }
+    floatingLaneObjects.length = 0;
+    floatingLaneConfig.selectedLaneIndex = -1;
+  }
+
+  function createFloatingLaneLabel(kind: string, x: number, y: number, z: number): THREE.Sprite {
+    const label = LANE_LABELS[kind] ?? LANE_LABELS["default"];
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+    roundRect(ctx, 0, 0, 256, 64, 8);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 24px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, 128, 32);
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(4, 1, 1);
+    sprite.position.set(x, y, z);
+    sprite.userData.isFloatingLane = true;
+    sprite.userData.laneLabel = label;
+    return sprite;
+  }
+
+  function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  function buildFloatingLaneOverlay(): void {
+    clearFloatingLaneOverlay();
+    if (!currentManifest?.layout_overlay) return;
+
+    const overlay = currentManifest.layout_overlay;
+    const lengthM = overlay.length_m || 0;
+
+    // Create lanes for each band
+    for (let bandIdx = 0; bandIdx < overlay.bands.length; bandIdx++) {
+      const band = overlay.bands[bandIdx];
+      if (!band.width_m || !Number.isFinite(band.width_m)) continue;
+      if (!visibleLaneKinds.has(band.kind) && band.kind !== "default") continue;
+
+      const isSelected = floatingLaneConfig.selectedLaneIndex === bandIdx;
+      const baseColor = getFloatingLaneColor(band.kind);
+      const opacity = isSelected
+        ? Math.min(floatingLaneConfig.opacity * 1.5, 0.9)
+        : floatingLaneConfig.opacity * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
+
+      // 1. Main lane plane
+      const planeGeo = new THREE.PlaneGeometry(lengthM, band.width_m);
+      const planeMat = new THREE.MeshBasicMaterial({
+        color: baseColor,
+        transparent: true,
+        opacity: opacity * 0.7,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+      planeMesh.rotation.x = -Math.PI / 2;
+      planeMesh.position.set(lengthM / 2, floatingLaneConfig.height, band.z_center_m ?? 0);
+      planeMesh.userData.isFloatingLane = true;
+      planeMesh.userData.bandIndex = bandIdx;
+      planeMesh.userData.bandKind = band.kind;
+      scene.add(planeMesh);
+      floatingLaneObjects.push(planeMesh);
+
+      // 2. Edge lines (left and right borders)
+      if (floatingLaneConfig.showEdgeLines) {
+        const halfWidth = band.width_m / 2;
+        const edgeHeight = floatingLaneConfig.height;
+        const leftZ = (band.z_center_m ?? 0) - halfWidth;
+        const rightZ = (band.z_center_m ?? 0) + halfWidth;
+
+        const edgeLineMat = new THREE.LineBasicMaterial({
+          color: isSelected ? 0xffffff : baseColor,
+          transparent: true,
+          opacity: opacity * 0.9,
+          linewidth: 2,
+        });
+
+        // Left edge
+        const leftEdgePoints = [
+          new THREE.Vector3(0, edgeHeight, leftZ),
+          new THREE.Vector3(lengthM, edgeHeight, leftZ),
+        ];
+        const leftEdgeGeo = new THREE.BufferGeometry().setFromPoints(leftEdgePoints);
+        const leftEdge = new THREE.Line(leftEdgeGeo, edgeLineMat);
+        leftEdge.userData.isFloatingLane = true;
+        scene.add(leftEdge);
+        floatingLaneObjects.push(leftEdge);
+
+        // Right edge
+        const rightEdgePoints = [
+          new THREE.Vector3(0, edgeHeight, rightZ),
+          new THREE.Vector3(lengthM, edgeHeight, rightZ),
+        ];
+        const rightEdgeGeo = new THREE.BufferGeometry().setFromPoints(rightEdgePoints);
+        const rightEdge = new THREE.Line(rightEdgeGeo, edgeLineMat);
+        rightEdge.userData.isFloatingLane = true;
+        scene.add(rightEdge);
+        floatingLaneObjects.push(rightEdge);
+
+        // Top edge
+        const topEdgePoints = [
+          new THREE.Vector3(0, edgeHeight, leftZ),
+          new THREE.Vector3(0, edgeHeight, rightZ),
+        ];
+        const topEdgeGeo = new THREE.BufferGeometry().setFromPoints(topEdgePoints);
+        const topEdge = new THREE.Line(topEdgeGeo, edgeLineMat);
+        topEdge.userData.isFloatingLane = true;
+        scene.add(topEdge);
+        floatingLaneObjects.push(topEdge);
+
+        // Bottom edge
+        const bottomEdgePoints = [
+          new THREE.Vector3(lengthM, edgeHeight, leftZ),
+          new THREE.Vector3(lengthM, edgeHeight, rightZ),
+        ];
+        const bottomEdgeGeo = new THREE.BufferGeometry().setFromPoints(bottomEdgePoints);
+        const bottomEdge = new THREE.Line(bottomEdgeGeo, edgeLineMat);
+        bottomEdge.userData.isFloatingLane = true;
+        scene.add(bottomEdge);
+        floatingLaneObjects.push(bottomEdge);
+      }
+
+      // 3. Lane label
+      if (floatingLaneConfig.showLabels) {
+        const labelSprite = createFloatingLaneLabel(
+          band.kind,
+          lengthM / 2,
+          floatingLaneConfig.height + 1.5,
+          band.z_center_m ?? 0
+        );
+        labelSprite.userData.isFloatingLane = true;
+        labelSprite.userData.bandIndex = bandIdx;
+        scene.add(labelSprite);
+        floatingLaneObjects.push(labelSprite);
+      }
+
+      // 4. Selection highlight glow
+      if (isSelected) {
+        const glowGeo = new THREE.PlaneGeometry(lengthM + 0.5, band.width_m + 0.5);
+        const glowMat = new THREE.MeshBasicMaterial({
+          color: baseColor,
+          transparent: true,
+          opacity: 0.2,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+        glowMesh.rotation.x = -Math.PI / 2;
+        glowMesh.position.set(lengthM / 2, floatingLaneConfig.height - 0.01, band.z_center_m ?? 0);
+        glowMesh.userData.isFloatingLane = true;
+        scene.add(glowMesh);
+        floatingLaneObjects.push(glowMesh);
+      }
+    }
+  }
+
+  function updateFloatingLaneOverlay(deltaTime: number): void {
+    if (!floatingLaneConfig.enabled) return;
+    if (floatingLaneConfig.animated) {
+      floatingLaneAnimTime += deltaTime;
+      buildFloatingLaneOverlay();
+    }
+  }
+
+  function createFloatingLaneControlPanel(): void {
+    const panelId = "floating-lane-panel";
+    if (document.getElementById(panelId)) return;
+
+    const panel = document.createElement("div");
+    panel.id = panelId;
+    panel.className = "floating-lane-panel";
+    panel.innerHTML = `
+      <div class="flp-header">
+        <span class="flp-title">Floating Lane Overlay</span>
+        <button class="flp-close" id="flp-close-btn">&times;</button>
+      </div>
+      <div class="flp-content">
+        <label class="flp-checkbox">
+          <input type="checkbox" id="flp-enabled" ${floatingLaneConfig.enabled ? "checked" : ""}>
+          Enable Overlay
+        </label>
+        <div class="flp-slider-group">
+          <label>Height: <span id="flp-height-val">${floatingLaneConfig.height.toFixed(1)}m</span></label>
+          <input type="range" id="flp-height" min="0.1" max="3" step="0.1" value="${floatingLaneConfig.height}">
+        </div>
+        <div class="flp-slider-group">
+          <label>Opacity: <span id="flp-opacity-val">${(floatingLaneConfig.opacity * 100).toFixed(0)}%</span></label>
+          <input type="range" id="flp-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.opacity}">
+        </div>
+        <div class="flp-section">
+          <label>Visible Lane Types:</label>
+          <div class="flp-checkboxes" id="flp-lane-kinds">
+            ${["carriageway", "drive_lane", "bike_lane", "bus_lane", "clear_path", "furnishing", "sidewalk", "greenzone"].map(kind => `
+              <label class="flp-checkbox">
+                <input type="checkbox" data-kind="${kind}" ${visibleLaneKinds.has(kind) ? "checked" : ""}>
+                ${LANE_LABELS[kind] || kind}
+              </label>
+            `).join("")}
+          </div>
+        </div>
+        <div class="flp-section">
+          <label>Color Scheme:</label>
+          <select id="flp-color-scheme">
+            <option value="semantic" ${floatingLaneConfig.colorScheme === "semantic" ? "selected" : ""}>Semantic</option>
+            <option value="functional" ${floatingLaneConfig.colorScheme === "functional" ? "selected" : ""}>Functional</option>
+            <option value="safety" ${floatingLaneConfig.colorScheme === "safety" ? "selected" : ""}>Safety</option>
+          </select>
+        </div>
+        <div class="flp-checkboxes-row">
+          <label class="flp-checkbox">
+            <input type="checkbox" id="flp-edges" ${floatingLaneConfig.showEdgeLines ? "checked" : ""}>
+            Edge Lines
+          </label>
+          <label class="flp-checkbox">
+            <input type="checkbox" id="flp-labels" ${floatingLaneConfig.showLabels ? "checked" : ""}>
+            Labels
+          </label>
+        </div>
+        <label class="flp-checkbox">
+          <input type="checkbox" id="flp-animated" ${floatingLaneConfig.animated ? "checked" : ""}>
+          Animated Pulse
+        </label>
+        <div class="flp-hint">Click lane to select | Press L to toggle</div>
+      </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    // Add event listeners
+    document.getElementById("flp-close-btn")?.addEventListener("click", () => {
+      floatingLaneConfig.enabled = false;
+      clearFloatingLaneOverlay();
+      panel.style.display = "none";
+    });
+
+    document.getElementById("flp-enabled")?.addEventListener("change", (e) => {
+      floatingLaneConfig.enabled = (e.target as HTMLInputElement).checked;
+      if (floatingLaneConfig.enabled) {
+        buildFloatingLaneOverlay();
+        panel.style.display = "block";
+      } else {
+        clearFloatingLaneOverlay();
+        panel.style.display = "none";
+      }
+    });
+
+    document.getElementById("flp-height")?.addEventListener("input", (e) => {
+      floatingLaneConfig.height = parseFloat((e.target as HTMLInputElement).value);
+      document.getElementById("flp-height-val")!.textContent = `${floatingLaneConfig.height.toFixed(1)}m`;
+      buildFloatingLaneOverlay();
+    });
+
+    document.getElementById("flp-opacity")?.addEventListener("input", (e) => {
+      floatingLaneConfig.opacity = parseFloat((e.target as HTMLInputElement).value);
+      document.getElementById("flp-opacity-val")!.textContent = `${(floatingLaneConfig.opacity * 100).toFixed(0)}%`;
+      buildFloatingLaneOverlay();
+    });
+
+    document.getElementById("flp-color-scheme")?.addEventListener("change", (e) => {
+      floatingLaneConfig.colorScheme = (e.target as HTMLSelectElement).value as "semantic" | "functional" | "safety";
+      buildFloatingLaneOverlay();
+    });
+
+    document.getElementById("flp-edges")?.addEventListener("change", (e) => {
+      floatingLaneConfig.showEdgeLines = (e.target as HTMLInputElement).checked;
+      buildFloatingLaneOverlay();
+    });
+
+    document.getElementById("flp-labels")?.addEventListener("change", (e) => {
+      floatingLaneConfig.showLabels = (e.target as HTMLInputElement).checked;
+      buildFloatingLaneOverlay();
+    });
+
+    document.getElementById("flp-animated")?.addEventListener("change", (e) => {
+      floatingLaneConfig.animated = (e.target as HTMLInputElement).checked;
+      buildFloatingLaneOverlay();
+    });
+
+    document.getElementById("flp-lane-kinds")?.addEventListener("change", (e) => {
+      const target = e.target as HTMLInputElement;
+      if (target.dataset.kind) {
+        if (target.checked) {
+          visibleLaneKinds.add(target.dataset.kind);
+        } else {
+          visibleLaneKinds.delete(target.dataset.kind);
+        }
+        buildFloatingLaneOverlay();
+      }
+    });
+
+    if (!floatingLaneConfig.enabled) {
+      panel.style.display = "none";
+    }
+  }
+
+  function toggleFloatingLaneOverlay(): void {
+    floatingLaneConfig.enabled = !floatingLaneConfig.enabled;
+    if (floatingLaneConfig.enabled) {
+      buildFloatingLaneOverlay();
+      createFloatingLaneControlPanel();
+      const panel = document.getElementById("floating-lane-panel");
+      if (panel) panel.style.display = "block";
+    } else {
+      clearFloatingLaneOverlay();
+      const panel = document.getElementById("floating-lane-panel");
+      if (panel) panel.style.display = "none";
+    }
+  }
+
+  function selectFloatingLane(bandIndex: number): void {
+    if (floatingLaneConfig.selectedLaneIndex === bandIndex) {
+      floatingLaneConfig.selectedLaneIndex = -1;
+    } else {
+      floatingLaneConfig.selectedLaneIndex = bandIndex;
+    }
+    buildFloatingLaneOverlay();
+  }
+
   function resizeRenderer(): void {
     const width = Math.max(1, canvasHost.clientWidth);
     const height = Math.max(1, canvasHost.clientHeight);
@@ -2287,6 +2720,33 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       case "KeyP":
         if (active && !event.repeat) {
           toggleSettingsShortcut();
+        }
+        break;
+      case "KeyL":
+        if (active && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          toggleFloatingLaneOverlay();
+        }
+        break;
+      case "Digit1":
+      case "Digit2":
+      case "Digit3":
+      case "Digit4":
+      case "Digit5":
+      case "Digit6":
+      case "Digit7":
+      case "Digit8":
+      case "Digit9":
+        if (active && !event.repeat && floatingLaneConfig.enabled) {
+          const laneIndex = parseInt(event.code.replace("Digit", "")) - 1;
+          if (currentManifest?.layout_overlay && laneIndex < currentManifest.layout_overlay.bands.length) {
+            selectFloatingLane(laneIndex);
+          }
+        }
+        break;
+      case "Escape":
+        if (active && floatingLaneConfig.selectedLaneIndex >= 0) {
+          floatingLaneConfig.selectedLaneIndex = -1;
+          buildFloatingLaneOverlay();
         }
         break;
       default:
@@ -2563,6 +3023,15 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     currentLaserHitPoint = hit.point.clone();
     laserHitDot.visible = true;
     laserHitDot.position.copy(hit.point);
+
+    // Check if clicked on a floating lane
+    if (hit.object.userData.isFloatingLane && typeof hit.object.userData.bandIndex === "number") {
+      selectFloatingLane(hit.object.userData.bandIndex);
+      const bandKind = hit.object.userData.bandKind || "unknown";
+      const bandLabel = LANE_LABELS[bandKind] || bandKind;
+      setInfoCardContent(`<div class="hit-descriptor"><strong>${bandLabel}</strong><br>Click again to deselect</div>`);
+      return;
+    }
 
     const descriptor = resolveHitDescriptor(hit.object, hit.point.clone());
     if (!descriptor) {
@@ -3088,6 +3557,12 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
   }, { signal });
 
+  // Floating Lane Overlay toggle
+  const floatingLaneToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-floating-lane-toggle");
+  floatingLaneToggleEl.addEventListener("click", () => {
+    toggleFloatingLaneOverlay();
+  }, { signal });
+
   minimapOverlayEl.addEventListener(
     "click",
     (event) => {
@@ -3412,6 +3887,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
 
     updateAssetBboxHelpers();
     updateLaserPointer();
+    updateFloatingLaneOverlay(delta);
 
     const didRenderCompare = compareMode.renderCompare3dFrame();
     if (!didRenderCompare) {
