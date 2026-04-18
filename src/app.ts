@@ -976,7 +976,16 @@ function parseQueryLayoutPath(): string | null {
 
 async function loadManifest(layoutPath: string): Promise<ViewerManifest> {
   const response = await fetch(`./api/layout?path=${encodeURIComponent(layoutPath)}`);
-  const payload = (await response.json()) as ViewerManifest | { error?: string };
+  const text = await response.text();
+  if (!text) {
+    throw new Error("Server returned empty response");
+  }
+  let payload: ViewerManifest | { error?: string };
+  try {
+    payload = JSON.parse(text) as ViewerManifest | { error?: string };
+  } catch {
+    throw new Error(`Invalid JSON: ${text.substring(0, 100)}`);
+  }
   if (!response.ok) {
     throw new Error(
       payload && "error" in payload
@@ -989,7 +998,16 @@ async function loadManifest(layoutPath: string): Promise<ViewerManifest> {
 
 async function loadRecentLayouts(limit = 20): Promise<RecentLayout[]> {
   const response = await fetch(`./api/recent-layouts?limit=${encodeURIComponent(String(limit))}`);
-  const payload = (await response.json()) as RecentLayoutsPayload;
+  const text = await response.text();
+  if (!text) {
+    return [];
+  }
+  let payload: RecentLayoutsPayload;
+  try {
+    payload = JSON.parse(text) as RecentLayoutsPayload;
+  } catch {
+    throw new Error(`Invalid JSON: ${text.substring(0, 100)}`);
+  }
   if (!response.ok) {
     throw new Error(String(payload?.error ?? "Failed to discover recent scene layouts."));
   }
@@ -2778,7 +2796,20 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ layout_path: currentLayoutPath }),
       });
-      const result = (await response.json()) as EvaluationResult | { error?: string };
+
+      // Handle empty response or non-JSON responses
+      const text = await response.text();
+      if (!text) {
+        throw new Error("Server returned empty response");
+      }
+
+      let result: EvaluationResult | { error?: string };
+      try {
+        result = JSON.parse(text) as EvaluationResult | { error?: string };
+      } catch {
+        throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+      }
+
       if (!response.ok) {
         throw new Error(
           (result && "error" in result ? result.error : "Evaluation failed") as string,
@@ -2935,11 +2966,19 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ preset: preset.id, config: preset.config }),
       });
-      if (!response.ok) {
-        const errPayload = (await response.json()) as { error?: string };
-        throw new Error(errPayload.error ?? "Scene generation failed.");
+      const text = await response.text();
+      if (!text) {
+        throw new Error("Server returned empty response");
       }
-      const result = (await response.json()) as { layout_path?: string };
+      let result: { layout_path?: string; error?: string };
+      try {
+        result = JSON.parse(text) as { layout_path?: string; error?: string };
+      } catch {
+        throw new Error(`Invalid JSON: ${text.substring(0, 100)}`);
+      }
+      if (!response.ok) {
+        throw new Error(result.error ?? "Scene generation failed.");
+      }
       if (result.layout_path) {
         await loadLayoutSelection(result.layout_path);
         // Refresh recent layouts list
