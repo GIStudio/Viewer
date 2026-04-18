@@ -2324,6 +2324,48 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
 
     const height = floatingLaneConfig.height;
 
+    // ========== 0. Render scene axis indicator for debugging ==========
+    const axisLength = 20; // Length of axis arrows in scene units
+    const axisOrigin = new THREE.Vector3(sceneCenterX, height, sceneCenterZ);
+
+    // X axis (red arrow pointing in +X direction)
+    const xAxisPoints = [
+      new THREE.Vector3(sceneCenterX, height, sceneCenterZ),
+      new THREE.Vector3(sceneCenterX + axisLength, height, sceneCenterZ),
+    ];
+    const xAxisGeo = new THREE.BufferGeometry().setFromPoints(xAxisPoints);
+    const xAxisMat = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 });
+    const xAxisLine = new THREE.Line(xAxisGeo, xAxisMat);
+    xAxisLine.userData.isFloatingLane = true;
+    xAxisLine.userData.overlayType = "axis";
+    scene.add(xAxisLine);
+    floatingLaneObjects.push(xAxisLine);
+
+    // Z axis (blue arrow pointing in +Z direction)
+    const zAxisPoints = [
+      new THREE.Vector3(sceneCenterX, height, sceneCenterZ),
+      new THREE.Vector3(sceneCenterX, height, sceneCenterZ + axisLength),
+    ];
+    const zAxisGeo = new THREE.BufferGeometry().setFromPoints(zAxisPoints);
+    const zAxisMat = new THREE.LineBasicMaterial({ color: 0x0000ff, linewidth: 2 });
+    const zAxisLine = new THREE.Line(zAxisGeo, zAxisMat);
+    zAxisLine.userData.isFloatingLane = true;
+    zAxisLine.userData.overlayType = "axis";
+    scene.add(zAxisLine);
+    floatingLaneObjects.push(zAxisLine);
+
+    // X axis label
+    const xLabel = createFloatingLaneLabel("X+", sceneCenterX + axisLength + 3, height, sceneCenterZ);
+    xLabel.userData.isFloatingLane = true;
+    scene.add(xLabel);
+    floatingLaneObjects.push(xLabel);
+
+    // Z axis label
+    const zLabel = createFloatingLaneLabel("Z+", sceneCenterX, height, sceneCenterZ + axisLength + 3);
+    zLabel.userData.isFloatingLane = true;
+    scene.add(zLabel);
+    floatingLaneObjects.push(zLabel);
+
     // ========== 1. Render road polygons using carriagewayRings ==========
     // Note: carriagewayRings coordinates are already in absolute scene coordinates (X, Z)
     if (carriagewayRings.length > 0) {
