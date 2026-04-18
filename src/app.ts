@@ -1439,6 +1439,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         <div id="viewer-minimap-canvas" class="viewer-minimap-canvas"></div>
         <canvas id="viewer-minimap-overlay" class="viewer-minimap-overlay"></canvas>
       </div>
+      <canvas id="viewer-axis-hud" class="viewer-axis-hud"></canvas>
       <aside id="viewer-settings-panel" class="viewer-settings-panel" data-open="false">
         <div class="viewer-settings-header">
           <div>
@@ -1601,6 +1602,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const crosshairEl = requireElement<HTMLElement>(root, "#viewer-crosshair");
   const minimapHost = requireElement<HTMLElement>(root, "#viewer-minimap-canvas");
   const minimapOverlayEl = requireElement<HTMLCanvasElement>(root, "#viewer-minimap-overlay");
+  const axisHudEl = requireElement<HTMLCanvasElement>(root, "#viewer-axis-hud");
   const lightingPresetEl = requireElement<HTMLSelectElement>(root, "#lighting-preset");
   const exposureInput = requireElement<HTMLInputElement>(root, "#lighting-exposure");
   const keyInput = requireElement<HTMLInputElement>(root, "#lighting-key");
@@ -2248,6 +2250,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
     floatingLaneObjects.length = 0;
     floatingLaneConfig.selectedLaneIndex = -1;
+    updateAxisHud(); // Hide HUD when overlay is cleared
   }
 
   function createFloatingLaneLabel(kind: string, x: number, y: number, z: number): THREE.Sprite {
@@ -2288,6 +2291,100 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     ctx.closePath();
   }
 
+  // ─── Axis HUD Drawing ────────────────────────────────────────────────────────
+
+  function updateAxisHud(): void {
+    const ctx = axisHudEl.getContext("2d");
+    if (!ctx) return;
+
+    // Setup high DPI
+    const dpr = window.devicePixelRatio || 1;
+    const displayWidth = 120;
+    const displayHeight = 120;
+    axisHudEl.width = Math.round(displayWidth * dpr);
+    axisHudEl.height = Math.round(displayHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Clear canvas
+    ctx.clearRect(0, 0, displayWidth, displayHeight);
+
+    // Only show when floating lane overlay is enabled
+    if (!floatingLaneConfig.enabled) return;
+
+    const centerX = 25;
+    const centerY = displayHeight - 25;
+    const axisLength = 40;
+
+    // Background circle
+    ctx.fillStyle = "rgba(15, 23, 42, 0.8)";
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 55, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // X axis (red) - pointing right in screen space
+    ctx.strokeStyle = "#ef4444";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(centerX + axisLength, centerY);
+    ctx.stroke();
+
+    // X arrow head
+    ctx.beginPath();
+    ctx.moveTo(centerX + axisLength, centerY);
+    ctx.lineTo(centerX + axisLength - 8, centerY - 5);
+    ctx.lineTo(centerX + axisLength - 8, centerY + 5);
+    ctx.closePath();
+    ctx.fillStyle = "#ef4444";
+    ctx.fill();
+
+    // X label
+    ctx.fillStyle = "#ef4444";
+    ctx.font = "bold 14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("X", centerX + axisLength + 12, centerY);
+
+    // Z axis (blue) - pointing up in screen space (represents 3D Z)
+    ctx.strokeStyle = "#3b82f6";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(centerX, centerY - axisLength);
+    ctx.stroke();
+
+    // Z arrow head
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY - axisLength);
+    ctx.lineTo(centerX - 5, centerY - axisLength + 8);
+    ctx.lineTo(centerX + 5, centerY - axisLength + 8);
+    ctx.closePath();
+    ctx.fillStyle = "#3b82f6";
+    ctx.fill();
+
+    // Z label
+    ctx.fillStyle = "#3b82f6";
+    ctx.fillText("Z", centerX, centerY - axisLength - 12);
+
+    // Origin dot
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Title
+    ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText("Scene Axis", centerX, 5);
+  }
+
   function buildPolygonShape(points: number[][]): THREE.Shape {
     const shape = new THREE.Shape();
     if (points.length < 3) return shape;
@@ -2301,7 +2398,13 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
 
   function buildFloatingLaneOverlay(): void {
     clearFloatingLaneOverlay();
-    if (!currentManifest?.layout_overlay) return;
+    if (!currentManifest?.layout_overlay) {
+      updateAxisHud(); // Update HUD even when no overlay
+      return;
+    }
+
+    // Update axis HUD when overlay is enabled
+    updateAxisHud();
 
     const overlay = currentManifest.layout_overlay;
 
@@ -2323,48 +2426,6 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
 
     const height = floatingLaneConfig.height;
-
-    // ========== 0. Render scene axis indicator for debugging ==========
-    const axisLength = 20; // Length of axis arrows in scene units
-    const axisOrigin = new THREE.Vector3(sceneCenterX, height, sceneCenterZ);
-
-    // X axis (red arrow pointing in +X direction)
-    const xAxisPoints = [
-      new THREE.Vector3(sceneCenterX, height, sceneCenterZ),
-      new THREE.Vector3(sceneCenterX + axisLength, height, sceneCenterZ),
-    ];
-    const xAxisGeo = new THREE.BufferGeometry().setFromPoints(xAxisPoints);
-    const xAxisMat = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 });
-    const xAxisLine = new THREE.Line(xAxisGeo, xAxisMat);
-    xAxisLine.userData.isFloatingLane = true;
-    xAxisLine.userData.overlayType = "axis";
-    scene.add(xAxisLine);
-    floatingLaneObjects.push(xAxisLine);
-
-    // Z axis (blue arrow pointing in +Z direction)
-    const zAxisPoints = [
-      new THREE.Vector3(sceneCenterX, height, sceneCenterZ),
-      new THREE.Vector3(sceneCenterX, height, sceneCenterZ + axisLength),
-    ];
-    const zAxisGeo = new THREE.BufferGeometry().setFromPoints(zAxisPoints);
-    const zAxisMat = new THREE.LineBasicMaterial({ color: 0x0000ff, linewidth: 2 });
-    const zAxisLine = new THREE.Line(zAxisGeo, zAxisMat);
-    zAxisLine.userData.isFloatingLane = true;
-    zAxisLine.userData.overlayType = "axis";
-    scene.add(zAxisLine);
-    floatingLaneObjects.push(zAxisLine);
-
-    // X axis label
-    const xLabel = createFloatingLaneLabel("X+", sceneCenterX + axisLength + 3, height, sceneCenterZ);
-    xLabel.userData.isFloatingLane = true;
-    scene.add(xLabel);
-    floatingLaneObjects.push(xLabel);
-
-    // Z axis label
-    const zLabel = createFloatingLaneLabel("Z+", sceneCenterX, height, sceneCenterZ + axisLength + 3);
-    zLabel.userData.isFloatingLane = true;
-    scene.add(zLabel);
-    floatingLaneObjects.push(zLabel);
 
     // ========== 1. Render road polygons using carriagewayRings ==========
     // Note: carriagewayRings coordinates are already in absolute scene coordinates (X, Z)

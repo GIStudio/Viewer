@@ -4311,6 +4311,18 @@ body {
   border: 1px solid rgba(42, 110, 220, 0.18);
 }
 
+/* ── Axis HUD (Camera-relative) ──────────────────────────────────────────── */
+
+.viewer-axis-hud {
+  position: fixed;
+  bottom: 80px;
+  left: 16px;
+  width: 120px;
+  height: 120px;
+  pointer-events: none;
+  z-index: 100;
+}
+
 /* ── Floating Lane Overlay Panel ─────────────────────────────────────────── */
 
 .floating-lane-panel {
