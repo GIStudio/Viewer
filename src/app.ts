@@ -2443,13 +2443,19 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
 
     const height = floatingLaneConfig.height;
 
+    // Helper function to convert ring coordinates relative to scene center
+    const toSceneCoords = (point: number[]): number[] => {
+      return [point[0] - sceneCenterX, point[1] - sceneCenterZ];
+    };
+
     // ========== 1. Render road polygons using carriagewayRings ==========
-    // Note: carriagewayRings coordinates are already in absolute scene coordinates (X, Z)
+    // Note: carriagewayRings are relative to scene center
     if (carriagewayRings.length > 0) {
       for (const ring of carriagewayRings) {
         if (ring.length < 3) continue;
-        // ring format: [[x, z], [x, z], ...] - already in scene coordinates
-        const shape = buildPolygonShape(ring);
+        // Convert ring coordinates to scene space
+        const sceneRing = ring.map(p => toSceneCoords(p));
+        const shape = buildPolygonShape(sceneRing);
         const geometry = new THREE.ShapeGeometry(shape);
         const material = new THREE.MeshBasicMaterial({
           color: FLOATING_COLORS.carriageway,
@@ -2459,10 +2465,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           side: THREE.DoubleSide,
         });
         const mesh = new THREE.Mesh(geometry, material);
-        // ShapeGeometry vertices are in XY plane: point[0] -> X, point[1] -> Y
-        // After rotation.x = -PI/2: Y -> Z, so mesh is now on XZ plane at Y=0
         mesh.rotation.x = -Math.PI / 2;
-        // Polygon points are already in scene space, no need to offset mesh position
         mesh.position.set(0, height, 0);
         mesh.userData.isFloatingLane = true;
         mesh.userData.overlayType = "road";
@@ -2477,7 +2480,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
             opacity: floatingLaneConfig.opacity * 0.9,
           });
           const points: THREE.Vector3[] = [];
-          for (const point of ring) {
+          for (const point of sceneRing) {
             points.push(new THREE.Vector3(point[0], height, point[1]));
           }
           points.push(points[0].clone()); // close the loop
@@ -2494,13 +2497,14 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     if (floatingLaneConfig.showEdgeLines && sidewalkRings.length > 0) {
       for (const ring of sidewalkRings) {
         if (ring.length < 3) continue;
+        const sceneRing = ring.map(p => toSceneCoords(p));
         const edgeMaterial = new THREE.LineBasicMaterial({
           color: FLOATING_COLORS.sidewalk,
           transparent: true,
           opacity: floatingLaneConfig.opacity * 0.8,
         });
         const points: THREE.Vector3[] = [];
-        for (const point of ring) {
+        for (const point of sceneRing) {
           points.push(new THREE.Vector3(point[0], height, point[1]));
         }
         points.push(points[0].clone());
@@ -2517,7 +2521,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       const coreRings = (junction.carriageway_core_rings ?? []) as number[][][];
       for (const ring of coreRings) {
         if (ring.length < 3) continue;
-        const shape = buildPolygonShape(ring);
+        const sceneRing = ring.map(p => toSceneCoords(p));
+        const shape = buildPolygonShape(sceneRing);
         const geometry = new THREE.ShapeGeometry(shape);
         const material = new THREE.MeshBasicMaterial({
           color: FLOATING_COLORS.carriageway,
@@ -2542,7 +2547,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
             opacity: floatingLaneConfig.opacity * 0.9,
           });
           const points: THREE.Vector3[] = [];
-          for (const point of ring) {
+          for (const point of sceneRing) {
             points.push(new THREE.Vector3(point[0], height, point[1]));
           }
           points.push(points[0].clone());
