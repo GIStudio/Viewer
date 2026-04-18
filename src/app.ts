@@ -2305,7 +2305,14 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
 
     const overlay = currentManifest.layout_overlay;
 
-    // Get scene center for proper positioning
+    // Get OSM geometry for carriageway rings (road polygons)
+    const summary = (currentManifest.summary ?? {}) as Record<string, unknown>;
+    const osmGeom = (summary.osm_geometry ?? {}) as Record<string, unknown>;
+    const carriagewayRings = (osmGeom.carriageway_rings ?? []) as number[][][];
+    const sidewalkRings = (osmGeom.sidewalk_rings ?? []) as number[][][];
+    const junctions = (osmGeom.junction_geometries ?? []) as Array<Record<string, unknown>>;
+
+    // Get scene center for fallback case (when no carriagewayRings available)
     let sceneCenterX = 0;
     let sceneCenterZ = 0;
     if (currentRoot) {
@@ -2315,16 +2322,10 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       sceneCenterZ = center.z;
     }
 
-    // Get OSM geometry for carriageway rings (road polygons)
-    const summary = (currentManifest.summary ?? {}) as Record<string, unknown>;
-    const osmGeom = (summary.osm_geometry ?? {}) as Record<string, unknown>;
-    const carriagewayRings = (osmGeom.carriageway_rings ?? []) as number[][][];
-    const sidewalkRings = (osmGeom.sidewalk_rings ?? []) as number[][][];
-    const junctions = (osmGeom.junction_geometries ?? []) as Array<Record<string, unknown>>;
-
     const height = floatingLaneConfig.height;
 
     // ========== 1. Render road polygons using carriagewayRings ==========
+    // Note: carriagewayRings coordinates are already in absolute scene coordinates (X, Z)
     if (carriagewayRings.length > 0) {
       for (const ring of carriagewayRings) {
         if (ring.length < 3) continue;
@@ -2339,8 +2340,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           side: THREE.DoubleSide,
         });
         const mesh = new THREE.Mesh(geometry, material);
+        // ShapeGeometry vertices are in XY plane: point[0] -> X, point[1] -> Y
+        // After rotation.x = -PI/2: Y -> Z, so mesh is now on XZ plane at Y=0
         mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(sceneCenterX, height, sceneCenterZ);
+        // Polygon points are already in scene space, no need to offset mesh position
+        mesh.position.set(0, height, 0);
         mesh.userData.isFloatingLane = true;
         mesh.userData.overlayType = "road";
         scene.add(mesh);
@@ -2405,7 +2409,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(sceneCenterX, height, sceneCenterZ);
+        mesh.position.set(0, height, 0);
         mesh.userData.isFloatingLane = true;
         mesh.userData.overlayType = "junction";
         scene.add(mesh);
@@ -2561,7 +2565,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(sceneCenterX, height, sceneCenterZ);
+        mesh.position.set(0, height, 0);
         mesh.userData.isFloatingLane = true;
         mesh.userData.overlayType = "building";
         mesh.userData.buildingIndex = i;
