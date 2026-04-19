@@ -2451,9 +2451,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     const height = floatingLaneConfig.height;
 
     // Helper function to convert ring coordinates relative to scene center
-    // Note: ring data format is [x, z] where x=East/West, z=North/South in scene coords
+    // Note: swap X and Z because ring data format is [x, z] but we need [z, x] for scene
     const toSceneCoords = (point: number[]): number[] => {
-      return [point[0] - sceneCenterX, point[1] - sceneCenterZ];
+      // point[0] = X (East/West), point[1] = Z (North/South) in ring data
+      // For scene: X = point[1], Z = point[0] (swap)
+      return [point[1] - sceneCenterX, point[0] - sceneCenterZ];
     };
 
     // ========== 1. Render road polygons using carriagewayRings ==========
