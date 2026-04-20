@@ -6,6 +6,7 @@
 import { Chart, registerables, ChartConfiguration, ChartData, ChartOptions } from "chart.js";
 import annotationPlugin from "chartjs-plugin-annotation";
 import type { SceneHistoryEntry } from "./history-scatter-plot";
+import { API_BASE } from "./sg-constants";
 
 Chart.register(...registerables, annotationPlugin);
 
@@ -125,7 +126,7 @@ export class ThreeSystemScorePanel {
       }
 
       try {
-        const evalResponse = await fetch("./api/design/evaluate/unified", {
+        const evalResponse = await fetch(`${API_BASE}/api/design/evaluate/unified`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ layout_path: scene.layout_path }),
