@@ -23,6 +23,8 @@ import type {
   FLOATING_LANE_LABELS,
 } from "./viewer-types";
 import { PER_LANE_COLORS } from "./viewer-types";
+import { API_BASE } from "./sg-constants";
+import type { DesktopShell } from "./desktop-shell";
 
 type SceneOption = {
   key: string;
@@ -293,7 +295,26 @@ function isFiniteTriplet(value: unknown): value is [number, number, number] {
 }
 
 type MetricEntry = { label: string; value: number; max: number };
-type EvaluationResult = { evaluation: string; score: number; suggestions: string[]; config_patch: Record<string, unknown> };
+type LlmStatusEntry = {
+  enabled?: boolean;
+  available?: boolean;
+  source?: string;
+  cached?: boolean;
+  reasoning?: string;
+};
+type EvaluationResult = {
+  walkability: number;
+  safety: number;
+  beauty: number;
+  overall: number;
+  evaluation: string;
+  suggestions: string[];
+  config_patch: Record<string, unknown>;
+  llm_status?: {
+    safety?: LlmStatusEntry;
+    beauty?: LlmStatusEntry;
+  };
+};
 type PresetConfig = { id: string; name: string; description: string; config: Record<string, unknown> };
 
 function metricColor(value: number, max: number): string {
@@ -310,7 +331,15 @@ function renderMetricsBarHtml(entry: MetricEntry): string {
   <div class="viewer-metric-label">${escapeHtml(entry.label)}</div>
   <div class="viewer-metric-value">${entry.value.toFixed(2)}</div>
   <div class="viewer-metric-bar-track"><div class="viewer-metric-bar-fill" style="width:${percent}%;background:${color}"></div></div>
-</div>`;
+  </div>`;
+}
+
+function llmStatusPresentation(entry?: LlmStatusEntry): { label: string; className: string } {
+  const source = String(entry?.source || "unavailable").toLowerCase();
+  if (source === "llm") return { label: "Live", className: "live" };
+  if (source === "cache") return { label: "Cache", className: "cache" };
+  if (source === "disabled") return { label: "Disabled", className: "disabled" };
+  return { label: "Unavailable", className: "unavailable" };
 }
 
 function renderMetricsPanel(summary: Record<string, unknown>): string {
@@ -1430,68 +1459,298 @@ function createAvatarFigure(): THREE.Group {
   return avatar;
 }
 
-function mountViewer(root: HTMLElement): Promise<() => void> {
-  return mountViewerImpl(root);
+function mountViewer(shell: DesktopShell): Promise<() => void> {
+  return mountViewerImpl(shell);
 }
 
-async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
-  root.innerHTML = `
-    <div class="viewer-shell">
-      <div class="scene-page-topbar viewer-header-compact">
-        <div class="viewer-header-left">
-          <button id="viewer-menu-toggle" class="viewer-hamburger" type="button" aria-label="Menu" aria-expanded="false">☰</button>
-          <div class="viewer-header-brand">
-            <div class="scene-page-kicker viewer-header-kicker">Viewer</div>
-            <h1 class="scene-page-title viewer-header-title">3D Road Viewer</h1>
-          </div>
+async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
+  const root = shell.root;
+  shell.setHints([
+    "Click to capture mouse, then use WASD to move.",
+    "Shift accelerates movement, Esc unlocks the cursor, and R resets the roam state.",
+    "Use Tools in the top menu or the right tabs for Evaluate, Compare, History, Presets, and Scene Overlay.",
+  ]);
+  shell.setLeftSections([
+    {
+      id: "viewer-recent-layouts",
+      title: "Recent Layouts",
+      subtitle: "Layout / scene entry",
+      content: `
+        <div class="desktop-shell-form-stack">
+          <label class="desktop-shell-field">
+            <span>Recent Result</span>
+            <select id="layout-select" class="viewer-select viewer-select-inline" title="Recent Result"></select>
+          </label>
+          <label class="desktop-shell-field">
+            <span>Scene</span>
+            <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene"></select>
+          </label>
         </div>
-        <div class="viewer-header-controls">
-          <select id="layout-select" class="viewer-select viewer-select-inline" title="Recent Result"></select>
-          <!-- 原始场景选择器（隐藏，保持向后兼容） -->
-          <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene" style="display: none;"></select>
-          <!-- 场景对比选择器（隐藏，逻辑已迁移到 Compare 面板） -->
-          <div id="scene-compare-controls" class="scene-compare-controls" style="display: none;">
-            <div class="scene-compare-group">
+      `,
+    },
+    {
+      id: "viewer-compare-targets",
+      title: "Compare Targets",
+      subtitle: "Split-view source pairs",
+      content: `
+        <div id="scene-compare-controls" class="scene-compare-controls scene-compare-controls-shell">
+          <div class="scene-compare-group">
+            <label class="desktop-shell-field">
+              <span>Layout A</span>
               <select id="layout-a-select" class="viewer-select viewer-select-inline viewer-select-layout" title="Layout A"></select>
+            </label>
+            <label class="desktop-shell-field">
+              <span>Scene A</span>
               <select id="scene-a-select" class="viewer-select viewer-select-inline viewer-select-scene" title="Scene A"></select>
-            </div>
-            <div class="scene-compare-group">
+            </label>
+          </div>
+          <div class="scene-compare-group">
+            <label class="desktop-shell-field">
+              <span>Layout B</span>
               <select id="layout-b-select" class="viewer-select viewer-select-inline viewer-select-layout" title="Layout B"></select>
+            </label>
+            <label class="desktop-shell-field">
+              <span>Scene B</span>
               <select id="scene-b-select" class="viewer-select viewer-select-inline viewer-select-scene" title="Scene B"></select>
+            </label>
+          </div>
+          <button id="reset-scene-mode" class="viewer-btn-reset desktop-shell-inline-button" type="button" title="Clear Scene B">Clear Scene B</button>
+        </div>
+      `,
+      open: true,
+    },
+  ]);
+  shell.setRightTabs(
+    [
+      {
+        id: "settings",
+        label: "Settings",
+        content: `
+          <aside id="viewer-settings-panel" class="viewer-settings-panel" data-open="false">
+            <div class="viewer-settings-header">
+              <div>
+                <div class="viewer-settings-title">Display Settings</div>
+                <div class="viewer-settings-subtitle">Light presets, shadows, and laser pointer</div>
+              </div>
+              <button id="viewer-settings-close" class="viewer-settings-close" type="button" aria-label="Close settings">×</button>
             </div>
-            <button id="reset-scene-mode" class="viewer-btn-reset" type="button" title="Clear Scene B">✕</button>
+            <div class="viewer-settings-section viewer-settings-section-divider">
+              <label class="viewer-settings-label">Language · 语言</label>
+              <div class="viewer-lang-switcher">
+                <button id="viewer-lang-en" class="viewer-lang-btn" type="button">English</button>
+                <button id="viewer-lang-zh" class="viewer-lang-btn" type="button">中文</button>
+                <button id="viewer-lang-mixed" class="viewer-lang-btn" type="button">中英混合</button>
+              </div>
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-settings-label" for="lighting-preset">Lighting Preset</label>
+              <select id="lighting-preset" class="viewer-select viewer-select-compact"></select>
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-range-label" for="lighting-exposure">
+                <span>Exposure</span>
+                <span id="lighting-exposure-value"></span>
+              </label>
+              <input id="lighting-exposure" class="viewer-range" type="range" min="0.5" max="2.0" step="0.05" />
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-range-label" for="lighting-key">
+                <span>Key Light Intensity</span>
+                <span id="lighting-key-value"></span>
+              </label>
+              <input id="lighting-key" class="viewer-range" type="range" min="0.2" max="2.0" step="0.05" />
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-range-label" for="lighting-fill">
+                <span>Fill Light Intensity</span>
+                <span id="lighting-fill-value"></span>
+              </label>
+              <input id="lighting-fill" class="viewer-range" type="range" min="0.1" max="1.6" step="0.05" />
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-range-label" for="lighting-warmth">
+                <span>Warmth</span>
+                <span id="lighting-warmth-value"></span>
+              </label>
+              <input id="lighting-warmth" class="viewer-range" type="range" min="-1" max="1" step="0.05" />
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-range-label" for="lighting-shadow">
+                <span>Shadow Strength</span>
+                <span id="lighting-shadow-value"></span>
+              </label>
+              <input id="lighting-shadow" class="viewer-range" type="range" min="0" max="1" step="0.05" />
+            </div>
+            <div class="viewer-settings-section viewer-settings-section-divider">
+              <label class="viewer-toggle-row" for="third-person-enabled">
+                <span>Third Person Camera</span>
+                <input id="third-person-enabled" type="checkbox" />
+              </label>
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-toggle-row" for="frame-mode-enabled">
+                <span>Frame Mode (Show Boundaries)</span>
+                <input id="frame-mode-enabled" type="checkbox" />
+              </label>
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-toggle-row" for="asset-bbox-enabled">
+                <span>Asset BBoxes</span>
+                <input id="asset-bbox-enabled" type="checkbox" />
+              </label>
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-toggle-row" for="laser-pointer-enabled">
+                <span>Laser Pointer</span>
+                <input id="laser-pointer-enabled" type="checkbox" />
+              </label>
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-toggle-row" for="graph-overlay-enabled">
+                <span>Graph Overlay</span>
+                <input id="graph-overlay-enabled" type="checkbox" />
+              </label>
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-toggle-row" for="layout-overlay-enabled">
+                <span>Scene Overlay</span>
+                <input id="layout-overlay-enabled" type="checkbox" />
+              </label>
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-toggle-row" for="audio-enabled">
+                <span>Ambient Audio</span>
+                <input id="audio-enabled" type="checkbox" />
+              </label>
+            </div>
+          </aside>
+        `,
+      },
+      {
+        id: "evaluate",
+        label: "Evaluate",
+        content: `
+          <aside id="viewer-evaluate-panel" class="viewer-slide-panel" data-open="false">
+            <div class="viewer-slide-panel-header">
+              <div>
+                <div class="viewer-slide-panel-title">Design Evaluation</div>
+                <div class="viewer-slide-panel-subtitle">AI-driven layout assessment and suggestions</div>
+              </div>
+              <button id="viewer-evaluate-close" class="viewer-settings-close" type="button" aria-label="Close evaluation">x</button>
+            </div>
+            <div id="viewer-evaluate-content" class="viewer-slide-panel-body">
+              <div class="viewer-evaluate-empty">Click "Run Evaluation" to analyze the current layout.</div>
+            </div>
+            <div class="viewer-slide-panel-footer">
+              <button id="viewer-evaluate-run" class="viewer-nav-button" type="button">Run Evaluation</button>
+            </div>
+          </aside>
+        `,
+      },
+      {
+        id: "compare",
+        label: "Compare",
+        content: `
+          <aside id="viewer-compare-panel" class="viewer-slide-panel" data-open="false">
+            <div class="viewer-slide-panel-header">
+              <div>
+                <div class="viewer-slide-panel-title">Layout Comparison</div>
+                <div class="viewer-slide-panel-subtitle">Compare two layouts side-by-side</div>
+              </div>
+              <button id="viewer-compare-close" class="viewer-settings-close" type="button" aria-label="Close comparison">x</button>
+            </div>
+            <div class="viewer-slide-panel-body">
+              <div class="viewer-compare-selectors">
+                <div class="viewer-compare-col">
+                  <label class="viewer-settings-label" for="compare-layout-a">Layout A</label>
+                  <select id="compare-layout-a" class="viewer-select viewer-select-compact"></select>
+                </div>
+                <div class="viewer-compare-col">
+                  <label class="viewer-settings-label" for="compare-layout-b">Layout B</label>
+                  <select id="compare-layout-b" class="viewer-select viewer-select-compact"></select>
+                </div>
+              </div>
+              <div id="viewer-compare-results" class="viewer-compare-results"></div>
+            </div>
+          </aside>
+        `,
+      },
+      {
+        id: "history",
+        label: "History",
+        content: `
+          <aside id="viewer-history-analysis-panel" class="viewer-slide-panel" data-open="false">
+            <div class="viewer-slide-panel-header">
+              <div>
+                <div class="viewer-slide-panel-title">📊 History Analysis</div>
+                <div class="viewer-slide-panel-subtitle">Scatter plot analysis of scene generation history</div>
+              </div>
+              <button id="viewer-history-analysis-close" class="viewer-settings-close" type="button" aria-label="Close history">x</button>
+            </div>
+            <div id="viewer-history-analysis-content" class="viewer-slide-panel-body">
+              <div class="viewer-history-tabs">
+                <button class="viewer-history-tab" data-tab="scatter" data-active="true">散点图 · Scatter</button>
+                <button class="viewer-history-tab" data-tab="frequency">频次图 · Frequency</button>
+                <button class="viewer-history-tab" data-tab="trend">趋势图 · Trend</button>
+                <button class="viewer-history-tab" data-tab="scores">三系统评分 · Scores</button>
+              </div>
+              <div id="viewer-history-scatter-plot" class="viewer-history-tab-panel" data-tab="scatter" data-active="true" style="width: 100%;"></div>
+              <div id="viewer-history-frequency" class="viewer-history-tab-panel" data-tab="frequency" data-active="false" style="width: 100%;"></div>
+              <div id="viewer-history-trend" class="viewer-history-tab-panel" data-tab="trend" data-active="false" style="width: 100%;"></div>
+              <div id="viewer-history-scores" class="viewer-history-tab-panel" data-tab="scores" data-active="false" style="width: 100%;"></div>
+            </div>
+          </aside>
+        `,
+      },
+      {
+        id: "presets",
+        label: "Presets",
+        content: `
+          <aside id="viewer-presets-panel" class="viewer-slide-panel" data-open="false">
+            <div class="viewer-slide-panel-header">
+              <div>
+                <div class="viewer-slide-panel-title">Scene Presets</div>
+                <div class="viewer-slide-panel-subtitle">Pre-configured scene styles. The highlighted card matches the currently loaded scene's generation preset.</div>
+              </div>
+              <button id="viewer-presets-close" class="viewer-settings-close" type="button" aria-label="Close presets">x</button>
+            </div>
+            <div id="viewer-presets-grid" class="viewer-presets-grid"></div>
+          </aside>
+        `,
+      },
+      {
+        id: "floating-lane",
+        label: "Floating Lane",
+        content: `
+          <div id="viewer-floating-lane-panel-host" class="floating-lane-inline-host">
+            <div class="desktop-shell-empty-state">Click Floating Lane button to enable overlay controls.</div>
           </div>
-          <!-- 雷达图容器（隐藏，逻辑已迁移到 Compare 面板） -->
-          <div id="scene-radar-container" style="display: none;">
-            <button id="close-scene-radar" class="viewer-settings-close" type="button">x</button>
-            <canvas id="scene-radar-canvas-a"></canvas>
-            <canvas id="scene-radar-canvas-b"></canvas>
-            <span id="scene-a-label"></span>
-            <span id="scene-b-label"></span>
-          </div>
-          <button id="viewer-compare-toggle" class="viewer-btn-scene-compare" type="button" title="Open comparison panel">⚖️ Compare</button>
-        </div>
-        <div class="viewer-header-actions">
-          <button id="viewer-settings-toggle" class="viewer-settings-toggle" type="button" aria-expanded="false">Settings</button>
-        </div>
-        <div id="viewer-menu-dropdown" class="viewer-menu-dropdown" hidden>
-          <div class="viewer-menu-help">Click to capture mouse · WASD move · Shift sprint · Esc unlock · R reset · P panel · Ctrl/Cmd+C copy target</div>
-          <div class="viewer-menu-buttons">
-            <button id="viewer-scene-graph-link" class="viewer-nav-button viewer-menu-button" type="button">Annotation</button>
-            <button id="viewer-asset-editor-link" class="viewer-nav-button viewer-menu-button" type="button">Asset Editor</button>
-            <button id="viewer-junction-editor-link" class="viewer-nav-button viewer-menu-button" type="button">Junction Editor</button>
-            <button id="viewer-compare-toggle" class="viewer-nav-button viewer-menu-button" type="button">Compare</button>
-            <button id="viewer-presets-toggle" class="viewer-nav-button viewer-menu-button" type="button">Presets</button>
-            <button id="viewer-evaluate-toggle" class="viewer-nav-button viewer-menu-button" type="button">Evaluate</button>
-            <button id="viewer-history-analysis-toggle" class="viewer-nav-button viewer-menu-button" type="button">📊 History</button>
-            <button id="viewer-floating-lane-toggle" class="viewer-nav-button viewer-menu-button" type="button">Floating Lane</button>
-            <button id="viewer-export-topdown-map" class="viewer-nav-button viewer-menu-button" type="button">Export PNG</button>
-            <button id="viewer-export-topdown-svg" class="viewer-nav-button viewer-menu-button" type="button">Export SVG</button>
-          </div>
-        </div>
+        `,
+      },
+    ],
+    null,
+  );
+  shell.statusStatusHost.innerHTML = `<div id="viewer-status" class="desktop-shell-inline-status">Loading viewer…</div>`;
+  shell.setStatusSummary("Loading viewer…");
+  shell.statusActivityHost.innerHTML = `<div class="desktop-shell-log-entry" data-tone="neutral">Viewer shell initialized.</div>`;
+  shell.centerStage.innerHTML = `
+    <div class="viewer-shell viewer-shell-embedded">
+      <div class="viewer-command-hub" hidden>
+        <button id="viewer-menu-toggle" type="button" aria-label="Menu" aria-expanded="false">☰</button>
+        <div id="viewer-menu-dropdown" hidden></div>
+        <button id="viewer-scene-graph-link" type="button">Annotation</button>
+        <button id="viewer-asset-editor-link" type="button">Asset Editor</button>
+        <button id="viewer-junction-editor-link" type="button">Junction Editor</button>
+        <button id="viewer-settings-toggle" type="button" aria-expanded="false">Settings</button>
+        <button id="viewer-compare-toggle" type="button">Compare</button>
+        <button id="viewer-presets-toggle" type="button">Presets</button>
+        <button id="viewer-evaluate-toggle" type="button">Evaluate</button>
+        <button id="viewer-history-analysis-toggle" type="button">History</button>
+        <button id="viewer-floating-lane-toggle" type="button">Floating Lane</button>
+        <button id="viewer-export-topdown-map" type="button">Export PNG</button>
+        <button id="viewer-export-topdown-svg" type="button">Export SVG</button>
       </div>
       <div id="viewer-canvas" class="viewer-canvas"></div>
-      <!-- 双场景对比雷达图容器 -->
       <div id="scene-radar-container" class="scene-radar-container" hidden>
         <div class="scene-radar-header">
           <div class="scene-radar-title">Metrics Comparison</div>
@@ -1518,177 +1777,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         <canvas id="viewer-minimap-overlay" class="viewer-minimap-overlay"></canvas>
       </div>
       <canvas id="viewer-axis-hud" class="viewer-axis-hud"></canvas>
-      <aside id="viewer-settings-panel" class="viewer-settings-panel" data-open="false">
-        <div class="viewer-settings-header">
-          <div>
-            <div class="viewer-settings-title">Display Settings</div>
-            <div class="viewer-settings-subtitle">Light presets, shadows, and laser pointer</div>
-          </div>
-          <button id="viewer-settings-close" class="viewer-settings-close" type="button" aria-label="Close settings">
-            ×
-          </button>
-        </div>
-        <div class="viewer-settings-section viewer-settings-section-divider">
-          <label class="viewer-settings-label">Language · 语言</label>
-          <div class="viewer-lang-switcher">
-            <button id="viewer-lang-en" class="viewer-lang-btn" type="button">English</button>
-            <button id="viewer-lang-zh" class="viewer-lang-btn" type="button">中文</button>
-            <button id="viewer-lang-mixed" class="viewer-lang-btn" type="button">中英混合</button>
-          </div>
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-settings-label" for="lighting-preset">Lighting Preset</label>
-          <select id="lighting-preset" class="viewer-select viewer-select-compact"></select>
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-range-label" for="lighting-exposure">
-            <span>Exposure</span>
-            <span id="lighting-exposure-value"></span>
-          </label>
-          <input id="lighting-exposure" class="viewer-range" type="range" min="0.5" max="2.0" step="0.05" />
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-range-label" for="lighting-key">
-            <span>Key Light Intensity</span>
-            <span id="lighting-key-value"></span>
-          </label>
-          <input id="lighting-key" class="viewer-range" type="range" min="0.2" max="2.0" step="0.05" />
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-range-label" for="lighting-fill">
-            <span>Fill Light Intensity</span>
-            <span id="lighting-fill-value"></span>
-          </label>
-          <input id="lighting-fill" class="viewer-range" type="range" min="0.1" max="1.6" step="0.05" />
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-range-label" for="lighting-warmth">
-            <span>Warmth</span>
-            <span id="lighting-warmth-value"></span>
-          </label>
-          <input id="lighting-warmth" class="viewer-range" type="range" min="-1" max="1" step="0.05" />
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-range-label" for="lighting-shadow">
-            <span>Shadow Strength</span>
-            <span id="lighting-shadow-value"></span>
-          </label>
-          <input id="lighting-shadow" class="viewer-range" type="range" min="0" max="1" step="0.05" />
-        </div>
-        <div class="viewer-settings-section viewer-settings-section-divider">
-          <label class="viewer-toggle-row" for="third-person-enabled">
-            <span>Third Person Camera</span>
-            <input id="third-person-enabled" type="checkbox" />
-          </label>
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-toggle-row" for="frame-mode-enabled">
-            <span>Frame Mode (Show Boundaries)</span>
-            <input id="frame-mode-enabled" type="checkbox" />
-          </label>
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-toggle-row" for="asset-bbox-enabled">
-            <span>Asset BBoxes</span>
-            <input id="asset-bbox-enabled" type="checkbox" />
-          </label>
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-toggle-row" for="laser-pointer-enabled">
-            <span>Laser Pointer</span>
-            <input id="laser-pointer-enabled" type="checkbox" />
-          </label>
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-toggle-row" for="graph-overlay-enabled">
-            <span>Graph Overlay</span>
-            <input id="graph-overlay-enabled" type="checkbox" />
-          </label>
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-toggle-row" for="layout-overlay-enabled">
-            <span>Scene Overlay</span>
-            <input id="layout-overlay-enabled" type="checkbox" />
-          </label>
-        </div>
-        <div class="viewer-settings-section">
-          <label class="viewer-toggle-row" for="audio-enabled">
-            <span>Ambient Audio</span>
-            <input id="audio-enabled" type="checkbox" />
-          </label>
-        </div>
-      </aside>
-      <div id="viewer-status" class="viewer-status">Loading viewer…</div>
       <div id="viewer-overlay" class="viewer-overlay">Click scene to capture mouse</div>
       <div id="viewer-error" class="viewer-error" hidden></div>
-      <aside id="viewer-evaluate-panel" class="viewer-slide-panel" data-open="false">
-        <div class="viewer-slide-panel-header">
-          <div>
-            <div class="viewer-slide-panel-title">Design Evaluation</div>
-            <div class="viewer-slide-panel-subtitle">AI-driven layout assessment and suggestions</div>
-          </div>
-          <button id="viewer-evaluate-close" class="viewer-settings-close" type="button" aria-label="Close evaluation">x</button>
-        </div>
-        <div id="viewer-evaluate-content" class="viewer-slide-panel-body">
-          <div class="viewer-evaluate-empty">Click "Run Evaluation" to analyze the current layout.</div>
-        </div>
-        <div class="viewer-slide-panel-footer">
-          <button id="viewer-evaluate-run" class="viewer-nav-button" type="button">Run Evaluation</button>
-        </div>
-      </aside>
-      <aside id="viewer-compare-panel" class="viewer-slide-panel" data-open="false">
-        <div class="viewer-slide-panel-header">
-          <div>
-            <div class="viewer-slide-panel-title">Layout Comparison</div>
-            <div class="viewer-slide-panel-subtitle">Compare two layouts side-by-side</div>
-          </div>
-          <button id="viewer-compare-close" class="viewer-settings-close" type="button" aria-label="Close comparison">x</button>
-        </div>
-        <div class="viewer-slide-panel-body">
-          <div class="viewer-compare-selectors">
-            <div class="viewer-compare-col">
-              <label class="viewer-settings-label" for="compare-layout-a">Layout A</label>
-              <select id="compare-layout-a" class="viewer-select viewer-select-compact"></select>
-            </div>
-            <div class="viewer-compare-col">
-              <label class="viewer-settings-label" for="compare-layout-b">Layout B</label>
-              <select id="compare-layout-b" class="viewer-select viewer-select-compact"></select>
-            </div>
-          </div>
-          <div id="viewer-compare-results" class="viewer-compare-results"></div>
-        </div>
-      </aside>
-      <aside id="viewer-history-analysis-panel" class="viewer-slide-panel" data-open="false">
-        <div class="viewer-slide-panel-header">
-          <div>
-            <div class="viewer-slide-panel-title">📊 History Analysis</div>
-            <div class="viewer-slide-panel-subtitle">Scatter plot analysis of scene generation history</div>
-          </div>
-          <button id="viewer-history-analysis-close" class="viewer-settings-close" type="button" aria-label="Close history">x</button>
-        </div>
-        <div id="viewer-history-analysis-content" class="viewer-slide-panel-body">
-          <div class="viewer-history-tabs">
-            <button class="viewer-history-tab" data-tab="scatter" data-active="true">散点图 · Scatter</button>
-            <button class="viewer-history-tab" data-tab="frequency">频次图 · Frequency</button>
-            <button class="viewer-history-tab" data-tab="trend">趋势图 · Trend</button>
-            <button class="viewer-history-tab" data-tab="scores">三系统评分 · Scores</button>
-          </div>
-          <div id="viewer-history-scatter-plot" class="viewer-history-tab-panel" data-tab="scatter" data-active="true" style="width: 100%;"></div>
-          <div id="viewer-history-frequency" class="viewer-history-tab-panel" data-tab="frequency" data-active="false" style="width: 100%;"></div>
-          <div id="viewer-history-trend" class="viewer-history-tab-panel" data-tab="trend" data-active="false" style="width: 100%;"></div>
-          <div id="viewer-history-scores" class="viewer-history-tab-panel" data-tab="scores" data-active="false" style="width: 100%;"></div>
-        </div>
-      </aside>
-      <aside id="viewer-presets-panel" class="viewer-slide-panel" data-open="false">
-        <div class="viewer-slide-panel-header">
-          <div>
-            <div class="viewer-slide-panel-title">Scene Presets</div>
-            <div class="viewer-slide-panel-subtitle">Pre-configured scene styles. The highlighted card matches the currently loaded scene's generation preset.</div>
-          </div>
-          <button id="viewer-presets-close" class="viewer-settings-close" type="button" aria-label="Close presets">x</button>
-        </div>
-        <div id="viewer-presets-grid" class="viewer-presets-grid"></div>
-      </aside>
     </div>
   `;
 
@@ -1766,10 +1856,16 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   let historyAnalysisOpen = false;
 
   const setHistoryAnalysisOpen = (nextOpen: boolean) => {
+    if (nextOpen) {
+      closeAllSlidePanels();
+    }
     historyAnalysisOpen = nextOpen;
     historyAnalysisPanelEl.dataset.open = String(nextOpen);
     if (nextOpen) {
+      shell.activateRightTab("history");
       loadAndRenderHistory();
+    } else if (!settingsOpen && !evaluateOpen && !compareOpen && !presetsOpen) {
+      shell.activateRightTab(null);
     }
   };
 
@@ -2039,6 +2135,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       statusResetHandle = null;
     }
     statusEl.textContent = message;
+    shell.setStatusSummary(message);
+    shell.pushActivity(message, "neutral");
   }
 
   function flashStatus(message: string, durationMs = 1800): void {
@@ -2047,8 +2145,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       window.clearTimeout(statusResetHandle);
     }
     statusEl.textContent = message;
+    shell.setStatusSummary(message);
+    shell.pushActivity(message, "success");
     statusResetHandle = window.setTimeout(() => {
       statusEl.textContent = restoreText;
+      shell.setStatusSummary(restoreText);
       statusResetHandle = null;
     }, durationMs);
   }
@@ -2099,6 +2200,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     settingsPanelEl.dataset.open = nextOpen ? "true" : "false";
     settingsToggleEl.setAttribute("aria-expanded", nextOpen ? "true" : "false");
     if (nextOpen) {
+      shell.activateRightTab("settings");
+    } else if (!evaluateOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
+      shell.activateRightTab(null);
+    }
+    if (nextOpen) {
       if (controls.isLocked) {
         resumeRoamAfterSettingsClose = true;
         controls.unlock();
@@ -2148,6 +2254,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       floatingLaneConfig.enabled = false;
       clearFloatingLaneOverlay();
     }
+    shell.activateRightTab(null);
     updateCanvasSlideOpenState();
   }
 
@@ -2155,6 +2262,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     if (nextOpen) closeAllSlidePanels();
     evaluateOpen = nextOpen;
     evaluatePanelEl.dataset.open = nextOpen ? "true" : "false";
+    if (nextOpen) {
+      shell.activateRightTab("evaluate");
+    } else if (!settingsOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
+      shell.activateRightTab(null);
+    }
     updateCanvasSlideOpenState();
   }
 
@@ -2165,6 +2277,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
     compareOpen = nextOpen;
     comparePanelEl.dataset.open = nextOpen ? "true" : "false";
+    if (nextOpen) {
+      shell.activateRightTab("compare");
+    } else if (!settingsOpen && !evaluateOpen && !presetsOpen && !historyAnalysisOpen) {
+      shell.activateRightTab(null);
+    }
     updateCanvasSlideOpenState();
   }
 
@@ -2175,6 +2292,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
     presetsOpen = nextOpen;
     presetsPanelEl.dataset.open = nextOpen ? "true" : "false";
+    if (nextOpen) {
+      shell.activateRightTab("presets");
+    } else if (!settingsOpen && !evaluateOpen && !compareOpen && !historyAnalysisOpen) {
+      shell.activateRightTab(null);
+    }
     updateCanvasSlideOpenState();
   }
 
@@ -3129,103 +3251,95 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     const panelId = "floating-lane-panel";
     if (document.getElementById(panelId)) return;
 
+    const panelHost = requireElement<HTMLElement>(root, "#viewer-floating-lane-panel-host");
+    panelHost.innerHTML = "";
+
     const panel = document.createElement("div");
     panel.id = panelId;
     panel.className = "floating-lane-panel";
     panel.innerHTML = `
-      <div class="flp-header">
-        <span class="flp-title">Scene Overlay</span>
-        <button class="flp-close" id="flp-close-btn">&times;</button>
-      </div>
-      <div class="flp-content">
+      <div class="flp-section">
+        <label>Controls</label>
         <label class="flp-checkbox">
           <input type="checkbox" id="flp-enabled" ${floatingLaneConfig.enabled ? "checked" : ""}>
           Enable Overlay
         </label>
-        <div class="flp-slider-group">
-          <label>Height: <span id="flp-height-val">${floatingLaneConfig.height.toFixed(1)}m</span></label>
-          <input type="range" id="flp-height" min="0.1" max="3" step="0.1" value="${floatingLaneConfig.height}">
-        </div>
-        <div class="flp-slider-group">
-          <label>Road Opacity: <span id="flp-opacity-val">${(floatingLaneConfig.opacity * 100).toFixed(0)}%</span></label>
-          <input type="range" id="flp-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.opacity}">
-        </div>
-        <div class="flp-section">
-          <label>Visible Elements:</label>
-          <div class="flp-checkboxes-row">
-            <label class="flp-checkbox">
-              <input type="checkbox" id="flp-buildings" ${floatingLaneConfig.showBuildings ? "checked" : ""}>
-              Buildings
-            </label>
-            <label class="flp-checkbox">
-              <input type="checkbox" id="flp-features" ${floatingLaneConfig.showFeatures ? "checked" : ""}>
-              Features (Trees)
-            </label>
-          </div>
-        </div>
-        <div class="flp-slider-group" id="flp-building-opacity-group">
-          <label>Building Opacity: <span id="flp-building-opacity-val">${(floatingLaneConfig.buildingOpacity * 100).toFixed(0)}%</span></label>
-          <input type="range" id="flp-building-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.buildingOpacity}">
-        </div>
-        <div class="flp-slider-group" id="flp-feature-opacity-group">
-          <label>Feature Opacity: <span id="flp-feature-opacity-val">${(floatingLaneConfig.featureOpacity * 100).toFixed(0)}%</span></label>
-          <input type="range" id="flp-feature-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.featureOpacity}">
-        </div>
-        <div class="flp-section">
-          <label>Visible Lane Types:</label>
-          <div class="flp-checkboxes" id="flp-lane-kinds">
-            ${["carriageway", "drive_lane", "bike_lane", "bus_lane", "clear_path", "furnishing", "sidewalk", "greenzone"].map(kind => `
-              <label class="flp-checkbox">
-                <input type="checkbox" data-kind="${kind}" ${visibleLaneKinds.has(kind) ? "checked" : ""}>
-                ${LANE_LABELS[kind] || kind}
-              </label>
-            `).join("")}
-          </div>
-        </div>
-        <div class="flp-section">
-          <label>Color Scheme:</label>
-          <select id="flp-color-scheme">
-            <option value="semantic" ${floatingLaneConfig.colorScheme === "semantic" ? "selected" : ""}>Semantic</option>
-            <option value="functional" ${floatingLaneConfig.colorScheme === "functional" ? "selected" : ""}>Functional</option>
-            <option value="safety" ${floatingLaneConfig.colorScheme === "safety" ? "selected" : ""}>Safety</option>
-          </select>
-        </div>
+      </div>
+      <div class="flp-slider-group">
+        <label>Height: <span id="flp-height-val">${floatingLaneConfig.height.toFixed(1)}m</span></label>
+        <input type="range" id="flp-height" min="0.1" max="3" step="0.1" value="${floatingLaneConfig.height}">
+      </div>
+      <div class="flp-slider-group">
+        <label>Road Opacity: <span id="flp-opacity-val">${(floatingLaneConfig.opacity * 100).toFixed(0)}%</span></label>
+        <input type="range" id="flp-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.opacity}">
+      </div>
+      <div class="flp-section">
+        <label>Visible Elements</label>
         <div class="flp-checkboxes-row">
           <label class="flp-checkbox">
-            <input type="checkbox" id="flp-edges" ${floatingLaneConfig.showEdgeLines ? "checked" : ""}>
-            Edge Lines
+            <input type="checkbox" id="flp-buildings" ${floatingLaneConfig.showBuildings ? "checked" : ""}>
+            Buildings
           </label>
           <label class="flp-checkbox">
-            <input type="checkbox" id="flp-labels" ${floatingLaneConfig.showLabels ? "checked" : ""}>
-            Labels
+            <input type="checkbox" id="flp-features" ${floatingLaneConfig.showFeatures ? "checked" : ""}>
+            Features (Trees)
           </label>
         </div>
-        <label class="flp-checkbox">
-          <input type="checkbox" id="flp-animated" ${floatingLaneConfig.animated ? "checked" : ""}>
-          Animated Pulse
-        </label>
-        <div class="flp-hint">Press L to toggle | Use carriagewayRings</div>
       </div>
+      <div class="flp-slider-group" id="flp-building-opacity-group">
+        <label>Building Opacity: <span id="flp-building-opacity-val">${(floatingLaneConfig.buildingOpacity * 100).toFixed(0)}%</span></label>
+        <input type="range" id="flp-building-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.buildingOpacity}">
+      </div>
+      <div class="flp-slider-group" id="flp-feature-opacity-group">
+        <label>Feature Opacity: <span id="flp-feature-opacity-val">${(floatingLaneConfig.featureOpacity * 100).toFixed(0)}%</span></label>
+        <input type="range" id="flp-feature-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.featureOpacity}">
+      </div>
+      <div class="flp-section">
+        <label>Visible Lane Types</label>
+        <div class="flp-checkboxes" id="flp-lane-kinds">
+          ${["carriageway", "drive_lane", "bike_lane", "bus_lane", "clear_path", "furnishing", "sidewalk", "greenzone"].map(kind => `
+            <label class="flp-checkbox">
+              <input type="checkbox" data-kind="${kind}" ${visibleLaneKinds.has(kind) ? "checked" : ""}>
+              ${LANE_LABELS[kind] || kind}
+            </label>
+          `).join("")}
+        </div>
+      </div>
+      <div class="flp-section">
+        <label>Color Scheme</label>
+        <select id="flp-color-scheme">
+          <option value="semantic" ${floatingLaneConfig.colorScheme === "semantic" ? "selected" : ""}>Semantic</option>
+          <option value="functional" ${floatingLaneConfig.colorScheme === "functional" ? "selected" : ""}>Functional</option>
+          <option value="safety" ${floatingLaneConfig.colorScheme === "safety" ? "selected" : ""}>Safety</option>
+        </select>
+      </div>
+      <div class="flp-checkboxes-row">
+        <label class="flp-checkbox">
+          <input type="checkbox" id="flp-edges" ${floatingLaneConfig.showEdgeLines ? "checked" : ""}>
+          Edge Lines
+        </label>
+        <label class="flp-checkbox">
+          <input type="checkbox" id="flp-labels" ${floatingLaneConfig.showLabels ? "checked" : ""}>
+          Labels
+        </label>
+      </div>
+      <label class="flp-checkbox">
+        <input type="checkbox" id="flp-animated" ${floatingLaneConfig.animated ? "checked" : ""}>
+        Animated Pulse
+      </label>
+      <div class="flp-hint">Press L to toggle | Use carriagewayRings</div>
     `;
 
-    document.body.appendChild(panel);
+    panelHost.appendChild(panel);
 
-    // Add event listeners
-    document.getElementById("flp-close-btn")?.addEventListener("click", () => {
-      floatingLaneConfig.enabled = false;
-      clearFloatingLaneOverlay();
-      panel.style.display = "none";
-    });
-
+    // Add event listeners (no close button in inline mode)
     document.getElementById("flp-enabled")?.addEventListener("change", (e) => {
       floatingLaneConfig.enabled = (e.target as HTMLInputElement).checked;
       layoutOverlayToggleEl.checked = floatingLaneConfig.enabled;
       if (floatingLaneConfig.enabled) {
         buildFloatingLaneOverlay();
-        panel.style.display = "block";
       } else {
         clearFloatingLaneOverlay();
-        panel.style.display = "none";
       }
     });
 
@@ -3305,12 +3419,16 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     if (floatingLaneConfig.enabled) {
       buildFloatingLaneOverlay();
       createFloatingLaneControlPanel();
+      shell.activateRightTab("floating-lane");
       const panel = document.getElementById("floating-lane-panel");
       if (panel) panel.style.display = "block";
     } else {
       clearFloatingLaneOverlay();
       const panel = document.getElementById("floating-lane-panel");
       if (panel) panel.style.display = "none";
+      if (!settingsOpen && !evaluateOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
+        shell.activateRightTab(null);
+      }
     }
   }
 
@@ -4034,7 +4152,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     evaluateRunEl.disabled = true;
 
     try {
-      const response = await fetch("./api/design/evaluate", {
+      const response = await fetch(`${API_BASE}/api/design/evaluate/unified`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ layout_path: currentLayoutPath }),
@@ -4069,14 +4187,43 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   }
 
   function renderEvaluationResult(result: EvaluationResult): void {
-    const scorePercent = Math.round(clamp(result.score, 0, 1) * 100);
-    const scoreColor = metricColor(result.score, 1);
+    const scorePercent = Math.round(clamp(result.overall, 0, 100));
+    const scoreColor = metricColor(result.overall, 100);
+    const safetyStatus = llmStatusPresentation(result.llm_status?.safety);
+    const beautyStatus = llmStatusPresentation(result.llm_status?.beauty);
     evaluateContentEl.innerHTML = `
       <div class="viewer-evaluate-score">
         <div class="viewer-evaluate-score-ring" style="--score-color:${scoreColor};--score-percent:${scorePercent}">
           <span>${scorePercent}</span>
         </div>
         <div class="viewer-evaluate-score-label">Overall Score</div>
+      </div>
+      <div class="viewer-evaluate-score-grid">
+        <div class="viewer-evaluate-score-card">
+          <div class="viewer-evaluate-score-card-label">Walkability</div>
+          <div class="viewer-evaluate-score-card-value">${Math.round(result.walkability)}</div>
+        </div>
+        <div class="viewer-evaluate-score-card">
+          <div class="viewer-evaluate-score-card-label">Safety</div>
+          <div class="viewer-evaluate-score-card-value">${Math.round(result.safety)}</div>
+        </div>
+        <div class="viewer-evaluate-score-card">
+          <div class="viewer-evaluate-score-card-label">Beauty</div>
+          <div class="viewer-evaluate-score-card-value">${Math.round(result.beauty)}</div>
+        </div>
+      </div>
+      <div class="viewer-evaluate-section">
+        <div class="viewer-metrics-group-title">LLM Status</div>
+        <div class="viewer-evaluate-llm-status">
+          <div class="viewer-evaluate-llm-row">
+            <span class="viewer-evaluate-llm-label">Safety LLM</span>
+            <span class="viewer-evaluate-llm-pill ${safetyStatus.className}">${safetyStatus.label}</span>
+          </div>
+          <div class="viewer-evaluate-llm-row">
+            <span class="viewer-evaluate-llm-label">Beauty LLM</span>
+            <span class="viewer-evaluate-llm-pill ${beautyStatus.className}">${beautyStatus.label}</span>
+          </div>
+        </div>
       </div>
       <div class="viewer-evaluate-section">
         <div class="viewer-metrics-group-title">Evaluation Summary</div>
@@ -4380,6 +4527,65 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   langMixedBtn.addEventListener("click", () => setLang("mixed"), { signal });
   updateLangButtons();
   updatePanelTexts();
+
+  shell.setMenuActions({
+    "file-load-layout": () => {
+      root.querySelector<HTMLElement>(".desktop-shell")?.classList.remove("desktop-shell-left-collapsed");
+      layoutSelectEl.focus();
+    },
+    "file-export-png": () => exportTopdownMapEl.click(),
+    "file-export-svg": () => exportTopdownSvgEl.click(),
+    "view-reset-view": () => resetView(),
+    "view-language-en": () => langEnBtn.click(),
+    "view-language-zh": () => langZhBtn.click(),
+    "view-language-mixed": () => langMixedBtn.click(),
+    "tools-open-settings": () => {
+      if (settingsOpen) {
+        setSettingsOpen(false);
+      } else {
+        closeAllSlidePanels();
+        setSettingsOpen(true);
+      }
+    },
+    "tools-open-evaluate": () => setEvaluateOpen(!evaluateOpen),
+    "tools-open-compare": () => setCompareOpen(!compareOpen),
+    "tools-open-history": () => setHistoryAnalysisOpen(!historyAnalysisOpen),
+    "tools-open-presets": () => setPresetsOpen(!presetsOpen),
+    "tools-open-floating-lane": () => {
+      shell.activateRightTab("floating-lane");
+      if (!floatingLaneConfig.enabled) {
+        toggleFloatingLaneOverlay();
+      }
+      createFloatingLaneControlPanel();
+    },
+    "help-shortcuts": () => {
+      shell.setBottomOpen(true);
+      root.querySelector<HTMLButtonElement>('[data-shell-status-tab="hints"]')?.click();
+    },
+  });
+
+  root.querySelector<HTMLButtonElement>('[data-shell-tab="settings"]')?.addEventListener("click", () => {
+    setSettingsOpen(true);
+  }, { signal });
+  root.querySelector<HTMLButtonElement>('[data-shell-tab="evaluate"]')?.addEventListener("click", () => {
+    setEvaluateOpen(true);
+  }, { signal });
+  root.querySelector<HTMLButtonElement>('[data-shell-tab="compare"]')?.addEventListener("click", () => {
+    setCompareOpen(true);
+  }, { signal });
+  root.querySelector<HTMLButtonElement>('[data-shell-tab="history"]')?.addEventListener("click", () => {
+    setHistoryAnalysisOpen(true);
+  }, { signal });
+  root.querySelector<HTMLButtonElement>('[data-shell-tab="presets"]')?.addEventListener("click", () => {
+    setPresetsOpen(true);
+  }, { signal });
+  root.querySelector<HTMLButtonElement>('[data-shell-tab="floating-lane"]')?.addEventListener("click", () => {
+    if (!floatingLaneConfig.enabled) {
+      toggleFloatingLaneOverlay();
+    }
+    createFloatingLaneControlPanel();
+    shell.activateRightTab("floating-lane");
+  }, { signal });
 
   evaluateToggleEl.addEventListener("click", () => setEvaluateOpen(!evaluateOpen), { signal });
   evaluateCloseEl.addEventListener("click", () => setEvaluateOpen(false), { signal });
