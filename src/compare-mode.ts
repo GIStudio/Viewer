@@ -354,17 +354,24 @@ export function createCompareMode(deps: CompareModeDependencies) {
     html += `<div class="viewer-compare-tab-panel" data-tab="placements">${placementsHtml}</div>`;
 
     // 2D Diff tab
+    const diffModes = [
+      { value: "overlay", label: t("Overlay (red/green)", "叠加（红/绿）") },
+      { value: "delta", label: t("Delta Map (arrows)", "差异图（箭头）") },
+    ];
     html += `<div class="viewer-compare-tab-panel" data-tab="diff2d">
       <div class="viewer-diff2d-controls">
-        <label class="viewer-settings-label">${t("Diff Mode", "差异模式")}</label>
-        <select id="diff2d-mode" class="viewer-select viewer-select-compact">
-          <option value="overlay">${t("Overlay (red/green)", "叠加（红/绿）")}</option>
-          <option value="delta">${t("Delta Map (arrows)", "差异图（箭头）")}</option>
-        </select>
-        <button id="diff2d-render" class="viewer-nav-button" type="button">${t("Render Diff", "渲染差异")}</button>
+        <label class="viewer-settings-label">${t("Click images to enlarge", "点击图片放大查看")}</label>
+        <button id="diff2d-render-all" class="viewer-nav-button" type="button">${t("Render All Diffs", "渲染所有差异")}</button>
       </div>
-      <div id="diff2d-image-host" class="viewer-diff2d-host">
-        <div class="viewer-evaluate-empty">${t("Select a mode and click Render Diff.", "选择模式后点击渲染差异")}</div>
+      <div class="viewer-diff2d-grid">
+        ${diffModes.map(m => `
+          <div class="viewer-diff2d-card" data-diff-mode="${m.value}">
+            <div class="viewer-diff2d-card-label">${m.label}</div>
+            <div class="viewer-diff2d-card-image" id="diff2d-${m.value}">
+              <div class="viewer-diff2d-placeholder">${t("Click Render All Diffs", "点击渲染差异图")}</div>
+            </div>
+          </div>
+        `).join("")}
       </div>
     </div>`;
 
@@ -398,14 +405,12 @@ export function createCompareMode(deps: CompareModeDependencies) {
     openCompare3dEl?.addEventListener("click", () => void enterCompare3d(a, b));
 
     // Wire up 2D diff rendering
-    const diff2dModeEl = deps.compareResultsEl.querySelector<HTMLSelectElement>("#diff2d-mode");
-    const diff2dRenderEl = deps.compareResultsEl.querySelector<HTMLButtonElement>("#diff2d-render");
-    const diff2dHostEl = deps.compareResultsEl.querySelector<HTMLElement>("#diff2d-image-host");
+    const diff2dRenderAllEl = deps.compareResultsEl.querySelector<HTMLButtonElement>("#diff2d-render-all");
 
-    async function renderDiff2d(): Promise<void> {
-      if (!diff2dModeEl || !diff2dHostEl) return;
-      const mode = diff2dModeEl.value;
-      diff2dHostEl.innerHTML = `<div class="viewer-evaluate-loading">Rendering ${mode} diff…</div>`;
+    async function renderDiff2d(mode: string): Promise<void> {
+      const hostEl = deps.compareResultsEl.querySelector<HTMLElement>(`#diff2d-${mode}`);
+      if (!hostEl) return;
+      hostEl.innerHTML = `<div class="viewer-evaluate-loading">${t("Rendering...", "正在渲染...")}</div>`;
       try {
         const url = `./api/scenes/diff/image?layout_a=${encodeURIComponent(a.layout_path)}&layout_b=${encodeURIComponent(b.layout_path)}&mode=${encodeURIComponent(mode)}`;
         const response = await fetch(url);
@@ -415,21 +420,57 @@ export function createCompareMode(deps: CompareModeDependencies) {
         }
         const blob = await response.blob();
         const objectUrl = URL.createObjectURL(blob);
-        diff2dHostEl.innerHTML = `<img class="viewer-diff2d-image" src="${deps.escapeHtml(objectUrl)}" alt="${deps.escapeHtml(mode)} diff" />`;
+        hostEl.innerHTML = `<img class="viewer-diff2d-thumb" src="${deps.escapeHtml(objectUrl)}" alt="${deps.escapeHtml(mode)} diff" data-full-url="${deps.escapeHtml(objectUrl)}" />`;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Rendering failed.";
-        diff2dHostEl.innerHTML = `<div class="viewer-evaluate-error">${deps.escapeHtml(message)}</div>`;
+        hostEl.innerHTML = `<div class="viewer-evaluate-error">${deps.escapeHtml(message)}</div>`;
       }
     }
 
-    diff2dRenderEl?.addEventListener("click", () => void renderDiff2d());
-    // Auto-render overlay when switching to diff2d for the first time
-    const diff2dTab = Array.from(tabs).find(t => t.dataset.tab === "diff2d");
-    diff2dTab?.addEventListener("click", () => {
-      if (diff2dHostEl && diff2dHostEl.querySelector(".viewer-evaluate-empty")) {
-        void renderDiff2d();
+    async function renderAllDiffs(): Promise<void> {
+      if (diff2dRenderAllEl) diff2dRenderAllEl.disabled = true;
+      await Promise.all([renderDiff2d("overlay"), renderDiff2d("delta")]);
+      if (diff2dRenderAllEl) diff2dRenderAllEl.disabled = false;
+    }
+
+    diff2dRenderAllEl?.addEventListener("click", () => void renderAllDiffs());
+
+    // 点击图片放大显示
+    deps.compareResultsEl.addEventListener("click", (e) => {
+      const img = (e.target as HTMLElement).closest(".viewer-diff2d-thumb") as HTMLImageElement | null;
+      if (img) {
+        showFullscreenImage(img.src, img.alt);
       }
     });
+
+    // 全屏图片弹窗
+    function showFullscreenImage(src: string, alt: string): void {
+      const modal = document.createElement("div");
+      modal.className = "viewer-diff2d-modal";
+      modal.innerHTML = `
+        <div class="viewer-diff2d-modal-overlay"></div>
+        <div class="viewer-diff2d-modal-content">
+          <button class="viewer-diff2d-modal-close" type="button" aria-label="${t("Close", "关闭")}">&times;</button>
+          <img src="${deps.escapeHtml(src)}" alt="${deps.escapeHtml(alt)}" />
+          <div class="viewer-diff2d-modal-caption">${deps.escapeHtml(alt)}</div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      const closeBtn = modal.querySelector<HTMLButtonElement>(".viewer-diff2d-modal-close")!;
+      const overlay = modal.querySelector(".viewer-diff2d-modal-overlay")!;
+
+      const closeModal = () => {
+        modal.classList.add("viewer-diff2d-modal-exit");
+        setTimeout(() => modal.remove(), 300);
+      };
+
+      closeBtn.addEventListener("click", closeModal);
+      overlay.addEventListener("click", closeModal);
+      modal.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeModal();
+      });
+    }
   }
 
   async function runComparison(): Promise<void> {
