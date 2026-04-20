@@ -779,6 +779,137 @@ body {
   white-space: nowrap;
 }
 
+/* Three-system scores styles */
+.viewer-three-system-main-scores {
+  margin-bottom: 24px;
+}
+
+.viewer-three-system-overall {
+  text-align: center;
+  padding: 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  color: #fff;
+}
+
+.viewer-three-system-overall-label {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.viewer-three-system-overall-value {
+  font-size: 36px;
+  font-weight: 700;
+}
+
+.viewer-three-system-score-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.viewer-three-system-score-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.viewer-three-system-score-content {
+  flex: 1;
+}
+
+.viewer-three-system-score-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.viewer-three-system-score-value {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.viewer-three-system-score-bar {
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.viewer-three-system-score-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.viewer-three-system-score-weight {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.viewer-three-system-sub-scores-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.viewer-three-system-sub-group {
+  margin-bottom: 20px;
+}
+
+.viewer-three-system-sub-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.viewer-three-system-sub-scores-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.viewer-three-system-sub-item {
+  padding: 10px;
+  background: #f8fafc;
+  border-radius: 6px;
+}
+
+.viewer-three-system-sub-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.viewer-three-system-sub-value {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.viewer-three-system-sub-bar {
+  height: 4px;
+  background: #e2e8f0;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.viewer-three-system-sub-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
 .viewer-settings-label {
   display: block;
   margin-bottom: 0.45rem;
