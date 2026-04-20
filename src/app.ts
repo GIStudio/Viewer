@@ -4,6 +4,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { AudioManager } from "./audio-manager";
 import { createCompareMode } from "./compare-mode";
 import { HistoryScatterPlot, type SceneHistoryEntry } from "./history-scatter-plot";
+import { HistoryFrequencyChart } from "./history-frequency-chart";
 import {
   createRadarChart,
   resizeRadarCanvas,
@@ -1664,7 +1665,12 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           <button id="viewer-history-analysis-close" class="viewer-settings-close" type="button" aria-label="Close history">x</button>
         </div>
         <div id="viewer-history-analysis-content" class="viewer-slide-panel-body">
-          <div id="viewer-history-scatter-plot" style="width: 100%;"></div>
+          <div class="viewer-history-tabs">
+            <button class="viewer-history-tab" data-tab="scatter" data-active="true">散点图 · Scatter</button>
+            <button class="viewer-history-tab" data-tab="frequency">频次图 · Frequency</button>
+          </div>
+          <div id="viewer-history-scatter-plot" class="viewer-history-tab-panel" data-tab="scatter" data-active="true" style="width: 100%;"></div>
+          <div id="viewer-history-frequency" class="viewer-history-tab-panel" data-tab="frequency" data-active="false" style="width: 100%;"></div>
         </div>
       </aside>
       <aside id="viewer-presets-panel" class="viewer-slide-panel" data-open="false">
@@ -1748,6 +1754,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const historyAnalysisCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-history-analysis-close");
   const historyAnalysisContentEl = requireElement<HTMLElement>(root, "#viewer-history-analysis-content");
   let historyScatterPlot: HistoryScatterPlot | null = null;
+  let historyFrequencyChart: HistoryFrequencyChart | null = null;
   let historyAnalysisOpen = false;
 
   const setHistoryAnalysisOpen = (nextOpen: boolean) => {
@@ -1756,6 +1763,19 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     if (nextOpen) {
       loadAndRenderHistory();
     }
+  };
+
+  const setupHistoryTabs = () => {
+    const tabs = historyAnalysisContentEl.querySelectorAll<HTMLButtonElement>(".viewer-history-tab");
+    const panels = historyAnalysisContentEl.querySelectorAll<HTMLElement>(".viewer-history-tab-panel");
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const target = tab.dataset.tab!;
+        tabs.forEach((t) => (t.dataset.active = String(t.dataset.tab === target)));
+        panels.forEach((p) => (p.dataset.active = String(p.dataset.tab === target)));
+      });
+    });
   };
 
   const loadAndRenderHistory = async () => {
@@ -1792,10 +1812,22 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       }
 
       if (!historyScatterPlot) {
-        historyScatterPlot = new HistoryScatterPlot(historyAnalysisContentEl);
+        historyScatterPlot = new HistoryScatterPlot(
+          historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-scatter-plot")!
+        );
+      }
+
+      if (!historyFrequencyChart) {
+        historyFrequencyChart = new HistoryFrequencyChart(
+          historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-frequency")!
+        );
       }
 
       await historyScatterPlot.init(scenesWithMetrics);
+      await historyFrequencyChart.init(scenesWithMetrics);
+
+      // Setup tab switching
+      setupHistoryTabs();
     } catch (error) {
       console.error("Failed to load history data:", error);
       historyAnalysisContentEl.innerHTML = `
