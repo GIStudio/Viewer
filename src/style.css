@@ -723,6 +723,62 @@ body {
   color: #1e293b;
 }
 
+/* Trend chart styles */
+.viewer-history-trend-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 6px;
+}
+
+.viewer-history-trend-add-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  background: #3b82f6;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.viewer-history-trend-add-btn:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.viewer-history-trend-stats {
+  margin-top: 16px;
+}
+
+.viewer-history-trend-stats-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.viewer-history-trend-stat-label {
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.viewer-history-trend-stat-row {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: #666;
+}
+
+.viewer-history-trend-stat-row span {
+  white-space: nowrap;
+}
+
 .viewer-settings-label {
   display: block;
   margin-bottom: 0.45rem;

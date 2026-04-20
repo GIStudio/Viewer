@@ -5,6 +5,7 @@ import { AudioManager } from "./audio-manager";
 import { createCompareMode } from "./compare-mode";
 import { HistoryScatterPlot, type SceneHistoryEntry } from "./history-scatter-plot";
 import { HistoryFrequencyChart } from "./history-frequency-chart";
+import { HistoryTrendChart } from "./history-trend-chart";
 import {
   createRadarChart,
   resizeRadarCanvas,
@@ -1668,9 +1669,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           <div class="viewer-history-tabs">
             <button class="viewer-history-tab" data-tab="scatter" data-active="true">散点图 · Scatter</button>
             <button class="viewer-history-tab" data-tab="frequency">频次图 · Frequency</button>
+            <button class="viewer-history-tab" data-tab="trend">趋势图 · Trend</button>
           </div>
           <div id="viewer-history-scatter-plot" class="viewer-history-tab-panel" data-tab="scatter" data-active="true" style="width: 100%;"></div>
           <div id="viewer-history-frequency" class="viewer-history-tab-panel" data-tab="frequency" data-active="false" style="width: 100%;"></div>
+          <div id="viewer-history-trend" class="viewer-history-tab-panel" data-tab="trend" data-active="false" style="width: 100%;"></div>
         </div>
       </aside>
       <aside id="viewer-presets-panel" class="viewer-slide-panel" data-open="false">
@@ -1755,6 +1758,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const historyAnalysisContentEl = requireElement<HTMLElement>(root, "#viewer-history-analysis-content");
   let historyScatterPlot: HistoryScatterPlot | null = null;
   let historyFrequencyChart: HistoryFrequencyChart | null = null;
+  let historyTrendChart: HistoryTrendChart | null = null;
   let historyAnalysisOpen = false;
 
   const setHistoryAnalysisOpen = (nextOpen: boolean) => {
@@ -1823,8 +1827,15 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         );
       }
 
+      if (!historyTrendChart) {
+        historyTrendChart = new HistoryTrendChart(
+          historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-trend")!
+        );
+      }
+
       await historyScatterPlot.init(scenesWithMetrics);
       await historyFrequencyChart.init(scenesWithMetrics);
+      await historyTrendChart.init(scenesWithMetrics);
 
       // Setup tab switching
       setupHistoryTabs();
