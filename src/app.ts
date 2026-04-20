@@ -3,6 +3,13 @@ import { PointerLockControls } from "three/examples/jsm/controls/PointerLockCont
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { AudioManager } from "./audio-manager";
 import { createCompareMode } from "./compare-mode";
+import { HistoryScatterPlot, type SceneHistoryEntry } from "./history-scatter-plot";
+import {
+  createRadarChart,
+  resizeRadarCanvas,
+  type SceneCompareState,
+  type SceneMetrics,
+} from "./scene-compare-radar";
 import type {
   ViewerManifest,
   InstanceInfo,
@@ -12,6 +19,7 @@ import type {
   FLOATING_LANE_COLORS,
   FLOATING_LANE_LABELS,
 } from "./viewer-types";
+import { PER_LANE_COLORS } from "./viewer-types";
 
 type SceneOption = {
   key: string;
@@ -829,6 +837,31 @@ function exportTopDownSvg(scene: THREE.Scene, root: THREE.Object3D | null): void
         svg += `\n  <polygon points="${points}" class="sidewalk" opacity="0.8"/>`;
       }
     }
+    // Nearroad corner patches (furnishing)
+    const nearroadPatches = (junction.nearroad_corner_patches ?? []) as Array<Record<string, unknown>>;
+    for (const patch of nearroadPatches) {
+      const rings = (patch.rings ?? []) as number[][][];
+      for (const ring of rings) {
+        if (ring.length < 3) continue;
+        const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+        svg += `\n  <polygon points="${points}" class="furnishing" opacity="0.8"/>`;
+      }
+    }
+    // Frontage corner patches
+    const frontagePatches = (junction.frontage_corner_patches ?? []) as Array<Record<string, unknown>>;
+    for (const patch of frontagePatches) {
+      const rings = (patch.rings ?? []) as number[][][];
+      for (const ring of rings) {
+        if (ring.length < 3) continue;
+        const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+        svg += `\n  <polygon points="${points}" class="frontage" opacity="0.8"/>`;
+      }
+    }
+    // Check generation_mode for debugging/visibility toggle
+    const generationMode = junction.generation_mode as string | undefined;
+    if (generationMode) {
+      console.debug(`[Junction ${junction.junction_id}] generation_mode: ${generationMode}`);
+    }
   }
 
   // 1.6. Draw carriageway rings from OSM geometry (non-junction roads)
@@ -1411,7 +1444,21 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         </div>
         <div class="viewer-header-controls">
           <select id="layout-select" class="viewer-select viewer-select-inline" title="Recent Result"></select>
-          <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene"></select>
+          <!-- 原始场景选择器（隐藏，保持向后兼容） -->
+          <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene" style="display: none;"></select>
+          <!-- 场景对比选择器 - 双Layout对比 -->
+          <div id="scene-compare-controls" class="scene-compare-controls">
+            <div class="scene-compare-group">
+              <select id="layout-a-select" class="viewer-select viewer-select-inline viewer-select-layout" title="Layout A"></select>
+              <select id="scene-a-select" class="viewer-select viewer-select-inline viewer-select-scene" title="Scene A"></select>
+            </div>
+            <div class="scene-compare-group">
+              <select id="layout-b-select" class="viewer-select viewer-select-inline viewer-select-layout" title="Layout B"></select>
+              <select id="scene-b-select" class="viewer-select viewer-select-inline viewer-select-scene" title="Scene B"></select>
+            </div>
+            <button id="reset-scene-mode" class="viewer-btn-reset" type="button" title="Clear Scene B">✕</button>
+          </div>
+          <button id="open-metrics-panel" class="viewer-btn-scene-compare" type="button" title="Open metrics comparison panel">⚖️ Compare</button>
         </div>
         <div class="viewer-header-actions">
           <button id="viewer-settings-toggle" class="viewer-settings-toggle" type="button" aria-expanded="false">Settings</button>
@@ -1421,9 +1468,11 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           <div class="viewer-menu-buttons">
             <button id="viewer-scene-graph-link" class="viewer-nav-button viewer-menu-button" type="button">Annotation</button>
             <button id="viewer-asset-editor-link" class="viewer-nav-button viewer-menu-button" type="button">Asset Editor</button>
-            <button id="viewer-presets-toggle" class="viewer-nav-button viewer-menu-button" type="button">Presets</button>
+            <button id="viewer-junction-editor-link" class="viewer-nav-button viewer-menu-button" type="button">Junction Editor</button>
             <button id="viewer-compare-toggle" class="viewer-nav-button viewer-menu-button" type="button">Compare</button>
+            <button id="viewer-presets-toggle" class="viewer-nav-button viewer-menu-button" type="button">Presets</button>
             <button id="viewer-evaluate-toggle" class="viewer-nav-button viewer-menu-button" type="button">Evaluate</button>
+            <button id="viewer-history-analysis-toggle" class="viewer-nav-button viewer-menu-button" type="button">📊 History</button>
             <button id="viewer-floating-lane-toggle" class="viewer-nav-button viewer-menu-button" type="button">Floating Lane</button>
             <button id="viewer-export-topdown-map" class="viewer-nav-button viewer-menu-button" type="button">Export PNG</button>
             <button id="viewer-export-topdown-svg" class="viewer-nav-button viewer-menu-button" type="button">Export SVG</button>
@@ -1431,6 +1480,24 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         </div>
       </div>
       <div id="viewer-canvas" class="viewer-canvas"></div>
+      <!-- 双场景对比雷达图容器 -->
+      <div id="scene-radar-container" class="scene-radar-container" hidden>
+        <div class="scene-radar-header">
+          <div class="scene-radar-title">Metrics Comparison</div>
+          <button id="close-scene-radar" class="viewer-btn-icon" type="button" title="Close radar view">✕</button>
+        </div>
+        <div class="scene-radar-body">
+          <div class="scene-radar-panel">
+            <div class="scene-radar-label" id="scene-a-label">Scene A</div>
+            <canvas id="scene-radar-canvas-a" class="scene-radar-canvas"></canvas>
+          </div>
+          <div class="scene-radar-divider"></div>
+          <div class="scene-radar-panel">
+            <div class="scene-radar-label" id="scene-b-label">Scene B</div>
+            <canvas id="scene-radar-canvas-b" class="scene-radar-canvas"></canvas>
+          </div>
+        </div>
+      </div>
       <button id="viewer-exit-compare3d" class="viewer-exit-compare3d" type="button" hidden>Exit Split View</button>
       <div id="viewer-crosshair" class="viewer-crosshair" hidden></div>
       <div id="viewer-info-card" class="viewer-info-card" hidden></div>
@@ -1521,7 +1588,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         </div>
         <div class="viewer-settings-section">
           <label class="viewer-toggle-row" for="layout-overlay-enabled">
-            <span>Layout Overlay</span>
+            <span>Scene Overlay</span>
             <input id="layout-overlay-enabled" type="checkbox" />
           </label>
         </div>
@@ -1572,6 +1639,18 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           <div id="viewer-compare-results" class="viewer-compare-results"></div>
         </div>
       </aside>
+      <aside id="viewer-history-analysis-panel" class="viewer-slide-panel" data-open="false">
+        <div class="viewer-slide-panel-header">
+          <div>
+            <div class="viewer-slide-panel-title">📊 History Analysis</div>
+            <div class="viewer-slide-panel-subtitle">Scatter plot analysis of scene generation history</div>
+          </div>
+          <button id="viewer-history-analysis-close" class="viewer-settings-close" type="button" aria-label="Close history">x</button>
+        </div>
+        <div id="viewer-history-analysis-content" class="viewer-slide-panel-body">
+          <div id="viewer-history-scatter-plot" style="width: 100%;"></div>
+        </div>
+      </aside>
       <aside id="viewer-presets-panel" class="viewer-slide-panel" data-open="false">
         <div class="viewer-slide-panel-header">
           <div>
@@ -1593,6 +1672,22 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const selectEl = requireElement<HTMLSelectElement>(root, "#scene-select");
   const sceneGraphLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-scene-graph-link");
   const assetEditorLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-asset-editor-link");
+  
+  // 场景对比相关元素
+  const openMetricsBtn = requireElement<HTMLButtonElement>(root, "#open-metrics-panel");
+  const sceneCompareControls = requireElement<HTMLElement>(root, "#scene-compare-controls");
+  const layoutASelectEl = requireElement<HTMLSelectElement>(root, "#layout-a-select");
+  const sceneASelectEl = requireElement<HTMLSelectElement>(root, "#scene-a-select");
+  const layoutBSelectEl = requireElement<HTMLSelectElement>(root, "#layout-b-select");
+  const sceneBSelectEl = requireElement<HTMLSelectElement>(root, "#scene-b-select");
+  const resetSceneModeBtn = requireElement<HTMLButtonElement>(root, "#reset-scene-mode");
+  const sceneRadarContainer = requireElement<HTMLElement>(root, "#scene-radar-container");
+  const closeSceneRadarBtn = requireElement<HTMLButtonElement>(root, "#close-scene-radar");
+  const sceneRadarCanvasA = requireElement<HTMLCanvasElement>(root, "#scene-radar-canvas-a");
+  const sceneRadarCanvasB = requireElement<HTMLCanvasElement>(root, "#scene-radar-canvas-b");
+  const sceneALabel = requireElement<HTMLElement>(root, "#scene-a-label");
+  const sceneBLabel = requireElement<HTMLElement>(root, "#scene-b-label");
+  
   const menuToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-menu-toggle");
   const menuDropdownEl = requireElement<HTMLElement>(root, "#viewer-menu-dropdown");
   const settingsToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-settings-toggle");
@@ -1632,6 +1727,70 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const compareSelectBEl = requireElement<HTMLSelectElement>(root, "#compare-layout-b");
   const compareResultsEl = requireElement<HTMLElement>(root, "#viewer-compare-results");
   const exitCompare3dEl = requireElement<HTMLButtonElement>(root, "#viewer-exit-compare3d");
+
+  const historyAnalysisToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-history-analysis-toggle");
+  const historyAnalysisPanelEl = requireElement<HTMLElement>(root, "#viewer-history-analysis-panel");
+  const historyAnalysisCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-history-analysis-close");
+  const historyAnalysisContentEl = requireElement<HTMLElement>(root, "#viewer-history-analysis-content");
+  let historyScatterPlot: HistoryScatterPlot | null = null;
+  let historyAnalysisOpen = false;
+
+  const setHistoryAnalysisOpen = (nextOpen: boolean) => {
+    historyAnalysisOpen = nextOpen;
+    historyAnalysisPanelEl.dataset.open = String(nextOpen);
+    if (nextOpen) {
+      loadAndRenderHistory();
+    }
+  };
+
+  const loadAndRenderHistory = async () => {
+    try {
+      const recentLayouts = await loadRecentLayouts(50);
+      const scenesWithMetrics: SceneHistoryEntry[] = [];
+
+      for (const layout of recentLayouts) {
+        try {
+          const manifest = await loadManifest(layout.layout_path);
+          if (manifest.summary) {
+            scenesWithMetrics.push({
+              layout_path: layout.layout_path,
+              label: layout.label,
+              relative_path: layout.relative_path,
+              updated_at: layout.updated_at,
+              mtime_ms: layout.mtime_ms,
+              summary: manifest.summary,
+            });
+          }
+        } catch (e) {
+          console.warn(`Failed to load manifest for ${layout.layout_path}:`, e);
+        }
+      }
+
+      if (scenesWithMetrics.length === 0) {
+        historyAnalysisContentEl.innerHTML = `
+          <div style="padding: 24px; text-align: center; color: #999;">
+            <p>No scene data with metrics found.</p>
+            <p style="font-size: 12px; margin-top: 8px;">Generate some scenes first, then return here to analyze the history.</p>
+          </div>
+        `;
+        return;
+      }
+
+      if (!historyScatterPlot) {
+        historyScatterPlot = new HistoryScatterPlot(historyAnalysisContentEl);
+      }
+
+      await historyScatterPlot.init(scenesWithMetrics);
+    } catch (error) {
+      console.error("Failed to load history data:", error);
+      historyAnalysisContentEl.innerHTML = `
+        <div style="padding: 24px; text-align: center; color: #f5222d;">
+          <p>Failed to load history data.</p>
+          <p style="font-size: 12px; margin-top: 8px;">${error instanceof Error ? error.message : "Unknown error"}</p>
+        </div>
+      `;
+    }
+  };
 
   const exportTopdownMapEl = requireElement<HTMLButtonElement>(root, "#viewer-export-topdown-map");
   const exportTopdownSvgEl = requireElement<HTMLButtonElement>(root, "#viewer-export-topdown-svg");
@@ -1912,7 +2071,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
     if (layoutOverlayToggleEl.checked) {
       layoutOverlayToggleEl.checked = false;
-      clearLayoutOverlay();
+      floatingLaneConfig.enabled = false;
+      clearFloatingLaneOverlay();
     }
     updateCanvasSlideOpenState();
   }
@@ -2032,128 +2192,6 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
   }
 
-  /* ── Layout Overlay ──────────────────────────────────────────── */
-
-  const BAND_COLORS: Record<string, number> = {
-    carriageway: 0x424a57,
-    drive_lane: 0x424a57,
-    bus_lane: 0xb7483a,
-    bike_lane: 0x39875a,
-    parking_lane: 0xa68256,
-    median: 0x6e7a5f,
-    grass_belt: 0x8cb369,
-    shared_street_surface: 0xc9b896,
-    colored_pavement: 0xe8dcc8,
-    nearroad_buffer: 0x989898,
-    furnishing: 0x7e6547,
-    clear_paths: 0xebe0ce,
-    clear_sidewalk: 0xebe0ce,
-    sidewalk: 0xebe0ce,
-    frontage_reserve: 0xb7d4e6,
-  };
-
-  const layoutOverlayObjects: THREE.Object3D[] = [];
-
-  function clearLayoutOverlay(): void {
-    for (const obj of layoutOverlayObjects) {
-      scene.remove(obj);
-      if (obj instanceof THREE.Mesh) {
-        obj.geometry.dispose();
-        (obj.material as THREE.Material).dispose();
-      }
-      if (obj instanceof THREE.Sprite) {
-        obj.material.map?.dispose();
-        obj.material.dispose();
-      }
-    }
-    layoutOverlayObjects.length = 0;
-  }
-
-  function buildLayoutOverlay(): void {
-    clearLayoutOverlay();
-    if (!currentManifest?.layout_overlay) return;
-
-    const overlay = currentManifest.layout_overlay;
-    const lengthM = overlay.length_m || 0;
-
-    // 1. Bands — semi-transparent colored planes at ground level
-    for (const band of overlay.bands) {
-      if (!band.width_m || !Number.isFinite(band.width_m)) continue;
-      const planeGeo = new THREE.PlaneGeometry(lengthM, band.width_m);
-      const planeMat = new THREE.MeshBasicMaterial({
-        color: BAND_COLORS[band.kind] ?? 0x666666,
-        transparent: true,
-        opacity: 0.35,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      const planeMesh = new THREE.Mesh(planeGeo, planeMat);
-      planeMesh.rotation.x = -Math.PI / 2;
-      planeMesh.position.set(lengthM / 2, 0.05, band.z_center_m ?? 0);
-      planeMesh.userData.isLayoutOverlay = true;
-      scene.add(planeMesh);
-      layoutOverlayObjects.push(planeMesh);
-    }
-
-    // 2. Building footprints — extruded semi-transparent 3D blocks
-    for (const fp of overlay.building_footprints) {
-      const pts = fp.polygon_xz;
-      if (!Array.isArray(pts) || pts.length < 3) continue;
-      try {
-        const shape = new THREE.Shape();
-        shape.moveTo(pts[0][0], pts[0][1]);
-        for (let i = 1; i < pts.length; i++) {
-          shape.lineTo(pts[i][0], pts[i][1]);
-        }
-        shape.closePath();
-        const extrudeSettings = { depth: fp.target_height_m || 6, bevelEnabled: false };
-        const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-        geo.rotateX(-Math.PI / 2);
-        const mat = new THREE.MeshBasicMaterial({
-          color: 0xa78bfa,
-          transparent: true,
-          opacity: 0.3,
-          depthWrite: false,
-        });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.y = 0.05;
-        mesh.userData.isLayoutOverlay = true;
-        scene.add(mesh);
-        layoutOverlayObjects.push(mesh);
-      } catch {
-        // Skip invalid polygon shapes
-      }
-    }
-
-    // 3. Placement markers — colored cylinders with category labels
-    const instances = currentManifest.instances;
-    if (instances) {
-      const markerGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.2, 8);
-      for (const info of Object.values(instances)) {
-        const category = String(info.category || "").trim().toLowerCase();
-        const color = CATEGORY_COLORS[category] ?? 0x38bdf8;
-        const markerMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 });
-        const marker = new THREE.Mesh(markerGeo, markerMat);
-        if (info.position_xyz) {
-          marker.position.set(
-            info.position_xyz[0],
-            (info.position_xyz[1] || 0) + 0.6,
-            info.position_xyz[2],
-          );
-        }
-        marker.userData.isLayoutOverlay = true;
-        scene.add(marker);
-        layoutOverlayObjects.push(marker);
-
-        const label = createTextSprite(category, color);
-        label.position.set(marker.position.x, marker.position.y + 1.2, marker.position.z);
-        label.userData.isLayoutOverlay = true;
-        scene.add(label);
-        layoutOverlayObjects.push(label);
-      }
-    }
-  }
-
   /* ── Floating Lane Overlay ─────────────────────────────────── */
 
   // Floating lane colors - HDR style (bright, saturated)
@@ -2215,6 +2253,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     selectedLaneIndex: -1,
     showBuildings: true,
     showFeatures: true,
+    showPlacementMarkers: true,
     buildingOpacity: 0.4,
     featureOpacity: 0.6,
   };
@@ -2253,8 +2292,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     updateAxisHud(); // Hide HUD when overlay is cleared
   }
 
-  function createFloatingLaneLabel(kind: string, x: number, y: number, z: number): THREE.Sprite {
-    const label = LANE_LABELS[kind] ?? LANE_LABELS["default"];
+  function createFloatingLaneLabel(kind: string, x: number, y: number, z: number, customLabel?: string): THREE.Sprite {
+    const label = customLabel ?? LANE_LABELS[kind] ?? LANE_LABELS["default"];
     const canvas = document.createElement("canvas");
     canvas.width = 256;
     canvas.height = 64;
@@ -2424,13 +2463,6 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
 
     const overlay = currentManifest.layout_overlay;
 
-    // Debug: log manifest info for coordinate system understanding
-    console.log("[FloatingLane] Manifest info:", {
-      spawn_point: currentManifest.spawn_point,
-      forward_vector: currentManifest.forward_vector,
-      scene_bounds: currentManifest.scene_bounds,
-    });
-
     // Get OSM geometry for carriageway rings (road polygons)
     const summary = (currentManifest.summary ?? {}) as Record<string, unknown>;
     const osmGeom = (summary.osm_geometry ?? {}) as Record<string, unknown>;
@@ -2438,39 +2470,18 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     const sidewalkRings = (osmGeom.sidewalk_rings ?? []) as number[][][];
     const junctions = (osmGeom.junction_geometries ?? []) as Array<Record<string, unknown>>;
 
-    // Get scene center for fallback case (when no carriagewayRings available)
-    let sceneCenterX = 0;
-    let sceneCenterZ = 0;
-    if (currentRoot) {
-      const bbox = new THREE.Box3().setFromObject(currentRoot);
-      const center = bbox.getCenter(new THREE.Vector3());
-      sceneCenterX = center.x;
-      sceneCenterZ = center.z;
-    }
-
     const height = floatingLaneConfig.height;
 
-    // Helper function to convert ring coordinates relative to scene center
-    // Note: swap X and Z because ring data format is [x, z] but we need [z, x] for scene
-    const toSceneCoords = (point: number[]): number[] => {
-      // point[0] = X (East/West), point[1] = Z (North/South) in ring data
-      // For scene: X = point[1], Z = point[0] (swap)
-      return [point[1] - sceneCenterX, point[0] - sceneCenterZ];
-    };
+    // ShapeGeometry is defined in XY plane; rotation.x = -PI/2 maps Shape(x,y) → World(x,0,-y).
+    // Pre-negate Z so that after rotation, world Z matches the data Z.
+    const toShapeXY = (point: number[]): number[] => [point[0], -point[1]];
 
     // ========== 1. Render road polygons using carriagewayRings ==========
-    // Note: ring data format is [x, z] = [East, North]
     if (carriagewayRings.length > 0) {
-      // Debug: log first ring's first few points
-      console.log("[FloatingLane] Scene center:", { sceneCenterX, sceneCenterZ });
-      console.log("[FloatingLane] First carriageway ring (raw):", carriagewayRings[0]?.slice(0, 3));
-      console.log("[FloatingLane] First carriageway ring (offset):", carriagewayRings[0]?.slice(0, 3).map(toSceneCoords));
-
       for (const ring of carriagewayRings) {
         if (ring.length < 3) continue;
-        // Convert ring coordinates to scene space
-        const sceneRing = ring.map(p => toSceneCoords(p));
-        const shape = buildPolygonShape(sceneRing);
+        const shapeRing = ring.map(p => toShapeXY(p));
+        const shape = buildPolygonShape(shapeRing);
         const geometry = new THREE.ShapeGeometry(shape);
         const material = new THREE.MeshBasicMaterial({
           color: FLOATING_COLORS.carriageway,
@@ -2495,7 +2506,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
             opacity: floatingLaneConfig.opacity * 0.9,
           });
           const points: THREE.Vector3[] = [];
-          for (const point of sceneRing) {
+          for (const point of ring) {
             points.push(new THREE.Vector3(point[0], height, point[1]));
           }
           points.push(points[0].clone()); // close the loop
@@ -2512,14 +2523,13 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     if (floatingLaneConfig.showEdgeLines && sidewalkRings.length > 0) {
       for (const ring of sidewalkRings) {
         if (ring.length < 3) continue;
-        const sceneRing = ring.map(p => toSceneCoords(p));
         const edgeMaterial = new THREE.LineBasicMaterial({
           color: FLOATING_COLORS.sidewalk,
           transparent: true,
           opacity: floatingLaneConfig.opacity * 0.8,
         });
         const points: THREE.Vector3[] = [];
-        for (const point of sceneRing) {
+        for (const point of ring) {
           points.push(new THREE.Vector3(point[0], height, point[1]));
         }
         points.push(points[0].clone());
@@ -2536,8 +2546,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       const coreRings = (junction.carriageway_core_rings ?? []) as number[][][];
       for (const ring of coreRings) {
         if (ring.length < 3) continue;
-        const sceneRing = ring.map(p => toSceneCoords(p));
-        const shape = buildPolygonShape(sceneRing);
+        const shapeRing = ring.map(p => toShapeXY(p));
+        const shape = buildPolygonShape(shapeRing);
         const geometry = new THREE.ShapeGeometry(shape);
         const material = new THREE.MeshBasicMaterial({
           color: FLOATING_COLORS.carriageway,
@@ -2562,7 +2572,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
             opacity: floatingLaneConfig.opacity * 0.9,
           });
           const points: THREE.Vector3[] = [];
-          for (const point of sceneRing) {
+          for (const point of ring) {
             points.push(new THREE.Vector3(point[0], height, point[1]));
           }
           points.push(points[0].clone());
@@ -2573,108 +2583,317 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           floatingLaneObjects.push(edgeLine);
         }
       }
+
+      const surfacePatchCollections = [
+        {
+          patches: (junction.lane_surface_patches ?? []) as Array<Record<string, unknown>>,
+          kind: "lane" as const,
+        },
+        {
+          patches: (junction.merged_surface_patches ?? []) as Array<Record<string, unknown>>,
+          kind: "merged" as const,
+        },
+      ];
+
+      for (const collection of surfacePatchCollections) {
+        for (const [patchIndex, patch] of collection.patches.entries()) {
+          const rings = (patch.rings ?? []) as number[][][];
+          for (const [ringIndex, ring] of rings.entries()) {
+            if (ring.length < 3) continue;
+            const shapeRing = ring.map((point) => toShapeXY(point));
+            const shape = buildPolygonShape(shapeRing);
+            const geometry = new THREE.ShapeGeometry(shape);
+            const color =
+              collection.kind === "merged"
+                ? 0x8b5cf6
+                : patch.flow === "outbound"
+                  ? 0xdc2626
+                  : 0x2563eb;
+            const material = new THREE.MeshBasicMaterial({
+              color,
+              transparent: true,
+              opacity: floatingLaneConfig.opacity * (collection.kind === "merged" ? 0.35 : 0.28),
+              depthWrite: false,
+              side: THREE.DoubleSide,
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.set(0, height + 0.01, 0);
+            mesh.userData.isFloatingLane = true;
+            mesh.userData.overlayType = `junction-${collection.kind}`;
+            mesh.userData.surfaceId = patch.surface_id ?? `${collection.kind}_${patchIndex}_${ringIndex}`;
+            scene.add(mesh);
+            floatingLaneObjects.push(mesh);
+
+            if (floatingLaneConfig.showEdgeLines) {
+              const edgeMaterial = new THREE.LineBasicMaterial({
+                color,
+                transparent: true,
+                opacity: floatingLaneConfig.opacity * 0.75,
+              });
+              const points: THREE.Vector3[] = [];
+              for (const point of ring) {
+                points.push(new THREE.Vector3(point[0], height + 0.01, point[1]));
+              }
+              points.push(points[0].clone());
+              const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
+              const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
+              edgeLine.userData.isFloatingLane = true;
+              scene.add(edgeLine);
+              floatingLaneObjects.push(edgeLine);
+            }
+          }
+        }
+      }
     }
 
-    // ========== 4. Fallback: render bands as rectangles if no carriagewayRings ==========
-    if (carriagewayRings.length === 0 && junctions.length === 0) {
-      // Get road extent from bands
-      let roadMinX = Infinity, roadMaxX = -Infinity, roadMinZ = Infinity, roadMaxZ = -Infinity;
-      for (const band of overlay.bands) {
-        if (!band.width_m || !Number.isFinite(band.width_m)) continue;
-        const halfWidth = band.width_m / 2;
-        const zCenter = band.z_center_m ?? 0;
-        roadMinZ = Math.min(roadMinZ, zCenter - halfWidth);
-        roadMaxZ = Math.max(roadMaxZ, zCenter + halfWidth);
+    // ========== 4. Render bands as rectangles (always, with per-lane carriageway split) ==========
+    {
+      const bandHeight = height + 0.02; // Slight offset above OSM polygons to avoid z-fighting
+
+      // --- Compute road extent and center from actual scene geometry ---
+      let roadMinX: number;
+      let roadMaxX: number;
+      let roadCenterZ = 0; // Lateral offset: band z_center_m is relative to road center
+
+      if (carriagewayRings.length > 0) {
+        // Use actual carriageway ring bounds for positioning
+        let ringMinX = Infinity, ringMaxX = -Infinity;
+        let ringMinZ = Infinity, ringMaxZ = -Infinity;
+        for (const ring of carriagewayRings) {
+          for (const point of ring) {
+            ringMinX = Math.min(ringMinX, point[0]);
+            ringMaxX = Math.max(ringMaxX, point[0]);
+            ringMinZ = Math.min(ringMinZ, point[1]);
+            ringMaxZ = Math.max(ringMaxZ, point[1]);
+          }
+        }
+        // Also include junction rings in extent
+        for (const junctionObj of junctions) {
+          const coreRings = (junctionObj.carriageway_core_rings ?? []) as number[][][];
+          for (const ring of coreRings) {
+            for (const point of ring) {
+              ringMinX = Math.min(ringMinX, point[0]);
+              ringMaxX = Math.max(ringMaxX, point[0]);
+              ringMinZ = Math.min(ringMinZ, point[1]);
+              ringMaxZ = Math.max(ringMaxZ, point[1]);
+            }
+          }
+        }
+        roadMinX = ringMinX;
+        roadMaxX = ringMaxX;
+        roadCenterZ = (ringMinZ + ringMaxZ) / 2;
+      } else if (currentManifest?.scene_bounds) {
+        // Use scene bounds for positioning
+        const sb = currentManifest.scene_bounds;
+        roadMinX = sb.center[0] - sb.size[0] / 2;
+        roadMaxX = sb.center[0] + sb.size[0] / 2;
+        roadCenterZ = sb.center[2];
+      } else {
+        // Fallback: overlay.length_m centered at origin (template mode)
+        const halfLen = (overlay.length_m || 100) / 2;
+        roadMinX = -halfLen;
+        roadMaxX = halfLen;
+        roadCenterZ = 0;
       }
-      roadMinX = sceneCenterX - 50; // Default length
-      roadMaxX = sceneCenterX + 50;
+
+      const laneCount = Math.max(1, overlay.lane_count ?? 1);
+      const roadCenterX = (roadMinX + roadMaxX) / 2;
+      const length = roadMaxX - roadMinX;
+
+      const addSolidEdgeLine = (x1: number, z1: number, x2: number, z2: number, color: number, opacity: number) => {
+        const edgeLineMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+        const points = [new THREE.Vector3(x1, bandHeight, z1), new THREE.Vector3(x2, bandHeight, z2)];
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geo, edgeLineMat);
+        line.userData.isFloatingLane = true;
+        scene.add(line);
+        floatingLaneObjects.push(line);
+      };
+
+      const addDashedEdgeLine = (x1: number, z1: number, x2: number, z2: number, opacity: number) => {
+        const dashMat = new THREE.LineDashedMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity,
+          dashSize: 1.5,
+          gapSize: 1.0,
+        });
+        const points = [new THREE.Vector3(x1, bandHeight, z1), new THREE.Vector3(x2, bandHeight, z2)];
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geo, dashMat);
+        line.computeLineDistances();
+        line.userData.isFloatingLane = true;
+        scene.add(line);
+        floatingLaneObjects.push(line);
+      };
 
       for (let bandIdx = 0; bandIdx < overlay.bands.length; bandIdx++) {
         const band = overlay.bands[bandIdx];
         if (!band.width_m || !Number.isFinite(band.width_m)) continue;
         if (!visibleLaneKinds.has(band.kind) && band.kind !== "default") continue;
 
+        // Band z_center_m is relative to road center; offset by roadCenterZ for world position
+        const bandZ = roadCenterZ + (band.z_center_m ?? 0);
+
         const isSelected = floatingLaneConfig.selectedLaneIndex === bandIdx;
-        const baseColor = getFloatingLaneColor(band.kind);
-        const opacity = isSelected
+        const baseOpacity = isSelected
           ? Math.min(floatingLaneConfig.opacity * 1.5, 0.9)
           : floatingLaneConfig.opacity * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
 
-        const length = roadMaxX - roadMinX;
-        const planeGeo = new THREE.PlaneGeometry(length, band.width_m);
-        const planeMat = new THREE.MeshBasicMaterial({
-          color: baseColor,
-          transparent: true,
-          opacity: opacity * 0.7,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        });
-        const planeMesh = new THREE.Mesh(planeGeo, planeMat);
-        planeMesh.rotation.x = -Math.PI / 2;
-        planeMesh.position.set((roadMinX + roadMaxX) / 2, height, band.z_center_m ?? 0);
-        planeMesh.userData.isFloatingLane = true;
-        planeMesh.userData.bandIndex = bandIdx;
-        planeMesh.userData.bandKind = band.kind;
-        planeMesh.userData.overlayType = "band";
-        scene.add(planeMesh);
-        floatingLaneObjects.push(planeMesh);
+        // --- Carriageway: split into per-lane sub-lanes ---
+        if (band.kind === "carriageway" && laneCount > 0) {
+          const laneWidth = band.width_m / laneCount;
+          const zStart = bandZ - band.width_m / 2;
 
-        // Edge lines
-        if (floatingLaneConfig.showEdgeLines) {
-          const halfWidth = band.width_m / 2;
-          const leftZ = (band.z_center_m ?? 0) - halfWidth;
-          const rightZ = (band.z_center_m ?? 0) + halfWidth;
-          const edgeLineMat = new THREE.LineBasicMaterial({
-            color: isSelected ? 0xffffff : baseColor,
-            transparent: true,
-            opacity: opacity * 0.9,
-          });
+          for (let i = 0; i < laneCount; i++) {
+            const laneZCenter = zStart + laneWidth * (i + 0.5);
+            const laneColor = PER_LANE_COLORS[i % PER_LANE_COLORS.length];
 
-          const addEdgeLine = (x1: number, z1: number, x2: number, z2: number) => {
-            const points = [new THREE.Vector3(x1, height, z1), new THREE.Vector3(x2, height, z2)];
-            const geo = new THREE.BufferGeometry().setFromPoints(points);
-            const line = new THREE.Line(geo, edgeLineMat);
-            line.userData.isFloatingLane = true;
-            scene.add(line);
-            floatingLaneObjects.push(line);
-          };
+            const planeGeo = new THREE.PlaneGeometry(length, laneWidth);
+            const planeMat = new THREE.MeshBasicMaterial({
+              color: laneColor,
+              transparent: true,
+              opacity: baseOpacity * 0.7,
+              depthWrite: false,
+              side: THREE.DoubleSide,
+            });
+            const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+            planeMesh.rotation.x = -Math.PI / 2;
+            planeMesh.position.set(roadCenterX, bandHeight, laneZCenter);
+            planeMesh.userData.isFloatingLane = true;
+            planeMesh.userData.bandIndex = bandIdx;
+            planeMesh.userData.bandKind = "drive_lane";
+            planeMesh.userData.laneIndex = i;
+            planeMesh.userData.overlayType = "lane";
+            scene.add(planeMesh);
+            floatingLaneObjects.push(planeMesh);
 
-          addEdgeLine(roadMinX, leftZ, roadMaxX, leftZ);
-          addEdgeLine(roadMinX, rightZ, roadMaxX, rightZ);
-          addEdgeLine(roadMinX, leftZ, roadMinX, rightZ);
-          addEdgeLine(roadMaxX, leftZ, roadMaxX, rightZ);
-        }
+            // Edge lines for each lane
+            if (floatingLaneConfig.showEdgeLines) {
+              const laneLeftZ = laneZCenter - laneWidth / 2;
+              const laneRightZ = laneZCenter + laneWidth / 2;
 
-        // Label
-        if (floatingLaneConfig.showLabels) {
-          const labelSprite = createFloatingLaneLabel(
-            band.kind,
-            (roadMinX + roadMaxX) / 2,
-            height + 1.5,
-            band.z_center_m ?? 0
-          );
-          labelSprite.userData.isFloatingLane = true;
-          labelSprite.userData.bandIndex = bandIdx;
-          scene.add(labelSprite);
-          floatingLaneObjects.push(labelSprite);
-        }
+              if (i === 0) {
+                // Outer boundary (first lane left edge) — solid
+                addSolidEdgeLine(roadMinX, laneLeftZ, roadMaxX, laneLeftZ, isSelected ? 0xffffff : laneColor, baseOpacity * 0.9);
+              }
+              if (i === laneCount - 1) {
+                // Outer boundary (last lane right edge) — solid
+                addSolidEdgeLine(roadMinX, laneRightZ, roadMaxX, laneRightZ, isSelected ? 0xffffff : laneColor, baseOpacity * 0.9);
+              }
+              if (i > 0) {
+                // Inter-lane boundary — dashed white
+                addDashedEdgeLine(roadMinX, laneLeftZ, roadMaxX, laneLeftZ, baseOpacity * 0.7);
+              }
+            }
 
-        // Selection glow
-        if (isSelected) {
-          const glowGeo = new THREE.PlaneGeometry(length + 0.5, band.width_m + 0.5);
-          const glowMat = new THREE.MeshBasicMaterial({
+            // Per-lane label
+            if (floatingLaneConfig.showLabels) {
+              const labelSprite = createFloatingLaneLabel(
+                "drive_lane",
+                roadCenterX,
+                bandHeight + 1.5,
+                laneZCenter,
+                `车道 ${i + 1}`,
+              );
+              labelSprite.userData.isFloatingLane = true;
+              labelSprite.userData.bandIndex = bandIdx;
+              labelSprite.userData.laneIndex = i;
+              scene.add(labelSprite);
+              floatingLaneObjects.push(labelSprite);
+            }
+          }
+
+          // End-cap lines for carriageway outer boundaries
+          if (floatingLaneConfig.showEdgeLines) {
+            const cwLeftZ = zStart;
+            const cwRightZ = zStart + band.width_m;
+            addSolidEdgeLine(roadMinX, cwLeftZ, roadMinX, cwRightZ, isSelected ? 0xffffff : PER_LANE_COLORS[0], baseOpacity * 0.9);
+            addSolidEdgeLine(roadMaxX, cwLeftZ, roadMaxX, cwRightZ, isSelected ? 0xffffff : PER_LANE_COLORS[0], baseOpacity * 0.9);
+          }
+
+          // Selection glow covers entire carriageway
+          if (isSelected) {
+            const glowGeo = new THREE.PlaneGeometry(length + 0.5, band.width_m + 0.5);
+            const glowMat = new THREE.MeshBasicMaterial({
+              color: PER_LANE_COLORS[0],
+              transparent: true,
+              opacity: 0.2,
+              depthWrite: false,
+              side: THREE.DoubleSide,
+            });
+            const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+            glowMesh.rotation.x = -Math.PI / 2;
+            glowMesh.position.set(roadCenterX, bandHeight - 0.01, bandZ);
+            glowMesh.userData.isFloatingLane = true;
+            scene.add(glowMesh);
+            floatingLaneObjects.push(glowMesh);
+          }
+        } else {
+          // --- Non-carriageway band: render as single rectangle ---
+          const baseColor = getFloatingLaneColor(band.kind);
+          const planeGeo = new THREE.PlaneGeometry(length, band.width_m);
+          const planeMat = new THREE.MeshBasicMaterial({
             color: baseColor,
             transparent: true,
-            opacity: 0.2,
+            opacity: baseOpacity * 0.7,
             depthWrite: false,
             side: THREE.DoubleSide,
           });
-          const glowMesh = new THREE.Mesh(glowGeo, glowMat);
-          glowMesh.rotation.x = -Math.PI / 2;
-          glowMesh.position.set((roadMinX + roadMaxX) / 2, height - 0.01, band.z_center_m ?? 0);
-          glowMesh.userData.isFloatingLane = true;
-          scene.add(glowMesh);
-          floatingLaneObjects.push(glowMesh);
+          const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+          planeMesh.rotation.x = -Math.PI / 2;
+          planeMesh.position.set(roadCenterX, bandHeight, bandZ);
+          planeMesh.userData.isFloatingLane = true;
+          planeMesh.userData.bandIndex = bandIdx;
+          planeMesh.userData.bandKind = band.kind;
+          planeMesh.userData.overlayType = "band";
+          scene.add(planeMesh);
+          floatingLaneObjects.push(planeMesh);
+
+          // Edge lines
+          if (floatingLaneConfig.showEdgeLines) {
+            const halfWidth = band.width_m / 2;
+            const leftZ = bandZ - halfWidth;
+            const rightZ = bandZ + halfWidth;
+
+            addSolidEdgeLine(roadMinX, leftZ, roadMaxX, leftZ, isSelected ? 0xffffff : baseColor, baseOpacity * 0.9);
+            addSolidEdgeLine(roadMinX, rightZ, roadMaxX, rightZ, isSelected ? 0xffffff : baseColor, baseOpacity * 0.9);
+            addSolidEdgeLine(roadMinX, leftZ, roadMinX, rightZ, isSelected ? 0xffffff : baseColor, baseOpacity * 0.9);
+            addSolidEdgeLine(roadMaxX, leftZ, roadMaxX, rightZ, isSelected ? 0xffffff : baseColor, baseOpacity * 0.9);
+          }
+
+          // Label
+          if (floatingLaneConfig.showLabels) {
+            const labelSprite = createFloatingLaneLabel(
+              band.kind,
+              roadCenterX,
+              bandHeight + 1.5,
+              bandZ,
+            );
+            labelSprite.userData.isFloatingLane = true;
+            labelSprite.userData.bandIndex = bandIdx;
+            scene.add(labelSprite);
+            floatingLaneObjects.push(labelSprite);
+          }
+
+          // Selection glow
+          if (isSelected) {
+            const glowGeo = new THREE.PlaneGeometry(length + 0.5, band.width_m + 0.5);
+            const glowMat = new THREE.MeshBasicMaterial({
+              color: baseColor,
+              transparent: true,
+              opacity: 0.2,
+              depthWrite: false,
+              side: THREE.DoubleSide,
+            });
+            const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+            glowMesh.rotation.x = -Math.PI / 2;
+            glowMesh.position.set(roadCenterX, bandHeight - 0.01, bandZ);
+            glowMesh.userData.isFloatingLane = true;
+            scene.add(glowMesh);
+            floatingLaneObjects.push(glowMesh);
+          }
         }
       }
     }
@@ -2686,7 +2905,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         const pts = fp.polygon_xz;
         if (!Array.isArray(pts) || pts.length < 3) continue;
 
-        const shape = buildPolygonShape(pts);
+        const shape = buildPolygonShape(pts.map(p => [p[0], -p[1]]));
         const geometry = new THREE.ShapeGeometry(shape);
         const landUseType = fp.land_use_type?.toLowerCase() ?? "";
         const colorKey = landUseType.includes("residential") ? "building_residential"
@@ -2794,6 +3013,34 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         }
       }
     }
+
+    // ========== 7. Render placement markers (absorbed from Layout Overlay) ==========
+    if (floatingLaneConfig.showPlacementMarkers && instances) {
+      const markerGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.2, 8);
+      for (const info of Object.values(instances)) {
+        const category = String(info.category || "").trim().toLowerCase();
+        const color = CATEGORY_COLORS[category] ?? 0x38bdf8;
+        const markerMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 });
+        const marker = new THREE.Mesh(markerGeo, markerMat);
+        if (info.position_xyz) {
+          marker.position.set(
+            info.position_xyz[0],
+            (info.position_xyz[1] || 0) + 0.6,
+            info.position_xyz[2],
+          );
+        }
+        marker.userData.isFloatingLane = true;
+        marker.userData.overlayType = "marker";
+        scene.add(marker);
+        floatingLaneObjects.push(marker);
+
+        const label = createTextSprite(category, color);
+        label.position.set(marker.position.x, marker.position.y + 1.2, marker.position.z);
+        label.userData.isFloatingLane = true;
+        scene.add(label);
+        floatingLaneObjects.push(label);
+      }
+    }
   }
 
   function updateFloatingLaneOverlay(deltaTime: number): void {
@@ -2813,7 +3060,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     panel.className = "floating-lane-panel";
     panel.innerHTML = `
       <div class="flp-header">
-        <span class="flp-title">Floating Lane Overlay</span>
+        <span class="flp-title">Scene Overlay</span>
         <button class="flp-close" id="flp-close-btn">&times;</button>
       </div>
       <div class="flp-content">
@@ -2898,6 +3145,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
 
     document.getElementById("flp-enabled")?.addEventListener("change", (e) => {
       floatingLaneConfig.enabled = (e.target as HTMLInputElement).checked;
+      layoutOverlayToggleEl.checked = floatingLaneConfig.enabled;
       if (floatingLaneConfig.enabled) {
         buildFloatingLaneOverlay();
         panel.style.display = "block";
@@ -3489,17 +3737,6 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           (child.material as THREE.Material).dispose();
         }
       }
-      if (child.userData.isLayoutOverlay) {
-        scene.remove(child);
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          (child.material as THREE.Material).dispose();
-        }
-        if (child instanceof THREE.Sprite) {
-          child.material.map?.dispose();
-          child.material.dispose();
-        }
-      }
     });
 
     applyAudioProfile();
@@ -3622,6 +3859,33 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
   }
 
+  // 从manifest创建场景选项
+  function makeSceneOptionsFromManifest(manifest: ViewerManifest, layoutPath: string): SceneOption[] {
+    const options: SceneOption[] = [];
+    
+    // 添加production_steps场景
+    if (manifest.production_steps) {
+      for (const step of manifest.production_steps) {
+        options.push({
+          key: step.step_id,
+          label: `${step.title} (${layoutPath.split('/').pop()})`,
+          glbUrl: step.glb_url,
+        });
+      }
+    }
+    
+    // 添加final_scene
+    if (manifest.final_scene) {
+      options.push({
+        key: "final_scene",
+        label: `Final Scene (${layoutPath.split('/').pop()})`,
+        glbUrl: manifest.final_scene.glb_url,
+      });
+    }
+    
+    return options;
+  }
+
   function populateSceneOptions(manifest: ViewerManifest): SceneOption[] {
     optionsByKey.clear();
     selectEl.innerHTML = "";
@@ -3637,6 +3901,10 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     selectEl.disabled = options.length === 0;
     const selectedOption = options.find((option) => option.key === selectEl.value) ?? options[0];
     selectEl.title = selectedOption?.label ?? "";
+    
+    // 填充场景对比选择器
+    populateLayoutSelectors();
+    
     return options;
   }
 
@@ -3669,9 +3937,16 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     // Reset layout overlay if active
     if (layoutOverlayToggleEl.checked) {
       layoutOverlayToggleEl.checked = false;
-      clearLayoutOverlay();
+      floatingLaneConfig.enabled = false;
+      clearFloatingLaneOverlay();
     }
     applyAudioProfile();
+    
+    // 填充对比选择器
+    populateLayoutSelectors();
+    // 默认设置Layout A
+    layoutASelectEl.value = layoutPath;
+    await loadLayoutAndPopulateScenes(layoutPath, sceneASelectEl, true);
   }
 
   /* ── Evaluate ────────────────────────────────────────────── */
@@ -3928,6 +4203,15 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     { signal },
   );
 
+  const junctionEditorLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-junction-editor-link");
+  junctionEditorLinkEl.addEventListener(
+    "click",
+    () => {
+      window.location.hash = "#junction-editor";
+    },
+    { signal },
+  );
+
   exportTopdownMapEl.addEventListener("click", () => {
     exportTopDownMapEnhanced(scene, currentRoot);
     menuDropdownEl.hidden = true;
@@ -3971,6 +4255,282 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   compareCloseEl.addEventListener("click", () => setCompareOpen(false), { signal });
   compareSelectAEl.addEventListener("change", () => void compareMode.runComparison(), { signal });
   compareSelectBEl.addEventListener("change", () => void compareMode.runComparison(), { signal });
+
+  historyAnalysisToggleEl.addEventListener("click", () => setHistoryAnalysisOpen(!historyAnalysisOpen), { signal });
+  historyAnalysisCloseEl.addEventListener("click", () => setHistoryAnalysisOpen(false), { signal });
+
+  // ==================== 场景对比功能 ====================
+  
+  // 存储每个layout的manifest
+  const layoutManifests = new Map<string, ViewerManifest>();
+  
+  const sceneCompareState: SceneCompareState = {
+    mode: "single",
+    sceneA: null,
+    sceneB: null,
+    metricsA: null,
+    metricsB: null,
+  };
+
+  // 填充Layout选择器（使用已有的recentLayouts数据）
+  function populateLayoutSelectors() {
+    const layouts = Array.from(recentLayoutsByPath.values());
+    
+    // Layout A
+    layoutASelectEl.innerHTML = "";
+    layouts.forEach((layout) => {
+      const option = document.createElement("option");
+      option.value = layout.layout_path;
+      option.textContent = compactUiLabel(layout.label, 35);
+      option.title = layout.label;
+      layoutASelectEl.appendChild(option);
+    });
+    layoutASelectEl.disabled = layouts.length === 0;
+    
+    // Layout B (带一个默认的空选项)
+    layoutBSelectEl.innerHTML = "";
+    const emptyOption = document.createElement("option");
+    emptyOption.value = "";
+    emptyOption.textContent = "— Clear —";
+    layoutBSelectEl.appendChild(emptyOption);
+    
+    layouts.forEach((layout) => {
+      const option = document.createElement("option");
+      option.value = layout.layout_path;
+      option.textContent = compactUiLabel(layout.label, 35);
+      option.title = layout.label;
+      layoutBSelectEl.appendChild(option);
+    });
+    layoutBSelectEl.disabled = layouts.length === 0;
+    layoutBSelectEl.value = ""; // 默认清空
+  }
+
+  // 加载Layout的manifest并填充Scene选择器
+  async function loadLayoutAndPopulateScenes(layoutPath: string, sceneSelectEl: HTMLSelectElement, isLayoutA: boolean) {
+    try {
+      let manifest = layoutManifests.get(layoutPath);
+      if (!manifest) {
+        manifest = await loadManifest(layoutPath);
+        layoutManifests.set(layoutPath, manifest);
+      }
+      
+      const scenes = makeSceneOptionsFromManifest(manifest, layoutPath);
+      
+      sceneSelectEl.innerHTML = "";
+      scenes.forEach((scene) => {
+        const option = document.createElement("option");
+        option.value = scene.key;
+        option.textContent = compactUiLabel(scene.label, 30);
+        option.title = scene.label;
+        sceneSelectEl.appendChild(option);
+      });
+      sceneSelectEl.disabled = scenes.length === 0;
+      
+    } catch (error) {
+      console.error(`Failed to load manifest for ${layoutPath}:`, error);
+      sceneSelectEl.innerHTML = "";
+      sceneSelectEl.disabled = true;
+    }
+  }
+
+  // Layout A 选择变化
+  layoutASelectEl.addEventListener("change", async () => {
+    const layoutPath = layoutASelectEl.value;
+    if (layoutPath) {
+      await loadLayoutAndPopulateScenes(layoutPath, sceneASelectEl, true);
+      updateSplitView();
+    }
+  }, { signal });
+
+  // Layout B 选择变化
+  layoutBSelectEl.addEventListener("change", async () => {
+    const layoutPath = layoutBSelectEl.value;
+    if (layoutPath) {
+      await loadLayoutAndPopulateScenes(layoutPath, sceneBSelectEl, false);
+      updateSplitView();
+    } else {
+      // 清空Scene B
+      sceneBSelectEl.innerHTML = "";
+      sceneBSelectEl.disabled = true;
+      updateSplitView();
+    }
+  }, { signal });
+
+  // Scene A 选择变化
+  sceneASelectEl.addEventListener("change", () => {
+    updateSplitView();
+  }, { signal });
+
+  // Scene B 选择变化
+  sceneBSelectEl.addEventListener("change", () => {
+    updateSplitView();
+  }, { signal });
+
+  // 清除Layout B和Scene B，返回单屏
+  resetSceneModeBtn.addEventListener("click", () => {
+    layoutBSelectEl.value = "";
+    sceneBSelectEl.innerHTML = "";
+    sceneBSelectEl.disabled = true;
+    sceneCompareState.sceneB = null;
+    sceneCompareState.metricsB = null;
+    layoutManifests.clear(); // 清除缓存的manifest
+    updateSplitView();
+  }, { signal });
+
+  // 更新分屏状态
+  function updateSplitView() {
+    const layoutA = layoutASelectEl.value;
+    const sceneA = sceneASelectEl.value;
+    const layoutB = layoutBSelectEl.value;
+    const sceneB = sceneBSelectEl.value;
+    
+    // 如果Layout B为空或Scene B未选择，或与A完全相同，单屏模式
+    const isSameScene = layoutA === layoutB && sceneA === sceneB && layoutA && sceneA;
+    
+    if (!layoutB || !sceneB || isSameScene) {
+      sceneCompareState.mode = "single";
+      sceneCompareState.sceneA = sceneA;
+      sceneCompareState.sceneB = null;
+      resetSceneModeBtn.hidden = true;
+      
+      // 加载单场景
+      if (layoutA && sceneA) {
+        const manifest = layoutManifests.get(layoutA);
+        if (manifest) {
+          const scenes = makeSceneOptionsFromManifest(manifest, layoutA);
+          const sceneOption = scenes.find(s => s.key === sceneA);
+          if (sceneOption) {
+            loadScene(sceneOption);
+            enableSingleView();
+          }
+        }
+      }
+    } else {
+      // 不同场景，分屏模式
+      sceneCompareState.mode = "dual";
+      sceneCompareState.sceneA = `${layoutA}::${sceneA}`;
+      sceneCompareState.sceneB = `${layoutB}::${sceneB}`;
+      resetSceneModeBtn.hidden = false;
+      
+      // 更新雷达图标签
+      sceneALabel.textContent = `${compactUiLabel(layoutASelectEl.selectedOptions[0]?.label || "", 20)} / ${sceneA}`;
+      sceneBLabel.textContent = `${compactUiLabel(layoutBSelectEl.selectedOptions[0]?.label || "", 20)} / ${sceneB}`;
+      
+      // 启用分屏模式
+      enableSplitView();
+      
+      // 加载Scene A（左侧）
+      const manifestA = layoutManifests.get(layoutA);
+      if (manifestA) {
+        const scenesA = makeSceneOptionsFromManifest(manifestA, layoutA);
+        const sceneOptionA = scenesA.find(s => s.key === sceneA);
+        if (sceneOptionA) {
+          loadSceneA(sceneOptionA);
+        }
+      }
+      
+      // 加载Scene B（右侧）
+      const manifestB = layoutManifests.get(layoutB);
+      if (manifestB) {
+        const scenesB = makeSceneOptionsFromManifest(manifestB, layoutB);
+        const sceneOptionB = scenesB.find(s => s.key === sceneB);
+        if (sceneOptionB) {
+          loadSceneB(sceneOptionB);
+        }
+      }
+    }
+  }
+
+  // 启用单屏模式
+  function enableSingleView() {
+    // 移除分屏class
+    const shell = canvasHost.closest(".viewer-shell");
+    if (shell) {
+      shell.classList.remove("split-view");
+    }
+    
+    canvasHost.style.display = "";
+    canvasHost.style.width = "100%";
+    // 隐藏分屏canvas
+    const canvasB = document.getElementById("viewer-canvas-b");
+    if (canvasB) {
+      (canvasB as HTMLElement).style.display = "none";
+    }
+    
+    // 调整renderer大小回全屏
+    setTimeout(() => {
+      renderer.setSize(canvasHost.clientWidth, canvasHost.clientHeight);
+    }, 100);
+  }
+
+  // 启用分屏模式
+  function enableSplitView() {
+    // 检查是否已经有第二个canvas
+    let canvasB = document.getElementById("viewer-canvas-b") as HTMLElement;
+    if (!canvasB) {
+      // 创建第二个canvas容器
+      canvasB = document.createElement("div");
+      canvasB.id = "viewer-canvas-b";
+      canvasB.className = "viewer-canvas viewer-canvas-b";
+      canvasHost.parentElement?.insertBefore(canvasB, canvasHost.nextSibling);
+    }
+    
+    // 添加分屏class
+    const shell = canvasHost.closest(".viewer-shell");
+    if (shell) {
+      shell.classList.add("split-view");
+    }
+    
+    canvasB.style.display = "";
+    
+    // 调整renderer大小以适应半屏
+    setTimeout(() => {
+      const width = canvasHost.clientWidth;
+      const height = canvasHost.clientHeight;
+      renderer.setSize(width, height);
+    }, 100);
+  }
+
+  // 加载Scene A（左侧视口）
+  async function loadSceneA(option: SceneOption): Promise<void> {
+    // 复用现有的loadScene逻辑，但渲染到左半屏
+    await loadScene(option);
+  }
+
+  // 加载Scene B（右侧视口）
+  async function loadSceneB(option: SceneOption): Promise<void> {
+    // TODO: 实现Scene B的加载和渲染
+    // 目前简单实现：创建第二个renderer和scene
+    const canvasB = document.getElementById("viewer-canvas-b");
+    if (!canvasB) return;
+    
+    console.log("Loading Scene B:", option.label);
+    // 这里需要实现独立的Scene B渲染
+    // 为了快速验证，暂时只显示提示信息
+    setStatus(`Split View: Scene A loaded, Scene B (dual viewport) coming soon...`);
+  }
+
+  // 打开雷达图面板
+  openMetricsBtn.addEventListener("click", () => {
+    sceneRadarContainer.hidden = false;
+    
+    // 如果两个场景都有metrics，绘制对比图
+    if (sceneCompareState.metricsA && sceneCompareState.metricsB) {
+      resizeRadarCanvas(sceneRadarCanvasA);
+      resizeRadarCanvas(sceneRadarCanvasB);
+      createRadarChart(sceneRadarCanvasA, sceneCompareState.metricsA, sceneALabel.textContent || "Scene A", "#3b82f6");
+      createRadarChart(sceneRadarCanvasB, sceneCompareState.metricsB, sceneBLabel.textContent || "Scene B", "#ef4444");
+    } else if (sceneCompareState.metricsA) {
+      // 只有Scene A有metrics
+      resizeRadarCanvas(sceneRadarCanvasA);
+      createRadarChart(sceneRadarCanvasA, sceneCompareState.metricsA, sceneALabel.textContent || "Scene A", "#3b82f6");
+    }
+  }, { signal });
+
+  // 关闭雷达图
+  closeSceneRadarBtn.addEventListener("click", () => {
+    sceneRadarContainer.hidden = true;
+  }, { signal });
 
   presetsToggleEl.addEventListener("click", () => setPresetsOpen(!presetsOpen), { signal });
   presetsCloseEl.addEventListener("click", () => setPresetsOpen(false), { signal });
@@ -4224,12 +4784,15 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   layoutOverlayToggleEl.addEventListener(
     "change",
     () => {
-      if (layoutOverlayToggleEl.checked) {
-        buildLayoutOverlay();
-        flashStatus("Layout overlay enabled");
+      floatingLaneConfig.enabled = layoutOverlayToggleEl.checked;
+      const flpEnabledEl = document.getElementById("flp-enabled") as HTMLInputElement | null;
+      if (flpEnabledEl) flpEnabledEl.checked = layoutOverlayToggleEl.checked;
+      if (floatingLaneConfig.enabled) {
+        buildFloatingLaneOverlay();
+        flashStatus("Scene overlay enabled");
       } else {
-        clearLayoutOverlay();
-        flashStatus("Layout overlay disabled");
+        clearFloatingLaneOverlay();
+        flashStatus("Scene overlay disabled");
       }
     },
     { signal },
@@ -4355,7 +4918,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       controls.unlock();
     }
     clearGraphOverlay();
-    clearLayoutOverlay();
+    clearFloatingLaneOverlay();
     renderer.dispose();
     minimapRenderer.dispose();
   };
