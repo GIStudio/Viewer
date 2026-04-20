@@ -1446,8 +1446,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
           <select id="layout-select" class="viewer-select viewer-select-inline" title="Recent Result"></select>
           <!-- 原始场景选择器（隐藏，保持向后兼容） -->
           <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene" style="display: none;"></select>
-          <!-- 场景对比选择器 - 双Layout对比 -->
-          <div id="scene-compare-controls" class="scene-compare-controls">
+          <!-- 场景对比选择器（隐藏，逻辑已迁移到 Compare 面板） -->
+          <div id="scene-compare-controls" class="scene-compare-controls" style="display: none;">
             <div class="scene-compare-group">
               <select id="layout-a-select" class="viewer-select viewer-select-inline viewer-select-layout" title="Layout A"></select>
               <select id="scene-a-select" class="viewer-select viewer-select-inline viewer-select-scene" title="Scene A"></select>
@@ -1457,6 +1457,14 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
               <select id="scene-b-select" class="viewer-select viewer-select-inline viewer-select-scene" title="Scene B"></select>
             </div>
             <button id="reset-scene-mode" class="viewer-btn-reset" type="button" title="Clear Scene B">✕</button>
+          </div>
+          <!-- 雷达图容器（隐藏，逻辑已迁移到 Compare 面板） -->
+          <div id="scene-radar-container" style="display: none;">
+            <button id="close-scene-radar" class="viewer-settings-close" type="button">x</button>
+            <canvas id="scene-radar-canvas-a"></canvas>
+            <canvas id="scene-radar-canvas-b"></canvas>
+            <span id="scene-a-label"></span>
+            <span id="scene-b-label"></span>
           </div>
           <button id="viewer-compare-toggle" class="viewer-btn-scene-compare" type="button" title="Open comparison panel">⚖️ Compare</button>
         </div>
