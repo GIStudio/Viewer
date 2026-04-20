@@ -1650,8 +1650,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       <aside id="viewer-history-analysis-panel" class="viewer-slide-panel" data-open="false">
         <div class="viewer-slide-panel-header">
           <div>
-            <div class="viewer-slide-panel-title">📊 History Analysis</div>
-            <div class="viewer-slide-panel-subtitle">Scatter plot analysis of scene generation history</div>
+            <div class="viewer-slide-panel-title">📊 History Analysis · 历史分析</div>
+            <div class="viewer-slide-panel-subtitle">Scatter plot analysis of scene generation history · 场景生成历史的散点图分析</div>
           </div>
           <button id="viewer-history-analysis-close" class="viewer-settings-close" type="button" aria-label="Close history">x</button>
         </div>
