@@ -88,6 +88,9 @@ export class ThreeSystemScorePanel {
   private scenes: SceneHistoryEntry[] = [];
   private chart: Chart<"radar"> | null = null;
   private canvas: HTMLCanvasElement | null = null;
+  private scoresDiv: HTMLDivElement | null = null;
+  private fetchBtn: HTMLButtonElement | null = null;
+  private isFetching = false;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -96,6 +99,86 @@ export class ThreeSystemScorePanel {
   async init(scenes: SceneHistoryEntry[]) {
     this.scenes = scenes;
     this.render();
+    this.drawChart();
+  }
+
+  private async fetchScores() {
+    if (this.isFetching) return;
+    if (!this.fetchBtn || this.scenes.length === 0) return;
+
+    this.isFetching = true;
+    this.fetchBtn.disabled = true;
+    this.fetchBtn.textContent = "⏳ 正在获取评分...";
+
+    let successCount = 0;
+    let failCount = 0;
+    const errors: string[] = [];
+
+    for (let i = 0; i < this.scenes.length; i++) {
+      const scene = this.scenes[i];
+      const summary = scene.summary || {};
+
+      // 如果已经有评分，跳过
+      if (summary.walkability && summary.safety && summary.beauty) {
+        successCount++;
+        continue;
+      }
+
+      try {
+        const evalResponse = await fetch("./api/design/evaluate/unified", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ layout_path: scene.layout_path }),
+        });
+
+        if (evalResponse.ok) {
+          const evalResult = await evalResponse.json();
+          // 将评分合并到 summary 中
+          Object.assign(summary, {
+            walkability: evalResult.walkability ?? 0,
+            safety: evalResult.safety ?? 0,
+            beauty: evalResult.beauty ?? 0,
+            overall: evalResult.overall ?? 0,
+            // 添加子分数
+            protection: evalResult.indicators?.protection ?? 0,
+            comfort: evalResult.indicators?.comfort ?? 0,
+            delight: evalResult.indicators?.delight ?? 0,
+            safety_lighting: evalResult.indicators?.safety_lighting ?? 0,
+            safety_visibility: evalResult.indicators?.safety_visibility ?? 0,
+            safety_protection: evalResult.indicators?.safety_protection ?? 0,
+            safety_activation: evalResult.indicators?.safety_activation ?? 0,
+            beauty_planting: evalResult.indicators?.beauty_planting ?? 0,
+            beauty_furniture: evalResult.indicators?.beauty_furniture ?? 0,
+            beauty_space: evalResult.indicators?.beauty_space ?? 0,
+          });
+          successCount++;
+        } else {
+          failCount++;
+          errors.push(`${scene.label}: API 返回 ${evalResponse.status}`);
+        }
+      } catch (err) {
+        failCount++;
+        errors.push(`${scene.label}: ${err instanceof Error ? err.message : "未知错误"}`);
+      }
+
+      // 更新按钮进度
+      this.fetchBtn.textContent = `⏳ 获取中... ${i + 1}/${this.scenes.length}`;
+    }
+
+    // 恢复按钮状态
+    this.isFetching = false;
+    this.fetchBtn.disabled = false;
+    this.fetchBtn.textContent = "🔄 获取评分 · Fetch Scores";
+
+    // 显示结果提示
+    if (failCount > 0) {
+      const errorMsg = `评分获取完成，但有 ${failCount} 个场景失败：\n${errors.slice(0, 5).join("\n")}${errors.length > 5 ? "\n..." : ""}`;
+      alert(errorMsg);
+    } else {
+      alert(`✅ 评分获取完成！成功 ${successCount} 个场景。`);
+    }
+
+    // 重新绘制图表
     this.drawChart();
   }
 
@@ -108,10 +191,27 @@ export class ThreeSystemScorePanel {
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     `;
 
+    // Fetch button
+    const controlsDiv = document.createElement("div");
+    controlsDiv.className = "viewer-three-system-controls";
+    
+    this.fetchBtn = document.createElement("button");
+    this.fetchBtn.className = "viewer-three-system-fetch-btn";
+    this.fetchBtn.textContent = "🔄 获取评分 · Fetch Scores";
+    this.fetchBtn.addEventListener("click", () => this.fetchScores());
+    controlsDiv.appendChild(this.fetchBtn);
+
+    const hintDiv = document.createElement("div");
+    hintDiv.className = "viewer-three-system-hint";
+    hintDiv.textContent = "点击按钮调用评估 API 计算所有场景的评分";
+    controlsDiv.appendChild(hintDiv);
+    
+    this.container.appendChild(controlsDiv);
+
     // Main scores display
-    const scoresDiv = document.createElement("div");
-    scoresDiv.className = "viewer-three-system-scores";
-    this.container.appendChild(scoresDiv);
+    this.scoresDiv = document.createElement("div");
+    this.scoresDiv.className = "viewer-three-system-scores";
+    this.container.appendChild(this.scoresDiv);
 
     // Chart container
     const chartContainer = document.createElement("div");

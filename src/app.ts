@@ -1795,49 +1795,13 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
         try {
           const manifest = await loadManifest(layout.layout_path);
           if (manifest.summary) {
-            const summary = { ...manifest.summary };
-
-            // 如果 summary 中没有评分，尝试调用评估 API 获取
-            if (!summary.walkability || !summary.safety || !summary.beauty) {
-              try {
-                const evalResponse = await fetch("./api/design/evaluate/unified", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ layout_path: layout.layout_path }),
-                });
-                if (evalResponse.ok) {
-                  const evalResult = await evalResponse.json();
-                  // 将评分合并到 summary 中
-                  Object.assign(summary, {
-                    walkability: evalResult.walkability ?? 0,
-                    safety: evalResult.safety ?? 0,
-                    beauty: evalResult.beauty ?? 0,
-                    overall: evalResult.overall ?? 0,
-                    // 添加子分数
-                    protection: evalResult.indicators?.protection ?? 0,
-                    comfort: evalResult.indicators?.comfort ?? 0,
-                    delight: evalResult.indicators?.delight ?? 0,
-                    safety_lighting: evalResult.indicators?.safety_lighting ?? 0,
-                    safety_visibility: evalResult.indicators?.safety_visibility ?? 0,
-                    safety_protection: evalResult.indicators?.safety_protection ?? 0,
-                    safety_activation: evalResult.indicators?.safety_activation ?? 0,
-                    beauty_planting: evalResult.indicators?.beauty_planting ?? 0,
-                    beauty_furniture: evalResult.indicators?.beauty_furniture ?? 0,
-                    beauty_space: evalResult.indicators?.beauty_space ?? 0,
-                  });
-                }
-              } catch (evalError) {
-                console.warn(`Failed to evaluate layout ${layout.layout_path}:`, evalError);
-              }
-            }
-
             scenesWithMetrics.push({
               layout_path: layout.layout_path,
               label: layout.label,
               relative_path: layout.relative_path,
               updated_at: layout.updated_at,
               mtime_ms: layout.mtime_ms,
-              summary,
+              summary: { ...manifest.summary },
             });
           }
         } catch (e) {
