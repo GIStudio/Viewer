@@ -18,6 +18,8 @@ export interface CompareModeDependencies {
   loadManifest: (layoutPath: string) => Promise<ViewerManifest>;
   compareSelectAEl: HTMLSelectElement;
   compareSelectBEl: HTMLSelectElement;
+  // 翻译支持
+  getLang: () => "en" | "zh" | "mixed";
 }
 
 export function createCompareMode(deps: CompareModeDependencies) {
@@ -26,6 +28,15 @@ export function createCompareMode(deps: CompareModeDependencies) {
   let compareRootB: THREE.Object3D | null = null;
   const compareCameraA = deps.camera.clone();
   const compareCameraB = deps.camera.clone();
+
+  function t(en: string, zh: string): string {
+    const lang = deps.getLang();
+    switch (lang) {
+      case "zh": return zh;
+      case "mixed": return `${en} · ${zh}`;
+      default: return en;
+    }
+  }
 
   function isNumeric(value: unknown): boolean {
     return typeof value === "number" && Number.isFinite(value);
@@ -267,14 +278,20 @@ export function createCompareMode(deps: CompareModeDependencies) {
     const imgB = b.final_scene?.glb_url ? toPreviewUrl(b.final_scene.glb_url) : "";
 
     const tabIds = ["metrics", "config", "placements", "diff2d", "preview"];
-    const tabLabels = ["Metrics", "Config", "Placements", "2D Diff", "Preview"];
+    const tabLabels = [
+      t("Metrics", "指标"),
+      t("Config", "配置"),
+      t("Placements", "地物"),
+      t("2D Diff", "2D 差异"),
+      t("Preview", "预览"),
+    ];
 
     let html = `<div class="viewer-compare-tabs">`;
     for (let i = 0; i < tabIds.length; i++) {
       html += `<button class="viewer-compare-tab" data-tab="${tabIds[i]}" ${i === 0 ? 'data-active="true"' : ""}>${tabLabels[i]}</button>`;
     }
     html += `</div>`;
-    html += `<div class="viewer-compare-actions"><button id="viewer-open-compare3d" class="viewer-nav-button" type="button">Open Split 3D View</button></div>`;
+    html += `<div class="viewer-compare-actions"><button id="viewer-open-compare3d" class="viewer-nav-button" type="button">${t("Open Split 3D View", "打开分屏 3D 视图")}</button></div>`;
 
     // Metrics tab
     const metricsRows = metricsDiff
@@ -291,7 +308,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
 
     html += `<div class="viewer-compare-tab-panel" data-tab="metrics" data-active="true">
       <div class="viewer-compare-table-wrap"><table class="viewer-compare-table">
-        <thead><tr><th>Metric</th><th>Layout A</th><th>Layout B</th><th>Diff</th></tr></thead><tbody>${metricsRows}</tbody>
+        <thead><tr><th>${t("Metric", "指标")}</th><th>${t("Layout A", "布局 A")}</th><th>${t("Layout B", "布局 B")}</th><th>${t("Diff", "差异")}</th></tr></thead><tbody>${metricsRows}</tbody>
       </table></div>
     </div>`;
 
@@ -323,7 +340,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
     const pd = placementsDiff;
     const catStats = (pd.category_stats as Array<Record<string, unknown>>) ?? [];
     let placementsHtml = `<div class="viewer-compare-table-wrap"><table class="viewer-compare-table">
-      <thead><tr><th>Category</th><th>A</th><th>B</th><th>Δ</th><th>Matched</th><th>Added</th><th>Deleted</th><th>Moved</th><th>Mean Shift (m)</th></tr></thead><tbody>`;
+      <thead><tr><th>${t("Category", "类别")}</th><th>A</th><th>B</th><th>Δ</th><th>${t("Matched", "匹配")}</th><th>${t("Added", "新增")}</th><th>${t("Deleted", "删除")}</th><th>${t("Moved", "移动")}</th><th>${t("Mean Shift (m)", "平均位移 (m)")}</th></tr></thead><tbody>`;
     for (const s of catStats) {
       placementsHtml += `<tr>
         <td class="viewer-compare-metric-label">${deps.escapeHtml(String(s.category))}</td>
@@ -333,21 +350,21 @@ export function createCompareMode(deps: CompareModeDependencies) {
       </tr>`;
     }
     placementsHtml += `</tbody></table></div>`;
-    placementsHtml += `<div class="viewer-placements-totals">Total: ${pd.total_count_a} → ${pd.total_count_b} (Δ ${pd.total_delta})</div>`;
+    placementsHtml += `<div class="viewer-placements-totals">${t("Total", "总计")}: ${pd.total_count_a} → ${pd.total_count_b} (Δ ${pd.total_delta})</div>`;
     html += `<div class="viewer-compare-tab-panel" data-tab="placements">${placementsHtml}</div>`;
 
     // 2D Diff tab
     html += `<div class="viewer-compare-tab-panel" data-tab="diff2d">
       <div class="viewer-diff2d-controls">
-        <label class="viewer-settings-label">Diff Mode</label>
+        <label class="viewer-settings-label">${t("Diff Mode", "差异模式")}</label>
         <select id="diff2d-mode" class="viewer-select viewer-select-compact">
-          <option value="overlay">Overlay (red/green)</option>
-          <option value="delta">Delta Map (arrows)</option>
+          <option value="overlay">${t("Overlay (red/green)", "叠加（红/绿）")}</option>
+          <option value="delta">${t("Delta Map (arrows)", "差异图（箭头）")}</option>
         </select>
-        <button id="diff2d-render" class="viewer-nav-button" type="button">Render Diff</button>
+        <button id="diff2d-render" class="viewer-nav-button" type="button">${t("Render Diff", "渲染差异")}</button>
       </div>
       <div id="diff2d-image-host" class="viewer-diff2d-host">
-        <div class="viewer-evaluate-empty">Select a mode and click Render Diff.</div>
+        <div class="viewer-evaluate-empty">${t("Select a mode and click Render Diff.", "选择模式后点击渲染差异")}</div>
       </div>
     </div>`;
 
@@ -356,11 +373,11 @@ export function createCompareMode(deps: CompareModeDependencies) {
       <div class="viewer-compare-images">
         <div class="viewer-compare-col">
           <div class="viewer-compare-thumb-label">${deps.escapeHtml(deps.compactUiLabel(a.layout_path))}</div>
-          ${imgA ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgA)}" alt="Layout A" />` : "<div class='viewer-compare-no-img'>No preview</div>"}
+          ${imgA ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgA)}" alt="Layout A" />` : `<div class='viewer-compare-no-img'>${t("No preview", "无预览")}</div>`}
         </div>
         <div class="viewer-compare-col">
           <div class="viewer-compare-thumb-label">${deps.escapeHtml(deps.compactUiLabel(b.layout_path))}</div>
-          ${imgB ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgB)}" alt="Layout B" />` : "<div class='viewer-compare-no-img'>No preview</div>"}
+          ${imgB ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgB)}" alt="Layout B" />` : `<div class='viewer-compare-no-img'>${t("No preview", "无预览")}</div>`}
         </div>
       </div>
     </div>`;
@@ -419,10 +436,10 @@ export function createCompareMode(deps: CompareModeDependencies) {
     const pathA = deps.compareSelectAEl.value;
     const pathB = deps.compareSelectBEl.value;
     if (!pathA || !pathB) {
-      deps.compareResultsEl.innerHTML = `<div class="viewer-evaluate-empty">Select two layouts to compare.</div>`;
+      deps.compareResultsEl.innerHTML = `<div class="viewer-evaluate-empty">${t("Select two layouts to compare.", "选择两个布局进行对比。")}</div>`;
       return;
     }
-    deps.compareResultsEl.innerHTML = `<div class="viewer-evaluate-loading">Loading layouts for comparison...</div>`;
+    deps.compareResultsEl.innerHTML = `<div class="viewer-evaluate-loading">${t("Loading layouts for comparison...", "正在加载布局对比...")}</div>`;
 
     try {
       const [manifestA, manifestB, layoutJsonA, layoutJsonB] = await Promise.all([

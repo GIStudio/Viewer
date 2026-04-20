@@ -1913,6 +1913,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     loadManifest,
     compareSelectAEl,
     compareSelectBEl,
+    getLang: () => currentLang,
   });
 
   const raycaster = new THREE.Raycaster();
@@ -4296,6 +4297,19 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       }
       if (subtitleEl) {
         subtitleEl.textContent = t("Scatter plot analysis of scene generation history", "场景生成历史的散点图分析");
+      }
+    }
+
+    // Layout Comparison 面板
+    const comparePanel = root.querySelector<HTMLElement>("#viewer-compare-panel");
+    if (comparePanel) {
+      const titleEl = comparePanel.querySelector<HTMLElement>(".viewer-slide-panel-title");
+      const subtitleEl = comparePanel.querySelector<HTMLElement>(".viewer-slide-panel-subtitle");
+      if (titleEl) {
+        titleEl.textContent = t("Layout Comparison", "布局对比");
+      }
+      if (subtitleEl) {
+        subtitleEl.textContent = t("Compare two layouts side-by-side", "对比两个布局的配置、指标和地物差异");
       }
     }
   }
