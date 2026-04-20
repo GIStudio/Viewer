@@ -1458,7 +1458,7 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
             </div>
             <button id="reset-scene-mode" class="viewer-btn-reset" type="button" title="Clear Scene B">✕</button>
           </div>
-          <button id="open-metrics-panel" class="viewer-btn-scene-compare" type="button" title="Open metrics comparison panel">⚖️ Compare</button>
+          <button id="viewer-compare-toggle" class="viewer-btn-scene-compare" type="button" title="Open comparison panel">⚖️ Compare</button>
         </div>
         <div class="viewer-header-actions">
           <button id="viewer-settings-toggle" class="viewer-settings-toggle" type="button" aria-expanded="false">Settings</button>
@@ -1674,7 +1674,6 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const assetEditorLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-asset-editor-link");
   
   // 场景对比相关元素
-  const openMetricsBtn = requireElement<HTMLButtonElement>(root, "#open-metrics-panel");
   const sceneCompareControls = requireElement<HTMLElement>(root, "#scene-compare-controls");
   const layoutASelectEl = requireElement<HTMLSelectElement>(root, "#layout-a-select");
   const sceneASelectEl = requireElement<HTMLSelectElement>(root, "#scene-a-select");
@@ -4509,23 +4508,6 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     // 为了快速验证，暂时只显示提示信息
     setStatus(`Split View: Scene A loaded, Scene B (dual viewport) coming soon...`);
   }
-
-  // 打开雷达图面板
-  openMetricsBtn.addEventListener("click", () => {
-    sceneRadarContainer.hidden = false;
-    
-    // 如果两个场景都有metrics，绘制对比图
-    if (sceneCompareState.metricsA && sceneCompareState.metricsB) {
-      resizeRadarCanvas(sceneRadarCanvasA);
-      resizeRadarCanvas(sceneRadarCanvasB);
-      createRadarChart(sceneRadarCanvasA, sceneCompareState.metricsA, sceneALabel.textContent || "Scene A", "#3b82f6");
-      createRadarChart(sceneRadarCanvasB, sceneCompareState.metricsB, sceneBLabel.textContent || "Scene B", "#ef4444");
-    } else if (sceneCompareState.metricsA) {
-      // 只有Scene A有metrics
-      resizeRadarCanvas(sceneRadarCanvasA);
-      createRadarChart(sceneRadarCanvasA, sceneCompareState.metricsA, sceneALabel.textContent || "Scene A", "#3b82f6");
-    }
-  }, { signal });
 
   // 关闭雷达图
   closeSceneRadarBtn.addEventListener("click", () => {
