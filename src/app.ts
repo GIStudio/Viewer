@@ -1525,6 +1525,14 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
             ×
           </button>
         </div>
+        <div class="viewer-settings-section viewer-settings-section-divider">
+          <label class="viewer-settings-label">Language · 语言</label>
+          <div class="viewer-lang-switcher">
+            <button id="viewer-lang-en" class="viewer-lang-btn" type="button">English</button>
+            <button id="viewer-lang-zh" class="viewer-lang-btn" type="button">中文</button>
+            <button id="viewer-lang-mixed" class="viewer-lang-btn" type="button">中英混合</button>
+          </div>
+        </div>
         <div class="viewer-settings-section">
           <label class="viewer-settings-label" for="lighting-preset">Lighting Preset</label>
           <select id="lighting-preset" class="viewer-select viewer-select-compact"></select>
@@ -1650,8 +1658,8 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
       <aside id="viewer-history-analysis-panel" class="viewer-slide-panel" data-open="false">
         <div class="viewer-slide-panel-header">
           <div>
-            <div class="viewer-slide-panel-title">📊 History Analysis · 历史分析</div>
-            <div class="viewer-slide-panel-subtitle">Scatter plot analysis of scene generation history · 场景生成历史的散点图分析</div>
+            <div class="viewer-slide-panel-title">📊 History Analysis</div>
+            <div class="viewer-slide-panel-subtitle">Scatter plot analysis of scene generation history</div>
           </div>
           <button id="viewer-history-analysis-close" class="viewer-settings-close" type="button" aria-label="Close history">x</button>
         </div>
@@ -1961,6 +1969,10 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
   const graphOverlayMarkers: THREE.Object3D[] = [];
   const optionsByKey = new Map<string, SceneOption>();
   const recentLayoutsByPath = new Map<string, RecentLayout>();
+
+  // 语言状态
+  type LangMode = "en" | "zh" | "mixed";
+  let currentLang: LangMode = (localStorage.getItem("viewer-lang") as LangMode) || "en";
 
   const lightingState: LightingState = {
     ...DEFAULT_LIGHTING_STATE,
@@ -4253,6 +4265,53 @@ async function mountViewerImpl(root: HTMLElement): Promise<() => void> {
     }
   }, { signal });
   settingsCloseEl.addEventListener("click", () => setSettingsOpen(false), { signal });
+
+  // 语言切换
+  const langEnBtn = requireElement<HTMLButtonElement>(root, "#viewer-lang-en");
+  const langZhBtn = requireElement<HTMLButtonElement>(root, "#viewer-lang-zh");
+  const langMixedBtn = requireElement<HTMLButtonElement>(root, "#viewer-lang-mixed");
+
+  function updateLangButtons() {
+    langEnBtn.classList.toggle("viewer-lang-btn-active", currentLang === "en");
+    langZhBtn.classList.toggle("viewer-lang-btn-active", currentLang === "zh");
+    langMixedBtn.classList.toggle("viewer-lang-btn-active", currentLang === "mixed");
+  }
+
+  function t(en: string, zh: string): string {
+    switch (currentLang) {
+      case "zh": return zh;
+      case "mixed": return `${en} · ${zh}`;
+      default: return en;
+    }
+  }
+
+  function updatePanelTexts() {
+    // History Analysis 面板
+    const historyPanel = root.querySelector<HTMLElement>("#viewer-history-analysis-panel");
+    if (historyPanel) {
+      const titleEl = historyPanel.querySelector<HTMLElement>(".viewer-slide-panel-title");
+      const subtitleEl = historyPanel.querySelector<HTMLElement>(".viewer-slide-panel-subtitle");
+      if (titleEl) {
+        titleEl.textContent = t("📊 History Analysis", "📊 历史分析");
+      }
+      if (subtitleEl) {
+        subtitleEl.textContent = t("Scatter plot analysis of scene generation history", "场景生成历史的散点图分析");
+      }
+    }
+  }
+
+  function setLang(lang: LangMode) {
+    currentLang = lang;
+    localStorage.setItem("viewer-lang", lang);
+    updateLangButtons();
+    updatePanelTexts();
+  }
+
+  langEnBtn.addEventListener("click", () => setLang("en"), { signal });
+  langZhBtn.addEventListener("click", () => setLang("zh"), { signal });
+  langMixedBtn.addEventListener("click", () => setLang("mixed"), { signal });
+  updateLangButtons();
+  updatePanelTexts();
 
   evaluateToggleEl.addEventListener("click", () => setEvaluateOpen(!evaluateOpen), { signal });
   evaluateCloseEl.addEventListener("click", () => setEvaluateOpen(false), { signal });

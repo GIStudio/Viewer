@@ -615,6 +615,38 @@ body {
   border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
 
+.viewer-lang-switcher {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.viewer-lang-btn {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.6);
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.viewer-lang-btn:hover {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: #3b82f6;
+  color: #1e40af;
+}
+
+.viewer-lang-btn-active {
+  background: #3b82f6 !important;
+  border-color: #3b82f6 !important;
+  color: #fff !important;
+  font-weight: 600;
+}
+
 .viewer-settings-label {
   display: block;
   margin-bottom: 0.45rem;
