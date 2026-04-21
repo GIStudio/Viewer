@@ -38,6 +38,89 @@ export function createCompareMode(deps: CompareModeDependencies) {
     }
   }
 
+  // 定义配置参数分类
+  type ConfigCategory = "query" | "setting" | "result" | "other";
+
+  function classifyConfigKey(key: string): ConfigCategory {
+    const lowerKey = key.toLowerCase();
+    // Query 类 - 用户输入的提示词
+    if (lowerKey.includes("query") || lowerKey.includes("prompt") || lowerKey === "q") {
+      return "query";
+    }
+    // Result 类 - 生成结果的指标
+    if (
+      lowerKey.includes("density") ||
+      lowerKey.includes("coverage") ||
+      lowerKey.includes("count") ||
+      lowerKey.includes("rate") ||
+      lowerKey.includes("ratio") ||
+      lowerKey.includes("score") ||
+      lowerKey.includes("avg") ||
+      lowerKey.includes("total") ||
+      lowerKey.includes("sum") ||
+      lowerKey.includes("percent") ||
+      lowerKey.includes("compliance") ||
+      lowerKey.includes("violation") ||
+      lowerKey.includes("overlap") ||
+      lowerKey.includes("dropped") ||
+      lowerKey.includes("uniformity") ||
+      lowerKey.includes("diversity") ||
+      lowerKey.includes("feasibility") ||
+      lowerKey.includes("validity")
+    ) {
+      return "result";
+    }
+    // Setting 类 - 用户设置的参数
+    if (
+      lowerKey.includes("setting") ||
+      lowerKey.includes("param") ||
+      lowerKey.includes("config") ||
+      lowerKey.includes("option") ||
+      lowerKey.includes("mode") ||
+      lowerKey.includes("style") ||
+      lowerKey.includes("theme") ||
+      lowerKey.includes("seed") ||
+      lowerKey.includes("width") ||
+      lowerKey.includes("height") ||
+      lowerKey.includes("length") ||
+      lowerKey.includes("size") ||
+      lowerKey.includes("radius") ||
+      lowerKey.includes("distance") ||
+      lowerKey.includes("limit") ||
+      lowerKey.includes("threshold") ||
+      lowerKey.includes("enabled") ||
+      lowerKey.includes("visible") ||
+      lowerKey.includes("show") ||
+      lowerKey.includes("layer") ||
+      lowerKey.includes("band") ||
+      lowerKey.includes("lane") ||
+      lowerKey.includes("road") ||
+      lowerKey.includes("city") ||
+      lowerKey.includes("region")
+    ) {
+      return "setting";
+    }
+    return "other";
+  }
+
+  function getConfigCategoryLabel(category: ConfigCategory): string {
+    switch (category) {
+      case "query": return t("Query (User Input)", "查询（用户输入）");
+      case "setting": return t("Settings (User Config)", "设置（用户配置）");
+      case "result": return t("Results (Generated)", "结果（生成指标）");
+      default: return t("Other", "其他");
+    }
+  }
+
+  function getConfigCategoryColor(category: ConfigCategory): string {
+    switch (category) {
+      case "query": return "#3b82f6";  // 蓝色
+      case "setting": return "#8b5cf6"; // 紫色
+      case "result": return "#16a34a";  // 绿色
+      default: return "#6b7280";       // 灰色
+    }
+  }
+
   function isNumeric(value: unknown): boolean {
     return typeof value === "number" && Number.isFinite(value);
   }
@@ -307,32 +390,114 @@ export function createCompareMode(deps: CompareModeDependencies) {
       .join("");
 
     html += `<div class="viewer-compare-tab-panel" data-tab="metrics" data-active="true">
+      <div class="viewer-compare-table-header-info">${t("← Layout A (Left)", "← 布局 A（左侧）")} · ${t("Layout B (Right) →", "布局 B（右侧） →")}</div>
       <div class="viewer-compare-table-wrap"><table class="viewer-compare-table">
-        <thead><tr><th>${t("Metric", "指标")}</th><th>${t("Layout A", "布局 A")}</th><th>${t("Layout B", "布局 B")}</th><th>${t("Diff", "差异")}</th></tr></thead><tbody>${metricsRows}</tbody>
+        <thead><tr><th>${t("Metric", "指标")}</th><th>${t("A", "A")}</th><th>${t("B", "B")}</th><th>${t("Diff", "差异")}</th></tr></thead><tbody>${metricsRows}</tbody>
       </table></div>
     </div>`;
 
-    // Config tab
+    // Config tab - 按类型分组显示
     let configHtml = "";
     const configAdded = Object.entries((configDiff.added ?? {}) as Record<string, unknown>);
     const configRemoved = Object.entries((configDiff.removed ?? {}) as Record<string, unknown>);
     const configChanged = Object.entries((configDiff.changed ?? {}) as Record<string, unknown>);
 
+    // 按分类分组配置项
+    const categorizeEntries = (entries: Array<[string, unknown]>): Record<ConfigCategory, Array<[string, unknown]>> => {
+      const grouped: Record<ConfigCategory, Array<[string, unknown]>> = {
+        query: [],
+        setting: [],
+        result: [],
+        other: [],
+      };
+      for (const [key, value] of entries) {
+        grouped[classifyConfigKey(key)].push([key, value]);
+      }
+      return grouped;
+    };
+
+    const renderDiffItem = (type: "added" | "removed" | "changed", key: string, value: unknown, oldValue?: unknown, newValue?: unknown): string => {
+      const category = classifyConfigKey(key);
+      const color = getConfigCategoryColor(category);
+      const badgeClass = type === "added" ? "viewer-diff-added" : type === "removed" ? "viewer-diff-removed" : "viewer-diff-changed";
+      const badge = type === "added" ? "+" : type === "removed" ? "−" : "~";
+      let valueHtml = "";
+      if (type === "changed" && oldValue !== undefined && newValue !== undefined) {
+        valueHtml = `<div class="viewer-diff-values"><span class="viewer-diff-old">${deps.escapeHtml(JSON.stringify(oldValue))}</span> → <span class="viewer-diff-new">${deps.escapeHtml(JSON.stringify(newValue))}</span></div>`;
+      } else {
+        valueHtml = ` = ${deps.escapeHtml(JSON.stringify(value))}`;
+      }
+      return `<div class="viewer-diff-item ${badgeClass}">
+        <span class="viewer-diff-badge">${badge}</span>
+        <code style="border-left: 3px solid ${color}; padding-left: 6px;">${deps.escapeHtml(key)}</code>
+        ${valueHtml}
+      </div>`;
+    };
+
+    const renderConfigCategory = (category: ConfigCategory, entries: Array<[string, unknown]>, diffType?: "added" | "removed", changedEntries?: Array<[string, { old: unknown; new: unknown }]>): string => {
+      if (entries.length === 0 && (!changedEntries || changedEntries.length === 0)) return "";
+      const label = getConfigCategoryLabel(category);
+      const color = getConfigCategoryColor(category);
+      let html = `<div class="viewer-config-category">
+        <div class="viewer-config-category-header" style="border-left: 4px solid ${color};">
+          <span class="viewer-config-category-label">${label}</span>
+          <span class="viewer-config-category-count">${entries.length + (changedEntries?.length || 0)}</span>
+        </div>
+        <div class="viewer-config-category-items">`;
+      for (const [k, v] of entries) {
+        html += renderDiffItem(diffType || "added", k, v);
+      }
+      if (changedEntries) {
+        for (const [k, v] of changedEntries) {
+          html += renderDiffItem("changed", k, v.new, v.old, v.new);
+        }
+      }
+      html += `</div></div>`;
+      return html;
+    };
+
     if (configAdded.length || configRemoved.length || configChanged.length) {
-      configHtml += `<div class="viewer-diff-list">`;
-      for (const [k, v] of configAdded) {
-        configHtml += `<div class="viewer-diff-item viewer-diff-added"><span class="viewer-diff-badge">+</span> <code>${deps.escapeHtml(k)}</code> = ${deps.escapeHtml(JSON.stringify(v))}</div>`;
+      configHtml += `<div class="viewer-config-section">`;
+
+      // 渲染新增的配置（按类型分组）
+      if (configAdded.length) {
+        const addedByCategory = categorizeEntries(configAdded);
+        configHtml += `<div class="viewer-config-section-title">${t("Added in Layout B", "B 新增的配置")}</div>`;
+        for (const cat of ["query", "setting", "result", "other"] as ConfigCategory[]) {
+          configHtml += renderConfigCategory(cat, addedByCategory[cat], "added");
+        }
       }
-      for (const [k, v] of configRemoved) {
-        configHtml += `<div class="viewer-diff-item viewer-diff-removed"><span class="viewer-diff-badge">−</span> <code>${deps.escapeHtml(k)}</code> = ${deps.escapeHtml(JSON.stringify(v))}</div>`;
+
+      // 渲染删除的配置（按类型分组）
+      if (configRemoved.length) {
+        const removedByCategory = categorizeEntries(configRemoved);
+        configHtml += `<div class="viewer-config-section-title">${t("Removed from Layout A", "A 删除的配置")}</div>`;
+        for (const cat of ["query", "setting", "result", "other"] as ConfigCategory[]) {
+          configHtml += renderConfigCategory(cat, removedByCategory[cat], "removed");
+        }
       }
-      for (const [k, v] of configChanged) {
-        const changed = v as { old: unknown; new: unknown };
-        configHtml += `<div class="viewer-diff-item viewer-diff-changed"><span class="viewer-diff-badge">~</span> <code>${deps.escapeHtml(k)}</code><div class="viewer-diff-values"><span class="viewer-diff-old">${deps.escapeHtml(JSON.stringify(changed.old))}</span> → <span class="viewer-diff-new">${deps.escapeHtml(JSON.stringify(changed.new))}</span></div></div>`;
+
+      // 渲染变更的配置（按类型分组）
+      if (configChanged.length) {
+        const changedByCategory: Record<ConfigCategory, Array<[string, { old: unknown; new: unknown }]>> = {
+          query: [],
+          setting: [],
+          result: [],
+          other: [],
+        };
+        for (const [k, v] of configChanged) {
+          const cat = classifyConfigKey(k);
+          changedByCategory[cat].push([k, v as { old: unknown; new: unknown }]);
+        }
+        configHtml += `<div class="viewer-config-section-title">${t("Changed", "变更的配置")}</div>`;
+        for (const cat of ["query", "setting", "result", "other"] as ConfigCategory[]) {
+          configHtml += renderConfigCategory(cat, [], undefined, changedByCategory[cat]);
+        }
       }
+
       configHtml += `</div>`;
     } else {
-      configHtml = `<div class="viewer-evaluate-empty">No config differences.</div>`;
+      configHtml = `<div class="viewer-evaluate-empty">${t("No config differences.", "配置无差异。")}</div>`;
     }
     html += `<div class="viewer-compare-tab-panel" data-tab="config">${configHtml}</div>`;
 
@@ -377,12 +542,15 @@ export function createCompareMode(deps: CompareModeDependencies) {
 
     // Preview tab
     html += `<div class="viewer-compare-tab-panel" data-tab="preview">
+      <div class="viewer-compare-images-header">${t("← Layout A (Left)", "← 布局 A（左侧）")} · ${t("Layout B (Right) →", "布局 B（右侧） →")}</div>
       <div class="viewer-compare-images">
         <div class="viewer-compare-col">
+          <div class="viewer-compare-layout-badge viewer-compare-layout-a">${t("Layout A", "布局 A")}</div>
           <div class="viewer-compare-thumb-label">${deps.escapeHtml(deps.compactUiLabel(a.layout_path))}</div>
           ${imgA ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgA)}" alt="Layout A" />` : `<div class='viewer-compare-no-img'>${t("No preview", "无预览")}</div>`}
         </div>
         <div class="viewer-compare-col">
+          <div class="viewer-compare-layout-badge viewer-compare-layout-b">${t("Layout B", "布局 B")}</div>
           <div class="viewer-compare-thumb-label">${deps.escapeHtml(deps.compactUiLabel(b.layout_path))}</div>
           ${imgB ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgB)}" alt="Layout B" />` : `<div class='viewer-compare-no-img'>${t("No preview", "无预览")}</div>`}
         </div>

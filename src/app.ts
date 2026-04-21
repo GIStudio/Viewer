@@ -1041,13 +1041,25 @@ function inferSpawnFromBbox(
   };
 }
 
+// Manifest 缓存 - 避免重复请求
+const manifestCache = new Map<string, { data: ViewerManifest; timestamp: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟缓存
+
 function parseQueryLayoutPath(): string | null {
   const search = new URLSearchParams(window.location.search);
   const layoutPath = search.get("layout") ?? "";
   return layoutPath.trim() || null;
 }
 
-async function loadManifest(layoutPath: string): Promise<ViewerManifest> {
+async function loadManifest(layoutPath: string, useCache = true): Promise<ViewerManifest> {
+  // 检查缓存
+  if (useCache) {
+    const cached = manifestCache.get(layoutPath);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return cached.data;
+    }
+  }
+
   const response = await fetch(`./api/layout?path=${encodeURIComponent(layoutPath)}`);
   const text = await response.text();
   if (!text) {
@@ -1066,10 +1078,27 @@ async function loadManifest(layoutPath: string): Promise<ViewerManifest> {
         : "Failed to load scene layout.",
     );
   }
+
+  // 存入缓存
+  manifestCache.set(layoutPath, { data: payload as ViewerManifest, timestamp: Date.now() });
   return payload as ViewerManifest;
 }
 
-async function loadRecentLayouts(limit = 20): Promise<RecentLayout[]> {
+// 清除 manifest 缓存（当场景更新时调用）
+function clearManifestCache(): void {
+  manifestCache.clear();
+}
+
+// 缓存最近布局列表
+let recentLayoutsCache: { data: RecentLayout[]; timestamp: number } | null = null;
+const RECENT_LAYOUTS_CACHE_TTL_MS = 60 * 1000; // 1 分钟缓存
+
+async function loadRecentLayouts(limit = 20, useCache = true): Promise<RecentLayout[]> {
+  // 检查缓存
+  if (useCache && recentLayoutsCache && Date.now() - recentLayoutsCache.timestamp < RECENT_LAYOUTS_CACHE_TTL_MS) {
+    return recentLayoutsCache.data;
+  }
+
   const response = await fetch(`./api/recent-layouts?limit=${encodeURIComponent(String(limit))}`);
   const text = await response.text();
   if (!text) {
@@ -1084,7 +1113,11 @@ async function loadRecentLayouts(limit = 20): Promise<RecentLayout[]> {
   if (!response.ok) {
     throw new Error(String(payload?.error ?? "Failed to discover recent scene layouts."));
   }
-  return Array.isArray(payload?.results) ? payload.results : [];
+  const results = Array.isArray(payload?.results) ? payload.results : [];
+
+  // 存入缓存
+  recentLayoutsCache = { data: results, timestamp: Date.now() };
+  return results;
 }
 
 function updateQueryLayout(layoutPath: string): void {
@@ -1820,14 +1853,46 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     });
   };
 
-  const loadAndRenderHistory = async () => {
+  // 缓存历史数据，避免重复请求
+  let cachedHistoryData: SceneHistoryEntry[] | null = null;
+  let lastHistoryLoadTime = 0;
+  const HISTORY_CACHE_TTL_MS = 60 * 1000; // 1 分钟缓存
+
+  const loadAndRenderHistory = async (forceRefresh = false) => {
     try {
-      const recentLayouts = await loadRecentLayouts(50);
+      // 检查缓存是否有效
+      const now = Date.now();
+      const cacheValid = !forceRefresh && cachedHistoryData !== null && (now - lastHistoryLoadTime) < HISTORY_CACHE_TTL_MS;
+
+      if (cacheValid && cachedHistoryData !== null && cachedHistoryData.length > 0) {
+        // 使用缓存数据快速渲染
+        await renderHistoryCharts(cachedHistoryData);
+        return;
+      }
+
+      // 显示加载状态
+      historyAnalysisContentEl.innerHTML = `
+        <div style="padding: 24px; text-align: center; color: #64748b;">
+          <div style="margin-bottom: 8px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" style="animation: spin 1s linear infinite; vertical-align: middle;">
+              <circle cx="12" cy="12" r="10" stroke="#e2e8f0" stroke-width="3" fill="none"/>
+              <path d="M12 2a10 10 0 0 1 10 10" stroke="#3b82f6" stroke-width="3" fill="none" stroke-linecap="round"/>
+            </svg>
+            <span style="margin-left: 8px;">Loading history data...</span>
+          </div>
+          <p style="font-size: 12px; color: #94a3b8; margin-top: 8px;">Using cached data if available</p>
+        </div>
+        <style>@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }</style>
+      `;
+
+      const recentLayouts = await loadRecentLayouts(50, !forceRefresh);
       const scenesWithMetrics: SceneHistoryEntry[] = [];
+      const total = recentLayouts.length;
+      let loaded = 0;
 
       for (const layout of recentLayouts) {
         try {
-          const manifest = await loadManifest(layout.layout_path);
+          const manifest = await loadManifest(layout.layout_path, !forceRefresh);
           if (manifest.summary) {
             scenesWithMetrics.push({
               layout_path: layout.layout_path,
@@ -1841,6 +1906,15 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         } catch (e) {
           console.warn(`Failed to load manifest for ${layout.layout_path}:`, e);
         }
+        loaded++;
+
+        // 每加载 10 个更新一次进度
+        if (loaded % 10 === 0 || loaded === total) {
+          historyAnalysisContentEl.querySelector(".loading-progress")?.setAttribute(
+            "data-progress",
+            `${loaded}/${total}`
+          );
+        }
       }
 
       if (scenesWithMetrics.length === 0) {
@@ -1853,37 +1927,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         return;
       }
 
-      if (!historyScatterPlot) {
-        historyScatterPlot = new HistoryScatterPlot(
-          historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-scatter-plot")!
-        );
-      }
+      // 缓存数据
+      cachedHistoryData = scenesWithMetrics;
+      lastHistoryLoadTime = Date.now();
 
-      if (!historyFrequencyChart) {
-        historyFrequencyChart = new HistoryFrequencyChart(
-          historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-frequency")!
-        );
-      }
-
-      if (!historyTrendChart) {
-        historyTrendChart = new HistoryTrendChart(
-          historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-trend")!
-        );
-      }
-
-      if (!historyThreeSystemScores) {
-        historyThreeSystemScores = new ThreeSystemScorePanel(
-          historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-scores")!
-        );
-      }
-
-      await historyScatterPlot.init(scenesWithMetrics);
-      await historyFrequencyChart.init(scenesWithMetrics);
-      await historyTrendChart.init(scenesWithMetrics);
-      await historyThreeSystemScores.init(scenesWithMetrics);
-
-      // Setup tab switching
-      setupHistoryTabs();
+      await renderHistoryCharts(scenesWithMetrics);
     } catch (error) {
       console.error("Failed to load history data:", error);
       historyAnalysisContentEl.innerHTML = `
@@ -1893,6 +1941,44 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         </div>
       `;
     }
+  };
+
+  // 渲染历史图表（可复用）
+  const renderHistoryCharts = async (scenesWithMetrics: SceneHistoryEntry[]) => {
+    if (scenesWithMetrics.length === 0) return;
+
+    // 初始化图表组件
+    if (!historyScatterPlot) {
+      historyScatterPlot = new HistoryScatterPlot(
+        historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-scatter-plot")!
+      );
+    }
+
+    if (!historyFrequencyChart) {
+      historyFrequencyChart = new HistoryFrequencyChart(
+        historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-frequency")!
+      );
+    }
+
+    if (!historyTrendChart) {
+      historyTrendChart = new HistoryTrendChart(
+        historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-trend")!
+      );
+    }
+
+    if (!historyThreeSystemScores) {
+      historyThreeSystemScores = new ThreeSystemScorePanel(
+        historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-scores")!
+      );
+    }
+
+    await historyScatterPlot.init(scenesWithMetrics);
+    await historyFrequencyChart.init(scenesWithMetrics);
+    await historyTrendChart.init(scenesWithMetrics);
+    await historyThreeSystemScores.init(scenesWithMetrics);
+
+    // Setup tab switching
+    setupHistoryTabs();
   };
 
   const exportTopdownMapEl = requireElement<HTMLButtonElement>(root, "#viewer-export-topdown-map");
@@ -3960,6 +4046,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
     syncLightingUi();
     setStatus(`Viewing ${option.label}`);
+
+    // 清除 manifest 缓存，确保 History Analysis 重新加载最新数据
+    clearManifestCache();
   }
 
   function populateRecentLayoutOptions(layouts: RecentLayout[], selectedPath: string): void {
