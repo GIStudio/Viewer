@@ -1488,37 +1488,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         </div>
       `,
     },
-    {
-      id: "viewer-compare-targets",
-      title: "Compare Targets",
-      subtitle: "Split-view source pairs",
-      content: `
-        <div id="scene-compare-controls" class="scene-compare-controls scene-compare-controls-shell">
-          <div class="scene-compare-group">
-            <label class="desktop-shell-field">
-              <span>Layout A</span>
-              <select id="layout-a-select" class="viewer-select viewer-select-inline viewer-select-layout" title="Layout A"></select>
-            </label>
-            <label class="desktop-shell-field">
-              <span>Scene A</span>
-              <select id="scene-a-select" class="viewer-select viewer-select-inline viewer-select-scene" title="Scene A"></select>
-            </label>
-          </div>
-          <div class="scene-compare-group">
-            <label class="desktop-shell-field">
-              <span>Layout B</span>
-              <select id="layout-b-select" class="viewer-select viewer-select-inline viewer-select-layout" title="Layout B"></select>
-            </label>
-            <label class="desktop-shell-field">
-              <span>Scene B</span>
-              <select id="scene-b-select" class="viewer-select viewer-select-inline viewer-select-scene" title="Scene B"></select>
-            </label>
-          </div>
-          <button id="reset-scene-mode" class="viewer-btn-reset desktop-shell-inline-button" type="button" title="Clear Scene B">Clear Scene B</button>
-        </div>
-      `,
-      open: true,
-    },
   ]);
   shell.setRightTabs(
     [
@@ -1751,23 +1720,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         <button id="viewer-export-topdown-svg" type="button">Export SVG</button>
       </div>
       <div id="viewer-canvas" class="viewer-canvas"></div>
-      <div id="scene-radar-container" class="scene-radar-container" hidden>
-        <div class="scene-radar-header">
-          <div class="scene-radar-title">Metrics Comparison</div>
-          <button id="close-scene-radar" class="viewer-btn-icon" type="button" title="Close radar view">✕</button>
-        </div>
-        <div class="scene-radar-body">
-          <div class="scene-radar-panel">
-            <div class="scene-radar-label" id="scene-a-label">Scene A</div>
-            <canvas id="scene-radar-canvas-a" class="scene-radar-canvas"></canvas>
-          </div>
-          <div class="scene-radar-divider"></div>
-          <div class="scene-radar-panel">
-            <div class="scene-radar-label" id="scene-b-label">Scene B</div>
-            <canvas id="scene-radar-canvas-b" class="scene-radar-canvas"></canvas>
-          </div>
-        </div>
-      </div>
       <button id="viewer-exit-compare3d" class="viewer-exit-compare3d" type="button" hidden>Exit Split View</button>
       <div id="viewer-crosshair" class="viewer-crosshair" hidden></div>
       <div id="viewer-info-card" class="viewer-info-card" hidden></div>
@@ -1790,20 +1742,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const selectEl = requireElement<HTMLSelectElement>(root, "#scene-select");
   const sceneGraphLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-scene-graph-link");
   const assetEditorLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-asset-editor-link");
-  
-  // 场景对比相关元素
-  const sceneCompareControls = requireElement<HTMLElement>(root, "#scene-compare-controls");
-  const layoutASelectEl = requireElement<HTMLSelectElement>(root, "#layout-a-select");
-  const sceneASelectEl = requireElement<HTMLSelectElement>(root, "#scene-a-select");
-  const layoutBSelectEl = requireElement<HTMLSelectElement>(root, "#layout-b-select");
-  const sceneBSelectEl = requireElement<HTMLSelectElement>(root, "#scene-b-select");
-  const resetSceneModeBtn = requireElement<HTMLButtonElement>(root, "#reset-scene-mode");
-  const sceneRadarContainer = requireElement<HTMLElement>(root, "#scene-radar-container");
-  const closeSceneRadarBtn = requireElement<HTMLButtonElement>(root, "#close-scene-radar");
-  const sceneRadarCanvasA = requireElement<HTMLCanvasElement>(root, "#scene-radar-canvas-a");
-  const sceneRadarCanvasB = requireElement<HTMLCanvasElement>(root, "#scene-radar-canvas-b");
-  const sceneALabel = requireElement<HTMLElement>(root, "#scene-a-label");
-  const sceneBLabel = requireElement<HTMLElement>(root, "#scene-b-label");
   
   const menuToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-menu-toggle");
   const menuDropdownEl = requireElement<HTMLElement>(root, "#viewer-menu-dropdown");
@@ -4094,9 +4032,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const selectedOption = options.find((option) => option.key === selectEl.value) ?? options[0];
     selectEl.title = selectedOption?.label ?? "";
     
-    // 填充场景对比选择器
-    populateLayoutSelectors();
-    
     return options;
   }
 
@@ -4133,12 +4068,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       clearFloatingLaneOverlay();
     }
     applyAudioProfile();
-    
-    // 填充对比选择器
-    populateLayoutSelectors();
-    // 默认设置Layout A
-    layoutASelectEl.value = layoutPath;
-    await loadLayoutAndPopulateScenes(layoutPath, sceneASelectEl, true);
   }
 
   /* ── Evaluate ────────────────────────────────────────────── */
@@ -4598,262 +4527,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   historyAnalysisToggleEl.addEventListener("click", () => setHistoryAnalysisOpen(!historyAnalysisOpen), { signal });
   historyAnalysisCloseEl.addEventListener("click", () => setHistoryAnalysisOpen(false), { signal });
-
-  // ==================== 场景对比功能 ====================
-  
-  // 存储每个layout的manifest
-  const layoutManifests = new Map<string, ViewerManifest>();
-  
-  const sceneCompareState: SceneCompareState = {
-    mode: "single",
-    sceneA: null,
-    sceneB: null,
-    metricsA: null,
-    metricsB: null,
-  };
-
-  // 填充Layout选择器（使用已有的recentLayouts数据）
-  function populateLayoutSelectors() {
-    const layouts = Array.from(recentLayoutsByPath.values());
-    
-    // Layout A
-    layoutASelectEl.innerHTML = "";
-    layouts.forEach((layout) => {
-      const option = document.createElement("option");
-      option.value = layout.layout_path;
-      option.textContent = compactUiLabel(layout.label, 35);
-      option.title = layout.label;
-      layoutASelectEl.appendChild(option);
-    });
-    layoutASelectEl.disabled = layouts.length === 0;
-    
-    // Layout B (带一个默认的空选项)
-    layoutBSelectEl.innerHTML = "";
-    const emptyOption = document.createElement("option");
-    emptyOption.value = "";
-    emptyOption.textContent = "— Clear —";
-    layoutBSelectEl.appendChild(emptyOption);
-    
-    layouts.forEach((layout) => {
-      const option = document.createElement("option");
-      option.value = layout.layout_path;
-      option.textContent = compactUiLabel(layout.label, 35);
-      option.title = layout.label;
-      layoutBSelectEl.appendChild(option);
-    });
-    layoutBSelectEl.disabled = layouts.length === 0;
-    layoutBSelectEl.value = ""; // 默认清空
-  }
-
-  // 加载Layout的manifest并填充Scene选择器
-  async function loadLayoutAndPopulateScenes(layoutPath: string, sceneSelectEl: HTMLSelectElement, isLayoutA: boolean) {
-    try {
-      let manifest = layoutManifests.get(layoutPath);
-      if (!manifest) {
-        manifest = await loadManifest(layoutPath);
-        layoutManifests.set(layoutPath, manifest);
-      }
-      
-      const scenes = makeSceneOptionsFromManifest(manifest, layoutPath);
-      
-      sceneSelectEl.innerHTML = "";
-      scenes.forEach((scene) => {
-        const option = document.createElement("option");
-        option.value = scene.key;
-        option.textContent = compactUiLabel(scene.label, 30);
-        option.title = scene.label;
-        sceneSelectEl.appendChild(option);
-      });
-      sceneSelectEl.disabled = scenes.length === 0;
-      
-    } catch (error) {
-      console.error(`Failed to load manifest for ${layoutPath}:`, error);
-      sceneSelectEl.innerHTML = "";
-      sceneSelectEl.disabled = true;
-    }
-  }
-
-  // Layout A 选择变化
-  layoutASelectEl.addEventListener("change", async () => {
-    const layoutPath = layoutASelectEl.value;
-    if (layoutPath) {
-      await loadLayoutAndPopulateScenes(layoutPath, sceneASelectEl, true);
-      updateSplitView();
-    }
-  }, { signal });
-
-  // Layout B 选择变化
-  layoutBSelectEl.addEventListener("change", async () => {
-    const layoutPath = layoutBSelectEl.value;
-    if (layoutPath) {
-      await loadLayoutAndPopulateScenes(layoutPath, sceneBSelectEl, false);
-      updateSplitView();
-    } else {
-      // 清空Scene B
-      sceneBSelectEl.innerHTML = "";
-      sceneBSelectEl.disabled = true;
-      updateSplitView();
-    }
-  }, { signal });
-
-  // Scene A 选择变化
-  sceneASelectEl.addEventListener("change", () => {
-    updateSplitView();
-  }, { signal });
-
-  // Scene B 选择变化
-  sceneBSelectEl.addEventListener("change", () => {
-    updateSplitView();
-  }, { signal });
-
-  // 清除Layout B和Scene B，返回单屏
-  resetSceneModeBtn.addEventListener("click", () => {
-    layoutBSelectEl.value = "";
-    sceneBSelectEl.innerHTML = "";
-    sceneBSelectEl.disabled = true;
-    sceneCompareState.sceneB = null;
-    sceneCompareState.metricsB = null;
-    layoutManifests.clear(); // 清除缓存的manifest
-    updateSplitView();
-  }, { signal });
-
-  // 更新分屏状态
-  function updateSplitView() {
-    const layoutA = layoutASelectEl.value;
-    const sceneA = sceneASelectEl.value;
-    const layoutB = layoutBSelectEl.value;
-    const sceneB = sceneBSelectEl.value;
-    
-    // 如果Layout B为空或Scene B未选择，或与A完全相同，单屏模式
-    const isSameScene = layoutA === layoutB && sceneA === sceneB && layoutA && sceneA;
-    
-    if (!layoutB || !sceneB || isSameScene) {
-      sceneCompareState.mode = "single";
-      sceneCompareState.sceneA = sceneA;
-      sceneCompareState.sceneB = null;
-      resetSceneModeBtn.hidden = true;
-      
-      // 加载单场景
-      if (layoutA && sceneA) {
-        const manifest = layoutManifests.get(layoutA);
-        if (manifest) {
-          const scenes = makeSceneOptionsFromManifest(manifest, layoutA);
-          const sceneOption = scenes.find(s => s.key === sceneA);
-          if (sceneOption) {
-            loadScene(sceneOption);
-            enableSingleView();
-          }
-        }
-      }
-    } else {
-      // 不同场景，分屏模式
-      sceneCompareState.mode = "dual";
-      sceneCompareState.sceneA = `${layoutA}::${sceneA}`;
-      sceneCompareState.sceneB = `${layoutB}::${sceneB}`;
-      resetSceneModeBtn.hidden = false;
-      
-      // 更新雷达图标签
-      sceneALabel.textContent = `${compactUiLabel(layoutASelectEl.selectedOptions[0]?.label || "", 20)} / ${sceneA}`;
-      sceneBLabel.textContent = `${compactUiLabel(layoutBSelectEl.selectedOptions[0]?.label || "", 20)} / ${sceneB}`;
-      
-      // 启用分屏模式
-      enableSplitView();
-      
-      // 加载Scene A（左侧）
-      const manifestA = layoutManifests.get(layoutA);
-      if (manifestA) {
-        const scenesA = makeSceneOptionsFromManifest(manifestA, layoutA);
-        const sceneOptionA = scenesA.find(s => s.key === sceneA);
-        if (sceneOptionA) {
-          loadSceneA(sceneOptionA);
-        }
-      }
-      
-      // 加载Scene B（右侧）
-      const manifestB = layoutManifests.get(layoutB);
-      if (manifestB) {
-        const scenesB = makeSceneOptionsFromManifest(manifestB, layoutB);
-        const sceneOptionB = scenesB.find(s => s.key === sceneB);
-        if (sceneOptionB) {
-          loadSceneB(sceneOptionB);
-        }
-      }
-    }
-  }
-
-  // 启用单屏模式
-  function enableSingleView() {
-    // 移除分屏class
-    const shell = canvasHost.closest(".viewer-shell");
-    if (shell) {
-      shell.classList.remove("split-view");
-    }
-    
-    canvasHost.style.display = "";
-    canvasHost.style.width = "100%";
-    // 隐藏分屏canvas
-    const canvasB = document.getElementById("viewer-canvas-b");
-    if (canvasB) {
-      (canvasB as HTMLElement).style.display = "none";
-    }
-    
-    // 调整renderer大小回全屏
-    setTimeout(() => {
-      renderer.setSize(canvasHost.clientWidth, canvasHost.clientHeight);
-    }, 100);
-  }
-
-  // 启用分屏模式
-  function enableSplitView() {
-    // 检查是否已经有第二个canvas
-    let canvasB = document.getElementById("viewer-canvas-b") as HTMLElement;
-    if (!canvasB) {
-      // 创建第二个canvas容器
-      canvasB = document.createElement("div");
-      canvasB.id = "viewer-canvas-b";
-      canvasB.className = "viewer-canvas viewer-canvas-b";
-      canvasHost.parentElement?.insertBefore(canvasB, canvasHost.nextSibling);
-    }
-    
-    // 添加分屏class
-    const shell = canvasHost.closest(".viewer-shell");
-    if (shell) {
-      shell.classList.add("split-view");
-    }
-    
-    canvasB.style.display = "";
-    
-    // 调整renderer大小以适应半屏
-    setTimeout(() => {
-      const width = canvasHost.clientWidth;
-      const height = canvasHost.clientHeight;
-      renderer.setSize(width, height);
-    }, 100);
-  }
-
-  // 加载Scene A（左侧视口）
-  async function loadSceneA(option: SceneOption): Promise<void> {
-    // 复用现有的loadScene逻辑，但渲染到左半屏
-    await loadScene(option);
-  }
-
-  // 加载Scene B（右侧视口）
-  async function loadSceneB(option: SceneOption): Promise<void> {
-    // TODO: 实现Scene B的加载和渲染
-    // 目前简单实现：创建第二个renderer和scene
-    const canvasB = document.getElementById("viewer-canvas-b");
-    if (!canvasB) return;
-    
-    console.log("Loading Scene B:", option.label);
-    // 这里需要实现独立的Scene B渲染
-    // 为了快速验证，暂时只显示提示信息
-    setStatus(`Split View: Scene A loaded, Scene B (dual viewport) coming soon...`);
-  }
-
-  // 关闭雷达图
-  closeSceneRadarBtn.addEventListener("click", () => {
-    sceneRadarContainer.hidden = true;
-  }, { signal });
 
   presetsToggleEl.addEventListener("click", () => setPresetsOpen(!presetsOpen), { signal });
   presetsCloseEl.addEventListener("click", () => setPresetsOpen(false), { signal });
