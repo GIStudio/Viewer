@@ -3,9 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { CSS2DRenderer, CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
-
-// Unified UI components
-import { setupMenuToggle, setupNavigation } from "./ui";
+import type { DesktopShell } from "./desktop-shell";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -757,7 +755,8 @@ function showToast(root: HTMLElement, message: string, type: "success" | "error"
 
 /* ── Main Mount ────────────────────────────────────────────────────── */
 
-export function mountAssetEditor(root: HTMLElement): () => void {
+export function mountAssetEditor(shell: DesktopShell): () => void {
+  const root = shell.root;
   const state: AssetEditorState = {
     manifestName: "",
     assets: [],
@@ -786,55 +785,46 @@ export function mountAssetEditor(root: HTMLElement): () => void {
   let destroyed = false;
 
   // Build the unified header
-  const headerHTML = `
-    <div class="scene-page-topbar viewer-header-full">
-      <div class="viewer-header-full-left">
-        <button id="viewer-menu-toggle" class="viewer-hamburger" type="button" aria-label="Menu" aria-expanded="false">☰</button>
-        <div class="viewer-header-full-info">
-          <div class="scene-page-kicker">Viewer / 3D Assets</div>
-          <h1 class="scene-page-title">3D Asset Editor</h1>
-          <p class="scene-page-subtitle">Browse, inspect, and manage project 3D assets</p>
-        </div>
-      </div>
-      <div class="viewer-header-full-actions">
-        <select id="ae-manifest-select" class="ae-manifest-select">
-          <option value="">-- Select Manifest --</option>
-        </select>
-        <button id="ae-back-btn" class="viewer-nav-button" type="button">Back to Viewer</button>
-      </div>
-      <div id="viewer-menu-dropdown" class="viewer-menu-dropdown" hidden>
-        <div class="viewer-menu-help">Click to select · Scroll to zoom · Drag to orbit · Esc to deselect</div>
-        <div class="viewer-menu-buttons">
-          <button data-nav="viewer" class="viewer-nav-button viewer-menu-button" type="button">3D Viewer</button>
-          <button data-nav="scene-graph" class="viewer-nav-button viewer-menu-button" type="button">Annotation</button>
-          <button class="viewer-nav-button viewer-menu-button viewer-menu-button-active" type="button" disabled>Asset Editor</button>
-        </div>
-      </div>
-    </div>
-  `;
-
-  root.innerHTML = `
-    <div class="scene-page">
-      ${headerHTML}
-
-      <div class="asset-editor-layout">
-        <!-- Left: Gallery -->
-        <div class="asset-gallery-panel">
-          <div class="ae-filter-bar">
-            <input id="ae-search" type="text" placeholder="Search assets..." class="ae-search-input" />
-            <select id="ae-category-filter" class="ae-filter-select">
-              <option value="">All Categories</option>
+  shell.setHints([
+    "Use the left rail to pick a manifest, filter assets, and browse the gallery.",
+    "The center workspace stays focused on preview and object selection.",
+    "Metadata, object lists, and export actions live in the right inspector tabs.",
+  ]);
+  shell.setLeftSections([
+    {
+      id: "asset-manifest",
+      title: "Manifest",
+      subtitle: "Source and filters",
+      content: `
+        <div class="desktop-shell-form-stack">
+          <label class="desktop-shell-field">
+            <span>Manifest</span>
+            <select id="ae-manifest-select" class="ae-manifest-select">
+              <option value="">-- Select Manifest --</option>
             </select>
-            <select id="ae-tier-filter" class="ae-filter-select">
-              <option value="">All Tiers</option>
-              <option value="5">T5 — Excellent</option>
-              <option value="4">T4 — Good</option>
-              <option value="3">T3 — Production</option>
-              <option value="2">T2 — Moderate</option>
-              <option value="1">T1 — Low-poly</option>
-              <option value="0">T0 — Unusable</option>
-            </select>
-          </div>
+          </label>
+          <input id="ae-search" type="text" placeholder="Search assets..." class="ae-search-input" />
+          <select id="ae-category-filter" class="ae-filter-select">
+            <option value="">All Categories</option>
+          </select>
+          <select id="ae-tier-filter" class="ae-filter-select">
+            <option value="">All Tiers</option>
+            <option value="5">T5 — Excellent</option>
+            <option value="4">T4 — Good</option>
+            <option value="3">T3 — Production</option>
+            <option value="2">T2 — Moderate</option>
+            <option value="1">T1 — Low-poly</option>
+            <option value="0">T0 — Unusable</option>
+          </select>
+        </div>
+      `,
+    },
+    {
+      id: "asset-gallery",
+      title: "Asset List",
+      subtitle: "Gallery browser",
+      content: `
+        <div class="asset-gallery-panel asset-gallery-panel-shell">
           <div class="ae-gallery-stats" id="ae-gallery-stats"></div>
           <div class="ae-gallery-grid" id="ae-gallery-grid"></div>
           <div class="ae-load-more-section" id="ae-load-more-section" style="display:none;">
@@ -842,73 +832,93 @@ export function mountAssetEditor(root: HTMLElement): () => void {
             <span id="ae-load-more-info" class="ae-load-more-info"></span>
           </div>
         </div>
-
-        <!-- Right: Detail -->
-        <div class="asset-detail-panel" id="ae-detail-panel">
-          <div class="ae-empty-state" id="ae-empty-state">
-            <div class="ae-empty-icon">&#9881;</div>
-            <p>Select an asset from the gallery to inspect</p>
+      `,
+      open: true,
+    },
+  ]);
+  shell.setRightTabs(
+    [
+      {
+        id: "metadata",
+        label: "Metadata",
+        content: `
+          <section class="ae-info-section" id="ae-info-section">
+            <h3 class="ae-section-title">Asset Information</h3>
+            <div class="ae-info-grid" id="ae-info-grid"></div>
+          </section>
+        `,
+      },
+      {
+        id: "objects",
+        label: "Objects",
+        content: `
+          <section class="ae-objects-section" id="ae-objects-section" style="display:none;">
+            <h3 class="ae-section-title">Scene Objects <span id="ae-dup-count" class="ae-dup-badge" style="display:none;"></span></h3>
+            <div class="ae-object-list" id="ae-object-list"></div>
+          </section>
+        `,
+      },
+      {
+        id: "export",
+        label: "Export",
+        content: `
+          <div class="ae-actions-bar ae-actions-bar-shell">
+            <button id="ae-save-btn" class="ae-action-btn ae-btn-primary" disabled>Save</button>
+            <button id="ae-export-btn" class="ae-action-btn">Export GLB</button>
+            <span class="ae-actions-sep"></span>
+            <div class="ae-scale-group">
+              <label class="ae-scale-label">Scale:</label>
+              <input id="ae-scale-input" type="number" class="ae-scale-input" value="1" min="0.01" max="100" step="0.1" />
+            </div>
+            <div class="ae-orientation-group">
+              <label class="ae-yaw-label">Yaw (°):</label>
+              <input id="ae-yaw-input" type="number" class="ae-yaw-input" value="0" min="-180" max="360" step="1" />
+            </div>
+            <div class="ae-front-group">
+              <label class="ae-front-label">Front:</label>
+              <select id="ae-front-select" class="ae-front-select">
+                <option value="+X">+X</option>
+                <option value="-X">-X</option>
+                <option value="+Z" selected>+Z</option>
+                <option value="-Z">-Z</option>
+              </select>
+            </div>
+            <span class="ae-actions-sep"></span>
+            <button id="ae-remove-dups-btn" class="ae-action-btn ae-btn-warning" disabled>Remove Duplicates</button>
+            <button id="ae-split-btn" class="ae-action-btn ae-btn-secondary" disabled>Split Selected</button>
           </div>
-
-          <div class="ae-detail-content" id="ae-detail-content" style="display:none;">
-            <!-- Preview Canvas -->
-            <div class="ae-preview-section">
-              <div class="ae-preview-toolbar">
-                <button id="ae-mode-solid" class="ae-toolbar-btn active" title="Solid render">Solid</button>
-                <button id="ae-mode-wire" class="ae-toolbar-btn" title="Wireframe">Wire</button>
-                <span class="ae-toolbar-sep"></span>
-                <button id="ae-toggle-bbox" class="ae-toolbar-btn" title="Bounding box">BBox</button>
-                <button id="ae-zoom-fit" class="ae-toolbar-btn" title="Zoom to fit">Fit</button>
-                <span class="ae-toolbar-sep"></span>
-                <button id="ae-toggle-select" class="ae-toolbar-btn" title="Rectangle selection mode">Select</button>
-                <button id="ae-delete-selected" class="ae-toolbar-btn ae-btn-danger" title="Delete selected objects" disabled>Delete</button>
-                <span class="ae-toolbar-sep"></span>
-                <button id="ae-delete-record" class="ae-toolbar-btn ae-btn-danger" title="Delete this asset from manifest" disabled>Del Record</button>
-              </div>
-              <div class="ae-preview-canvas" id="ae-preview-canvas"></div>
-            </div>
-
-            <!-- Info Panel -->
-            <div class="ae-info-section" id="ae-info-section">
-              <h3 class="ae-section-title">Asset Information</h3>
-              <div class="ae-info-grid" id="ae-info-grid"></div>
-            </div>
-
-            <!-- Scene Objects -->
-            <div class="ae-objects-section" id="ae-objects-section" style="display:none;">
-              <h3 class="ae-section-title">Scene Objects <span id="ae-dup-count" class="ae-dup-badge" style="display:none;"></span></h3>
-              <div class="ae-object-list" id="ae-object-list"></div>
-            </div>
-
-            <!-- Actions -->
-            <div class="ae-actions-bar">
-              <button id="ae-save-btn" class="ae-action-btn ae-btn-primary" disabled>Save</button>
-              <button id="ae-export-btn" class="ae-action-btn">Export GLB</button>
-              <span class="ae-actions-sep"></span>
-              <div class="ae-scale-group">
-                <label class="ae-scale-label">Scale:</label>
-                <input id="ae-scale-input" type="number" class="ae-scale-input" value="1" min="0.01" max="100" step="0.1" />
-              </div>
-              <div class="ae-orientation-group">
-                <label class="ae-yaw-label">Yaw (°):</label>
-                <input id="ae-yaw-input" type="number" class="ae-yaw-input" value="0" min="-180" max="360" step="1" />
-              </div>
-              <div class="ae-front-group">
-                <label class="ae-front-label">Front:</label>
-                <select id="ae-front-select" class="ae-front-select">
-                  <option value="+X">+X</option>
-                  <option value="-X">-X</option>
-                  <option value="+Z" selected>+Z</option>
-                  <option value="-Z">-Z</option>
-                </select>
-              </div>
-              <span class="ae-actions-sep"></span>
-              <button id="ae-remove-dups-btn" class="ae-action-btn ae-btn-warning" disabled>Remove Duplicates</button>
-              <button id="ae-split-btn" class="ae-action-btn ae-btn-secondary" disabled>Split Selected</button>
-            </div>
+        `,
+      },
+    ],
+    "metadata",
+  );
+  shell.statusStatusHost.innerHTML = `<div class="desktop-shell-inline-status">Asset editor ready.</div>`;
+  shell.setStatusSummary("Asset editor ready.");
+  shell.centerStage.innerHTML = `
+    <div class="asset-editor-shell-stage">
+      <div id="ae-empty-state" class="ae-empty-state">
+        <div class="ae-empty-icon">&#9881;</div>
+        <p>Select an asset from the gallery to inspect</p>
+      </div>
+      <div class="ae-detail-content" id="ae-detail-content" style="display:none;">
+        <div class="ae-preview-section">
+          <div class="ae-preview-toolbar">
+            <button id="ae-mode-solid" class="ae-toolbar-btn active" title="Solid render">Solid</button>
+            <button id="ae-mode-wire" class="ae-toolbar-btn" title="Wireframe">Wire</button>
+            <span class="ae-toolbar-sep"></span>
+            <button id="ae-toggle-bbox" class="ae-toolbar-btn" title="Bounding box">BBox</button>
+            <button id="ae-zoom-fit" class="ae-toolbar-btn" title="Zoom to fit">Fit</button>
+            <span class="ae-toolbar-sep"></span>
+            <button id="ae-toggle-select" class="ae-toolbar-btn" title="Rectangle selection mode">Select</button>
+            <button id="ae-delete-selected" class="ae-toolbar-btn ae-btn-danger" title="Delete selected objects" disabled>Delete</button>
+            <span class="ae-toolbar-sep"></span>
+            <button id="ae-delete-record" class="ae-toolbar-btn ae-btn-danger" title="Delete this asset from manifest" disabled>Del Record</button>
           </div>
+          <div class="ae-preview-canvas" id="ae-preview-canvas"></div>
         </div>
       </div>
+      <div id="ae-detail-panel" hidden></div>
+      <button id="ae-back-btn" type="button" hidden>Back to Viewer</button>
     </div>
   `;
 
@@ -946,9 +956,19 @@ export function mountAssetEditor(root: HTMLElement): () => void {
   const yawInput = qs<HTMLInputElement>(root, "#ae-yaw-input");
   const frontSelect = qs<HTMLSelectElement>(root, "#ae-front-select");
 
-  /* ── Unified Menu Setup ───────────────────────────────────────────── */
-  setupMenuToggle(root);
-  setupNavigation(root);
+  shell.setMenuActions({
+    "file-load-layout": () => manifestSelect.focus(),
+    "file-save-context": () => saveBtn.click(),
+    "view-reset-view": () => zoomFitBtn.click(),
+    "help-shortcuts": () => {
+      shell.setBottomOpen(true);
+      shell.setHints([
+        "Scroll to orbit, right-drag to pan, and use Fit to frame the current asset.",
+        "Toggle Select to enter rectangle selection mode for mesh-level editing.",
+        "Export GLB and Save live in the Export tab on the right rail.",
+      ]);
+    },
+  });
 
   /* ── Navigation ────────────────────────────────────────────────── */
   backBtn.addEventListener("click", () => {

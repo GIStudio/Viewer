@@ -12,6 +12,7 @@ import type {
   DerivedJunctionOverlayArm,
   DerivedJunctionOverlayBoundary,
   DerivedJunctionOverlayConnectorLine,
+  DerivedJunctionOverlayFusedStrip,
   DerivedJunctionOverlayPatch,
   JunctionOverlayControlPoint,
   JunctionOverlayCornerFocus,
@@ -19,6 +20,9 @@ import type {
   JunctionOverlayFootPoint,
   JunctionOverlayGuideLine,
   JunctionOverlayStripLink,
+  JunctionQuadrantBezierPatch,
+  JunctionQuadrantComposition,
+  JunctionQuadrantSkeletonLine,
   ClippedDisplaySegment,
   StripKind,
   StripZone,
@@ -99,6 +103,107 @@ export function angleDistanceDegTs(aDeg: number, bDeg: number): number {
 export function axisDistanceDegTs(angleDeg: number, axisAngleDeg: number): number {
   const diff = angleDistanceDegTs(angleDeg, axisAngleDeg);
   return Math.min(diff, Math.abs(diff - 180));
+}
+
+function shortArcSweepTs(startAngle: number, endAngle: number): { sweep: number; direction: 1 | -1 } {
+  let ccwSweep = endAngle - startAngle;
+  while (ccwSweep <= 0) {
+    ccwSweep += Math.PI * 2;
+  }
+  let clockwiseSweep = startAngle - endAngle;
+  while (clockwiseSweep <= 0) {
+    clockwiseSweep += Math.PI * 2;
+  }
+  if (ccwSweep <= clockwiseSweep) {
+    return { sweep: ccwSweep, direction: 1 };
+  }
+  return { sweep: clockwiseSweep, direction: -1 };
+}
+
+export function sampleTaperedArcPoints(
+  center: AnnotationPoint,
+  startPoint: AnnotationPoint,
+  endPoint: AnnotationPoint,
+  targetSegmentLengthPx: number,
+): AnnotationPoint[] {
+  const startRadius = pointDistance(center, startPoint);
+  const endRadius = pointDistance(center, endPoint);
+  if (startRadius <= 1e-6 && endRadius <= 1e-6) {
+    return [clonePoint(center)];
+  }
+  const startAngle = Math.atan2(startPoint.y - center.y, startPoint.x - center.x);
+  const endAngle = Math.atan2(endPoint.y - center.y, endPoint.x - center.x);
+  const { sweep, direction } = shortArcSweepTs(startAngle, endAngle);
+  const arcLength = Math.max(((startRadius + endRadius) * 0.5) * sweep, 0);
+  const rawPointCount = Math.ceil(arcLength / Math.max(targetSegmentLengthPx, 1e-6)) + 1;
+  const pointCount = Math.max(4, Math.min(24, rawPointCount));
+  const points: AnnotationPoint[] = [];
+  for (let index = 0; index < pointCount; index += 1) {
+    const ratio = index / Math.max(pointCount - 1, 1);
+    const radius = startRadius + (endRadius - startRadius) * ratio;
+    const angle = startAngle + direction * sweep * ratio;
+    points.push({
+      x: center.x + Math.cos(angle) * radius,
+      y: center.y + Math.sin(angle) * radius,
+    });
+  }
+  points[0] = clonePoint(startPoint);
+  points[points.length - 1] = clonePoint(endPoint);
+  return points;
+}
+
+function dedupeRingPointsTs(points: AnnotationPoint[], tolerancePx = 1e-6): AnnotationPoint[] {
+  const deduped: AnnotationPoint[] = [];
+  for (const point of points) {
+    const candidate = clonePoint(point);
+    if (deduped.length > 0 && pointDistance(deduped[deduped.length - 1], candidate) <= tolerancePx) {
+      continue;
+    }
+    deduped.push(candidate);
+  }
+  if (deduped.length > 1 && pointDistance(deduped[0], deduped[deduped.length - 1]) <= tolerancePx) {
+    deduped.pop();
+  }
+  return deduped;
+}
+
+export function buildAnnularSectorBandPoints(
+  center: AnnotationPoint,
+  nearStart: AnnotationPoint,
+  farStart: AnnotationPoint,
+  nearEnd: AnnotationPoint,
+  farEnd: AnnotationPoint,
+  targetSegmentLengthPx = 8,
+): AnnotationPoint[] {
+  return buildAnnularSectorBandGeometry(
+    center,
+    nearStart,
+    farStart,
+    nearEnd,
+    farEnd,
+    targetSegmentLengthPx,
+  ).ring;
+}
+
+export function buildAnnularSectorBandGeometry(
+  center: AnnotationPoint,
+  nearStart: AnnotationPoint,
+  farStart: AnnotationPoint,
+  nearEnd: AnnotationPoint,
+  farEnd: AnnotationPoint,
+  targetSegmentLengthPx = 8,
+): {
+  nearLine: AnnotationPoint[];
+  farLine: AnnotationPoint[];
+  ring: AnnotationPoint[];
+} {
+  const nearLine = sampleTaperedArcPoints(center, nearStart, nearEnd, targetSegmentLengthPx);
+  const farLine = sampleTaperedArcPoints(center, farStart, farEnd, targetSegmentLengthPx);
+  return {
+    nearLine,
+    farLine,
+    ring: dedupeRingPointsTs([...nearLine, ...farLine.slice().reverse()]),
+  };
 }
 
 export function classifyDerivedJunctionKind(anglesDeg: number[]): "t_junction" | "cross_junction" | "complex_junction" {
@@ -440,6 +545,168 @@ export function pointOnBoundaryWithOffsetTs(
   };
 }
 
+function orderedCornerOffsetsTs(
+  boundaryCenter: AnnotationPoint,
+  normal: AnnotationPoint,
+  cornerCenter: AnnotationPoint,
+  innerOffsetPx: number,
+  outerOffsetPx: number,
+): { nearOffsetPx: number; farOffsetPx: number } {
+  const edgeOffsetPx = (cornerCenter.x - boundaryCenter.x) * normal.x + (cornerCenter.y - boundaryCenter.y) * normal.y;
+  const offsets = [innerOffsetPx, outerOffsetPx].sort((a, b) => Math.abs(a - edgeOffsetPx) - Math.abs(b - edgeOffsetPx));
+  return { nearOffsetPx: offsets[0], farOffsetPx: offsets[1] };
+}
+
+function dedupePolylinePointsTs(points: AnnotationPoint[], tolerancePx = 0.1): AnnotationPoint[] {
+  const deduped: AnnotationPoint[] = [];
+  for (const point of points) {
+    const previous = deduped[deduped.length - 1];
+    if (previous && pointDistance(previous, point) <= tolerancePx) {
+      continue;
+    }
+    deduped.push(clonePoint(point));
+  }
+  if (deduped.length > 2 && pointDistance(deduped[0], deduped[deduped.length - 1]) <= tolerancePx) {
+    deduped.pop();
+  }
+  return deduped;
+}
+
+function polylineToBezierTs(points: AnnotationPoint[]): BezierCurve3 {
+  const deduped = dedupePolylinePointsTs(points, 0.05);
+  const start = deduped[0] ?? { x: 0, y: 0 };
+  const end = deduped[deduped.length - 1] ?? start;
+  if (deduped.length < 3) {
+    return {
+      start: clonePoint(start),
+      end: clonePoint(end),
+      control1: {
+        x: start.x + (end.x - start.x) / 3,
+        y: start.y + (end.y - start.y) / 3,
+      },
+      control2: {
+        x: start.x + ((end.x - start.x) * 2) / 3,
+        y: start.y + ((end.y - start.y) * 2) / 3,
+      },
+    };
+  }
+  const midpoint = deduped[Math.floor(deduped.length / 2)];
+  const quadraticControl = {
+    x: midpoint.x * 2 - (start.x + end.x) * 0.5,
+    y: midpoint.y * 2 - (start.y + end.y) * 0.5,
+  };
+  return {
+    start: clonePoint(start),
+    end: clonePoint(end),
+    control1: {
+      x: start.x + ((quadraticControl.x - start.x) * 2) / 3,
+      y: start.y + ((quadraticControl.y - start.y) * 2) / 3,
+    },
+    control2: {
+      x: end.x + ((quadraticControl.x - end.x) * 2) / 3,
+      y: end.y + ((quadraticControl.y - end.y) * 2) / 3,
+    },
+  };
+}
+
+function averageDistanceToPointTs(points: AnnotationPoint[], target: AnnotationPoint): number {
+  if (points.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return points.reduce((sum, point) => sum + pointDistance(point, target), 0) / points.length;
+}
+
+function buildCornerBisectorJoinPointTs(
+  startPoint: AnnotationPoint,
+  endPoint: AnnotationPoint,
+  cornerCenter: AnnotationPoint,
+  widthPx: number,
+): AnnotationPoint {
+  const fromCornerToStart = normalizeVector({
+    x: startPoint.x - cornerCenter.x,
+    y: startPoint.y - cornerCenter.y,
+  });
+  const fromCornerToEnd = normalizeVector({
+    x: endPoint.x - cornerCenter.x,
+    y: endPoint.y - cornerCenter.y,
+  });
+  const bisector = fromCornerToStart && fromCornerToEnd
+    ? normalizeVector({
+        x: fromCornerToStart.x + fromCornerToEnd.x,
+        y: fromCornerToStart.y + fromCornerToEnd.y,
+      })
+    : null;
+  if (!bisector) {
+    return midpointTs(startPoint, endPoint);
+  }
+  const reachPx = Math.min(
+    pointDistance(startPoint, cornerCenter),
+    pointDistance(endPoint, cornerCenter),
+  );
+  const minInsetPx = Math.max(widthPx * 0.85, 2);
+  const maxInsetPx = Math.max(minInsetPx, reachPx - widthPx * 0.6);
+  const insetPx = clamp(reachPx * 0.45, minInsetPx, maxInsetPx);
+  return {
+    x: cornerCenter.x + bisector.x * insetPx,
+    y: cornerCenter.y + bisector.y * insetPx,
+  };
+}
+
+export function buildFusedCornerStripGeometryTs(
+  centerPointA: AnnotationPoint,
+  centerPointB: AnnotationPoint,
+  cornerCenter: AnnotationPoint,
+  widthPxA: number,
+  widthPxB: number,
+): {
+  centerLine: AnnotationPoint[];
+  patchPoints: AnnotationPoint[];
+  innerPolyline: AnnotationPoint[];
+  outerPolyline: AnnotationPoint[];
+  widthPx: number;
+  innerCurve: BezierCurve3;
+  outerCurve: BezierCurve3;
+} | null {
+  const minWidthPx = Math.max(Math.min(widthPxA, widthPxB), 1);
+  const maxWidthPx = Math.max(widthPxA, widthPxB, minWidthPx);
+  const widthPx = clamp(
+    (widthPxA + widthPxB) * 0.5,
+    minWidthPx,
+    Math.min(maxWidthPx, minWidthPx + Math.max(minWidthPx * 0.5, 12)),
+  );
+  const joinPoint = buildCornerBisectorJoinPointTs(centerPointA, centerPointB, cornerCenter, widthPx);
+  const centerLine = dedupePolylinePointsTs([centerPointA, joinPoint, centerPointB], 0.05);
+  if (centerLine.length < 2) {
+    return null;
+  }
+  const halfWidthPx = Math.max(widthPx * 0.5, 0.5);
+  const positiveOffset = dedupePolylinePointsTs(offsetPolyline(centerLine, halfWidthPx), 0.05);
+  const negativeOffset = dedupePolylinePointsTs(offsetPolyline(centerLine, -halfWidthPx), 0.05);
+  if (positiveOffset.length < 2 || negativeOffset.length < 2) {
+    return null;
+  }
+  const positiveDistance = averageDistanceToPointTs(positiveOffset, cornerCenter);
+  const negativeDistance = averageDistanceToPointTs(negativeOffset, cornerCenter);
+  const innerPolyline = positiveDistance <= negativeDistance ? positiveOffset : negativeOffset;
+  const outerPolyline = positiveDistance <= negativeDistance ? negativeOffset : positiveOffset;
+  const patchPoints = dedupePolylinePointsTs(
+    [...outerPolyline, ...innerPolyline.slice().reverse()],
+    0.05,
+  );
+  if (patchPoints.length < 3) {
+    return null;
+  }
+  return {
+    centerLine,
+    patchPoints,
+    innerPolyline,
+    outerPolyline,
+    widthPx,
+    innerCurve: polylineToBezierTs(innerPolyline),
+    outerCurve: polylineToBezierTs(outerPolyline),
+  };
+}
+
 export function connectorJoinPointTs(
   pointA: AnnotationPoint,
   tangentA: AnnotationPoint,
@@ -689,6 +956,7 @@ export function buildCrossCornerOverlayTs(
   orderedArms: DerivedJunctionOverlayArm[],
   ppm: number,
 ): {
+  fusedCornerStrips: DerivedJunctionOverlayFusedStrip[];
   quadrantCornerKernels: JunctionOverlayCornerKernel[];
   connectorCenterLines: DerivedJunctionOverlayConnectorLine[];
   cornerStripLinks: JunctionOverlayStripLink[];
@@ -696,14 +964,13 @@ export function buildCrossCornerOverlayTs(
   boundaryExtensionLines: JunctionOverlayGuideLine[];
   focusGuideLines: JunctionOverlayGuideLine[];
 } {
+  const fusedCornerStrips: DerivedJunctionOverlayFusedStrip[] = [];
   const quadrantCornerKernels: JunctionOverlayCornerKernel[] = [];
   const connectorCenterLines: DerivedJunctionOverlayConnectorLine[] = [];
   const cornerStripLinks: JunctionOverlayStripLink[] = [];
   const cornerFocusPoints: JunctionOverlayCornerFocus[] = [];
   const boundaryExtensionLines: JunctionOverlayGuideLine[] = [];
   const focusGuideLines: JunctionOverlayGuideLine[] = [];
-  const targetSegmentLengthPx = Math.max(ppm * 0.75, 1);
-  const minRadiusPx = Math.max(ppm * 0.25, 0.25);
 
   for (let armIndex = 0; armIndex < orderedArms.length; armIndex += 1) {
     const arm = orderedArms[armIndex];
@@ -726,8 +993,6 @@ export function buildCrossCornerOverlayTs(
     }
     const quadrantId = `${junctionId}_quadrant_${String(armIndex + 1).padStart(2, "0")}`;
     const kernelId = `${quadrantId}_kernel`;
-    const startTangent = { x: -arm.tangent.x, y: -arm.tangent.y };
-    const endTangent = clonePoint(nextArm.tangent);
 
     cornerFocusPoints.push({
       focusId: `${junctionId}_focus_${String(armIndex + 1).padStart(2, "0")}`,
@@ -746,52 +1011,57 @@ export function buildCrossCornerOverlayTs(
       },
     );
 
-    let canonicalStartPoint: AnnotationPoint | null = null;
-    let canonicalEndPoint: AnnotationPoint | null = null;
+    const targetArcSegmentPx = Math.max(ppm * 0.75, 4);
+    let canonicalCenterLine: AnnotationPoint[] | null = null;
     for (const kind of ["clear_sidewalk", "nearroad_furnishing", "frontage_reserve"] as const) {
       const offsetsA = cornerStripOffsetRangeTs(arm, cornerCenter, kind, ppm);
       const offsetsB = cornerStripOffsetRangeTs(nextArm, cornerCenter, kind, ppm);
       if (!offsetsA || !offsetsB) {
         continue;
       }
-      canonicalStartPoint = pointOnBoundaryWithOffsetTs(
+      const canonicalStartPoint = pointOnBoundaryWithOffsetTs(
         arm.splitBoundaryCenter,
         arm.normal,
         offsetsA.centerOffsetPx,
       );
-      canonicalEndPoint = pointOnBoundaryWithOffsetTs(
+      const canonicalEndPoint = pointOnBoundaryWithOffsetTs(
         nextArm.splitBoundaryCenter,
         nextArm.normal,
         offsetsB.centerOffsetPx,
       );
+      canonicalCenterLine = sampleTaperedArcPoints(
+        cornerCenter,
+        canonicalStartPoint,
+        canonicalEndPoint,
+        targetArcSegmentPx,
+      );
       break;
     }
-    if (!canonicalStartPoint || !canonicalEndPoint) {
+    if (!canonicalCenterLine || canonicalCenterLine.length < 2) {
       continue;
     }
-
-    const canonicalKernel = cornerLaneKernelGeometryTs(
-      canonicalStartPoint,
-      canonicalEndPoint,
-      startTangent,
-      endTangent,
-      cornerCenter,
-      targetSegmentLengthPx,
-      minRadiusPx,
-    );
+    const startVector = normalizeVector({
+      x: canonicalCenterLine[1].x - canonicalCenterLine[0].x,
+      y: canonicalCenterLine[1].y - canonicalCenterLine[0].y,
+    }) ?? { x: 1, y: 0 };
+    const lastIndex = canonicalCenterLine.length - 1;
+    const endVector = normalizeVector({
+      x: canonicalCenterLine[lastIndex].x - canonicalCenterLine[lastIndex - 1].x,
+      y: canonicalCenterLine[lastIndex].y - canonicalCenterLine[lastIndex - 1].y,
+    }) ?? { x: 1, y: 0 };
     quadrantCornerKernels.push({
       kernelId,
       quadrantId,
       junctionId,
       startCenterlineId: arm.centerlineId,
       endCenterlineId: nextArm.centerlineId,
-      kernelKind: canonicalKernel.kernelKind,
-      center: clonePoint(canonicalKernel.center),
-      radiusPx: canonicalKernel.radiusPx,
-      startHeadingDeg: canonicalKernel.startHeadingDeg,
-      endHeadingDeg: canonicalKernel.endHeadingDeg,
-      clockwise: canonicalKernel.clockwise,
-      points: canonicalKernel.sampledPoints.map((point) => clonePoint(point)),
+      kernelKind: "polyline_fallback",
+      center: clonePoint(cornerCenter),
+      radiusPx: 0,
+      startHeadingDeg: headingDegForVectorTs(startVector),
+      endHeadingDeg: headingDegForVectorTs(endVector),
+      clockwise: null,
+      points: canonicalCenterLine.map((point) => clonePoint(point)),
     });
 
     for (const spec of [
@@ -806,34 +1076,67 @@ export function buildCrossCornerOverlayTs(
       }
       const centerPointA = pointOnBoundaryWithOffsetTs(arm.splitBoundaryCenter, arm.normal, offsetsA.centerOffsetPx);
       const centerPointB = pointOnBoundaryWithOffsetTs(nextArm.splitBoundaryCenter, nextArm.normal, offsetsB.centerOffsetPx);
-      const innerPointA = pointOnBoundaryWithOffsetTs(arm.splitBoundaryCenter, arm.normal, offsetsA.innerOffsetPx);
-      const innerPointB = pointOnBoundaryWithOffsetTs(nextArm.splitBoundaryCenter, nextArm.normal, offsetsB.innerOffsetPx);
-      const outerPointA = pointOnBoundaryWithOffsetTs(arm.splitBoundaryCenter, arm.normal, offsetsA.outerOffsetPx);
-      const outerPointB = pointOnBoundaryWithOffsetTs(nextArm.splitBoundaryCenter, nextArm.normal, offsetsB.outerOffsetPx);
-      const strokeWidthPx = Math.max(
-        2,
-        (Math.abs(offsetsA.outerOffsetPx - offsetsA.innerOffsetPx) + Math.abs(offsetsB.outerOffsetPx - offsetsB.innerOffsetPx)) * 0.5,
-      );
-      const lineKernel = cornerLaneKernelGeometryTs(
-        centerPointA,
-        centerPointB,
-        startTangent,
-        endTangent,
+      const orderedA = orderedCornerOffsetsTs(
+        arm.splitBoundaryCenter,
+        arm.normal,
         cornerCenter,
-        targetSegmentLengthPx,
-        minRadiusPx,
+        offsetsA.innerOffsetPx,
+        offsetsA.outerOffsetPx,
       );
+      const orderedB = orderedCornerOffsetsTs(
+        nextArm.splitBoundaryCenter,
+        nextArm.normal,
+        cornerCenter,
+        offsetsB.innerOffsetPx,
+        offsetsB.outerOffsetPx,
+      );
+      const nearPointA = pointOnBoundaryWithOffsetTs(arm.splitBoundaryCenter, arm.normal, orderedA.nearOffsetPx);
+      const nearPointB = pointOnBoundaryWithOffsetTs(nextArm.splitBoundaryCenter, nextArm.normal, orderedB.nearOffsetPx);
+      const farPointA = pointOnBoundaryWithOffsetTs(arm.splitBoundaryCenter, arm.normal, orderedA.farOffsetPx);
+      const farPointB = pointOnBoundaryWithOffsetTs(nextArm.splitBoundaryCenter, nextArm.normal, orderedB.farOffsetPx);
+      const stripGeometry = buildAnnularSectorBandGeometry(
+        cornerCenter,
+        nearPointA,
+        farPointA,
+        nearPointB,
+        farPointB,
+        targetArcSegmentPx,
+      );
+      if (stripGeometry.ring.length < 3) {
+        continue;
+      }
+      const centerLine = sampleTaperedArcPoints(cornerCenter, centerPointA, centerPointB, targetArcSegmentPx);
+      const widthPx = (
+        Math.abs(offsetsA.outerOffsetPx - offsetsA.innerOffsetPx) +
+        Math.abs(offsetsB.outerOffsetPx - offsetsB.innerOffsetPx)
+      ) * 0.5;
+      const strokeWidthPx = Math.max(2, widthPx);
+      const stripId = `${junctionId}_${spec.patchPrefix}_${String(armIndex + 1).padStart(2, "0")}`;
       connectorCenterLines.push({
-        connectorId: `${junctionId}_${spec.patchPrefix}_${String(armIndex + 1).padStart(2, "0")}_centerline`,
+        connectorId: `${stripId}_centerline`,
         stripKind: spec.kind,
         quadrantId,
         kernelId,
         strokeWidthPx,
-        points: lineKernel.sampledPoints.map((point) => clonePoint(point)),
+        points: centerLine.map((point) => clonePoint(point)),
+      });
+      fusedCornerStrips.push({
+        stripId,
+        stripKind: spec.kind,
+        quadrantId,
+        kernelId,
+        widthPx,
+        centerLine: centerLine.map((point) => clonePoint(point)),
+        innerLine: stripGeometry.nearLine.map((point) => clonePoint(point)),
+        outerLine: stripGeometry.farLine.map((point) => clonePoint(point)),
+        patch: {
+          patchId: stripId,
+          points: stripGeometry.ring.map((point) => clonePoint(point)),
+        },
       });
       if (offsetsA.stripId && offsetsB.stripId) {
         cornerStripLinks.push({
-          linkId: `${junctionId}_${spec.patchPrefix}_${String(armIndex + 1).padStart(2, "0")}_link`,
+          linkId: `${stripId}_link`,
           junctionId,
           quadrantId,
           kernelId,
@@ -850,7 +1153,7 @@ export function buildCrossCornerOverlayTs(
             stripKind: spec.kind,
             stripZone: offsetsB.zone,
           },
-          points: lineKernel.sampledPoints.map((point) => clonePoint(point)),
+          points: centerLine.map((point) => clonePoint(point)),
           strokeWidthPx,
         });
       }
@@ -868,28 +1171,29 @@ export function buildCrossCornerOverlayTs(
         {
           guideId: `${junctionId}_${spec.patchPrefix}_${String(armIndex + 1).padStart(2, "0")}_inner_a`,
           start: clonePoint(cornerCenter),
-          end: clonePoint(innerPointA),
+          end: clonePoint(nearPointA),
         },
         {
           guideId: `${junctionId}_${spec.patchPrefix}_${String(armIndex + 1).padStart(2, "0")}_inner_b`,
           start: clonePoint(cornerCenter),
-          end: clonePoint(innerPointB),
+          end: clonePoint(nearPointB),
         },
         {
           guideId: `${junctionId}_${spec.patchPrefix}_${String(armIndex + 1).padStart(2, "0")}_outer_a`,
           start: clonePoint(cornerCenter),
-          end: clonePoint(outerPointA),
+          end: clonePoint(farPointA),
         },
         {
           guideId: `${junctionId}_${spec.patchPrefix}_${String(armIndex + 1).padStart(2, "0")}_outer_b`,
           start: clonePoint(cornerCenter),
-          end: clonePoint(outerPointB),
+          end: clonePoint(farPointB),
         },
       );
     }
   }
 
   return {
+    fusedCornerStrips,
     quadrantCornerKernels,
     connectorCenterLines,
     cornerStripLinks,
@@ -897,6 +1201,44 @@ export function buildCrossCornerOverlayTs(
     boundaryExtensionLines,
     focusGuideLines,
   };
+}
+
+export function buildQuadrantsFromFusedCornerStripsTs(
+  fusedCornerStrips: DerivedJunctionOverlayFusedStrip[],
+  pixelsPerMeter: number,
+): JunctionQuadrantComposition[] {
+  const quadrantsById = new Map<string, JunctionQuadrantComposition>();
+  for (const strip of fusedCornerStrips) {
+    const quadrant = quadrantsById.get(strip.quadrantId) ?? {
+      quadrantId: strip.quadrantId,
+      armAId: "",
+      armBId: "",
+      patches: [],
+      skeletonLines: [],
+    };
+    const patch: JunctionQuadrantBezierPatch = {
+      patchId: strip.patch.patchId,
+      stripKind: strip.stripKind,
+      innerCurve: polylineToBezierTs(strip.innerLine),
+      outerCurve: polylineToBezierTs(strip.outerLine),
+    };
+    const skeletonLine: JunctionQuadrantSkeletonLine = {
+      lineId: `${strip.stripId}_skeleton`,
+      stripKind: strip.stripKind,
+      curve: polylineToBezierTs(strip.centerLine),
+      widthM: strip.widthPx / Math.max(pixelsPerMeter, 0.0001),
+    };
+    quadrant.patches = [
+      ...quadrant.patches.filter((item) => item.stripKind !== strip.stripKind),
+      patch,
+    ];
+    quadrant.skeletonLines = [
+      ...quadrant.skeletonLines.filter((item) => item.stripKind !== strip.stripKind),
+      skeletonLine,
+    ];
+    quadrantsById.set(strip.quadrantId, quadrant);
+  }
+  return [...quadrantsById.values()].sort((a, b) => a.quadrantId.localeCompare(b.quadrantId));
 }
 
 export function shouldTrimOutsideCornerTs(
@@ -1170,6 +1512,7 @@ export function deriveExplicitJunctionOverlayGeometries(annotation: ReferenceAnn
     const sidewalkCorners: DerivedJunctionOverlayPatch[] = [];
     const nearroadCorners: DerivedJunctionOverlayPatch[] = [];
     const frontageCorners: DerivedJunctionOverlayPatch[] = [];
+    const fusedCornerStrips: DerivedJunctionOverlayFusedStrip[] = [];
     const quadrantCornerKernels: JunctionOverlayCornerKernel[] = [];
     const connectorCenterLines: DerivedJunctionOverlayConnectorLine[] = [];
     const cornerStripLinks: JunctionOverlayStripLink[] = [];
@@ -1178,12 +1521,22 @@ export function deriveExplicitJunctionOverlayGeometries(annotation: ReferenceAnn
     const focusGuideLines: JunctionOverlayGuideLine[] = [];
     if (kind === "cross_junction") {
       const crossCornerData = buildCrossCornerOverlayTs(junction.id, orderedArms, ppm);
+      fusedCornerStrips.push(...crossCornerData.fusedCornerStrips);
       quadrantCornerKernels.push(...crossCornerData.quadrantCornerKernels);
       connectorCenterLines.push(...crossCornerData.connectorCenterLines);
       cornerStripLinks.push(...crossCornerData.cornerStripLinks);
       cornerFocusPoints.push(...crossCornerData.cornerFocusPoints);
       boundaryExtensionLines.push(...crossCornerData.boundaryExtensionLines);
       focusGuideLines.push(...crossCornerData.focusGuideLines);
+      for (const strip of crossCornerData.fusedCornerStrips) {
+        if (strip.stripKind === "nearroad_furnishing") {
+          nearroadCorners.push(strip.patch);
+        } else if (strip.stripKind === "clear_sidewalk") {
+          sidewalkCorners.push(strip.patch);
+        } else if (strip.stripKind === "frontage_reserve") {
+          frontageCorners.push(strip.patch);
+        }
+      }
     } else {
       for (let armIndex = 0; armIndex < orderedArms.length; armIndex += 1) {
         const arm = orderedArms[armIndex];
@@ -1320,10 +1673,12 @@ export function deriveExplicitJunctionOverlayGeometries(annotation: ReferenceAnn
       kind,
       sourceMode: "explicit",
       core,
+      carriagewayCore: core.map((point) => clonePoint(point)),
       crosswalks,
       sidewalkCorners,
       nearroadCorners,
       frontageCorners,
+      fusedCornerStrips,
       approachBoundaries,
       anchor,
       armCount: arms.length,
@@ -1585,6 +1940,7 @@ export function deriveLegacyJunctionOverlayGeometries(
     const sidewalkCorners: DerivedJunctionOverlayPatch[] = [];
     const nearroadCorners: DerivedJunctionOverlayPatch[] = [];
     const frontageCorners: DerivedJunctionOverlayPatch[] = [];
+    const fusedCornerStrips: DerivedJunctionOverlayFusedStrip[] = [];
     const quadrantCornerKernels: JunctionOverlayCornerKernel[] = [];
     const connectorCenterLines: DerivedJunctionOverlayConnectorLine[] = [];
     const cornerStripLinks: JunctionOverlayStripLink[] = [];
@@ -1594,12 +1950,22 @@ export function deriveLegacyJunctionOverlayGeometries(
     const overlayJunctionId = `junction_overlay_${String(clusterIndex + 1).padStart(2, "0")}`;
     if (kind === "cross_junction") {
       const crossCornerData = buildCrossCornerOverlayTs(overlayJunctionId, orderedArms, annotation.pixels_per_meter);
+      fusedCornerStrips.push(...crossCornerData.fusedCornerStrips);
       quadrantCornerKernels.push(...crossCornerData.quadrantCornerKernels);
       connectorCenterLines.push(...crossCornerData.connectorCenterLines);
       cornerStripLinks.push(...crossCornerData.cornerStripLinks);
       cornerFocusPoints.push(...crossCornerData.cornerFocusPoints);
       boundaryExtensionLines.push(...crossCornerData.boundaryExtensionLines);
       focusGuideLines.push(...crossCornerData.focusGuideLines);
+      for (const strip of crossCornerData.fusedCornerStrips) {
+        if (strip.stripKind === "nearroad_furnishing") {
+          nearroadCorners.push(strip.patch);
+        } else if (strip.stripKind === "clear_sidewalk") {
+          sidewalkCorners.push(strip.patch);
+        } else if (strip.stripKind === "frontage_reserve") {
+          frontageCorners.push(strip.patch);
+        }
+      }
     } else {
       for (let armIndex = 0; armIndex < orderedArms.length; armIndex += 1) {
         const arm = orderedArms[armIndex];
@@ -1736,10 +2102,12 @@ export function deriveLegacyJunctionOverlayGeometries(
       kind,
       sourceMode: "derived",
       core,
+      carriagewayCore: core.map((point) => clonePoint(point)),
       crosswalks,
       sidewalkCorners,
       nearroadCorners,
       frontageCorners,
+      fusedCornerStrips,
       approachBoundaries,
       anchor: { ...anchor },
       armCount: arms.length,

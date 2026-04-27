@@ -16,6 +16,7 @@ import { clonePoint, pointDistance } from "./sg-utils";
 import {
   arcToBezier,
   bezierPathD,
+  buildQuadrantsFromFusedCornerStripsTs,
   cloneBezier,
   sampleBezierPoints,
   pointOnBezier,
@@ -154,7 +155,15 @@ function midBezier(a: BezierCurve3, b: BezierCurve3): BezierCurve3 {
 export function buildDefaultJunctionComposition(
   junction: AnnotatedJunction,
   overlay: DerivedJunctionOverlay,
+  pixelsPerMeter: number,
 ): JunctionComposition {
+  if (overlay.kind === "cross_junction" && overlay.fusedCornerStrips.length > 0) {
+    return {
+      junctionId: junction.id,
+      kind: "cross_junction",
+      quadrants: buildQuadrantsFromFusedCornerStripsTs(overlay.fusedCornerStrips, pixelsPerMeter),
+    };
+  }
   const quadrants: JunctionQuadrantComposition[] = [];
   const kind = overlay.kind === "cross_junction" ? "cross_junction" : overlay.kind === "t_junction" ? "t_junction" : "complex_junction";
 
@@ -244,7 +253,7 @@ export function mountJunctionComposer(deps: JunctionComposerDeps): () => void {
 
   // Try load existing composition
   const existing = deps.annotation.junction_compositions?.find((c) => c.junctionId === deps.junction.id);
-  const defaultComp = buildDefaultJunctionComposition(deps.junction, deps.overlay);
+  const defaultComp = buildDefaultJunctionComposition(deps.junction, deps.overlay, deps.annotation.pixels_per_meter);
 
   // Deep clone existing or default
   const composition: JunctionComposition = existing
@@ -555,7 +564,7 @@ export function mountJunctionComposer(deps: JunctionComposerDeps): () => void {
   showSkeletonsInput.addEventListener("change", render, { signal });
 
   btnReset.addEventListener("click", () => {
-    const fresh = buildDefaultJunctionComposition(deps.junction, deps.overlay);
+    const fresh = buildDefaultJunctionComposition(deps.junction, deps.overlay, 10);
     for (const q of fresh.quadrants) {
       for (const sl of q.skeletonLines) {
         const connector = deps.overlay.connectorCenterLines.find(

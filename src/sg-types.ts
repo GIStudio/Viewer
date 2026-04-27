@@ -3,6 +3,11 @@ export type AnnotationPoint = {
   y: number;
 };
 
+export type JunctionArmKey = "north" | "east" | "south" | "west";
+export type SurfaceFlow = "inbound" | "outbound";
+export type SurfaceProvenance = "generated" | "manual" | "merged";
+export type SurfaceEdgeKind = "line" | "bezier";
+
 export type CrossSectionMode = "coarse" | "detailed";
 export type StripZone = "left" | "center" | "right";
 export type StripDirection = "forward" | "reverse" | "bidirectional" | "none";
@@ -156,6 +161,63 @@ export type BezierCurve3 = {
   control2: AnnotationPoint;
 };
 
+export type JunctionSurfaceNodeKind =
+  | "start_left"
+  | "start_right"
+  | "end_right"
+  | "end_left"
+  | "custom";
+
+export type JunctionSurfaceNode = {
+  nodeId: string;
+  kind: JunctionSurfaceNodeKind;
+  point: AnnotationPoint;
+};
+
+export type JunctionSurfaceEdge = {
+  edgeId: string;
+  startNodeId: string;
+  endNodeId: string;
+  kind: SurfaceEdgeKind;
+  curve: BezierCurve3;
+};
+
+export type JunctionLaneSurface = {
+  surfaceId: string;
+  laneId: string;
+  armKey: JunctionArmKey;
+  flow: SurfaceFlow;
+  laneIndex: number;
+  laneWidthM: number;
+  skeletonId: string;
+  provenance: SurfaceProvenance;
+  nodes: JunctionSurfaceNode[];
+  edges: JunctionSurfaceEdge[];
+};
+
+export type JunctionMergedSurface = {
+  surfaceId: string;
+  mergedFromSurfaceIds: string[];
+  mergedFromLaneIds: string[];
+  provenance: SurfaceProvenance;
+  nodes: JunctionSurfaceNode[];
+  edges: JunctionSurfaceEdge[];
+};
+
+export type JunctionTurnLanePatch = {
+  patch_id: string;
+  quadrant_id: string;
+  strip_kind: StripKind | string;
+  strip_id_a: string;
+  strip_id_b: string;
+  lane_index: number;
+  flow: StripDirection | "mixed";
+  direction: StripDirection | "mixed";
+  surface_role: string;
+  stack_kind: "center" | "side" | string;
+  rings: number[][][];
+};
+
 export type JunctionQuadrantBezierPatch = {
   patchId: string;
   stripKind: StripKind;
@@ -182,6 +244,8 @@ export type JunctionComposition = {
   junctionId: string;
   kind: "cross_junction" | "t_junction" | "complex_junction";
   quadrants: JunctionQuadrantComposition[];
+  laneSurfaces?: JunctionLaneSurface[];
+  mergedSurfaces?: JunctionMergedSurface[];
 };
 
 export type ReferenceAnnotation = {
@@ -346,15 +410,32 @@ export type JunctionOverlayStripLink = {
   strokeWidthPx: number;
 };
 
+export type DerivedJunctionOverlayFusedStrip = {
+  stripId: string;
+  stripKind: StripKind;
+  quadrantId: string;
+  kernelId: string | null;
+  widthPx: number;
+  centerLine: AnnotationPoint[];
+  innerLine: AnnotationPoint[];
+  outerLine: AnnotationPoint[];
+  patch: DerivedJunctionOverlayPatch;
+};
+
+export type GenerationMode = "cross_strip_fusion_auto" | "cross_strip_fusion_manual" | "corner_connector_patch" | "viewer_local";
+
 export type DerivedJunctionOverlay = {
   junctionId: string;
   kind: "t_junction" | "cross_junction";
   sourceMode: "explicit" | "derived";
+  generationMode?: GenerationMode;
   core: AnnotationPoint[];
+  carriagewayCore: AnnotationPoint[];
   crosswalks: DerivedJunctionOverlayPatch[];
   sidewalkCorners: DerivedJunctionOverlayPatch[];
   nearroadCorners: DerivedJunctionOverlayPatch[];
   frontageCorners: DerivedJunctionOverlayPatch[];
+  fusedCornerStrips: DerivedJunctionOverlayFusedStrip[];
   approachBoundaries: DerivedJunctionOverlayBoundary[];
   anchor: AnnotationPoint;
   armCount: number;

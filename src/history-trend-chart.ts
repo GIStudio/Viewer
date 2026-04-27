@@ -196,7 +196,8 @@ export class HistoryTrendChart {
               return `场景 #${idx + 1} · ${labels[idx]}`;
             },
             label: (context) => {
-              return `${context.dataset.label}: ${context.parsed.y.toFixed(3)}`;
+              const yValue = typeof context.parsed.y === "number" ? context.parsed.y : 0;
+              return `${context.dataset.label}: ${yValue.toFixed(3)}`;
             },
           },
           backgroundColor: "rgba(0, 0, 0, 0.8)",

@@ -14,6 +14,7 @@ export type ShellMenuActionId =
   | "view-language-zh"
   | "view-language-mixed"
   | "tools-open-settings"
+  | "tools-open-design"
   | "tools-open-evaluate"
   | "tools-open-compare"
   | "tools-open-history"
@@ -100,6 +101,7 @@ function buildMenuActionsHtml(menuId: ShellMenuId): string {
   if (menuId === "tools") {
     return `
       <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-settings">Settings</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-design">Design</button>
       <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-evaluate">Evaluate</button>
       <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-compare">Compare</button>
       <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-history">History</button>

@@ -1,5 +1,6 @@
 import type {
   AnnotationPoint,
+  BezierCurve3,
   CrossSectionMode,
   StripZone,
   StripDirection,
@@ -15,6 +16,16 @@ import type {
   AnnotatedRoundabout,
   AnnotatedBuildingRegion,
   AnnotatedFunctionalZone,
+  JunctionArmKey,
+  JunctionComposition,
+  JunctionLaneSurface,
+  JunctionMergedSurface,
+  JunctionQuadrantBezierPatch,
+  JunctionQuadrantComposition,
+  JunctionQuadrantSkeletonLine,
+  JunctionSurfaceEdge,
+  JunctionSurfaceNode,
+  JunctionSurfaceNodeKind,
   ReferenceAnnotation,
   ReferencePlan,
   ReferencePlansPayload,
@@ -48,6 +59,9 @@ import type {
   OffsetPolylineSegment,
   SideStripLayoutEntry,
   SideStripLayouts,
+  SurfaceEdgeKind,
+  SurfaceFlow,
+  SurfaceProvenance,
 } from "./sg-types";
 
 import {
@@ -163,7 +177,7 @@ import {
 } from "./sg-geometry";
 
 // Unified UI components
-import { mountAppHeader, setupMenuToggle, setupNavigation } from "./ui";
+import type { DesktopShell } from "./desktop-shell";
 
 function nextStripId(centerline: AnnotatedCenterline, zone: StripZone): string {
   const used = new Set(centerline.cross_section_strips.map((strip) => strip.strip_id));
@@ -542,6 +556,7 @@ function createEmptyAnnotation(planId = "", imagePath = "", imageWidthPx = 0, im
     control_points: [],
     building_regions: [],
     functional_zones: [],
+    junction_compositions: [],
   };
 }
 
@@ -693,6 +708,165 @@ function normalizeFunctionalZone(value: unknown, index: number): AnnotatedFuncti
   };
 }
 
+function normalizeBezierCurve(value: unknown): BezierCurve3 {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    start: normalizePoint(record.start ?? record.start_xy ?? record.startPoint),
+    end: normalizePoint(record.end ?? record.end_xy ?? record.endPoint),
+    control1: normalizePoint(record.control1 ?? record.control_1 ?? record.c1 ?? record.controlPoint1),
+    control2: normalizePoint(record.control2 ?? record.control_2 ?? record.c2 ?? record.controlPoint2),
+  };
+}
+
+function normalizeSurfaceNodeKind(value: unknown): JunctionSurfaceNodeKind {
+  const kind = asString(value, "custom");
+  return kind === "start_left" || kind === "start_right" || kind === "end_right" || kind === "end_left"
+    ? (kind as JunctionSurfaceNodeKind)
+    : "custom";
+}
+
+function normalizeSurfaceEdgeKind(value: unknown): SurfaceEdgeKind {
+  return asString(value, "line") === "bezier" ? "bezier" : "line";
+}
+
+function normalizeSurfaceFlow(value: unknown): SurfaceFlow {
+  return asString(value, "inbound") === "outbound" ? "outbound" : "inbound";
+}
+
+function normalizeSurfaceProvenance(value: unknown): SurfaceProvenance {
+  const provenance = asString(value, "generated");
+  return provenance === "manual" || provenance === "merged" ? provenance : "generated";
+}
+
+function normalizeArmKey(value: unknown): JunctionArmKey {
+  const armKey = asString(value, "north");
+  return armKey === "east" || armKey === "south" || armKey === "west" ? armKey : "north";
+}
+
+function normalizeStripKind(value: unknown): StripKind {
+  const kind = asString(value, "clear_sidewalk");
+  return isStripKind(kind) ? kind : "clear_sidewalk";
+}
+
+function normalizeJunctionCompositionKind(value: unknown): JunctionComposition["kind"] {
+  const kind = asString(value, "cross_junction");
+  return kind === "t_junction" || kind === "complex_junction" || kind === "cross_junction"
+    ? kind
+    : "cross_junction";
+}
+
+function normalizeSurfaceNode(value: unknown, index: number): JunctionSurfaceNode {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    nodeId: asString(record.nodeId ?? record.node_id, `node_${String(index + 1).padStart(2, "0")}`),
+    kind: normalizeSurfaceNodeKind(record.kind),
+    point: normalizePoint(record.point ?? record.xy ?? record.location),
+  };
+}
+
+function normalizeSurfaceEdge(value: unknown, index: number): JunctionSurfaceEdge {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    edgeId: asString(record.edgeId ?? record.edge_id, `edge_${String(index + 1).padStart(2, "0")}`),
+    startNodeId: asString(record.startNodeId ?? record.start_node_id, ""),
+    endNodeId: asString(record.endNodeId ?? record.end_node_id, ""),
+    kind: normalizeSurfaceEdgeKind(record.kind),
+    curve: normalizeBezierCurve(record.curve),
+  };
+}
+
+function normalizeLaneSurface(value: unknown, index: number): JunctionLaneSurface {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const nodes = Array.isArray(record.nodes) ? record.nodes.map((item, nodeIndex) => normalizeSurfaceNode(item, nodeIndex)) : [];
+  const edges = Array.isArray(record.edges) ? record.edges.map((item, edgeIndex) => normalizeSurfaceEdge(item, edgeIndex)) : [];
+  return {
+    surfaceId: asString(record.surfaceId ?? record.surface_id, `lane_surface_${String(index + 1).padStart(2, "0")}`),
+    laneId: asString(record.laneId ?? record.lane_id, ""),
+    armKey: normalizeArmKey(record.armKey ?? record.arm_key),
+    flow: normalizeSurfaceFlow(record.flow),
+    laneIndex: Math.max(0, Math.floor(asNumber(record.laneIndex ?? record.lane_index, 0))),
+    laneWidthM: Math.max(0.01, asNumber(record.laneWidthM ?? record.lane_width_m, 3.5)),
+    skeletonId: asString(record.skeletonId ?? record.skeleton_id, ""),
+    provenance: normalizeSurfaceProvenance(record.provenance),
+    nodes,
+    edges,
+  };
+}
+
+function normalizeMergedSurface(value: unknown, index: number): JunctionMergedSurface {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const nodes = Array.isArray(record.nodes) ? record.nodes.map((item, nodeIndex) => normalizeSurfaceNode(item, nodeIndex)) : [];
+  const edges = Array.isArray(record.edges) ? record.edges.map((item, edgeIndex) => normalizeSurfaceEdge(item, edgeIndex)) : [];
+  const rawSurfaceIds = record.mergedFromSurfaceIds ?? record.merged_from_surface_ids;
+  const rawLaneIds = record.mergedFromLaneIds ?? record.merged_from_lane_ids;
+  return {
+    surfaceId: asString(record.surfaceId ?? record.surface_id, `merged_surface_${String(index + 1).padStart(2, "0")}`),
+    mergedFromSurfaceIds: Array.isArray(rawSurfaceIds) ? rawSurfaceIds.map((item) => asString(item, "")).filter(Boolean) : [],
+    mergedFromLaneIds: Array.isArray(rawLaneIds) ? rawLaneIds.map((item) => asString(item, "")).filter(Boolean) : [],
+    provenance: normalizeSurfaceProvenance(record.provenance),
+    nodes,
+    edges,
+  };
+}
+
+function normalizeJunctionQuadrantBezierPatch(value: unknown, index: number): JunctionQuadrantBezierPatch {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    patchId: asString(record.patchId ?? record.patch_id, `patch_${String(index + 1).padStart(2, "0")}`),
+    stripKind: normalizeStripKind(record.stripKind ?? record.strip_kind),
+    innerCurve: normalizeBezierCurve(record.innerCurve ?? record.inner_curve),
+    outerCurve: normalizeBezierCurve(record.outerCurve ?? record.outer_curve),
+  };
+}
+
+function normalizeJunctionQuadrantSkeletonLine(value: unknown, index: number): JunctionQuadrantSkeletonLine {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    lineId: asString(record.lineId ?? record.line_id, `line_${String(index + 1).padStart(2, "0")}`),
+    stripKind: normalizeStripKind(record.stripKind ?? record.strip_kind),
+    curve: normalizeBezierCurve(record.curve),
+    widthM: Math.max(0.01, asNumber(record.widthM ?? record.width_m, 1.0)),
+  };
+}
+
+function normalizeJunctionQuadrantComposition(value: unknown, index: number): JunctionQuadrantComposition {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const rawPatches = Array.isArray(record.patches) ? record.patches : [];
+  const rawSkeletonLinesValue = record.skeletonLines ?? record.skeleton_lines;
+  const rawSkeletonLines = Array.isArray(rawSkeletonLinesValue) ? rawSkeletonLinesValue : [];
+  return {
+    quadrantId: asString(record.quadrantId ?? record.quadrant_id, `Q${index}`),
+    armAId: asString(record.armAId ?? record.arm_a_id, ""),
+    armBId: asString(record.armBId ?? record.arm_b_id, ""),
+    patches: rawPatches.map((item, patchIndex) => normalizeJunctionQuadrantBezierPatch(item, patchIndex)),
+    skeletonLines: rawSkeletonLines.map((item, lineIndex) => normalizeJunctionQuadrantSkeletonLine(item, lineIndex)),
+  };
+}
+
+function normalizeJunctionComposition(value: unknown, index: number): JunctionComposition {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const rawQuadrantsValue = record.quadrants;
+  const rawLaneSurfacesValue = record.laneSurfaces ?? record.lane_surfaces;
+  const rawMergedSurfacesValue = record.mergedSurfaces ?? record.merged_surfaces;
+  const rawQuadrants = Array.isArray(rawQuadrantsValue) ? rawQuadrantsValue : [];
+  const rawLaneSurfaces = Array.isArray(rawLaneSurfacesValue) ? rawLaneSurfacesValue : [];
+  const rawMergedSurfaces = Array.isArray(rawMergedSurfacesValue) ? rawMergedSurfacesValue : [];
+  return {
+    junctionId: asString(record.junctionId ?? record.junction_id, `composition_${String(index + 1).padStart(2, "0")}`),
+    kind: normalizeJunctionCompositionKind(record.kind),
+    quadrants: rawQuadrants.map((item, quadrantIndex) => normalizeJunctionQuadrantComposition(item, quadrantIndex)),
+    laneSurfaces: rawLaneSurfaces.map((item, laneIndex) => normalizeLaneSurface(item, laneIndex)),
+    mergedSurfaces: rawMergedSurfaces.map((item, mergedIndex) => normalizeMergedSurface(item, mergedIndex)),
+  };
+}
+
+function normalizeJunctionCompositions(value: unknown): JunctionComposition[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item, index) => normalizeJunctionComposition(item, index));
+}
+
 function normalizeZoneFurnitureInstance(value: unknown, index: number, zoneId: string): ZoneFurnitureInstance {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return {
@@ -731,6 +905,7 @@ function normalizeAnnotation(value: unknown): ReferenceAnnotation {
   const functionalZones = Array.isArray(inner.functional_zones)
     ? inner.functional_zones.map((item, index) => normalizeFunctionalZone(item, index))
     : [];
+  const junctionCompositions = normalizeJunctionCompositions(inner.junction_compositions ?? inner.compositions);
   return {
     version: asString(inner.version, ANNOTATION_SCHEMA_VERSION),
     plan_id: asString(inner.plan_id, "custom_annotation"),
@@ -744,6 +919,7 @@ function normalizeAnnotation(value: unknown): ReferenceAnnotation {
     control_points: controlPoints,
     building_regions: buildingRegions,
     functional_zones: functionalZones,
+    junction_compositions: junctionCompositions,
   };
 }
 
@@ -758,6 +934,23 @@ function cloneAnnotation(annotation: ReferenceAnnotation): ReferenceAnnotation {
 function setStatus(element: HTMLElement, message: string, tone: StatusTone): void {
   element.textContent = message;
   element.dataset.tone = tone;
+  const proxyId =
+    element.id === "annotation-status"
+      ? "annotation-status-proxy"
+      : element.id === "annotation-graph-status"
+        ? "annotation-graph-status-proxy"
+        : null;
+  if (proxyId) {
+    const proxy = document.getElementById(proxyId);
+    if (proxy) {
+      proxy.textContent = message;
+      proxy.dataset.tone = tone;
+    }
+    const summary = document.getElementById("desktop-shell-status-summary-text");
+    if (summary) {
+      summary.textContent = message;
+    }
+  }
 }
 
 function nextFeatureId(annotation: ReferenceAnnotation, prefix: string): string {
@@ -2925,23 +3118,13 @@ function buildDerivedJunctionOverlayMarkup(
             `;
           })
           .join("");
-      const cornerConnectorMarkup =
-        options.showJunctionConnectors && overlay.kind === "cross_junction"
-          ? overlay.connectorCenterLines
-              .map((line) => {
-                const className = cornerConnectorClassName(line.stripKind);
-                return `
-                  <polyline
-                    class="${className}${isSelected ? ` ${className}-selected` : ""}"
-                    points="${line.points.map((point) => `${point.x},${point.y}`).join(" ")}"
-                    style="stroke-width: ${line.strokeWidthPx}px"
-                    data-feature-kind="${featureKind}"
-                    data-feature-id="${escapeHtml(overlay.junctionId)}"
-                  />
-                `;
-              })
-              .join("")
-          : "";
+      const cornerConnectorMarkup = options.showJunctionConnectors
+        ? [
+            polygonMarkup(overlay.frontageCorners, "annotation-junction-frontage-corner"),
+            polygonMarkup(overlay.nearroadCorners, "annotation-junction-nearroad-corner"),
+            polygonMarkup(overlay.sidewalkCorners, "annotation-junction-sidewalk-corner"),
+          ].join("")
+        : "";
       const connectorLineMarkup = isSelected && options.showJunctionDebug && overlay.kind === "t_junction"
         ? overlay.connectorCenterLines
             .map(
@@ -3091,26 +3274,11 @@ function buildDerivedJunctionOverlayMarkup(
       ${quadrantCornerKernelMarkup}
           ${connectorDebugLabelMarkup}
           ${
-            options.showJunctionConnectors && overlay.kind === "t_junction"
-              ? polygonMarkup(overlay.frontageCorners, "annotation-junction-frontage-corner")
-              : ""
-          }
-          ${
-            options.showJunctionConnectors && overlay.kind === "t_junction"
-              ? polygonMarkup(overlay.nearroadCorners, "annotation-junction-nearroad-corner")
-              : ""
-          }
-          ${
-            options.showJunctionConnectors && overlay.kind === "t_junction"
-              ? polygonMarkup(overlay.sidewalkCorners, "annotation-junction-sidewalk-corner")
-              : ""
-          }
-          ${
             options.showJunctionCore
               ? `
           <polygon
             class="annotation-junction-core${isSelected ? " annotation-junction-core-selected" : ""}"
-            points="${overlay.core.map((point) => `${point.x},${point.y}`).join(" ")}"
+            points="${(overlay.carriagewayCore.length > 0 ? overlay.carriagewayCore : overlay.core).map((point) => `${point.x},${point.y}`).join(" ")}"
             data-feature-kind="${featureKind}"
             data-feature-id="${escapeHtml(overlay.junctionId)}"
           />`
@@ -3385,114 +3553,102 @@ function downloadText(filename: string, text: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function mountSceneGraphPage(root: HTMLElement): () => void {
+export function mountSceneGraphPage(shell: DesktopShell): () => void {
+  const root = shell.root;
   const eventController = new AbortController();
   const { signal } = eventController;
-
-  // Build the unified header
-  const headerHTML = `
-    <div class="scene-page-topbar viewer-header-full">
-      <div class="viewer-header-full-left">
-        <button id="viewer-menu-toggle" class="viewer-hamburger" type="button" aria-label="Menu" aria-expanded="false">☰</button>
-        <div class="viewer-header-full-info">
-          <div class="scene-page-kicker">Viewer / Reference</div>
-          <h1 class="scene-page-title">Reference Plan Annotator</h1>
-          <p class="scene-page-subtitle">
-            先校准道路总宽与参考图，再把中心线拆成车道、步行带、门前预留和街道家具点位，最后导出 JSON 并转换成带详细横断面的道路 graph。
-          </p>
+  shell.setHints([
+    "Load or import a reference plan, then pick a tool from the left rail to annotate roads, zones, or furniture.",
+    "The center stage is reserved for the plan image and overlay geometry; inspector and export tools stay on the right.",
+    "Status and graph conversion feedback are moved to the bottom workbench.",
+  ]);
+  shell.setLeftSections([
+    {
+      id: "annotation-navigation",
+      title: "Plan / Road / Junction / Building / Zone",
+      subtitle: "Workflow map",
+      content: `
+        <div class="desktop-shell-chip-list">
+          <button class="desktop-shell-chip" type="button" data-shell-focus="plan">Plan</button>
+          <button class="desktop-shell-chip" type="button" data-shell-focus="road">Road</button>
+          <button class="desktop-shell-chip" type="button" data-shell-focus="junction">Junction</button>
+          <button class="desktop-shell-chip" type="button" data-shell-focus="building">Building</button>
+          <button class="desktop-shell-chip" type="button" data-shell-focus="zone">Zone</button>
         </div>
-      </div>
-      <div class="viewer-header-full-actions">
-        <button id="scene-page-asset-editor" class="viewer-nav-button" type="button">Asset Editor</button>
-        <button id="scene-page-back" class="viewer-nav-button" type="button">Back to Viewer</button>
-      </div>
-      <div id="viewer-menu-dropdown" class="viewer-menu-dropdown" hidden>
-        <div class="viewer-menu-help">Click to select · Scroll to zoom · Drag to pan · Esc to deselect</div>
-        <div class="viewer-menu-buttons">
-          <button data-nav="viewer" class="viewer-nav-button viewer-menu-button" type="button">3D Viewer</button>
-          <button data-nav="asset-editor" class="viewer-nav-button viewer-menu-button" type="button">Asset Editor</button>
-          <button class="viewer-nav-button viewer-menu-button viewer-menu-button-active" type="button" disabled>Annotation</button>
-        </div>
-      </div>
-    </div>
-  `;
-
-  root.innerHTML = `
-    <div class="scene-page">
-      ${headerHTML}
-
-      <div class="scene-page-layout scene-page-layout-flex">
-        <div class="scene-canvas-column">
-          <div id="annotation-stage" class="scene-layer-stage scene-canvas-stage" data-has-image="false" data-loading="true" data-empty-state="loading">
-            <div id="annotation-stage-empty" class="scene-image-empty">
-              Loading default reference plan...
-            </div>
-            <div id="annotation-board" class="scene-board" hidden>
-              <img id="annotation-original-image" class="scene-original-image annotation-original-image" alt="Reference plan" />
-              <div id="annotation-overlay-host" class="scene-graph-overlay"></div>
+      `,
+    },
+    {
+      id: "annotation-tools",
+      title: "Tool Modes",
+      subtitle: "Select and author features",
+      content: `
+        <div class="scene-bottom-toolbar scene-bottom-toolbar-shell">
+          <div class="scene-tool-group">
+            <div class="scene-tool-group-label">选择 / Select</div>
+            <div class="scene-tool-row">
+              <button id="annotation-tool-select" class="scene-tool-button" data-tool="select" type="button">Select<span class="tool-label-zh">选择</span></button>
+              <button id="annotation-tool-adjust" class="scene-tool-button" data-tool="adjust" type="button">Adjust<span class="tool-label-zh">调整</span></button>
+              <button id="annotation-tool-control-point" class="scene-tool-button" data-tool="control_point" type="button">Control Point<span class="tool-label-zh">控制点</span></button>
             </div>
           </div>
-
-          <div class="scene-bottom-toolbar">
-            <div class="scene-tool-group">
-              <div class="scene-tool-group-label">选择 / Select</div>
-              <div class="scene-tool-row">
-                <button id="annotation-tool-select" class="scene-tool-button" data-tool="select" type="button">Select<span class="tool-label-zh">选择</span></button>
-                <button id="annotation-tool-adjust" class="scene-tool-button" data-tool="adjust" type="button">Adjust<span class="tool-label-zh">调整</span></button>
-                <button id="annotation-tool-control-point" class="scene-tool-button" data-tool="control_point" type="button">Control Point<span class="tool-label-zh">控制点</span></button>
-              </div>
-            </div>
-            <div class="scene-tool-group">
-              <div class="scene-tool-group-label">道路 / Road</div>
-              <div class="scene-tool-row">
-                <button id="annotation-tool-centerline" class="scene-tool-button" data-tool="centerline" type="button">Centerline<span class="tool-label-zh">中心线</span></button>
-                <button id="annotation-tool-branch" class="scene-tool-button" data-tool="branch" type="button">Branch<span class="tool-label-zh">分支</span></button>
-                <button id="annotation-tool-cross" class="scene-tool-button" data-tool="cross" type="button">Cross<span class="tool-label-zh">交叉</span></button>
-                <button id="annotation-tool-roundabout" class="scene-tool-button" data-tool="roundabout" type="button">Roundabout<span class="tool-label-zh">环岛</span></button>
-              </div>
-            </div>
-            <div class="scene-tool-group">
-              <div class="scene-tool-group-label">区域 / Zone</div>
-              <div class="scene-tool-row">
-                <button id="annotation-tool-building-region" class="scene-tool-button" data-tool="building_region" type="button">Building Region<span class="tool-label-zh">建筑区域</span></button>
-                <button id="annotation-tool-functional-zone" class="scene-tool-button" data-tool="functional_zone" type="button">Functional Zone<span class="tool-label-zh">功能区域</span></button>
-              </div>
-            </div>
-            <div class="scene-tool-group">
-              <div class="scene-tool-group-label">家具 / Furniture</div>
-              <div class="scene-tool-row">
-                <button id="annotation-tool-tree" class="scene-tool-button" data-tool="tree" type="button">Tree<span class="tool-label-zh">树木</span></button>
-                <button id="annotation-tool-lamp" class="scene-tool-button" data-tool="lamp" type="button">Lamp<span class="tool-label-zh">路灯</span></button>
-                <button id="annotation-tool-bench" class="scene-tool-button" data-tool="bench" type="button">Bench<span class="tool-label-zh">长椅</span></button>
-                <button id="annotation-tool-trash" class="scene-tool-button" data-tool="trash" type="button">Trash<span class="tool-label-zh">垃圾桶</span></button>
-                <button id="annotation-tool-bus-stop" class="scene-tool-button" data-tool="bus_stop" type="button">Bus Stop<span class="tool-label-zh">公交站</span></button>
-                <button id="annotation-tool-bollard" class="scene-tool-button" data-tool="bollard" type="button">Bollard<span class="tool-label-zh">隔离桩</span></button>
-                <button id="annotation-tool-mailbox" class="scene-tool-button" data-tool="mailbox" type="button">Mailbox<span class="tool-label-zh">邮筒</span></button>
-                <button id="annotation-tool-hydrant" class="scene-tool-button" data-tool="hydrant" type="button">Hydrant<span class="tool-label-zh">消防栓</span></button>
-                <button id="annotation-tool-sign" class="scene-tool-button" data-tool="sign" type="button">Sign<span class="tool-label-zh">标识牌</span></button>
-              </div>
-            </div>
-            <div class="scene-tool-group">
-              <div class="scene-tool-group-label">操作 / Action</div>
-              <div class="scene-layer-toolbar scene-layer-toolbar-secondary" style="padding:0;background:transparent;box-shadow:none">
-                <button id="annotation-finish-centerline" class="scene-toolbar-button" type="button">Finish Centerline<span class="tool-label-zh">完成中心线</span></button>
-                <button id="annotation-select-all-roads" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">All Roads<span class="tool-label-zh">全部道路</span></button>
-                <button id="annotation-undo-point" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Undo Point<span class="tool-label-zh">撤销节点</span></button>
-                <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Delete Selected<span class="tool-label-zh">删除选中</span></button>
-                <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Reset Annotation<span class="tool-label-zh">重置标注</span></button>
-                <label class="scene-layer-toggle" style="margin-left:0.5rem;gap:0.35rem;">
-                  <input id="annotation-snap-to-road" type="checkbox" checked />
-                  <span>Snap to Road<span class="tool-label-zh">吸附到道路</span></span>
-                </label>
-              </div>
-            </div>
-            <div id="annotation-image-meta" class="scene-image-meta" style="margin:0">
-              选择参考 plan 或导入 PNG 后，就可以在图上开始标注。
+          <div class="scene-tool-group">
+            <div class="scene-tool-group-label">道路 / Road</div>
+            <div class="scene-tool-row">
+              <button id="annotation-tool-centerline" class="scene-tool-button" data-tool="centerline" type="button">Centerline<span class="tool-label-zh">中心线</span></button>
+              <button id="annotation-tool-branch" class="scene-tool-button" data-tool="branch" type="button">Branch<span class="tool-label-zh">分支</span></button>
+              <button id="annotation-tool-cross" class="scene-tool-button" data-tool="cross" type="button">Cross<span class="tool-label-zh">交叉</span></button>
+              <button id="annotation-tool-roundabout" class="scene-tool-button" data-tool="roundabout" type="button">Roundabout<span class="tool-label-zh">环岛</span></button>
             </div>
           </div>
+          <div class="scene-tool-group">
+            <div class="scene-tool-group-label">区域 / Zone</div>
+            <div class="scene-tool-row">
+              <button id="annotation-tool-building-region" class="scene-tool-button" data-tool="building_region" type="button">Building Region<span class="tool-label-zh">建筑区域</span></button>
+              <button id="annotation-tool-functional-zone" class="scene-tool-button" data-tool="functional_zone" type="button">Functional Zone<span class="tool-label-zh">功能区域</span></button>
+            </div>
+          </div>
+          <div class="scene-tool-group">
+            <div class="scene-tool-group-label">家具 / Furniture</div>
+            <div class="scene-tool-row">
+              <button id="annotation-tool-tree" class="scene-tool-button" data-tool="tree" type="button">Tree<span class="tool-label-zh">树木</span></button>
+              <button id="annotation-tool-lamp" class="scene-tool-button" data-tool="lamp" type="button">Lamp<span class="tool-label-zh">路灯</span></button>
+              <button id="annotation-tool-bench" class="scene-tool-button" data-tool="bench" type="button">Bench<span class="tool-label-zh">长椅</span></button>
+              <button id="annotation-tool-trash" class="scene-tool-button" data-tool="trash" type="button">Trash<span class="tool-label-zh">垃圾桶</span></button>
+              <button id="annotation-tool-bus-stop" class="scene-tool-button" data-tool="bus_stop" type="button">Bus Stop<span class="tool-label-zh">公交站</span></button>
+              <button id="annotation-tool-bollard" class="scene-tool-button" data-tool="bollard" type="button">Bollard<span class="tool-label-zh">隔离桩</span></button>
+              <button id="annotation-tool-mailbox" class="scene-tool-button" data-tool="mailbox" type="button">Mailbox<span class="tool-label-zh">邮筒</span></button>
+              <button id="annotation-tool-hydrant" class="scene-tool-button" data-tool="hydrant" type="button">Hydrant<span class="tool-label-zh">消防栓</span></button>
+              <button id="annotation-tool-sign" class="scene-tool-button" data-tool="sign" type="button">Sign<span class="tool-label-zh">标识牌</span></button>
+            </div>
+          </div>
+          <div class="scene-tool-group">
+            <div class="scene-tool-group-label">操作 / Action</div>
+            <div class="scene-layer-toolbar scene-layer-toolbar-secondary" style="padding:0;background:transparent;box-shadow:none">
+              <button id="annotation-finish-centerline" class="scene-toolbar-button" type="button">Finish Centerline<span class="tool-label-zh">完成中心线</span></button>
+              <button id="annotation-select-all-roads" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">All Roads<span class="tool-label-zh">全部道路</span></button>
+              <button id="annotation-undo-point" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Undo Point<span class="tool-label-zh">撤销节点</span></button>
+              <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Delete Selected<span class="tool-label-zh">删除选中</span></button>
+              <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Reset Annotation<span class="tool-label-zh">重置标注</span></button>
+              <label class="scene-layer-toggle" style="margin-left:0.5rem;gap:0.35rem;">
+                <input id="annotation-snap-to-road" type="checkbox" checked />
+                <span>Snap to Road<span class="tool-label-zh">吸附到道路</span></span>
+              </label>
+            </div>
+          </div>
+          <div id="annotation-image-meta" class="scene-image-meta" style="margin:0">
+            选择参考 plan 或导入 PNG 后，就可以在图上开始标注。
+          </div>
         </div>
-
-        <aside class="scene-sidebar-right">
+      `,
+      open: true,
+    },
+  ]);
+  shell.setRightTabs(
+    [
+      {
+        id: "view",
+        label: "View",
+        content: `
           <details class="scene-collapsible-panel" open>
             <summary class="scene-collapsible-summary">View & Layer Options</summary>
             <div class="scene-collapsible-body">
@@ -3503,74 +3659,43 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
                 </label>
                 <label class="scene-file-button" for="annotation-image-input">Import PNG</label>
                 <input id="annotation-image-input" class="scene-file-input" type="file" accept="image/png,image/*" />
-                <button id="annotation-image-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">
-                  Clear Image
-                </button>
+                <button id="annotation-image-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Clear Image</button>
               </div>
               <div class="scene-layer-controls scene-layer-controls-annotation" style="padding:0">
-                <label class="scene-layer-toggle" for="annotation-show-original">
-                  <input id="annotation-show-original" type="checkbox" checked />
-                  <span>Original Image</span>
-                </label>
-                <label class="scene-layer-toggle" for="annotation-show-overlay">
-                  <input id="annotation-show-overlay" type="checkbox" checked />
-                  <span>Annotation Overlay</span>
-                </label>
-                <label class="scene-layer-toggle" for="annotation-show-junction-core">
-                  <input id="annotation-show-junction-core" type="checkbox" />
-                  <span>Junction Core</span>
-                </label>
-                <label class="scene-layer-toggle" for="annotation-show-junction-connectors">
-                  <input id="annotation-show-junction-connectors" type="checkbox" />
-                  <span>Junction Connectors</span>
-                </label>
-                <label class="scene-layer-toggle" for="annotation-show-junction-outlines">
-                  <input id="annotation-show-junction-outlines" type="checkbox" />
-                  <span>Junction Outlines</span>
-                </label>
-                <label class="scene-layer-toggle" for="annotation-show-junction-crosswalks">
-                  <input id="annotation-show-junction-crosswalks" type="checkbox" />
-                  <span>Crosswalks</span>
-                </label>
-                <label class="scene-layer-toggle" for="annotation-show-junction-boundaries">
-                  <input id="annotation-show-junction-boundaries" type="checkbox" />
-                  <span>Approach Boundaries</span>
-                </label>
-                <label class="scene-layer-toggle" for="annotation-show-junction-labels">
-                  <input id="annotation-show-junction-labels" type="checkbox" />
-                  <span>Junction Labels</span>
-                </label>
-                <label class="scene-layer-toggle" for="annotation-show-junction-debug">
-                  <input id="annotation-show-junction-debug" type="checkbox" />
-                  <span>Junction Debug</span>
-                </label>
-                <label class="scene-range-control" for="annotation-original-opacity">
-                  <span>Original Opacity</span>
-                  <input id="annotation-original-opacity" type="range" min="0" max="100" value="100" />
-                </label>
-                <label class="scene-range-control" for="annotation-overlay-opacity">
-                  <span>Overlay Opacity</span>
-                  <input id="annotation-overlay-opacity" type="range" min="0" max="100" value="88" />
-                </label>
-                <label class="scene-form-field scene-form-field-inline">
-                  <span>Pixels / Meter</span>
-                  <input id="annotation-pixels-per-meter" type="number" min="0.1" step="0.1" value="${DEFAULT_PIXELS_PER_METER}" />
-                </label>
-                <label class="scene-form-field scene-form-field-inline">
-                  <span>Default Roundabout Radius</span>
-                  <input id="annotation-roundabout-radius" type="number" min="8" step="1" value="${DEFAULT_ROUNDABOUT_RADIUS_PX}" />
-                </label>
+                <label class="scene-layer-toggle" for="annotation-show-original"><input id="annotation-show-original" type="checkbox" checked /><span>Original Image</span></label>
+                <label class="scene-layer-toggle" for="annotation-show-overlay"><input id="annotation-show-overlay" type="checkbox" checked /><span>Annotation Overlay</span></label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-core"><input id="annotation-show-junction-core" type="checkbox" /><span>Junction Core</span></label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-connectors"><input id="annotation-show-junction-connectors" type="checkbox" /><span>Junction Connectors</span></label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-outlines"><input id="annotation-show-junction-outlines" type="checkbox" /><span>Junction Outlines</span></label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-crosswalks"><input id="annotation-show-junction-crosswalks" type="checkbox" /><span>Crosswalks</span></label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-boundaries"><input id="annotation-show-junction-boundaries" type="checkbox" /><span>Approach Boundaries</span></label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-labels"><input id="annotation-show-junction-labels" type="checkbox" /><span>Junction Labels</span></label>
+                <label class="scene-layer-toggle" for="annotation-show-junction-debug"><input id="annotation-show-junction-debug" type="checkbox" /><span>Junction Debug</span></label>
+                <label class="scene-range-control" for="annotation-original-opacity"><span>Original Opacity</span><input id="annotation-original-opacity" type="range" min="0" max="100" value="100" /></label>
+                <label class="scene-range-control" for="annotation-overlay-opacity"><span>Overlay Opacity</span><input id="annotation-overlay-opacity" type="range" min="0" max="100" value="88" /></label>
+                <label class="scene-form-field scene-form-field-inline"><span>Pixels / Meter</span><input id="annotation-pixels-per-meter" type="number" min="0.1" step="0.1" value="${DEFAULT_PIXELS_PER_METER}" /></label>
+                <label class="scene-form-field scene-form-field-inline"><span>Default Roundabout Radius</span><input id="annotation-roundabout-radius" type="number" min="8" step="1" value="${DEFAULT_ROUNDABOUT_RADIUS_PX}" /></label>
               </div>
             </div>
           </details>
-
+        `,
+      },
+      {
+        id: "inspector",
+        label: "Inspector",
+        content: `
           <details class="scene-collapsible-panel" open>
             <summary class="scene-collapsible-summary">Selected Feature</summary>
             <div class="scene-collapsible-body" style="padding:0">
               <div id="annotation-inspector" class="scene-inspector-wrap"></div>
             </div>
           </details>
-
+        `,
+      },
+      {
+        id: "data",
+        label: "Data",
+        content: `
           <details class="scene-collapsible-panel">
             <summary class="scene-collapsible-summary">Import / Export</summary>
             <div class="scene-collapsible-body">
@@ -3578,84 +3703,79 @@ export function mountSceneGraphPage(root: HTMLElement): () => void {
                 <label class="scene-file-button" for="annotation-json-input">Import JSON</label>
                 <input id="annotation-json-input" class="scene-file-input" type="file" accept=".json,application/json" />
                 <button id="annotation-apply-json" class="scene-toolbar-button" type="button">Apply JSON</button>
-                <button id="annotation-download-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">
-                  Download JSON
-                </button>
-                <button id="annotation-copy-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">
-                  Copy JSON
-                </button>
+                <button id="annotation-download-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Download JSON</button>
+                <button id="annotation-copy-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Copy JSON</button>
               </div>
               <div class="scene-import-toolbar" style="padding:0">
                 <button id="annotation-convert-graph" class="scene-toolbar-button" type="button">Convert to Graph</button>
-                <button id="annotation-download-graph" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">
-                  Download Graph
-                </button>
+                <button id="annotation-download-graph" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Download Graph</button>
               </div>
             </div>
           </details>
-
           <details class="scene-collapsible-panel">
             <summary class="scene-collapsible-summary">Graph Conversion</summary>
             <div class="scene-collapsible-body">
-              <label class="scene-form-field scene-form-field-inline" style="padding:0;background:transparent;box-shadow:none">
-                <span>Segment Length (m)</span>
-                <input id="annotation-segment-length" type="number" min="4" step="1" value="${DEFAULT_SEGMENT_LENGTH_M}" />
-              </label>
-              <label class="scene-form-field scene-form-field-inline" style="padding:0;background:transparent;box-shadow:none">
-                <span>Sidewalk Width (m)</span>
-                <input id="annotation-sidewalk-width" type="number" min="1" step="0.5" value="${DEFAULT_SIDEWALK_WIDTH_M}" />
-              </label>
-              <div id="annotation-graph-status" class="scene-status" data-tone="neutral" style="margin:0">
-                Convert 后会在这里显示 graph 结果。
-              </div>
+              <label class="scene-form-field scene-form-field-inline" style="padding:0;background:transparent;box-shadow:none"><span>Segment Length (m)</span><input id="annotation-segment-length" type="number" min="4" step="1" value="${DEFAULT_SEGMENT_LENGTH_M}" /></label>
+              <label class="scene-form-field scene-form-field-inline" style="padding:0;background:transparent;box-shadow:none"><span>Sidewalk Width (m)</span><input id="annotation-sidewalk-width" type="number" min="1" step="0.5" value="${DEFAULT_SIDEWALK_WIDTH_M}" /></label>
+              <div id="annotation-graph-status" class="scene-status" data-tone="neutral" style="margin:0">Convert 后会在这里显示 graph 结果。</div>
               <div id="annotation-graph-summary" class="scene-metric-grid scene-metric-grid-compact"></div>
-              <div class="scene-json-wrap scene-json-wrap-compact" style="padding:0">
-                <textarea id="annotation-graph-json" class="scene-json-input" spellcheck="false" readonly></textarea>
-              </div>
+              <div class="scene-json-wrap scene-json-wrap-compact" style="padding:0"><textarea id="annotation-graph-json" class="scene-json-input" spellcheck="false" readonly></textarea></div>
             </div>
           </details>
-
           <details class="scene-collapsible-panel">
             <summary class="scene-collapsible-summary">Annotation Summary</summary>
-            <div class="scene-collapsible-body">
-              <div id="annotation-summary-grid" class="scene-metric-grid scene-metric-grid-compact"></div>
-            </div>
+            <div class="scene-collapsible-body"><div id="annotation-summary-grid" class="scene-metric-grid scene-metric-grid-compact"></div></div>
           </details>
-
           <details class="scene-collapsible-panel">
             <summary class="scene-collapsible-summary">Feature Table</summary>
             <div class="scene-collapsible-body">
               <div class="scene-table-wrap scene-table-wrap-compact" style="padding:0">
                 <table class="scene-table scene-table-compact">
-                  <thead>
-                    <tr>
-                      <th>Type</th>
-                      <th>ID</th>
-                      <th>Label</th>
-                      <th>Detail</th>
-                    </tr>
-                  </thead>
+                  <thead><tr><th>Type</th><th>ID</th><th>Label</th><th>Detail</th></tr></thead>
                   <tbody id="annotation-feature-table"></tbody>
                 </table>
               </div>
             </div>
           </details>
-
           <details class="scene-collapsible-panel">
             <summary class="scene-collapsible-summary">Annotation JSON</summary>
             <div class="scene-collapsible-body">
-              <div class="scene-json-wrap scene-json-wrap-compact" style="padding:0">
-                <textarea id="annotation-json" class="scene-json-input" spellcheck="false"></textarea>
-              </div>
-              <div id="annotation-status" class="scene-status" data-tone="neutral" style="margin:0.5rem 0 0">
-                Waiting for a reference image.
-              </div>
+              <div class="scene-json-wrap scene-json-wrap-compact" style="padding:0"><textarea id="annotation-json" class="scene-json-input" spellcheck="false"></textarea></div>
+              <div id="annotation-status" class="scene-status" data-tone="neutral" style="margin:0.5rem 0 0">Waiting for a reference image.</div>
             </div>
           </details>
-        </aside>
+        `,
+      },
+    ],
+    "view",
+  );
+  shell.setMenuActions({
+    "file-export-json": () => root.querySelector<HTMLButtonElement>("#annotation-download-json")?.click(),
+    "tools-open-settings": () => shell.activateRightTab("view"),
+    "tools-open-presets": () => shell.activateRightTab("data"),
+    "help-shortcuts": () => {
+      shell.setBottomOpen(true);
+      root.querySelector<HTMLButtonElement>('[data-shell-status-tab="hints"]')?.click();
+    },
+  });
+  shell.centerStage.innerHTML = `
+    <div class="scene-shell-stage">
+      <div id="annotation-stage" class="scene-layer-stage scene-canvas-stage" data-has-image="false" data-loading="true" data-empty-state="loading">
+        <div id="annotation-stage-empty" class="scene-image-empty">Loading default reference plan...</div>
+        <div id="annotation-board" class="scene-board" hidden>
+          <img id="annotation-original-image" class="scene-original-image annotation-original-image" alt="Reference plan" />
+          <div id="annotation-overlay-host" class="scene-graph-overlay"></div>
+        </div>
       </div>
+      <button id="scene-page-asset-editor" type="button" hidden>Asset Editor</button>
+      <button id="scene-page-back" type="button" hidden>Back to Viewer</button>
     </div>
   `;
+  shell.statusStatusHost.innerHTML = `
+    <div id="annotation-status-proxy" class="desktop-shell-inline-status">Waiting for a reference image.</div>
+    <div id="annotation-graph-status-proxy" class="desktop-shell-inline-status">Convert 后会在这里显示 graph 结果。</div>
+  `;
+  shell.setStatusSummary("Annotation ready.");
 
   const backButton = requireElement<HTMLButtonElement>(root, "#scene-page-back");
   const planSelect = requireElement<HTMLSelectElement>(root, "#annotation-plan-select");
@@ -5630,10 +5750,6 @@ function buildingRegionHandleFromTarget(
     },
     { signal },
   );
-
-  // Setup unified menu toggle and navigation
-  setupMenuToggle(root);
-  setupNavigation(root);
 
   backButton.addEventListener(
     "click",

@@ -4,7 +4,7 @@
  */
 
 // 路由类型
-export type AppRoute = "viewer" | "scene-graph" | "asset-editor";
+export type AppRoute = "viewer" | "scene-graph" | "asset-editor" | "junction-editor";
 
 interface RouteConfig {
   id: AppRoute;
@@ -46,12 +46,21 @@ const ROUTES: Record<AppRoute, RouteConfig> = {
     title: "3D Asset Editor",
     subtitle: "Browse, inspect, and manage project 3D assets",
   },
+  "junction-editor": {
+    id: "junction-editor",
+    label: "Junction Editor",
+    path: "#junction-editor",
+    kicker: "Viewer / Junction",
+    title: "Junction Editor",
+    subtitle: "Manually draw junction skeletons, Bezier curves, and corner patches for reusable junction templates.",
+  },
 };
 
 function getCurrentRoute(): AppRoute {
   const hash = window.location.hash;
   if (hash === "#scene-graph") return "scene-graph";
   if (hash === "#asset-editor") return "asset-editor";
+  if (hash === "#junction-editor") return "junction-editor";
   return "viewer";
 }
 

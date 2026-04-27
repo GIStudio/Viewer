@@ -634,6 +634,8 @@ function viewerApiPlugin(): Plugin {
                 bands: layoutBands,
                 building_footprints: buildingFootprints,
                 length_m: overlayLengthM,
+                lane_count: asNumber(streetProgram.lane_count, 1),
+                road_width_m: asNumber(streetProgram.road_width_m, 0),
               },
               audio_profile: audioProfile,
               lighting_preset: String(outputs.lighting_preset ?? "bright_day"),

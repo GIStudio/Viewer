@@ -1,9 +1,12 @@
 import "./style.css";
+import "./style-junction-editor.css";
+import "./style-scene-compare.css";
 
 import { mountViewer } from "./app";
 import { mountSceneGraphPage } from "./scene-graph";
 import { mountAssetEditor } from "./asset-editor";
-import "./ui"; // Initialize unified UI components
+import { mountJunctionEditor } from "./junction-editor";
+import { createDesktopShell } from "./desktop-shell";
 
 const appRoot = document.querySelector<HTMLElement>("#app");
 
@@ -13,7 +16,7 @@ if (!appRoot) {
 
 const root = appRoot;
 
-type Route = "viewer" | "scene-graph" | "asset-editor";
+type Route = "viewer" | "scene-graph" | "asset-editor" | "junction-editor";
 type Teardown = () => void;
 
 let currentTeardown: Teardown | undefined;
@@ -23,6 +26,7 @@ function resolveRoute(): Route {
   const hash = window.location.hash;
   if (hash === "#scene-graph") return "scene-graph";
   if (hash === "#asset-editor") return "asset-editor";
+  if (hash === "#junction-editor") return "junction-editor";
   return "viewer";
 }
 
@@ -33,25 +37,33 @@ async function renderRoute(): Promise<void> {
   root.innerHTML = "";
 
   const route = resolveRoute();
+  const shell = createDesktopShell(root, route);
   let teardown: Teardown;
   switch (route) {
     case "scene-graph":
-      teardown = mountSceneGraphPage(root);
+      teardown = mountSceneGraphPage(shell);
       break;
     case "asset-editor":
-      teardown = mountAssetEditor(root);
+      teardown = mountAssetEditor(shell);
+      break;
+    case "junction-editor":
+      teardown = mountJunctionEditor(shell);
       break;
     default:
-      teardown = await mountViewer(root);
+      teardown = await mountViewer(shell);
       break;
   }
 
   if (renderId !== currentRenderId) {
     teardown();
+    shell.destroy();
     return;
   }
 
-  currentTeardown = teardown;
+  currentTeardown = () => {
+    teardown();
+    shell.destroy();
+  };
 }
 
 window.addEventListener("hashchange", () => {

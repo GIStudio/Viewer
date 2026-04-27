@@ -64,9 +64,10 @@ const SCORE_SYSTEMS: ScoreSystemDef[] = [
     icon: "🎨",
     weight: 0.20,
     subScores: [
-      { key: "beauty_planting", label: "Planting", labelZh: "植物配置", color: "#52c41a" },
-      { key: "beauty_furniture", label: "Furniture", labelZh: "街道家具", color: "#fa8c16" },
-      { key: "beauty_space", label: "Space Richness", labelZh: "空间丰富度", color: "#a0d911" },
+      { key: "beauty_coherence", label: "Coherence", labelZh: "一致性", color: "#52c41a" },
+      { key: "beauty_human_scale", label: "Human Scale", labelZh: "人体尺度", color: "#fa8c16" },
+      { key: "beauty_material_contrast", label: "Material Contrast", labelZh: "材质对比", color: "#a0d911" },
+      { key: "beauty_visual_interest", label: "Visual Interest", labelZh: "视觉趣味", color: "#1677ff" },
     ],
   },
 ];
@@ -79,10 +80,17 @@ const SUB_SCORE_KEYS: string[] = [
   "safety_visibility",
   "safety_protection",
   "safety_activation",
-  "beauty_planting",
-  "beauty_furniture",
-  "beauty_space",
+  "beauty_coherence",
+  "beauty_human_scale",
+  "beauty_material_contrast",
+  "beauty_visual_interest",
 ];
+
+type NullableScore = number | null;
+
+function coerceNullableScore(value: unknown): NullableScore {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
 
 export class ThreeSystemScorePanel {
   private container: HTMLElement;
@@ -144,13 +152,14 @@ export class ThreeSystemScorePanel {
             protection: evalResult.indicators?.protection ?? 0,
             comfort: evalResult.indicators?.comfort ?? 0,
             delight: evalResult.indicators?.delight ?? 0,
-            safety_lighting: evalResult.indicators?.safety_lighting ?? 0,
-            safety_visibility: evalResult.indicators?.safety_visibility ?? 0,
-            safety_protection: evalResult.indicators?.safety_protection ?? 0,
-            safety_activation: evalResult.indicators?.safety_activation ?? 0,
-            beauty_planting: evalResult.indicators?.beauty_planting ?? 0,
-            beauty_furniture: evalResult.indicators?.beauty_furniture ?? 0,
-            beauty_space: evalResult.indicators?.beauty_space ?? 0,
+            safety_lighting: coerceNullableScore(evalResult.indicators?.safety_lighting),
+            safety_visibility: coerceNullableScore(evalResult.indicators?.safety_visibility),
+            safety_protection: coerceNullableScore(evalResult.indicators?.safety_protection),
+            safety_activation: coerceNullableScore(evalResult.indicators?.safety_activation),
+            beauty_coherence: coerceNullableScore(evalResult.indicators?.beauty_coherence),
+            beauty_human_scale: coerceNullableScore(evalResult.indicators?.beauty_human_scale),
+            beauty_material_contrast: coerceNullableScore(evalResult.indicators?.beauty_material_contrast),
+            beauty_visual_interest: coerceNullableScore(evalResult.indicators?.beauty_visual_interest),
           });
           successCount++;
         } else {
@@ -363,18 +372,19 @@ export class ThreeSystemScorePanel {
     this.scenes.forEach((scene) => {
       const summary = scene.summary || {};
       SUB_SCORE_KEYS.forEach((key) => {
-        if (summary[key] !== undefined) {
-          subScoreTotals[key].push(summary[key] as number);
+        const value = summary[key];
+        if (typeof value === "number" && Number.isFinite(value)) {
+          subScoreTotals[key].push(value);
         }
       });
     });
 
-    const averages: Record<string, number> = {};
+    const averages: Record<string, NullableScore> = {};
     SUB_SCORE_KEYS.forEach((key) => {
       const values = subScoreTotals[key];
       averages[key] = values.length > 0
         ? values.reduce((a, b) => a + b, 0) / values.length
-        : 0;
+        : null;
     });
 
     return averages;
@@ -424,13 +434,15 @@ export class ThreeSystemScorePanel {
           </div>
           <div class="viewer-three-system-sub-scores-grid">
             ${system.subScores.map((sub) => {
-              const value = avgSubScores[sub.key] || 0;
+              const value = avgSubScores[sub.key];
+              const numericValue = typeof value === "number" ? value : 0;
+              const labelValue = typeof value === "number" ? value.toFixed(1) : "N/A";
               return `
                 <div class="viewer-three-system-sub-item">
                   <div class="viewer-three-system-sub-label">${sub.labelZh} · ${sub.label}</div>
-                  <div class="viewer-three-system-sub-value" style="color: ${sub.color}">${value.toFixed(1)}</div>
+                  <div class="viewer-three-system-sub-value" style="color: ${sub.color}">${labelValue}</div>
                   <div class="viewer-three-system-sub-bar">
-                    <div class="viewer-three-system-sub-bar-fill" style="width: ${value}%; background: ${sub.color}"></div>
+                    <div class="viewer-three-system-sub-bar-fill" style="width: ${numericValue}%; background: ${sub.color}"></div>
                   </div>
                 </div>
               `;
