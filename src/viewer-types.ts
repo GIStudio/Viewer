@@ -41,6 +41,7 @@ export type ViewerManifest = {
     lane_count?: number;
     road_width_m?: number;
   };
+  summary?: Record<string, unknown>;
 };
 
 export type InstanceInfo = {
@@ -74,6 +75,7 @@ export type StaticObjectDescription = {
   title: string;
   category: string;
   intro: string;
+  source?: string;
   design_note?: string;
 };
 
@@ -117,6 +119,9 @@ export type RecentLayout = {
   scene_layout_path?: string;
   metrics?: Record<string, number>;
   preset_id?: string;
+  relative_path?: string;
+  updated_at?: string;
+  mtime_ms?: number;
 };
 
 export type SceneJobCreatePayload = {

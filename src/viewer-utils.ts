@@ -84,7 +84,7 @@ export function createTextSprite(
 /**
  * Require an element from the root, throwing if not found.
  */
-export function requireElement<T extends HTMLElement>(root: HTMLElement, selector: string): T {
+export function requireElement<T extends HTMLElement>(root: HTMLElement | Document, selector: string): T {
   const el = root.querySelector<T>(selector);
   if (!el) throw new Error(`Required element not found: ${selector}`);
   return el;
