@@ -2316,6 +2316,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const settingsCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-settings-close");
   const infoCardEl = requireElement<HTMLElement>(root, "#viewer-info-card");
   const crosshairEl = requireElement<HTMLElement>(root, "#viewer-crosshair");
+  const minimapEl = requireElement<HTMLElement>(root, "#viewer-minimap");
   const minimapHost = requireElement<HTMLElement>(root, "#viewer-minimap-canvas");
   const minimapOverlayEl = requireElement<HTMLCanvasElement>(root, "#viewer-minimap-overlay");
   const axisHudEl = requireElement<HTMLCanvasElement>(root, "#viewer-axis-hud");
@@ -5380,6 +5381,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const step = stepForStage(stage);
     const presetLabel = preset ? `${preset.nameEn}` : "Custom";
     designWorkspaceEl.hidden = false;
+    minimapEl.hidden = true; // Hide minimap when design workspace is visible
     designWorkspaceEl.innerHTML = `
       <div class="viewer-design-workspace-shell">
         <header class="viewer-design-workspace-header">
@@ -5413,6 +5415,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   function hideDesignWorkspace(): void {
     designWorkspaceEl.hidden = true;
+    minimapEl.hidden = false; // Show minimap when design workspace is hidden
     designWorkspaceEl.innerHTML = "";
   }
 
@@ -5553,6 +5556,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     updateDesignStatus("Submitting generation job...");
     designResultEl.innerHTML = "";
     designWorkspaceEl.hidden = false;
+    minimapEl.hidden = true; // Hide minimap when design workspace is visible
     const presetLabel = preset ? `${preset.nameEn} / ${preset.name}` : "Custom / LLM-Driven";
     designWorkspaceEl.innerHTML = `
       <div class="viewer-design-workspace-shell">
