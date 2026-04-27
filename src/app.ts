@@ -61,12 +61,22 @@ type SceneJobResult = {
   viewer_url?: string;
 };
 
+type SceneJobOperation = string | {
+  name?: string;
+  status?: string;
+  message?: string;
+  stage?: string;
+  progress?: number;
+  detail?: Record<string, unknown>;
+  timestamp?: string;
+};
+
 type SceneJobStatusPayload = {
   job_id: string;
   status: string;
   stage?: string;
   progress?: number;
-  operations?: Array<string | { name?: string; status?: string; message?: string }>;
+  operations?: SceneJobOperation[];
   error?: string;
   result: SceneJobResult | null;
 };
@@ -91,6 +101,23 @@ type GeneratedDesignScheme = {
   layoutPath: string;
   status: "ready" | "failed";
   error?: string;
+};
+
+type DesignRunSnapshot = {
+  payload: SceneJobStatusPayload;
+  preset: DesignPreset;
+  variant: DesignSchemeVariant;
+  prompt: string;
+  graphTemplateId: string;
+};
+
+type GenerationStep = {
+  key: string;
+  label: string;
+  shortLabel: string;
+  progress: number;
+  purpose: string;
+  detailHint: string;
 };
 
 const DEFAULT_GRAPH_TEMPLATE_ID = "hkust_gz_gate";
@@ -1875,6 +1902,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                 <div class="viewer-slide-panel-title">Design Assistant</div>
                 <div class="viewer-slide-panel-subtitle">Generate a scene and load it directly in Viewer</div>
               </div>
+              <button id="viewer-design-review-run" class="viewer-design-review-run" type="button" disabled title="重新展开最近一次场景生成步骤">Review Run</button>
               <button id="viewer-design-close" class="viewer-settings-close" type="button" aria-label="Close design assistant">x</button>
             </div>
             <div class="viewer-slide-panel-body viewer-design-body">
@@ -2046,8 +2074,18 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                       <button class="viewer-help-step-detail-btn" type="button" data-detail="context">详情</button>
                     </div>
                     <div class="viewer-help-step-content" data-detail-content="context" hidden>
-                      <p>系统会解析你输入的自然语言提示词（Prompt），结合选定的预设（Preset）和图模板（Graph Template），理解你的设计意图。</p>
+                      <p>系统会解析你输入的自然语言提示词（Prompt），结合选定的预设（Preset）和图模板（Graph Template），理解你的设计意图并生成可执行的 <code>StreetComposeConfig</code> 配置对象。</p>
                       <p><strong>预设是什么？</strong> 预设是预先配置好的参数组合，例如"步行友好"会降低车流量、增加绿化，"商业活力"会提高密度和商业设施。</p>
+                      <p><strong>算法过程：</strong></p>
+                      <ul class="viewer-help-list">
+                        <li><strong>意图解析：</strong>将自然语言 Prompt 解析为结构化的设计意图，包括目标街道类型、设计规则 profile、客观目标 profile</li>
+                        <li><strong>参数合并：</strong>合并 Preset 的配置补丁、Graph Template 的拓扑约束、以及用户手动覆盖的参数</li>
+                        <li><strong>需求评估：</strong>根据预设或 LLM 推理得到行人/自行车/公交/车流的需求等级（high/medium/low）</li>
+                        <li><strong>上下文构建：</strong>构建包含 layout_mode、graph_template_id、reference_plan_id 等的场景上下文</li>
+                        <li><strong>RAG 检索：</strong>从知识库（PDF RAG 或 Graph RAG）中检索相关的设计规则和最佳实践作为引用证据</li>
+                      </ul>
+                      <p><strong>输出参数：</strong> density、road_width_m、length_m、lane_count、sidewalk_width_m、design_rule_profile、objective_profile 等。</p>
+                      <p><strong>在设计面板中查看实时参数：</strong> 生成过程中点击"查看算法详情"按钮，可以看到本次生成实际使用的配置值。</p>
                     </div>
                   </div>
                   <div class="viewer-help-step" data-step="asset">
@@ -2244,6 +2282,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         <button id="viewer-export-topdown-svg" type="button">Export SVG</button>
       </div>
       <div id="viewer-canvas" class="viewer-canvas"></div>
+      <div id="viewer-design-workspace" class="viewer-design-workspace" hidden></div>
       <button id="viewer-exit-compare3d" class="viewer-exit-compare3d" type="button" hidden>Exit Split View</button>
       <div id="viewer-crosshair" class="viewer-crosshair" hidden></div>
       <div id="viewer-info-card" class="viewer-info-card" hidden></div>
@@ -2259,6 +2298,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   `;
 
   const canvasHost = requireElement<HTMLElement>(root, "#viewer-canvas");
+  const designWorkspaceEl = requireElement<HTMLElement>(root, "#viewer-design-workspace");
   const statusEl = requireElement<HTMLElement>(root, "#viewer-status");
   const overlayEl = requireElement<HTMLElement>(root, "#viewer-overlay");
   const errorEl = requireElement<HTMLElement>(root, "#viewer-error");
@@ -2295,6 +2335,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   const designToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-design-toggle");
   const designPanelEl = requireElement<HTMLElement>(root, "#viewer-design-panel");
+  const designReviewRunEl = requireElement<HTMLButtonElement>(root, "#viewer-design-review-run");
   const designCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-design-close");
   const designPresetEl = requireElement<HTMLSelectElement>(root, "#viewer-design-preset");
   const designPromptEl = requireElement<HTMLTextAreaElement>(root, "#viewer-design-prompt");
@@ -2646,6 +2687,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let statusResetHandle: number | null = null;
   let designOpen = false;
   let designIsGenerating = false;
+  let lastDesignRunSnapshot: DesignRunSnapshot | null = null;
   let evaluateOpen = false;
   let compareOpen = false;
   let presetsOpen = false;
@@ -4774,29 +4816,600 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     });
   }
 
-  // 定义生成步骤
-  const GENERATION_STEPS = [
-    { key: "queued", label: "任务排队中", progress: 5 },
-    { key: "context_resolving", label: "上下文解析", progress: 15 },
-    { key: "asset_loading", label: "资产加载", progress: 25 },
-    { key: "layout_generation", label: "布局生成", progress: 40 },
-    { key: "constraint_solving", label: "约束求解", progress: 50 },
-    { key: "asset_composition", label: "资产组合", progress: 65 },
-    { key: "mesh_generation", label: "网格生成", progress: 75 },
-    { key: "glb_export", label: "GLB 导出", progress: 88 },
-    { key: "scene_rendering", label: "场景渲染", progress: 95 },
-    { key: "finalizing", label: "结果整理", progress: 99 },
+  const GENERATION_STEPS: GenerationStep[] = [
+    {
+      key: "queued",
+      label: "任务排队中",
+      shortLabel: "排队",
+      progress: 5,
+      purpose: "任务已经进入后端 job service。当前后端是单 worker 流程，通常不会真正长时间排队。",
+      detailHint: "这里记录 job id、提交时间和即将使用的 preset/template。",
+    },
+    {
+      key: "context_resolving",
+      label: "上下文解析",
+      shortLabel: "上下文",
+      progress: 15,
+      purpose: "把 prompt、preset、graph template 或外部道路上下文合并成可生成的 StreetComposeConfig。",
+      detailHint: "重点看 layout_mode、graph_template_id/reference_plan_id，以及本次方案改动的需求等级和规则 profile。",
+    },
+    {
+      key: "asset_loading",
+      label: "资产加载",
+      shortLabel: "资产",
+      progress: 25,
+      purpose: "加载对象 manifest、建筑资产、地面材质、天空环境和检索索引。",
+      detailHint: "后端会回传 object_asset_count、building_asset_count 等数量，用来判断素材池是否足够。",
+    },
+    {
+      key: "layout_generation",
+      label: "布局生成",
+      shortLabel: "布局",
+      progress: 40,
+      purpose: "把道路图和设计目标转成主题分段、街道断面 program 与候选布局方案。",
+      detailHint: "这里能看到 theme_segment_count、道路宽度、密度、行人/自行车/公交/车流需求等参数。",
+    },
+    {
+      key: "constraint_solving",
+      label: "约束求解",
+      shortLabel: "约束",
+      progress: 50,
+      purpose: "使用 design_rule_profile 和布局 solver 检查断面、设施带、间距、可通行空间等约束。",
+      detailHint: "它不是 LLM 评价，而是规则/求解器层面对空间参数的约束计算。",
+    },
+    {
+      key: "asset_composition",
+      label: "资产组合",
+      shortLabel: "组合",
+      progress: 65,
+      purpose: "把求解得到的 slot plan 转成具体资产摆放：树、灯、座椅、站亭、建筑等都在这里落位。",
+      detailHint: "重点看 total_slots、placed_slots、placement_count；它回答“放了多少，放到哪里”。",
+    },
+    {
+      key: "mesh_generation",
+      label: "网格生成",
+      shortLabel: "网格",
+      progress: 75,
+      purpose: "生成或组装 Three.js 可导出的几何网格，包括道路表面、建筑体块和资产实例。",
+      detailHint: "这里的 mesh 不是 LLM 直接生成，而是由布局、资产和几何函数组合出来的 3D 数据。",
+    },
+    {
+      key: "glb_export",
+      label: "GLB 导出",
+      shortLabel: "导出",
+      progress: 88,
+      purpose: "把场景几何序列化为 GLB/PLY 文件，供 Viewer 直接加载。",
+      detailHint: "这是文件导出步骤；如果 export_format 是 glb，就会产出最终 3D 模型文件。",
+    },
+    {
+      key: "scene_rendering",
+      label: "场景渲染",
+      shortLabel: "渲染",
+      progress: 95,
+      purpose: "在导出 GLB 后生成 presentation views、top-down 图和 production steps，供评估和对比页面使用。",
+      detailHint: "所以导出后仍需要渲染：Viewer 加载 3D，评价/报告还需要 2D 视图和过程图。",
+    },
+    {
+      key: "finalizing",
+      label: "结果整理",
+      shortLabel: "整理",
+      progress: 99,
+      purpose: "写入 scene_layout.json、summary、metrics、render paths 和最终加载入口。",
+      detailHint: "这是必要步骤；Viewer 实际加载的是 layout manifest，而不是只加载一个裸 GLB。",
+    },
   ];
 
   function getStepIndex(stage: string): number {
     return GENERATION_STEPS.findIndex((step) => step.key === stage);
   }
 
-  function renderDesignSteps(currentStage: string, failed: boolean = false): string {
+  function stepForStage(stage: string): GenerationStep {
+    return GENERATION_STEPS.find((step) => step.key === stage) ?? GENERATION_STEPS[0]!;
+  }
+
+  function isOperationObject(
+    operation: SceneJobOperation,
+  ): operation is {
+    name?: string;
+    status?: string;
+    message?: string;
+    stage?: string;
+    progress?: number;
+    detail?: Record<string, unknown>;
+    timestamp?: string;
+  } {
+    return typeof operation === "object" && operation !== null;
+  }
+
+  function latestOperationForStage(payload: SceneJobStatusPayload, stage: string): {
+    message?: string;
+    progress?: number;
+    detail?: Record<string, unknown>;
+  } | null {
+    const operations = payload.operations ?? [];
+    for (let index = operations.length - 1; index >= 0; index -= 1) {
+      const operation = operations[index];
+      if (!isOperationObject(operation)) continue;
+      if (operation.stage === stage) {
+        return {
+          message: operation.message || operation.name || operation.status,
+          progress: operation.progress,
+          detail: operation.detail,
+        };
+      }
+    }
+    return null;
+  }
+
+  function formatDesignDetailKey(key: string): string {
+    const labels: Record<string, string> = {
+      graph_template_id: "图模板",
+      reference_plan_id: "参考方案",
+      layout_mode: "布局模式",
+      object_asset_count: "对象资产",
+      building_asset_count: "建筑资产",
+      theme_segment_count: "主题分段",
+      total_slots: "资产槽位",
+      placed_slots: "已放置槽位",
+      placement_count: "最终放置",
+      export_format: "导出格式",
+      production_step_count: "过程产物",
+      layout_path: "布局文件",
+      error: "错误",
+    };
+    return labels[key] ?? key.replace(/_/g, " ");
+  }
+
+  function formatDesignDetailValue(value: unknown): string {
+    if (Array.isArray(value)) {
+      return value.map((item) => formatDesignDetailValue(item)).join(", ");
+    }
+    if (value && typeof value === "object") {
+      return JSON.stringify(value);
+    }
+    if (value === null || value === undefined || value === "") {
+      return "未提供";
+    }
+    return String(value);
+  }
+
+  function renderDesignDetailList(detail: Record<string, unknown> | undefined, limit = 6): string {
+    const entries = Object.entries(detail ?? {}).filter(([, value]) => value !== undefined && value !== "");
+    if (entries.length === 0) {
+      return `<div class="viewer-design-workspace-muted">等待后端返回该阶段的具体数据。</div>`;
+    }
+    return `
+      <dl class="viewer-design-detail-list">
+        ${entries.slice(0, limit).map(([key, value]) => `
+          <div>
+            <dt>${escapeHtml(formatDesignDetailKey(key))}</dt>
+            <dd>${escapeHtml(formatDesignDetailValue(value))}</dd>
+          </div>
+        `).join("")}
+      </dl>
+    `;
+  }
+
+  function isCoreDiagnosticStage(stage: string): boolean {
+    return stage === "context_resolving" || stage === "layout_generation" || stage === "constraint_solving" || stage === "asset_composition";
+  }
+
+  function asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  }
+
+  function asRecords(value: unknown): Array<Record<string, unknown>> {
+    return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
+  }
+
+  function renderDiagnosticKeyValues(record: Record<string, unknown>, limit = 24): string {
+    const entries = Object.entries(record).filter(([, value]) => value !== undefined && value !== "");
+    if (entries.length === 0) return `<div class="viewer-design-workspace-muted">暂无数据。</div>`;
+    return `
+      <dl class="viewer-design-diagnostic-kv">
+        ${entries.slice(0, limit).map(([key, value]) => `
+          <div>
+            <dt>${escapeHtml(formatDesignDetailKey(key))}</dt>
+            <dd>${escapeHtml(formatDesignDetailValue(value))}</dd>
+          </div>
+        `).join("")}
+      </dl>
+    `;
+  }
+
+  function renderDiagnosticTable(
+    rows: Array<Record<string, unknown>>,
+    columns: Array<[string, string]>,
+    emptyText = "暂无记录。",
+  ): string {
+    if (rows.length === 0) return `<div class="viewer-design-workspace-muted">${escapeHtml(emptyText)}</div>`;
+    return `
+      <div class="viewer-design-diagnostic-table-wrap">
+        <table class="viewer-design-diagnostic-table">
+          <thead>
+            <tr>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}</tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                ${columns.map(([key]) => `<td>${escapeHtml(formatDesignDetailValue(row[key]))}</td>`).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderDiagnosticSection(title: string, body: string): string {
+    return `
+      <section class="viewer-design-diagnostic-section">
+        <h4>${escapeHtml(title)}</h4>
+        ${body}
+      </section>
+    `;
+  }
+
+  function renderLayoutDiagnostic(detail: Record<string, unknown>): string {
+    const streetProgram = asRecord(detail.street_program);
+    return [
+      renderDiagnosticSection("算法与输入", renderDiagnosticKeyValues({
+        ...asRecord(detail.algorithm),
+        ...asRecord(detail.config_parameters),
+      })),
+      renderDiagnosticSection(
+        "主题分段",
+        renderDiagnosticTable(asRecords(detail.theme_segments), [
+          ["theme_id", "ID"],
+          ["theme_name", "主题"],
+          ["x_start_m", "起点 m"],
+          ["x_end_m", "终点 m"],
+          ["length_m", "长度 m"],
+          ["dominant_poi_types", "主导 POI"],
+          ["design_rule_profile", "规则"],
+        ]),
+      ),
+      renderDiagnosticSection("生成的街道 Program", renderDiagnosticKeyValues({
+        cross_section_type: streetProgram.cross_section_type,
+        lane_count: streetProgram.lane_count,
+        road_width_m: streetProgram.road_width_m,
+        sidewalk_width_m: streetProgram.sidewalk_width_m,
+        row_width_m: streetProgram.row_width_m,
+        width_expanded: streetProgram.width_expanded,
+        width_reallocation_reason: streetProgram.width_reallocation_reason,
+        poi_fit_feasible: streetProgram.poi_fit_feasible,
+        furniture_requirements: streetProgram.furniture_requirements,
+        throughput_requirements: streetProgram.throughput_requirements,
+        design_goals: streetProgram.design_goals,
+      })),
+      renderDiagnosticSection(
+        "断面功能带",
+        renderDiagnosticTable(asRecords(streetProgram.bands), [
+          ["name", "名称"],
+          ["kind", "类型"],
+          ["side", "侧向"],
+          ["width_m", "宽度 m"],
+          ["z_center_m", "中心 z"],
+          ["allowed_categories", "允许资产"],
+        ]),
+      ),
+    ].join("");
+  }
+
+  function renderConstraintDiagnostic(detail: Record<string, unknown>): string {
+    const solver = asRecord(detail.solver_summary);
+    return [
+      renderDiagnosticSection("Solver 与规则", renderDiagnosticKeyValues({
+        ...asRecord(solver.algorithm),
+        active_constraints: solver.active_constraints,
+        rule_evaluation_counts: solver.rule_evaluation_counts,
+      })),
+      renderDiagnosticSection("求解结果指标", renderDiagnosticKeyValues(asRecord(solver.metrics))),
+      renderDiagnosticSection(
+        "功能带求解结果",
+        renderDiagnosticTable(asRecords(solver.band_solutions), [
+          ["band_name", "功能带"],
+          ["band_kind", "类型"],
+          ["side", "侧向"],
+          ["width_m", "宽度"],
+          ["min_width_m", "最小"],
+          ["max_width_m", "最大"],
+          ["slack_m", "余量"],
+          ["active_constraint_names", "约束"],
+        ]),
+      ),
+      renderDiagnosticSection(
+        "被拦截/未满足的规则",
+        renderDiagnosticTable(asRecords(solver.flagged_rule_evaluations), [
+          ["rule_name", "规则"],
+          ["status", "状态"],
+          ["mode", "模式"],
+          ["score", "分数"],
+          ["explanation", "说明"],
+        ], "没有发现失败规则。"),
+      ),
+      renderDiagnosticSection(
+        "求解器修改与冲突",
+        `${renderDiagnosticTable(asRecords(solver.edits), [
+          ["action", "动作"],
+          ["target", "目标"],
+          ["before", "之前"],
+          ["after", "之后"],
+          ["reason", "原因"],
+        ], "没有 solver edit。")}
+        ${renderDiagnosticTable(asRecords(solver.conflicts), [
+          ["rule_name", "规则"],
+          ["severity", "严重性"],
+          ["affected_target", "对象"],
+          ["message", "说明"],
+        ], "没有 unresolved conflict。")}`,
+      ),
+      renderDiagnosticSection("Slot Plan 汇总", renderDiagnosticKeyValues(asRecord(solver.slot_plan_summary))),
+      renderDiagnosticSection(
+        "分主题方案",
+        renderDiagnosticTable(asRecords(solver.zone_programs), [
+          ["theme_id", "主题 ID"],
+          ["theme_name", "主题"],
+          ["design_rule_profile", "规则"],
+          ["cross_section_type", "断面"],
+          ["slot_count", "slot"],
+          ["backend_used", "Program"],
+          ["solver_backend_used", "Solver"],
+        ]),
+      ),
+    ].join("");
+  }
+
+  function renderCompositionDiagnostic(detail: Record<string, unknown>): string {
+    const blockerSummary = asRecord(detail.blocker_summary);
+    return [
+      renderDiagnosticSection("资产落位算法", renderDiagnosticKeyValues(asRecord(detail.algorithm))),
+      renderDiagnosticSection("Slot 与落位进度", renderDiagnosticKeyValues({
+        ...asRecord(detail.slot_plan_summary),
+        ...asRecord(detail.placement_progress),
+        category_slot_counts: detail.category_slot_counts,
+      })),
+      renderDiagnosticSection("拦截器结果", renderDiagnosticKeyValues({
+        blocked_reason_counts: blockerSummary.blocked_reason_counts,
+        search_tier_counts: blockerSummary.search_tier_counts,
+        category_status_counts: blockerSummary.category_status_counts,
+      })),
+      renderDiagnosticSection(
+        "未落位样例",
+        renderDiagnosticTable(asRecords(blockerSummary.unplaced_samples), [
+          ["slot_id", "Slot"],
+          ["category", "类别"],
+          ["theme_id", "主题"],
+          ["side", "侧向"],
+          ["band_name", "功能带"],
+          ["failure_reason", "拦截原因"],
+          ["blocked_reason_counts", "过滤统计"],
+        ], "当前没有未落位样例。"),
+      ),
+      renderDiagnosticSection("锚点与平衡修复", renderDiagnosticKeyValues({
+        anchor_resolution_summary: detail.anchor_resolution_summary,
+        balance_repair_summary: detail.balance_repair_summary,
+        composition_pass_report: detail.composition_pass_report,
+      })),
+    ].join("");
+  }
+
+  function renderContextResolvingDiagnostic(detail: Record<string, unknown>): string {
+    const config = asRecord(detail.config || detail.compose_config || {});
+    const sceneContext = asRecord(detail.scene_context || {});
+    const draftIntent = asRecord(detail.draft_intent || {});
+
+    return [
+      renderDiagnosticSection("设计意图解析", renderDiagnosticKeyValues({
+        normalized_scene_query: detail.normalized_scene_query || detail.scene_query,
+        design_summary: detail.design_summary,
+        target_street_type: config.target_street_type || detail.target_street_type,
+        objective_profile: config.objective_profile || detail.objective_profile,
+        design_rule_profile: config.design_rule_profile || detail.design_rule_profile,
+      })),
+      renderDiagnosticSection("布局上下文", renderDiagnosticKeyValues({
+        layout_mode: sceneContext.layout_mode || config.layout_mode,
+        graph_template_id: sceneContext.graph_template_id || config.graph_template_id,
+        reference_plan_id: sceneContext.reference_plan_id,
+        city_name: sceneContext.city_name || config.city_name,
+      })),
+      renderDiagnosticSection("需求参数", renderDiagnosticKeyValues({
+        density: config.density,
+        ped_demand_level: config.ped_demand_level,
+        bike_demand_level: config.bike_demand_level,
+        transit_demand_level: config.transit_demand_level,
+        vehicle_demand_level: config.vehicle_demand_level,
+        road_width_m: config.road_width_m,
+        length_m: config.length_m,
+        lane_count: config.lane_count,
+        sidewalk_width_m: config.sidewalk_width_m,
+      })),
+      renderDiagnosticSection("生成配置补丁", renderDiagnosticKeyValues(asRecord(detail.config_patch || detail.compose_config_patch), 20)),
+      renderDiagnosticSection("引用证据", renderDiagnosticKeyValues({
+        citations_count: Array.isArray(detail.citations_by_field) ? detail.citations_by_field.length : Object.keys(asRecord(detail.citations_by_field)).length,
+        knowledge_source: detail.knowledge_source,
+      })),
+    ].join("");
+  }
+
+  function renderStageDiagnosticContent(stage: string, detail: Record<string, unknown>): string {
+    if (stage === "context_resolving") return renderContextResolvingDiagnostic(detail);
+    if (stage === "layout_generation") return renderLayoutDiagnostic(detail);
+    if (stage === "constraint_solving") return renderConstraintDiagnostic(detail);
+    if (stage === "asset_composition") return renderCompositionDiagnostic(detail);
+    return renderDiagnosticSection("Detail", renderDiagnosticKeyValues(detail, 80));
+  }
+
+  function openDesignStageDiagnostic(stage: string): void {
+    const snapshot = lastDesignRunSnapshot;
+    if (!snapshot) return;
+    const step = stepForStage(stage);
+    const operation = latestOperationForStage(snapshot.payload, stage);
+    const detail = operation?.detail ?? {};
+    const modal = document.createElement("div");
+    modal.className = "viewer-design-diagnostic-modal";
+    modal.innerHTML = `
+      <div class="viewer-design-diagnostic-backdrop" data-design-modal-close="true"></div>
+      <article class="viewer-design-diagnostic-dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(step.label)} algorithm detail">
+        <header class="viewer-design-diagnostic-header">
+          <div>
+            <span>${escapeHtml(step.shortLabel)}</span>
+            <h3>${escapeHtml(step.label)} · 算法详情</h3>
+            <p>${escapeHtml(operation?.message || step.detailHint)}</p>
+          </div>
+          <button class="viewer-settings-close" type="button" data-design-modal-close="true" aria-label="Close diagnostic">x</button>
+        </header>
+        <div class="viewer-design-diagnostic-body">
+          ${renderStageDiagnosticContent(stage, detail)}
+        </div>
+      </article>
+    `;
+    designWorkspaceEl.appendChild(modal);
+  }
+
+  function closeDesignStageDiagnostic(): void {
+    designWorkspaceEl.querySelector(".viewer-design-diagnostic-modal")?.remove();
+  }
+
+  function renderDesignImprovementSummary(
+    preset: DesignPreset,
+    variant: DesignSchemeVariant,
+    prompt: string,
+    graphTemplateId: string,
+  ): string {
+    const config = configForDesignVariant(preset.configPatch, variant);
+    const items = [
+      ["设计规则", config.design_rule_profile],
+      ["目标 profile", config.objective_profile],
+      ["密度", config.density],
+      ["道路宽度", config.road_width_m ? `${config.road_width_m} m` : undefined],
+      ["行人需求", config.ped_demand_level],
+      ["自行车需求", config.bike_demand_level],
+      ["公交需求", config.transit_demand_level],
+      ["车流需求", config.vehicle_demand_level],
+      ["图模板", graphTemplateId],
+      ["随机种子", variant.seed],
+    ].filter(([, value]) => value !== undefined && value !== "");
+    return `
+      <section class="viewer-design-workspace-panel">
+        <div class="viewer-design-workspace-panel-title">本次方案实际改了什么</div>
+        <p class="viewer-design-workspace-copy">${escapeHtml(prompt)}</p>
+        <div class="viewer-design-improvement-grid">
+          ${items.map(([label, value]) => `
+            <div class="viewer-design-improvement-item">
+              <span>${escapeHtml(String(label))}</span>
+              <strong>${escapeHtml(formatDesignDetailValue(value))}</strong>
+            </div>
+          `).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderDesignStageCards(payload: SceneJobStatusPayload, currentStage: string, failed: boolean): string {
+    const currentIndex = Math.max(0, getStepIndex(currentStage));
+    return `
+      <div class="viewer-design-stage-grid">
+        ${GENERATION_STEPS.map((step, index) => {
+          const operation = latestOperationForStage(payload, step.key);
+          const state =
+            failed && index === currentIndex
+              ? "failed"
+              : index < currentIndex || step.key === "succeeded"
+                ? "completed"
+                : index === currentIndex
+                  ? "active"
+                  : "pending";
+          const percent = typeof operation?.progress === "number" ? operation.progress : step.progress;
+          return `
+            <article class="viewer-design-stage-card" data-state="${state}">
+              <div class="viewer-design-stage-head">
+                <span>${escapeHtml(step.shortLabel)}</span>
+                <strong>${escapeHtml(step.label)}</strong>
+                <em>${Math.round(percent)}%</em>
+              </div>
+              <p>${escapeHtml(step.purpose)}</p>
+              <div class="viewer-design-stage-hint">${escapeHtml(operation?.message || step.detailHint)}</div>
+              ${renderDesignDetailList(operation?.detail, state === "active" ? 8 : 3)}
+              ${isCoreDiagnosticStage(step.key) ? `
+                <button class="viewer-design-stage-detail-button" type="button" data-design-stage-detail="${escapeHtml(step.key)}">
+                  查看算法详情
+                </button>
+              ` : ""}
+            </article>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function renderDesignWorkspace(
+    payload: SceneJobStatusPayload,
+    preset: DesignPreset,
+    variant: DesignSchemeVariant,
+    prompt: string,
+    graphTemplateId: string,
+  ): void {
+    lastDesignRunSnapshot = { payload, preset, variant, prompt, graphTemplateId };
+    designReviewRunEl.disabled = false;
+    const { progress, message, stage } = describeDesignJobProgress(payload);
+    const failed = payload.status === "failed";
+    const step = stepForStage(stage);
+    designWorkspaceEl.hidden = false;
+    designWorkspaceEl.innerHTML = `
+      <div class="viewer-design-workspace-shell">
+        <header class="viewer-design-workspace-header">
+          <div>
+            <span class="viewer-design-workspace-kicker">${escapeHtml(variant.name)} · ${escapeHtml(preset.nameEn)}</span>
+            <h2>Design Run</h2>
+            <p>${escapeHtml(message)}</p>
+          </div>
+          <div class="viewer-design-workspace-progress">
+            <strong>${Math.round(clamp(progress, 0, 100))}%</strong>
+            <span>${escapeHtml(step.label)}</span>
+          </div>
+        </header>
+        <div class="viewer-design-workspace-progressbar" aria-label="Generation progress">
+          <div style="width:${clamp(progress, 0, 100)}%"></div>
+        </div>
+        <div class="viewer-design-workspace-layout">
+          ${renderDesignImprovementSummary(preset, variant, prompt, graphTemplateId)}
+          <section class="viewer-design-workspace-panel">
+            <div class="viewer-design-workspace-panel-title">当前阶段在做什么</div>
+            <h3>${escapeHtml(step.label)}</h3>
+            <p class="viewer-design-workspace-copy">${escapeHtml(step.purpose)}</p>
+            <div class="viewer-design-stage-hint">${escapeHtml(step.detailHint)}</div>
+            ${renderDesignDetailList(latestOperationForStage(payload, stage)?.detail, 10)}
+          </section>
+        </div>
+        ${renderDesignStageCards(payload, stage, failed)}
+      </div>
+    `;
+  }
+
+  function hideDesignWorkspace(): void {
+    designWorkspaceEl.hidden = true;
+    designWorkspaceEl.innerHTML = "";
+  }
+
+  function reviewLastDesignRun(): void {
+    if (!lastDesignRunSnapshot) return;
+    renderDesignWorkspace(
+      lastDesignRunSnapshot.payload,
+      lastDesignRunSnapshot.preset,
+      lastDesignRunSnapshot.variant,
+      lastDesignRunSnapshot.prompt,
+      lastDesignRunSnapshot.graphTemplateId,
+    );
+    flashStatus("Design generation steps reopened.");
+  }
+
+  function renderDesignSteps(payload: SceneJobStatusPayload, currentStage: string, failed: boolean = false): string {
     const currentIndex = getStepIndex(currentStage);
     const steps = GENERATION_STEPS.map((step, idx) => {
       let stateClass = "";
       let iconSvg = "";
+      const operation = latestOperationForStage(payload, step.key);
 
       if (idx < currentIndex) {
         // 已完成的步骤
@@ -4813,7 +5426,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
       return `<div class="viewer-design-step ${stateClass}">
         <div class="viewer-design-step-indicator">${iconSvg}</div>
-        <span>${step.label}</span>
+        <span>
+          <strong>${step.label}</strong>
+          <small>${escapeHtml(operation?.message || step.detailHint)}</small>
+        </span>
       </div>`;
     });
 
@@ -4868,18 +5484,25 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     return { progress, message, stage };
   }
 
-  async function waitForDesignJob(jobId: string): Promise<SceneJobResult> {
+  async function waitForDesignJob(
+    jobId: string,
+    preset: DesignPreset,
+    variant: DesignSchemeVariant,
+    prompt: string,
+    graphTemplateId: string,
+  ): Promise<SceneJobResult> {
     for (let attempt = 0; attempt < DESIGN_MAX_POLL_ATTEMPTS; attempt += 1) {
       const payload = await apiJson<SceneJobStatusPayload>(`/api/scene/jobs/${encodeURIComponent(jobId)}`);
       const { progress, message, stage } = describeDesignJobProgress(payload);
       updateDesignStatus(`${message} (${progress}%)`);
+      renderDesignWorkspace(payload, preset, variant, prompt, graphTemplateId);
       
       const isFailed = payload.status === "failed";
       designResultEl.innerHTML = `
         <div class="viewer-design-progress" aria-label="Generation progress">
           <div style="width:${clamp(progress, 0, 100)}%"></div>
         </div>
-        ${renderDesignSteps(stage, isFailed)}
+        ${renderDesignSteps(payload, stage, isFailed)}
       `;
       
       if (payload.status === "succeeded" && payload.result) {
@@ -4902,8 +5525,26 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const generatedSchemes: GeneratedDesignScheme[] = [];
     designIsGenerating = true;
     designGenerateEl.disabled = true;
+    designReviewRunEl.disabled = lastDesignRunSnapshot === null;
     updateDesignStatus("Submitting generation job...");
     designResultEl.innerHTML = "";
+    designWorkspaceEl.hidden = false;
+    designWorkspaceEl.innerHTML = `
+      <div class="viewer-design-workspace-shell">
+        <header class="viewer-design-workspace-header">
+          <div>
+            <span class="viewer-design-workspace-kicker">${escapeHtml(preset.nameEn)} · ${escapeHtml(graphTemplateId)}</span>
+            <h2>Design Run</h2>
+            <p>正在提交生成任务。</p>
+          </div>
+          <div class="viewer-design-workspace-progress">
+            <strong>0%</strong>
+            <span>准备提交</span>
+          </div>
+        </header>
+        ${renderDesignImprovementSummary(preset, variants[0]!, prompt, graphTemplateId)}
+      </div>
+    `;
     setStatus("Submitting design generation job...");
 
     try {
@@ -4912,7 +5553,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         try {
           const createPayload = await submitDesignJob(preset, prompt, graphTemplateId, variant);
           updateDesignStatus(`${variant.name}: job ${createPayload.job_id} submitted.`);
-          const result = await waitForDesignJob(createPayload.job_id);
+          const result = await waitForDesignJob(createPayload.job_id, preset, variant, prompt, graphTemplateId);
           if (!result.scene_layout_path) {
             throw new Error("Generation finished without a scene_layout_path.");
           }
@@ -4948,6 +5589,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       const recent = await loadRecentLayouts(50, false);
       populateRecentLayoutOptions(recent, firstReady.layoutPath);
       renderGeneratedDesignSchemes(generatedSchemes);
+      hideDesignWorkspace();
       updateDesignStatus(`${generatedSchemes.filter((scheme) => scheme.status === "ready").length}/${variants.length} schemes generated.`, "success");
       flashStatus(`${firstReady.name} loaded in Viewer.`);
     } catch (err) {
@@ -4958,6 +5600,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     } finally {
       designIsGenerating = false;
       designGenerateEl.disabled = false;
+      designReviewRunEl.disabled = lastDesignRunSnapshot === null;
     }
   }
 
@@ -5680,11 +6323,24 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }, { signal });
 
   designToggleEl.addEventListener("click", () => setDesignOpen(!designOpen), { signal });
+  designReviewRunEl.addEventListener("click", reviewLastDesignRun, { signal });
   designCloseEl.addEventListener("click", () => setDesignOpen(false), { signal });
   designPresetEl.addEventListener("change", () => {
     designPromptEl.value = selectedDesignPreset().prompt;
   }, { signal });
   designGenerateEl.addEventListener("click", () => void runDesignGeneration(), { signal });
+  designWorkspaceEl.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-design-modal-close]")) {
+      closeDesignStageDiagnostic();
+      return;
+    }
+    const detailButton = target.closest<HTMLButtonElement>("[data-design-stage-detail]");
+    const stage = detailButton?.dataset.designStageDetail?.trim();
+    if (stage) {
+      openDesignStageDiagnostic(stage);
+    }
+  }, { signal });
   designResultEl.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     const button = target.closest<HTMLButtonElement>("[data-layout-path]");
