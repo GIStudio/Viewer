@@ -9,9 +9,103 @@
 // ============================================================================
 
 export type SceneOption = {
-  id: string;
+  key: string;
   label: string;
-  description?: string;
+  glbUrl: string;
+};
+
+export type ViewerManifest = {
+  final_scene: {
+    glb_url: string;
+    label: string;
+  };
+  production_steps?: Array<{
+    step_id: string;
+    title: string;
+    glb_url: string;
+  }>;
+  instances?: Array<Record<string, unknown>>;
+  asset_descriptions?: Record<string, unknown>;
+  audio_profile?: Record<string, unknown>;
+  spawn_point?: [number, number, number];
+  forward_vector?: [number, number, number];
+  scene_bounds?: {
+    center: [number, number, number];
+    size: [number, number, number];
+    road_axis: [number, number, number];
+  };
+  layout_overlay?: {
+    bands?: Array<Record<string, unknown>>;
+    building_footprints?: Array<Record<string, unknown>>;
+    length_m?: number;
+    lane_count?: number;
+    road_width_m?: number;
+  };
+};
+
+export type InstanceInfo = {
+  instance_id: string;
+  asset_id: string;
+  category: string;
+  placement_group?: string;
+  theme_id?: string;
+  selection_source?: string;
+  position_xyz?: [number, number, number];
+  bbox_xz?: [number, number, number, number];
+  anchor_poi_type?: string;
+  anchor_distance_m?: number;
+  feasibility_score?: number;
+  constraint_penalty?: number;
+  dist_to_road_edge_m?: number;
+  dist_to_nearest_junction_m?: number;
+  dist_to_nearest_entrance_m?: number;
+};
+
+export type AssetDescription = {
+  asset_id: string;
+  category: string;
+  text_desc: string;
+  source: string;
+  asset_role?: string;
+};
+
+export type StaticObjectDescription = {
+  match: "exact" | "prefix";
+  title: string;
+  category: string;
+  intro: string;
+  design_note?: string;
+};
+
+export type FloatingLaneConfig = {
+  enabled: boolean;
+  showLabels: boolean;
+  showSurfaces: boolean;
+  surfaceColor?: string;
+  laneOpacity?: number;
+};
+
+export const FLOATING_LANE_COLORS = [
+  "#2563eb", "#16a34a", "#dc2626", "#f59e0b",
+  "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16",
+];
+
+export const FLOATING_LANE_LABELS = [
+  "Drive Lane", "Bus Lane", "Bike Lane", "Parking",
+  "Median", "Buffer", "Sidewalk", "Frontage",
+];
+
+export const PER_LANE_COLORS: Record<string, string> = {
+  drive_lane: "#424a57",
+  bus_lane: "#b7483a",
+  bike_lane: "#39875a",
+  parking_lane: "#a68256",
+  median: "#6e7a5f",
+  nearroad_buffer: "#c4c4c4",
+  nearroad_furnishing: "#b5a28a",
+  clear_sidewalk: "#d4d0c8",
+  frontage_reserve: "#b7d4e6",
+  grass_belt: "#8cb369",
 };
 
 export type RecentLayout = {
