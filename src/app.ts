@@ -5426,6 +5426,39 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     `;
   }
 
+  function renderDesignStageTree(payload: SceneJobStatusPayload, currentStage: string, failed: boolean): string {
+    const currentIndex = Math.max(0, getStepIndex(currentStage));
+    return `
+      <div class="viewer-branch-tree">
+        ${GENERATION_STEPS.map((step, index) => {
+          const operation = latestOperationForStage(payload, step.key);
+          const state =
+            failed && index === currentIndex
+              ? "failed"
+              : index < currentIndex || step.key === "succeeded"
+                ? "completed"
+                : index === currentIndex
+                  ? "active"
+                  : "pending";
+          const percent = typeof operation?.progress === "number" ? operation.progress : step.progress;
+          return `
+            <button
+              class="viewer-branch-node"
+              data-design-stage="${escapeHtml(step.key)}"
+              data-depth="${escapeHtml(String(index))}"
+              data-status="${escapeHtml(state)}"
+              type="button"
+            >
+              <span>步骤 ${index + 1} · ${escapeHtml(step.shortLabel)}</span>
+              <strong>${escapeHtml(step.label)}</strong>
+              <small>${escapeHtml(state)} · ${Math.round(percent)}%</small>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
   function renderDesignStageCards(payload: SceneJobStatusPayload, currentStage: string, failed: boolean): string {
     const currentIndex = Math.max(0, getStepIndex(currentStage));
     return `
@@ -5496,6 +5529,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         </div>
         <div class="viewer-design-workspace-layout">
           ${renderDesignImprovementSummary(preset, variant, prompt, graphTemplateId)}
+          <section class="viewer-design-workspace-panel">
+            <div class="viewer-design-workspace-panel-title">场景生长树</div>
+            ${renderDesignStageTree(payload, stage, failed)}
+          </section>
           <section class="viewer-design-workspace-panel">
             <div class="viewer-design-workspace-panel-title">当前阶段在做什么</div>
             <h3>${escapeHtml(step.label)}</h3>
@@ -6744,6 +6781,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const stage = detailButton?.dataset.designStageDetail?.trim();
     if (stage) {
       openDesignStageDiagnostic(stage);
+    }
+    // Handle stage tree node clicks
+    const stageTreeNode = target.closest<HTMLButtonElement>("[data-design-stage]");
+    const treeStage = stageTreeNode?.dataset.designStage?.trim();
+    if (treeStage) {
+      openDesignStageDiagnostic(treeStage);
     }
   }, { signal });
   designResultEl.addEventListener("click", (event) => {
