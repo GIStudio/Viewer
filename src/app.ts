@@ -4804,12 +4804,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     graphTemplateId: string,
     variant: DesignSchemeVariant,
   ): Promise<SceneJobCreatePayload> {
-    // If no preset selected, use empty configPatch to let LLM drive all parameters
-    const configPatch = preset?.configPatch ?? {};
+    // If no preset selected (Custom/LLM-Driven), pass empty configPatch
+    // so backend will call LLM to derive all parameters
+    const configPatch = preset ? configForDesignVariant(preset.configPatch, variant) : {};
     return postApiJson<SceneJobCreatePayload>("/api/scene/jobs", {
       draft: {
         normalized_scene_query: prompt,
-        compose_config_patch: configForDesignVariant(configPatch, variant),
+        compose_config_patch: configPatch,
         citations_by_field: {},
         design_summary: prompt,
         risk_notes: [],
