@@ -45,6 +45,162 @@ type RecentLayoutsPayload = {
   error?: string;
 };
 
+type DesignPreset = {
+  id: string;
+  name: string;
+  nameEn: string;
+  description: string;
+  prompt: string;
+  configPatch: Record<string, string | number>;
+};
+
+type SceneJobResult = {
+  scene_layout_path: string;
+  scene_glb_path?: string;
+  scene_ply_path?: string;
+  viewer_url?: string;
+};
+
+type SceneJobStatusPayload = {
+  job_id: string;
+  status: string;
+  stage?: string;
+  progress?: number;
+  operations?: Array<string | { name?: string; status?: string; message?: string }>;
+  error?: string;
+  result: SceneJobResult | null;
+};
+
+type SceneJobCreatePayload = {
+  job_id: string;
+  status: string;
+  created_at?: string;
+};
+
+type DesignSchemeVariant = {
+  id: string;
+  name: string;
+  densityMod: number;
+  widthMod: number;
+  seed: number;
+};
+
+type GeneratedDesignScheme = {
+  id: string;
+  name: string;
+  layoutPath: string;
+  status: "ready" | "failed";
+  error?: string;
+};
+
+const DEFAULT_GRAPH_TEMPLATE_ID = "hkust_gz_gate";
+const DESIGN_POLL_INTERVAL_MS = 1500;
+const DESIGN_MAX_POLL_ATTEMPTS = 240;
+const DESIGN_SCHEME_VARIANTS: DesignSchemeVariant[] = [
+  { id: "A", name: "Scheme A", densityMod: 1.0, widthMod: 1.0, seed: 42 },
+  { id: "B", name: "Scheme B", densityMod: 1.2, widthMod: 0.9, seed: 137 },
+  { id: "C", name: "Scheme C", densityMod: 0.8, widthMod: 1.1, seed: 256 },
+];
+
+const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
+  {
+    id: "pedestrian_friendly",
+    name: "步行友好",
+    nameEn: "Pedestrian Friendly",
+    description: "行人优先，安全舒适",
+    prompt: "步行安全，全龄友好的完整街道，安静、安全、舒适",
+    configPatch: {
+      design_rule_profile: "pedestrian_priority_v1",
+      objective_profile: "balanced",
+      density: 0.5,
+      ped_demand_level: "high",
+      bike_demand_level: "medium",
+      transit_demand_level: "medium",
+      vehicle_demand_level: "low",
+    },
+  },
+  {
+    id: "commercial_vitality",
+    name: "商业活力",
+    nameEn: "Commercial Vitality",
+    description: "商业活跃，人流密集",
+    prompt: "商业活跃的街道，商业设施密集，人流穿梭",
+    configPatch: {
+      design_rule_profile: "balanced_complete_street_v1",
+      objective_profile: "commerce",
+      density: 0.9,
+      ped_demand_level: "high",
+      bike_demand_level: "medium",
+      transit_demand_level: "high",
+      vehicle_demand_level: "medium",
+    },
+  },
+  {
+    id: "transit_priority",
+    name: "公交优先",
+    nameEn: "Transit Priority",
+    description: "公交导向，换乘便利",
+    prompt: "公交优先的街道，公交可达性高，换乘便利",
+    configPatch: {
+      design_rule_profile: "transit_priority_v1",
+      objective_profile: "transit",
+      density: 0.85,
+      ped_demand_level: "high",
+      bike_demand_level: "medium",
+      transit_demand_level: "high",
+      vehicle_demand_level: "high",
+    },
+  },
+  {
+    id: "park_landscape",
+    name: "公园景观",
+    nameEn: "Park Landscape",
+    description: "绿化为主，休闲舒适",
+    prompt: "公园景观街道，绿化丰富，自然生态，休闲舒适",
+    configPatch: {
+      design_rule_profile: "pedestrian_priority_v1",
+      objective_profile: "greening",
+      density: 0.25,
+      ped_demand_level: "medium",
+      bike_demand_level: "medium",
+      transit_demand_level: "low",
+      vehicle_demand_level: "low",
+    },
+  },
+  {
+    id: "quiet_residential",
+    name: "安静居住",
+    nameEn: "Quiet Residential",
+    description: "住宅区安静，绿树成荫",
+    prompt: "安静居住街道，绿树成荫，步行安全，适合全龄",
+    configPatch: {
+      design_rule_profile: "pedestrian_priority_v1",
+      objective_profile: "greening",
+      density: 0.35,
+      ped_demand_level: "high",
+      bike_demand_level: "medium",
+      transit_demand_level: "low",
+      vehicle_demand_level: "low",
+    },
+  },
+  {
+    id: "balanced_complete",
+    name: "平衡街道",
+    nameEn: "Balanced Complete",
+    description: "各类使用者平衡",
+    prompt: "各类使用者平衡的完整街道，行人、自行车、公交、机动车和谐共处",
+    configPatch: {
+      design_rule_profile: "balanced_complete_street_v1",
+      objective_profile: "balanced",
+      density: 0.6,
+      ped_demand_level: "medium",
+      bike_demand_level: "medium",
+      transit_demand_level: "medium",
+      vehicle_demand_level: "medium",
+    },
+  },
+];
+
 
 type MovementState = {
   forward: boolean;
@@ -300,13 +456,15 @@ type LlmStatusEntry = {
   available?: boolean;
   source?: string;
   cached?: boolean;
+  visual_input?: string;
   reasoning?: string;
+  error?: string;
 };
 type EvaluationResult = {
   walkability: number;
-  safety: number;
-  beauty: number;
-  overall: number;
+  safety: number | null;
+  beauty: number | null;
+  overall: number | null;
   evaluation: string;
   suggestions: string[];
   config_patch: Record<string, unknown>;
@@ -314,6 +472,11 @@ type EvaluationResult = {
     safety?: LlmStatusEntry;
     beauty?: LlmStatusEntry;
   };
+};
+type RenderedEvaluationView = {
+  view_id: "pedestrian_forward" | "pedestrian_reverse" | "overview_topdown";
+  label: string;
+  image_data_url: string;
 };
 type PresetConfig = { id: string; name: string; description: string; config: Record<string, unknown> };
 
@@ -336,10 +499,26 @@ function renderMetricsBarHtml(entry: MetricEntry): string {
 
 function llmStatusPresentation(entry?: LlmStatusEntry): { label: string; className: string } {
   const source = String(entry?.source || "unavailable").toLowerCase();
-  if (source === "llm") return { label: "Live", className: "live" };
-  if (source === "cache") return { label: "Cache", className: "cache" };
+  const visualInput = String(entry?.visual_input || "missing").toLowerCase();
+  if (visualInput !== "provided" && source !== "disabled") {
+    return { label: "N/A · No views", className: "unavailable" };
+  }
+  if (source === "llm") return { label: "Live · Visual", className: "live" };
+  if (source === "cache") return { label: "Cache · Visual", className: "cache" };
   if (source === "disabled") return { label: "Disabled", className: "disabled" };
-  return { label: "Unavailable", className: "unavailable" };
+  return { label: "Unavailable · Visual", className: "unavailable" };
+}
+
+function isScoreValue(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function formatScore(value: number | null | undefined): string {
+  return isScoreValue(value) ? String(Math.round(value)) : "N/A";
+}
+
+function hasProvidedVisualInput(entry?: LlmStatusEntry): boolean {
+  return Boolean(entry?.available) && String(entry?.visual_input || "").toLowerCase() === "provided";
 }
 
 function renderMetricsPanel(summary: Record<string, unknown>): string {
@@ -526,6 +705,18 @@ const EXPORT_COLORS = {
   zebra_stripe: "#ffffff",
   zebra_stripe_dark: "#424a57",
 };
+
+function turnLanePatchSvgClass(patch: Record<string, unknown>): string {
+  const surfaceRole = String(patch.surface_role ?? "").toLowerCase();
+  const stripKind = String(patch.strip_kind ?? "").toLowerCase();
+  if (surfaceRole === "bike_lane" || stripKind === "bike_lane") return "bikelane";
+  if (surfaceRole === "bus_lane" || stripKind === "bus_lane") return "buslane";
+  if (surfaceRole === "parking_lane" || stripKind === "parking_lane") return "parking";
+  if (surfaceRole === "furnishing" || stripKind.includes("furnishing") || stripKind.includes("buffer")) return "furnishing";
+  if (surfaceRole === "context_ground" || stripKind === "frontage_reserve") return "frontage";
+  if (surfaceRole === "sidewalk" || stripKind === "clear_sidewalk") return "sidewalk";
+  return "road";
+}
 
 function exportTopDownMapEnhanced(scene: THREE.Scene, root: THREE.Object3D | null): void {
   if (!root) {
@@ -859,34 +1050,47 @@ function exportTopDownSvg(scene: THREE.Scene, root: THREE.Object3D | null): void
         svg += `\n  <polygon points="${points}" class="crosswalk"/>`;
       }
     }
-    // Sidewalk corner patches
-    const sidewalkPatches = (junction.sidewalk_corner_patches ?? []) as Array<Record<string, unknown>>;
-    for (const patch of sidewalkPatches) {
-      const rings = (patch.rings ?? []) as number[][][];
-      for (const ring of rings) {
-        if (ring.length < 3) continue;
-        const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
-        svg += `\n  <polygon points="${points}" class="sidewalk" opacity="0.8"/>`;
+    const turnLanePatches = (junction.turn_lane_patches ?? []) as Array<Record<string, unknown>>;
+    if (turnLanePatches.length > 0) {
+      for (const patch of turnLanePatches) {
+        const rings = (patch.rings ?? []) as number[][][];
+        const cssClass = turnLanePatchSvgClass(patch);
+        for (const ring of rings) {
+          if (ring.length < 3) continue;
+          const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+          svg += `\n  <polygon points="${points}" class="${cssClass}" opacity="0.82"/>`;
+        }
       }
-    }
-    // Nearroad corner patches (furnishing)
-    const nearroadPatches = (junction.nearroad_corner_patches ?? []) as Array<Record<string, unknown>>;
-    for (const patch of nearroadPatches) {
-      const rings = (patch.rings ?? []) as number[][][];
-      for (const ring of rings) {
-        if (ring.length < 3) continue;
-        const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
-        svg += `\n  <polygon points="${points}" class="furnishing" opacity="0.8"/>`;
+    } else {
+      // Sidewalk corner patches
+      const sidewalkPatches = (junction.sidewalk_corner_patches ?? []) as Array<Record<string, unknown>>;
+      for (const patch of sidewalkPatches) {
+        const rings = (patch.rings ?? []) as number[][][];
+        for (const ring of rings) {
+          if (ring.length < 3) continue;
+          const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+          svg += `\n  <polygon points="${points}" class="sidewalk" opacity="0.8"/>`;
+        }
       }
-    }
-    // Frontage corner patches
-    const frontagePatches = (junction.frontage_corner_patches ?? []) as Array<Record<string, unknown>>;
-    for (const patch of frontagePatches) {
-      const rings = (patch.rings ?? []) as number[][][];
-      for (const ring of rings) {
-        if (ring.length < 3) continue;
-        const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
-        svg += `\n  <polygon points="${points}" class="frontage" opacity="0.8"/>`;
+      // Nearroad corner patches (furnishing)
+      const nearroadPatches = (junction.nearroad_corner_patches ?? []) as Array<Record<string, unknown>>;
+      for (const patch of nearroadPatches) {
+        const rings = (patch.rings ?? []) as number[][][];
+        for (const ring of rings) {
+          if (ring.length < 3) continue;
+          const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+          svg += `\n  <polygon points="${points}" class="furnishing" opacity="0.8"/>`;
+        }
+      }
+      // Frontage corner patches
+      const frontagePatches = (junction.frontage_corner_patches ?? []) as Array<Record<string, unknown>>;
+      for (const patch of frontagePatches) {
+        const rings = (patch.rings ?? []) as number[][][];
+        for (const ring of rings) {
+          if (ring.length < 3) continue;
+          const points = ring.map(p => `${toSvgX(p[0])},${toSvgY(p[1])}`).join(" ");
+          svg += `\n  <polygon points="${points}" class="frontage" opacity="0.8"/>`;
+        }
       }
     }
     // Check generation_mode for debugging/visibility toggle
@@ -1118,6 +1322,39 @@ async function loadRecentLayouts(limit = 20, useCache = true): Promise<RecentLay
   // 存入缓存
   recentLayoutsCache = { data: results, timestamp: Date.now() };
   return results;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, init);
+  const text = await response.text();
+  if (!text) {
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`);
+    }
+    return {} as T;
+  }
+  let payload: T & { detail?: string; error?: string };
+  try {
+    payload = JSON.parse(text) as T & { detail?: string; error?: string };
+  } catch {
+    throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+  }
+  if (!response.ok) {
+    throw new Error(String(payload.detail ?? payload.error ?? `Request failed with status ${response.status}`));
+  }
+  return payload;
+}
+
+async function postApiJson<T>(path: string, payload: unknown): Promise<T> {
+  return apiJson<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 function updateQueryLayout(layoutPath: string): void {
@@ -1629,6 +1866,51 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         `,
       },
       {
+        id: "design",
+        label: "Design",
+        content: `
+          <aside id="viewer-design-panel" class="viewer-slide-panel" data-open="false">
+            <div class="viewer-slide-panel-header">
+              <div>
+                <div class="viewer-slide-panel-title">Design Assistant</div>
+                <div class="viewer-slide-panel-subtitle">Generate a scene and load it directly in Viewer</div>
+              </div>
+              <button id="viewer-design-close" class="viewer-settings-close" type="button" aria-label="Close design assistant">x</button>
+            </div>
+            <div class="viewer-slide-panel-body viewer-design-body">
+              <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-preset">
+                <span>Preset</span>
+                <button class="viewer-help-icon" type="button" data-help="design-preset" title="了解预设">?</button>
+              </label>
+              <select id="viewer-design-preset" class="viewer-select viewer-select-compact"></select>
+              <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-prompt">
+                <span>Prompt</span>
+                <button class="viewer-help-icon" type="button" data-help="design-prompt" title="了解提示词">?</button>
+              </label>
+              <textarea id="viewer-design-prompt" class="viewer-design-prompt" rows="5"></textarea>
+              <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-count">
+                <span>Schemes</span>
+                <button class="viewer-help-icon" type="button" data-help="design-schemes" title="了解方案数量">?</button>
+              </label>
+              <select id="viewer-design-count" class="viewer-select viewer-select-compact">
+                <option value="1">Single scheme</option>
+                <option value="3">Three variants</option>
+              </select>
+              <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-template">
+                <span>Graph Template</span>
+                <button class="viewer-help-icon" type="button" data-help="design-template" title="了解图模板">?</button>
+              </label>
+              <input id="viewer-design-template" class="viewer-design-input" type="text" value="${DEFAULT_GRAPH_TEMPLATE_ID}" />
+              <div id="viewer-design-status" class="viewer-design-status">Ready to generate.</div>
+              <div id="viewer-design-result" class="viewer-design-result"></div>
+            </div>
+            <div class="viewer-slide-panel-footer">
+              <button id="viewer-design-generate" class="viewer-nav-button" type="button">Generate & Load</button>
+            </div>
+          </aside>
+        `,
+      },
+      {
         id: "evaluate",
         label: "Evaluate",
         content: `
@@ -1729,6 +2011,213 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           </div>
         `,
       },
+      {
+        id: "help",
+        label: "Help",
+        content: `
+          <aside id="viewer-help-panel" class="viewer-slide-panel" data-open="false">
+            <div class="viewer-slide-panel-header">
+              <div>
+                <div class="viewer-slide-panel-title">Help · 帮助</div>
+                <div class="viewer-slide-panel-subtitle">了解生成流程和各个步骤的详细说明</div>
+              </div>
+              <button id="viewer-help-close" class="viewer-settings-close" type="button" aria-label="Close help">x</button>
+            </div>
+            <div id="viewer-help-content" class="viewer-slide-panel-body">
+              <div class="viewer-help-section">
+                <h3 class="viewer-help-section-title">🚀 场景生成流程</h3>
+                <p class="viewer-help-intro">当你点击 "Generate & Load" 后，系统会按照以下步骤生成 3D 街道场景：</p>
+                <div class="viewer-help-steps">
+                  <div class="viewer-help-step" data-step="queue">
+                    <div class="viewer-help-step-header">
+                      <span class="viewer-help-step-number">1</span>
+                      <span class="viewer-help-step-title">任务排队中</span>
+                      <button class="viewer-help-step-detail-btn" type="button" data-detail="queue">详情</button>
+                    </div>
+                    <div class="viewer-help-step-content" data-detail-content="queue" hidden>
+                      <p>你的生成请求被提交到后端服务后会进入排队状态。系统会按照提交顺序处理每个任务。</p>
+                      <p><strong>为什么需要排队？</strong> 场景生成是计算密集型任务，为保证服务质量，系统按序处理而非并行处理。</p>
+                    </div>
+                  </div>
+                  <div class="viewer-help-step" data-step="context">
+                    <div class="viewer-help-step-header">
+                      <span class="viewer-help-step-number">2</span>
+                      <span class="viewer-help-step-title">上下文解析</span>
+                      <button class="viewer-help-step-detail-btn" type="button" data-detail="context">详情</button>
+                    </div>
+                    <div class="viewer-help-step-content" data-detail-content="context" hidden>
+                      <p>系统会解析你输入的自然语言提示词（Prompt），结合选定的预设（Preset）和图模板（Graph Template），理解你的设计意图。</p>
+                      <p><strong>预设是什么？</strong> 预设是预先配置好的参数组合，例如"步行友好"会降低车流量、增加绿化，"商业活力"会提高密度和商业设施。</p>
+                    </div>
+                  </div>
+                  <div class="viewer-help-step" data-step="asset">
+                    <div class="viewer-help-step-header">
+                      <span class="viewer-help-step-number">3</span>
+                      <span class="viewer-help-step-title">资产加载</span>
+                      <button class="viewer-help-step-detail-btn" type="button" data-detail="asset">详情</button>
+                    </div>
+                    <div class="viewer-help-step-content" data-detail-content="asset" hidden>
+                      <p>根据解析出的需求，系统会从资产清单（Manifest）中加载对应的 3D 模型，包括树木、路灯、座椅、公交站等街道家具。</p>
+                      <p><strong>资产从哪里来？</strong> 资产存储在 <code>data/real_assets_manifest.jsonl</code> 中，每个资产都有分类、描述和 CLIP 文本嵌入向量用于语义检索。</p>
+                    </div>
+                  </div>
+                  <div class="viewer-help-step" data-step="layout">
+                    <div class="viewer-help-step-header">
+                      <span class="viewer-help-step-number">4</span>
+                      <span class="viewer-help-step-title">布局生成</span>
+                      <button class="viewer-help-step-detail-btn" type="button" data-detail="layout">详情</button>
+                    </div>
+                    <div class="viewer-help-step-content" data-detail-content="layout" hidden>
+                      <p>系统会根据图模板（Graph Template）生成街道的骨架，包括道路宽度、车道数量、人行道宽度等基础结构。</p>
+                      <p><strong>图模板是什么？</strong> 图模板定义了街道的拓扑结构，例如 <code>hkust_gz_gate</code> 是港科大（广州）校门的道路布局模板。</p>
+                    </div>
+                  </div>
+                  <div class="viewer-help-step" data-step="constraint">
+                    <div class="viewer-help-step-header">
+                      <span class="viewer-help-step-number">5</span>
+                      <span class="viewer-help-step-title">约束求解</span>
+                      <button class="viewer-help-step-detail-btn" type="button" data-detail="constraint">详情</button>
+                    </div>
+                    <div class="viewer-help-step-content" data-detail-content="constraint" hidden>
+                      <p>系统会检查布局是否满足设计规则（Design Rules）和合规性要求，例如人行道最小宽度、车道间距、无障碍通行等。</p>
+                      <p><strong>不满足约束怎么办？</strong> 系统会自动调整布局以尝试满足约束，如果无法完全满足，会在结果中标记违规项。</p>
+                    </div>
+                  </div>
+                  <div class="viewer-help-step" data-step="composition">
+                    <div class="viewer-help-step-header">
+                      <span class="viewer-help-step-number">6</span>
+                      <span class="viewer-help-step-title">资产组合</span>
+                      <button class="viewer-help-step-detail-btn" type="button" data-detail="composition">详情</button>
+                    </div>
+                    <div class="viewer-help-step-content" data-detail-content="composition" hidden>
+                      <p>系统会使用 CLIP 语义检索，将加载的 3D 资产智能地放置到街道场景中，包括放置位置、旋转角度和缩放比例。</p>
+                      <p><strong>放置策略是什么？</strong> 系统支持规则策略（Rule-based）和学习策略（Learned policy），会根据资产类别、道路功能区（Strip）和 POI 兴趣点进行布局。</p>
+                    </div>
+                  </div>
+                  <div class="viewer-help-step" data-step="mesh">
+                    <div class="viewer-help-step-header">
+                      <span class="viewer-help-step-number">7</span>
+                      <span class="viewer-help-step-title">网格生成</span>
+                      <button class="viewer-help-step-detail-btn" type="button" data-detail="mesh">详情</button>
+                    </div>
+                    <div class="viewer-help-step-content" data-detail-content="mesh" hidden>
+                      <p>所有资产放置完成后，系统会将它们合并为完整的 3D 场景网格（Mesh），包括道路铺装、人行道、建筑体块和所有街道家具。</p>
+                      <p><strong>这一步做什么？</strong> 将离散的 3D 模型整合为统一的场景几何体，为后续的光照计算和渲染做准备。</p>
+                    </div>
+                  </div>
+                  <div class="viewer-help-step" data-step="render">
+                    <div class="viewer-help-step-header">
+                      <span class="viewer-help-step-number">8</span>
+                      <span class="viewer-help-step-title">场景渲染</span>
+                      <button class="viewer-help-step-detail-btn" type="button" data-detail="render">详情</button>
+                    </div>
+                    <div class="viewer-help-step-content" data-detail-content="render" hidden>
+                      <p>系统会应用光照、材质、阴影和色调映射（Tone Mapping），生成最终的可视觉化场景。</p>
+                      <p><strong>光照从哪里来？</strong> 场景使用三点照明系统：主光源（Key Light）、补光（Fill Light）和环境光（Ambient），配合曝光和色温调节。</p>
+                    </div>
+                  </div>
+                  <div class="viewer-help-step" data-step="export">
+                    <div class="viewer-help-step-header">
+                      <span class="viewer-help-step-number">9</span>
+                      <span class="viewer-help-step-title">GLB 导出</span>
+                      <button class="viewer-help-step-detail-btn" type="button" data-detail="export">详情</button>
+                    </div>
+                    <div class="viewer-help-step-content" data-detail-content="export" hidden>
+                      <p>渲染完成后，系统会将场景导出为 GLB 格式（Binary glTF），这是一种高效的 3D 场景文件格式。</p>
+                      <p><strong>为什么用 GLB？</strong> GLB 格式将所有资源（几何体、材质、纹理）打包为单一文件，便于网络传输和 Three.js 加载。</p>
+                    </div>
+                  </div>
+                  <div class="viewer-help-step" data-step="organize">
+                    <div class="viewer-help-step-header">
+                      <span class="viewer-help-step-number">10</span>
+                      <span class="viewer-help-step-title">结果整理</span>
+                      <button class="viewer-help-step-detail-btn" type="button" data-detail="organize">详情</button>
+                    </div>
+                    <div class="viewer-help-step-content" data-detail-content="organize" hidden>
+                      <p>最后，系统会生成 <code>scene_layout.json</code> 文件，包含所有资产的放置信息、场景统计数据和生产步骤（Production Steps）。</p>
+                      <p><strong>生产步骤是什么？</strong> 生产步骤记录了场景构建的中间过程，你可以在 Viewer 中逐步查看道路基础 → 建筑 → 家具 → 最终预览的各个阶段。</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="viewer-help-section">
+                <h3 class="viewer-help-section-title">🎯 Design 面板使用指南</h3>
+                <div class="viewer-help-fields">
+                  <div class="viewer-help-field">
+                    <h4 class="viewer-help-field-title">Preset（预设）</h4>
+                    <p>预设是一组参数的快捷选择，每个预设对应特定的街道设计目标。</p>
+                    <ul class="viewer-help-list">
+                      <li><strong>步行友好（Pedestrian Friendly）：</strong>行人优先，全龄友好，低车流量，高绿化</li>
+                      <li><strong>商业活力（Commercial Vitality）：</strong>商业活跃，人流密集，高设施密度</li>
+                      <li><strong>公交优先（Transit Priority）：</strong>公交导向，换乘便利，高公交可达性</li>
+                      <li><strong>公园景观（Park Landscape）：</strong>绿化为主，自然生态，休闲舒适</li>
+                      <li><strong>安静居住（Quiet Residential）：</strong>住宅区安静环境，绿树成荫</li>
+                      <li><strong>平衡街道（Balanced Complete）：</strong>各类使用者平衡的完整街道</li>
+                    </ul>
+                  </div>
+                  <div class="viewer-help-field">
+                    <h4 class="viewer-help-field-title">Prompt（提示词）</h4>
+                    <p>用自然语言描述你想要的街道场景。提示词会被系统解析为具体的设计参数。</p>
+                    <ul class="viewer-help-list">
+                      <li>可以描述功能定位，如"商业步行街"、"住宅区小巷"</li>
+                      <li>可以描述氛围感受，如"安静舒适"、"充满活力"</li>
+                      <li>可以描述具体特征，如"林荫大道"、"有很多座椅"</li>
+                    </ul>
+                  </div>
+                  <div class="viewer-help-field">
+                    <h4 class="viewer-help-field-title">Schemes（方案数量）</h4>
+                    <p>选择生成单个方案还是三个变体（A/B/C）：</p>
+                    <ul class="viewer-help-list">
+                      <li><strong>Single scheme：</strong>只生成一个方案，速度更快</li>
+                      <li><strong>Three variants：</strong>生成 A/B/C 三个变体，各有不同的密度和道路宽度扰动，方便对比选择</li>
+                    </ul>
+                  </div>
+                  <div class="viewer-help-field">
+                    <h4 class="viewer-help-field-title">Graph Template（图模板）</h4>
+                    <p>图模板定义了街道的拓扑结构和布局骨架。</p>
+                    <ul class="viewer-help-list">
+                      <li>默认模板：<code>hkust_gz_gate</code>（港科大广州校门）</li>
+                      <li>可以指定其他已配置的模板 ID</li>
+                      <li>模板决定了道路数量、车道宽度和基本布局</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="viewer-help-section">
+                <h3 class="viewer-help-section-title">💡 常见问题</h3>
+                <div class="viewer-help-faq">
+                  <details class="viewer-help-faq-item">
+                    <summary class="viewer-help-faq-question">生成一个场景需要多长时间？</summary>
+                    <div class="viewer-help-faq-answer">
+                      <p>通常需要 1-5 分钟，具体取决于场景复杂度、资产数量和服务器负载。计算密集型任务包括布局生成、约束求解和资产组合。</p>
+                    </div>
+                  </details>
+                  <details class="viewer-help-faq-item">
+                    <summary class="viewer-help-faq-question">为什么生成失败了？</summary>
+                    <div class="viewer-help-faq-answer">
+                      <p>可能的原因包括：约束冲突无法解决、资产检索失败、模板配置错误等。请查看错误提示，调整预设或提示词后重试。</p>
+                    </div>
+                  </details>
+                  <details class="viewer-help-faq-item">
+                    <summary class="viewer-help-faq-question">如何选择最佳方案？</summary>
+                    <div class="viewer-help-faq-answer">
+                      <p>建议选择"Three variants"生成 A/B/C 三个变体，它们会在密度和道路宽度上有细微差别。加载后可以使用"Evaluate"面板进行 AI 评分对比。</p>
+                    </div>
+                  </details>
+                  <details class="viewer-help-faq-item">
+                    <summary class="viewer-help-faq-question">什么是 Production Steps？</summary>
+                    <div class="viewer-help-faq-answer">
+                      <p>Production Steps 是场景构建的中间过程记录，包括道路基础 → 建筑体块 → POI 上下文 → 家具锚点 → 必需家具 → 可选家具 → 最终预览。你可以在 Viewer 的 Settings 中切换到不同步骤查看。</p>
+                    </div>
+                  </details>
+                </div>
+              </div>
+            </div>
+          </aside>
+        `,
+      },
     ],
     null,
   );
@@ -1744,11 +2233,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         <button id="viewer-asset-editor-link" type="button">Asset Editor</button>
         <button id="viewer-junction-editor-link" type="button">Junction Editor</button>
         <button id="viewer-settings-toggle" type="button" aria-expanded="false">Settings</button>
+        <button id="viewer-design-toggle" type="button">Design</button>
         <button id="viewer-compare-toggle" type="button">Compare</button>
         <button id="viewer-presets-toggle" type="button">Presets</button>
         <button id="viewer-evaluate-toggle" type="button">Evaluate</button>
         <button id="viewer-history-analysis-toggle" type="button">History</button>
         <button id="viewer-floating-lane-toggle" type="button">Floating Lane</button>
+        <button id="viewer-help-toggle" type="button">Help</button>
         <button id="viewer-export-topdown-map" type="button">Export PNG</button>
         <button id="viewer-export-topdown-svg" type="button">Export SVG</button>
       </div>
@@ -1802,6 +2293,17 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const assetBboxToggleEl = requireElement<HTMLInputElement>(root, "#asset-bbox-enabled");
   const laserToggleEl = requireElement<HTMLInputElement>(root, "#laser-pointer-enabled");
 
+  const designToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-design-toggle");
+  const designPanelEl = requireElement<HTMLElement>(root, "#viewer-design-panel");
+  const designCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-design-close");
+  const designPresetEl = requireElement<HTMLSelectElement>(root, "#viewer-design-preset");
+  const designPromptEl = requireElement<HTMLTextAreaElement>(root, "#viewer-design-prompt");
+  const designCountEl = requireElement<HTMLSelectElement>(root, "#viewer-design-count");
+  const designTemplateEl = requireElement<HTMLInputElement>(root, "#viewer-design-template");
+  const designGenerateEl = requireElement<HTMLButtonElement>(root, "#viewer-design-generate");
+  const designStatusEl = requireElement<HTMLElement>(root, "#viewer-design-status");
+  const designResultEl = requireElement<HTMLElement>(root, "#viewer-design-result");
+
   const evaluateToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-evaluate-toggle");
   const evaluatePanelEl = requireElement<HTMLElement>(root, "#viewer-evaluate-panel");
   const evaluateCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-evaluate-close");
@@ -1835,7 +2337,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     if (nextOpen) {
       shell.activateRightTab("history");
       loadAndRenderHistory();
-    } else if (!settingsOpen && !evaluateOpen && !compareOpen && !presetsOpen) {
+    } else if (!settingsOpen && !designOpen && !evaluateOpen && !compareOpen && !presetsOpen) {
       shell.activateRightTab(null);
     }
   };
@@ -1988,6 +2490,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const presetsCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-presets-close");
   const presetsGridEl = requireElement<HTMLElement>(root, "#viewer-presets-grid");
 
+  const helpToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-help-toggle");
+  const helpPanelEl = requireElement<HTMLElement>(root, "#viewer-help-panel");
+  const helpCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-help-close");
+  const helpContentEl = requireElement<HTMLElement>(root, "#viewer-help-content");
+
   const graphOverlayToggleEl = requireElement<HTMLInputElement>(root, "#graph-overlay-enabled");
 
   const layoutOverlayToggleEl = requireElement<HTMLInputElement>(root, "#layout-overlay-enabled");
@@ -2137,9 +2644,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let settingsOpen = false;
   let resumeRoamAfterSettingsClose = false;
   let statusResetHandle: number | null = null;
+  let designOpen = false;
+  let designIsGenerating = false;
   let evaluateOpen = false;
   let compareOpen = false;
   let presetsOpen = false;
+  let helpOpen = false;
   let graphOverlayActive = false;
   const graphOverlayMarkers: THREE.Object3D[] = [];
   const optionsByKey = new Map<string, SceneOption>();
@@ -2225,7 +2735,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     settingsToggleEl.setAttribute("aria-expanded", nextOpen ? "true" : "false");
     if (nextOpen) {
       shell.activateRightTab("settings");
-    } else if (!evaluateOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
+    } else if (!designOpen && !evaluateOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
       shell.activateRightTab(null);
     }
     if (nextOpen) {
@@ -2251,12 +2761,16 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   function updateCanvasSlideOpenState(): void {
-    const anyOpen = evaluateOpen || compareOpen || presetsOpen;
+    const anyOpen = designOpen || evaluateOpen || compareOpen || presetsOpen;
     canvasHost.dataset.slideOpen = anyOpen ? "true" : "false";
   }
 
   function closeAllSlidePanels(): void {
     if (settingsOpen) setSettingsOpen(false);
+    if (designOpen) {
+      designOpen = false;
+      designPanelEl.dataset.open = "false";
+    }
     if (evaluateOpen) {
       evaluateOpen = false;
       evaluatePanelEl.dataset.open = "false";
@@ -2282,13 +2796,28 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     updateCanvasSlideOpenState();
   }
 
+  function setDesignOpen(nextOpen: boolean): void {
+    if (nextOpen) {
+      closeAllSlidePanels();
+      populateDesignPresets();
+    }
+    designOpen = nextOpen;
+    designPanelEl.dataset.open = nextOpen ? "true" : "false";
+    if (nextOpen) {
+      shell.activateRightTab("design");
+    } else if (!settingsOpen && !evaluateOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
+      shell.activateRightTab(null);
+    }
+    updateCanvasSlideOpenState();
+  }
+
   function setEvaluateOpen(nextOpen: boolean): void {
     if (nextOpen) closeAllSlidePanels();
     evaluateOpen = nextOpen;
     evaluatePanelEl.dataset.open = nextOpen ? "true" : "false";
     if (nextOpen) {
       shell.activateRightTab("evaluate");
-    } else if (!settingsOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
+    } else if (!settingsOpen && !designOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
       shell.activateRightTab(null);
     }
     updateCanvasSlideOpenState();
@@ -2303,7 +2832,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     comparePanelEl.dataset.open = nextOpen ? "true" : "false";
     if (nextOpen) {
       shell.activateRightTab("compare");
-    } else if (!settingsOpen && !evaluateOpen && !presetsOpen && !historyAnalysisOpen) {
+    } else if (!settingsOpen && !designOpen && !evaluateOpen && !presetsOpen && !historyAnalysisOpen) {
       shell.activateRightTab(null);
     }
     updateCanvasSlideOpenState();
@@ -2318,7 +2847,21 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     presetsPanelEl.dataset.open = nextOpen ? "true" : "false";
     if (nextOpen) {
       shell.activateRightTab("presets");
-    } else if (!settingsOpen && !evaluateOpen && !compareOpen && !historyAnalysisOpen) {
+    } else if (!settingsOpen && !designOpen && !evaluateOpen && !compareOpen && !historyAnalysisOpen && !helpOpen) {
+      shell.activateRightTab(null);
+    }
+    updateCanvasSlideOpenState();
+  }
+
+  function setHelpOpen(nextOpen: boolean): void {
+    if (nextOpen) {
+      closeAllSlidePanels();
+    }
+    helpOpen = nextOpen;
+    helpPanelEl.dataset.open = nextOpen ? "true" : "false";
+    if (nextOpen) {
+      shell.activateRightTab("help");
+    } else if (!settingsOpen && !designOpen && !evaluateOpen && !compareOpen && !historyAnalysisOpen && !presetsOpen) {
       shell.activateRightTab(null);
     }
     updateCanvasSlideOpenState();
@@ -2485,6 +3028,18 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   function getFloatingLaneColor(kind: string): number {
     const colors = floatingLaneConfig.colorScheme === "safety" ? SAFETY_COLORS : FLOATING_COLORS;
     return colors[kind] ?? colors["default"] ?? 0x94a3b8;
+  }
+
+  function getTurnLaneFloatingKind(patch: Record<string, unknown>): string {
+    const surfaceRole = String(patch.surface_role ?? "").toLowerCase();
+    const stripKind = String(patch.strip_kind ?? "").toLowerCase();
+    if (surfaceRole === "bike_lane" || stripKind === "bike_lane") return "bike_lane";
+    if (surfaceRole === "bus_lane" || stripKind === "bus_lane") return "bus_lane";
+    if (surfaceRole === "parking_lane" || stripKind === "parking_lane") return "parking_lane";
+    if (surfaceRole === "furnishing" || stripKind.includes("furnishing") || stripKind.includes("buffer")) return "furnishing";
+    if (surfaceRole === "context_ground" || stripKind === "frontage_reserve") return "frontage";
+    if (surfaceRole === "sidewalk" || stripKind === "clear_sidewalk") return "sidewalk";
+    return "carriageway";
   }
 
   function clearFloatingLaneOverlay(): void {
@@ -2801,6 +3356,52 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           edgeLine.userData.isFloatingLane = true;
           scene.add(edgeLine);
           floatingLaneObjects.push(edgeLine);
+        }
+      }
+
+      const turnLanePatches = (junction.turn_lane_patches ?? []) as Array<Record<string, unknown>>;
+      for (const [patchIndex, patch] of turnLanePatches.entries()) {
+        const rings = (patch.rings ?? []) as number[][][];
+        const color = getFloatingLaneColor(getTurnLaneFloatingKind(patch));
+        for (const [ringIndex, ring] of rings.entries()) {
+          if (ring.length < 3) continue;
+          const shapeRing = ring.map((point) => toShapeXY(point));
+          const shape = buildPolygonShape(shapeRing);
+          const geometry = new THREE.ShapeGeometry(shape);
+          const material = new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: floatingLaneConfig.opacity * 0.42,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+          });
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.rotation.x = -Math.PI / 2;
+          mesh.position.set(0, height + 0.012, 0);
+          mesh.userData.isFloatingLane = true;
+          mesh.userData.overlayType = "junction-turn-lane";
+          mesh.userData.surfaceId = patch.patch_id ?? `turn_lane_${patchIndex}_${ringIndex}`;
+          scene.add(mesh);
+          floatingLaneObjects.push(mesh);
+
+          if (floatingLaneConfig.showEdgeLines) {
+            const edgeMaterial = new THREE.LineBasicMaterial({
+              color,
+              transparent: true,
+              opacity: floatingLaneConfig.opacity * 0.8,
+            });
+            const points: THREE.Vector3[] = [];
+            for (const point of ring) {
+              points.push(new THREE.Vector3(point[0], height + 0.012, point[1]));
+            }
+            points.push(points[0].clone());
+            const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
+            const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
+            edgeLine.userData.isFloatingLane = true;
+            edgeLine.userData.overlayType = "junction-turn-lane-edge";
+            scene.add(edgeLine);
+            floatingLaneObjects.push(edgeLine);
+          }
         }
       }
 
@@ -3450,7 +4051,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       clearFloatingLaneOverlay();
       const panel = document.getElementById("floating-lane-panel");
       if (panel) panel.style.display = "none";
-      if (!settingsOpen && !evaluateOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
+      if (!settingsOpen && !designOpen && !evaluateOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
         shell.activateRightTab(null);
       }
     }
@@ -4078,6 +4679,288 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
   }
 
+  function populateDesignPresets(): void {
+    designPresetEl.innerHTML = "";
+    for (const preset of VIEWER_DESIGN_PRESETS) {
+      const optionEl = document.createElement("option");
+      optionEl.value = preset.id;
+      optionEl.textContent = `${preset.nameEn} / ${preset.name}`;
+      optionEl.title = preset.description;
+      designPresetEl.appendChild(optionEl);
+    }
+    const firstPreset = VIEWER_DESIGN_PRESETS[0];
+    if (firstPreset) {
+      designPresetEl.value = firstPreset.id;
+      designPromptEl.value = firstPreset.prompt;
+    }
+  }
+
+  function selectedDesignPreset(): DesignPreset {
+    return VIEWER_DESIGN_PRESETS.find((preset) => preset.id === designPresetEl.value) ?? VIEWER_DESIGN_PRESETS[0]!;
+  }
+
+  function updateDesignStatus(message: string, tone: "neutral" | "success" | "warning" | "error" = "neutral"): void {
+    designStatusEl.textContent = message;
+    designStatusEl.dataset.tone = tone;
+    shell.pushActivity(message, tone);
+    shell.setStatusSummary(message);
+  }
+
+  function configForDesignVariant(
+    configPatch: Record<string, string | number>,
+    variant: DesignSchemeVariant,
+  ): Record<string, string | number> {
+    const density = Number(configPatch.density ?? 0.6);
+    const roadWidth = Number(configPatch.road_width_m ?? 13.5);
+    return {
+      ...configPatch,
+      density: Math.max(0.1, Math.min(1.5, density * variant.densityMod)),
+      road_width_m: Math.max(5.0, Math.min(30.0, roadWidth * variant.widthMod)),
+    };
+  }
+
+  function renderGeneratedDesignSchemes(schemes: GeneratedDesignScheme[]): void {
+    if (schemes.length === 0) {
+      designResultEl.innerHTML = "";
+      return;
+    }
+    designResultEl.innerHTML = `
+      <div class="viewer-design-schemes">
+        ${schemes.map((scheme) => `
+          <button
+            class="viewer-design-scheme"
+            type="button"
+            data-layout-path="${escapeHtml(scheme.layoutPath)}"
+            ${scheme.status === "failed" ? "disabled" : ""}
+          >
+            <span>
+              <strong>${escapeHtml(scheme.name)}</strong>
+              <small>${scheme.status === "ready" ? escapeHtml(scheme.layoutPath) : escapeHtml(scheme.error || "Generation failed")}</small>
+            </span>
+            <em>${scheme.status === "ready" ? "Load" : "Failed"}</em>
+          </button>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  async function submitDesignJob(
+    preset: DesignPreset,
+    prompt: string,
+    graphTemplateId: string,
+    variant: DesignSchemeVariant,
+  ): Promise<SceneJobCreatePayload> {
+    return postApiJson<SceneJobCreatePayload>("/api/scene/jobs", {
+      draft: {
+        normalized_scene_query: prompt,
+        compose_config_patch: configForDesignVariant(preset.configPatch, variant),
+        citations_by_field: {},
+        design_summary: prompt,
+        risk_notes: [],
+        parameter_sources_by_field: {},
+      },
+      scene_context: {
+        layout_mode: "graph_template",
+        aoi_bbox: null,
+        city_name_en: null,
+        reference_plan_id: null,
+        graph_template_id: graphTemplateId,
+      },
+      patch_overrides: {},
+      generation_options: {
+        preset_id: preset.id,
+        random_seed: variant.seed,
+      },
+    });
+  }
+
+  // 定义生成步骤
+  const GENERATION_STEPS = [
+    { key: "queued", label: "任务排队中", progress: 5 },
+    { key: "context_resolving", label: "上下文解析", progress: 15 },
+    { key: "asset_loading", label: "资产加载", progress: 25 },
+    { key: "layout_generation", label: "布局生成", progress: 40 },
+    { key: "constraint_solving", label: "约束求解", progress: 50 },
+    { key: "asset_composition", label: "资产组合", progress: 65 },
+    { key: "mesh_generation", label: "网格生成", progress: 75 },
+    { key: "glb_export", label: "GLB 导出", progress: 88 },
+    { key: "scene_rendering", label: "场景渲染", progress: 95 },
+    { key: "finalizing", label: "结果整理", progress: 99 },
+  ];
+
+  function getStepIndex(stage: string): number {
+    return GENERATION_STEPS.findIndex((step) => step.key === stage);
+  }
+
+  function renderDesignSteps(currentStage: string, failed: boolean = false): string {
+    const currentIndex = getStepIndex(currentStage);
+    const steps = GENERATION_STEPS.map((step, idx) => {
+      let stateClass = "";
+      let iconSvg = "";
+
+      if (idx < currentIndex) {
+        // 已完成的步骤
+        stateClass = "completed";
+        iconSvg = `<svg viewBox="0 0 12 12" fill="none" stroke="white" stroke-width="2"><path d="M2 6l3 3 5-5"/></svg>`;
+      } else if (idx === currentIndex && !failed) {
+        // 当前活跃步骤
+        stateClass = "active";
+      } else if (idx === currentIndex && failed) {
+        // 失败步骤
+        stateClass = "failed";
+        iconSvg = `<svg viewBox="0 0 12 12" fill="none" stroke="white" stroke-width="2"><path d="M3 3l6 6M9 3l-6 6"/></svg>`;
+      }
+
+      return `<div class="viewer-design-step ${stateClass}">
+        <div class="viewer-design-step-indicator">${iconSvg}</div>
+        <span>${step.label}</span>
+      </div>`;
+    });
+
+    return `<div class="viewer-design-steps">${steps.join("")}</div>`;
+  }
+
+  function describeDesignJobProgress(payload: SceneJobStatusPayload): { progress: number; message: string; stage: string } {
+    let progress = 10;
+    let message = "Waiting for generation...";
+    let stage = "queued";
+
+    if (payload.status === "queued") {
+      progress = 5;
+      message = "Generation job queued...";
+      stage = "queued";
+    } else if (payload.status === "running" || payload.status === "processing") {
+      stage = payload.stage || "processing";
+      const stageProgress: Record<string, number> = {
+        context_resolving: 15,
+        asset_loading: 25,
+        layout_generation: 40,
+        constraint_solving: 50,
+        asset_composition: 65,
+        mesh_generation: 75,
+        glb_export: 88,
+        scene_rendering: 95,
+        finalizing: 99,
+      };
+      progress = stageProgress[stage] ?? 50;
+      message = `Generating: ${stage.replace(/_/g, " ")}`;
+    } else if (payload.status === "succeeded") {
+      progress = 100;
+      message = "Generation complete. Loading scene...";
+      stage = "finalizing";
+    } else if (payload.status === "failed") {
+      progress = 0;
+      message = payload.error || "Generation failed.";
+      stage = payload.stage || "processing";
+    }
+
+    if (typeof payload.progress === "number" && payload.progress > 0) {
+      progress = Math.round(payload.progress);
+    }
+
+    const currentOp = payload.operations?.[payload.operations.length - 1];
+    if (typeof currentOp === "string" && currentOp.trim()) {
+      message = currentOp;
+    } else if (currentOp && typeof currentOp === "object") {
+      message = currentOp.message || currentOp.name || currentOp.status || message;
+    }
+
+    return { progress, message, stage };
+  }
+
+  async function waitForDesignJob(jobId: string): Promise<SceneJobResult> {
+    for (let attempt = 0; attempt < DESIGN_MAX_POLL_ATTEMPTS; attempt += 1) {
+      const payload = await apiJson<SceneJobStatusPayload>(`/api/scene/jobs/${encodeURIComponent(jobId)}`);
+      const { progress, message, stage } = describeDesignJobProgress(payload);
+      updateDesignStatus(`${message} (${progress}%)`);
+      
+      const isFailed = payload.status === "failed";
+      designResultEl.innerHTML = `
+        <div class="viewer-design-progress" aria-label="Generation progress">
+          <div style="width:${clamp(progress, 0, 100)}%"></div>
+        </div>
+        ${renderDesignSteps(stage, isFailed)}
+      `;
+      
+      if (payload.status === "succeeded" && payload.result) {
+        return payload.result;
+      }
+      if (payload.status === "failed") {
+        throw new Error(payload.error || "Generation job failed.");
+      }
+      await sleep(DESIGN_POLL_INTERVAL_MS);
+    }
+    throw new Error("Generation timed out.");
+  }
+
+  async function runDesignGeneration(): Promise<void> {
+    if (designIsGenerating) return;
+    const preset = selectedDesignPreset();
+    const prompt = designPromptEl.value.trim() || preset.prompt;
+    const graphTemplateId = designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
+    const variants = designCountEl.value === "3" ? DESIGN_SCHEME_VARIANTS : [DESIGN_SCHEME_VARIANTS[0]];
+    const generatedSchemes: GeneratedDesignScheme[] = [];
+    designIsGenerating = true;
+    designGenerateEl.disabled = true;
+    updateDesignStatus("Submitting generation job...");
+    designResultEl.innerHTML = "";
+    setStatus("Submitting design generation job...");
+
+    try {
+      for (const variant of variants) {
+        updateDesignStatus(`Submitting ${variant.name}...`);
+        try {
+          const createPayload = await submitDesignJob(preset, prompt, graphTemplateId, variant);
+          updateDesignStatus(`${variant.name}: job ${createPayload.job_id} submitted.`);
+          const result = await waitForDesignJob(createPayload.job_id);
+          if (!result.scene_layout_path) {
+            throw new Error("Generation finished without a scene_layout_path.");
+          }
+          generatedSchemes.push({
+            id: variant.id,
+            name: variant.name,
+            layoutPath: result.scene_layout_path,
+            status: "ready",
+          });
+          renderGeneratedDesignSchemes(generatedSchemes);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : `${variant.name} generation failed.`;
+          generatedSchemes.push({
+            id: variant.id,
+            name: variant.name,
+            layoutPath: "",
+            status: "failed",
+            error: message,
+          });
+          renderGeneratedDesignSchemes(generatedSchemes);
+          if (variants.length === 1) {
+            throw err;
+          }
+        }
+      }
+      const firstReady = generatedSchemes.find((scheme) => scheme.status === "ready");
+      if (!firstReady) {
+        throw new Error("No schemes were generated successfully.");
+      }
+      recentLayoutsCache = null;
+      clearManifestCache();
+      await loadLayoutSelection(firstReady.layoutPath);
+      const recent = await loadRecentLayouts(50, false);
+      populateRecentLayoutOptions(recent, firstReady.layoutPath);
+      renderGeneratedDesignSchemes(generatedSchemes);
+      updateDesignStatus(`${generatedSchemes.filter((scheme) => scheme.status === "ready").length}/${variants.length} schemes generated.`, "success");
+      flashStatus(`${firstReady.name} loaded in Viewer.`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Design generation failed.";
+      updateDesignStatus(message, "error");
+      designResultEl.innerHTML = `<div class="viewer-design-error">${escapeHtml(message)}</div>`;
+      setError(errorEl, message);
+    } finally {
+      designIsGenerating = false;
+      designGenerateEl.disabled = false;
+    }
+  }
+
   // 从manifest创建场景选项
   function makeSceneOptionsFromManifest(manifest: ViewerManifest, layoutPath: string): SceneOption[] {
     const options: SceneOption[] = [];
@@ -4161,19 +5044,197 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   /* ── Evaluate ────────────────────────────────────────────── */
 
+  function renderEvaluationCameraToDataUrl(
+    renderCamera: THREE.Camera,
+    width = 960,
+    height = 540,
+  ): string {
+    const captureRenderer = new THREE.WebGLRenderer({
+      antialias: true,
+      preserveDrawingBuffer: true,
+    });
+    captureRenderer.setSize(width, height, false);
+    captureRenderer.setPixelRatio(1);
+    captureRenderer.outputColorSpace = renderer.outputColorSpace;
+    captureRenderer.toneMapping = renderer.toneMapping;
+    captureRenderer.toneMappingExposure = renderer.toneMappingExposure;
+    captureRenderer.shadowMap.enabled = renderer.shadowMap.enabled;
+    captureRenderer.shadowMap.type = renderer.shadowMap.type;
+    const bgColor = scene.background instanceof THREE.Color ? scene.background : new THREE.Color("#f7f6f3");
+    captureRenderer.setClearColor(bgColor);
+    captureRenderer.render(scene, renderCamera);
+    const dataUrl = captureRenderer.domElement.toDataURL("image/png");
+    captureRenderer.dispose();
+    return dataUrl;
+  }
+
+  function currentEvaluationForward(): THREE.Vector3 {
+    const forward = currentForward.clone().setY(0);
+    if (forward.lengthSq() > 1e-6) {
+      return forward.normalize();
+    }
+    const cameraForward = cameraForwardHorizontal();
+    if (cameraForward.lengthSq() > 1e-6) {
+      return cameraForward.normalize();
+    }
+    return new THREE.Vector3(1, 0, 0);
+  }
+
+  function makePedestrianEvaluationCamera(direction: 1 | -1): THREE.PerspectiveCamera {
+    const bbox = currentRoot ? new THREE.Box3().setFromObject(currentRoot) : null;
+    const eye = currentSpawn.clone();
+    if (!Number.isFinite(eye.x) || !Number.isFinite(eye.y) || !Number.isFinite(eye.z)) {
+      eye.set(0, AVATAR_EYE_HEIGHT_M, 0);
+    }
+    const groundY = bbox ? bbox.min.y : 0;
+    eye.y = Math.max(eye.y, groundY + AVATAR_EYE_HEIGHT_M);
+
+    const forward = currentEvaluationForward().multiplyScalar(direction);
+    const target = eye.clone().add(forward.multiplyScalar(12));
+    target.y = eye.y - 0.05;
+
+    const renderCamera = new THREE.PerspectiveCamera(68, 16 / 9, 0.05, 2000);
+    renderCamera.position.copy(eye);
+    renderCamera.lookAt(target);
+    renderCamera.updateProjectionMatrix();
+    return renderCamera;
+  }
+
+  function makeOverviewEvaluationCamera(width = 960, height = 540): THREE.OrthographicCamera {
+    if (!currentRoot) {
+      throw new Error("No scene root available for top-down evaluation view.");
+    }
+    const bbox = new THREE.Box3().setFromObject(currentRoot);
+    const center = bbox.getCenter(new THREE.Vector3());
+    const size = bbox.getSize(new THREE.Vector3());
+    const maxExtent = Math.max(size.x, size.z);
+    if (!Number.isFinite(maxExtent) || maxExtent <= 0) {
+      throw new Error("Scene bounds are too small for evaluation screenshots.");
+    }
+    const padding = maxExtent * 0.18;
+    const viewSize = maxExtent + padding * 2;
+    const aspect = width / height;
+    const halfHeight = viewSize / 2;
+    const halfWidth = halfHeight * aspect;
+    const renderCamera = new THREE.OrthographicCamera(
+      -halfWidth,
+      halfWidth,
+      halfHeight,
+      -halfHeight,
+      0.1,
+      5000,
+    );
+    renderCamera.position.set(center.x, center.y + size.y * 0.5 + viewSize * 1.2, center.z);
+    renderCamera.lookAt(center.x, center.y, center.z);
+    renderCamera.updateProjectionMatrix();
+    return renderCamera;
+  }
+
+  async function captureEvaluationViews(): Promise<RenderedEvaluationView[]> {
+    if (!currentRoot) {
+      throw new Error("No scene loaded for visual evaluation.");
+    }
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    const views: RenderedEvaluationView[] = [
+      {
+        view_id: "pedestrian_forward",
+        label: "Pedestrian forward view",
+        image_data_url: renderEvaluationCameraToDataUrl(makePedestrianEvaluationCamera(1)),
+      },
+      {
+        view_id: "pedestrian_reverse",
+        label: "Pedestrian reverse view",
+        image_data_url: renderEvaluationCameraToDataUrl(makePedestrianEvaluationCamera(-1)),
+      },
+      {
+        view_id: "overview_topdown",
+        label: "Overview top-down view",
+        image_data_url: renderEvaluationCameraToDataUrl(makeOverviewEvaluationCamera()),
+      },
+    ];
+    return views.every((view) => view.image_data_url.startsWith("data:image/")) ? views : [];
+  }
+
+  function renderEvaluationViewsPreview(views: RenderedEvaluationView[]): string {
+    const complete = views.length === 3;
+    if (!complete) {
+      return `
+        <div class="viewer-evaluate-views" data-state="missing">
+          <div class="viewer-evaluate-views-header">
+            <span>Rendered views</span>
+            <strong>0 / 3 captured</strong>
+          </div>
+          <div class="viewer-evaluate-views-note">Safety and Beauty will stay N/A until Viewer captures all three visual inputs.</div>
+        </div>
+      `;
+    }
+    return `
+      <div class="viewer-evaluate-views" data-state="provided">
+        <div class="viewer-evaluate-views-header">
+          <span>Rendered views</span>
+          <strong>${views.length} / 3 captured</strong>
+        </div>
+        <div class="viewer-evaluate-view-grid">
+          ${views.map((view) => `
+            <figure class="viewer-evaluate-view-card">
+              <img src="${view.image_data_url}" alt="${escapeHtml(view.label)}" />
+              <figcaption>${escapeHtml(view.label)}</figcaption>
+            </figure>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function enforceVisualEvaluationAvailability(result: EvaluationResult): EvaluationResult {
+    const safetyHasVisual = hasProvidedVisualInput(result.llm_status?.safety);
+    const beautyHasVisual = hasProvidedVisualInput(result.llm_status?.beauty);
+    return {
+      ...result,
+      safety: safetyHasVisual ? result.safety : null,
+      beauty: beautyHasVisual ? result.beauty : null,
+      overall: safetyHasVisual && beautyHasVisual ? result.overall : null,
+    };
+  }
+
   async function runEvaluation(): Promise<void> {
     if (!currentLayoutPath) {
       evaluateContentEl.innerHTML = `<div class="viewer-evaluate-empty">No layout loaded.</div>`;
       return;
     }
-    evaluateContentEl.innerHTML = `<div class="viewer-evaluate-loading">Evaluating layout...</div>`;
+    evaluateContentEl.innerHTML = `<div class="viewer-evaluate-loading">Capturing evaluation views...</div>`;
     evaluateRunEl.disabled = true;
 
     try {
+      setStatus("Capturing evaluation views...");
+      let renderedViews: RenderedEvaluationView[] = [];
+      try {
+        renderedViews = await captureEvaluationViews();
+      } catch (captureError) {
+        console.warn("Visual evaluation screenshots failed:", captureError);
+        renderedViews = [];
+      }
+      if (renderedViews.length === 3) {
+        evaluateContentEl.innerHTML = `
+          <div class="viewer-evaluate-loading">Running visual evaluation from 3 rendered views...</div>
+          ${renderEvaluationViewsPreview(renderedViews)}
+        `;
+        setStatus("Running visual evaluation from captured views...");
+      } else {
+        evaluateContentEl.innerHTML = `
+          <div class="viewer-evaluate-loading">Visual capture unavailable. Requesting walkability with Safety/Beauty as N/A...</div>
+          ${renderEvaluationViewsPreview(renderedViews)}
+        `;
+        setStatus("Visual evaluation unavailable; requesting walkability only.");
+      }
+
       const response = await fetch(`${API_BASE}/api/design/evaluate/unified`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ layout_path: currentLayoutPath }),
+        body: JSON.stringify({
+          layout_path: currentLayoutPath,
+          rendered_views: renderedViews,
+        }),
       });
 
       // Handle empty response or non-JSON responses
@@ -4194,51 +5255,60 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           (result && "error" in result ? result.error : "Evaluation failed") as string,
         );
       }
-      const evalResult = result as EvaluationResult;
-      renderEvaluationResult(evalResult);
+      const evalResult = enforceVisualEvaluationAvailability(result as EvaluationResult);
+      renderEvaluationResult(evalResult, renderedViews);
+      flashStatus(
+        renderedViews.length === 3
+          ? "Visual evaluation complete."
+          : "Walkability complete; visual scores unavailable.",
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Evaluation request failed.";
       evaluateContentEl.innerHTML = `<div class="viewer-evaluate-error">${escapeHtml(message)}</div>`;
+      setStatus(`Evaluation failed: ${message}`);
     } finally {
       evaluateRunEl.disabled = false;
     }
   }
 
-  function renderEvaluationResult(result: EvaluationResult): void {
-    const scorePercent = Math.round(clamp(result.overall, 0, 100));
-    const scoreColor = metricColor(result.overall, 100);
+  function renderEvaluationResult(result: EvaluationResult, renderedViews: RenderedEvaluationView[] = []): void {
+    const overallScore = result.overall;
+    const hasOverall = isScoreValue(overallScore);
+    const scorePercent = hasOverall ? Math.round(clamp(overallScore, 0, 100)) : 0;
+    const scoreColor = hasOverall ? metricColor(overallScore, 100) : "#94a3b8";
     const safetyStatus = llmStatusPresentation(result.llm_status?.safety);
     const beautyStatus = llmStatusPresentation(result.llm_status?.beauty);
     evaluateContentEl.innerHTML = `
       <div class="viewer-evaluate-score">
         <div class="viewer-evaluate-score-ring" style="--score-color:${scoreColor};--score-percent:${scorePercent}">
-          <span>${scorePercent}</span>
+          <span>${hasOverall ? scorePercent : "N/A"}</span>
         </div>
-        <div class="viewer-evaluate-score-label">Overall Score</div>
+        <div class="viewer-evaluate-score-label">Visual Overall Score</div>
       </div>
       <div class="viewer-evaluate-score-grid">
         <div class="viewer-evaluate-score-card">
           <div class="viewer-evaluate-score-card-label">Walkability</div>
-          <div class="viewer-evaluate-score-card-value">${Math.round(result.walkability)}</div>
+          <div class="viewer-evaluate-score-card-value">${formatScore(result.walkability)}</div>
         </div>
         <div class="viewer-evaluate-score-card">
-          <div class="viewer-evaluate-score-card-label">Safety</div>
-          <div class="viewer-evaluate-score-card-value">${Math.round(result.safety)}</div>
+          <div class="viewer-evaluate-score-card-label">Visual Safety</div>
+          <div class="viewer-evaluate-score-card-value">${formatScore(result.safety)}</div>
         </div>
         <div class="viewer-evaluate-score-card">
-          <div class="viewer-evaluate-score-card-label">Beauty</div>
-          <div class="viewer-evaluate-score-card-value">${Math.round(result.beauty)}</div>
+          <div class="viewer-evaluate-score-card-label">Visual Beauty</div>
+          <div class="viewer-evaluate-score-card-value">${formatScore(result.beauty)}</div>
         </div>
       </div>
+      ${renderEvaluationViewsPreview(renderedViews)}
       <div class="viewer-evaluate-section">
-        <div class="viewer-metrics-group-title">LLM Status</div>
+        <div class="viewer-metrics-group-title">Visual LLM Status</div>
         <div class="viewer-evaluate-llm-status">
           <div class="viewer-evaluate-llm-row">
-            <span class="viewer-evaluate-llm-label">Safety LLM</span>
+            <span class="viewer-evaluate-llm-label">Safety Visual LLM</span>
             <span class="viewer-evaluate-llm-pill ${safetyStatus.className}">${safetyStatus.label}</span>
           </div>
           <div class="viewer-evaluate-llm-row">
-            <span class="viewer-evaluate-llm-label">Beauty LLM</span>
+            <span class="viewer-evaluate-llm-label">Beauty Visual LLM</span>
             <span class="viewer-evaluate-llm-pill ${beautyStatus.className}">${beautyStatus.label}</span>
           </div>
         </div>
@@ -4565,6 +5635,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         setSettingsOpen(true);
       }
     },
+    "tools-open-design": () => setDesignOpen(!designOpen),
     "tools-open-evaluate": () => setEvaluateOpen(!evaluateOpen),
     "tools-open-compare": () => setCompareOpen(!compareOpen),
     "tools-open-history": () => setHistoryAnalysisOpen(!historyAnalysisOpen),
@@ -4584,6 +5655,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   root.querySelector<HTMLButtonElement>('[data-shell-tab="settings"]')?.addEventListener("click", () => {
     setSettingsOpen(true);
+  }, { signal });
+  root.querySelector<HTMLButtonElement>('[data-shell-tab="design"]')?.addEventListener("click", () => {
+    setDesignOpen(true);
   }, { signal });
   root.querySelector<HTMLButtonElement>('[data-shell-tab="evaluate"]')?.addEventListener("click", () => {
     setEvaluateOpen(true);
@@ -4605,6 +5679,25 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     shell.activateRightTab("floating-lane");
   }, { signal });
 
+  designToggleEl.addEventListener("click", () => setDesignOpen(!designOpen), { signal });
+  designCloseEl.addEventListener("click", () => setDesignOpen(false), { signal });
+  designPresetEl.addEventListener("change", () => {
+    designPromptEl.value = selectedDesignPreset().prompt;
+  }, { signal });
+  designGenerateEl.addEventListener("click", () => void runDesignGeneration(), { signal });
+  designResultEl.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const button = target.closest<HTMLButtonElement>("[data-layout-path]");
+    const layoutPath = button?.dataset.layoutPath?.trim();
+    if (!layoutPath) return;
+    void (async () => {
+      await loadLayoutSelection(layoutPath);
+      const recent = await loadRecentLayouts(50, false);
+      populateRecentLayoutOptions(recent, layoutPath);
+      flashStatus("Selected generated scheme loaded.");
+    })();
+  }, { signal });
+
   evaluateToggleEl.addEventListener("click", () => setEvaluateOpen(!evaluateOpen), { signal });
   evaluateCloseEl.addEventListener("click", () => setEvaluateOpen(false), { signal });
   evaluateRunEl.addEventListener("click", () => void runEvaluation(), { signal });
@@ -4624,6 +5717,43 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const card = target.closest<HTMLElement>("[data-preset-id]");
     if (card?.dataset.presetId) {
       void applyPreset(card.dataset.presetId);
+    }
+  }, { signal });
+
+  // Help panel toggle and close
+  helpToggleEl.addEventListener("click", () => setHelpOpen(!helpOpen), { signal });
+  helpCloseEl.addEventListener("click", () => setHelpOpen(false), { signal });
+
+  // Help icons in Design panel - click to open Help panel
+  root.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    
+    // Handle help icon clicks in Design panel
+    const helpIcon = target.closest<HTMLButtonElement>(".viewer-help-icon");
+    if (helpIcon && helpIcon.dataset.help) {
+      event.preventDefault();
+      event.stopPropagation();
+      setHelpOpen(true);
+      // Optionally scroll to the relevant section
+      return;
+    }
+
+    // Handle help step detail buttons
+    const detailBtn = target.closest<HTMLButtonElement>(".viewer-help-step-detail-btn");
+    if (detailBtn && detailBtn.dataset.detail) {
+      event.preventDefault();
+      const contentEl = helpContentEl.querySelector<HTMLElement>(`[data-detail-content="${detailBtn.dataset.detail}"]`);
+      if (contentEl) {
+        const isHidden = contentEl.hasAttribute("hidden");
+        // Toggle this content and hide all others
+        helpContentEl.querySelectorAll<HTMLElement>("[data-detail-content]").forEach((el) => {
+          el.setAttribute("hidden", "");
+        });
+        if (isHidden) {
+          contentEl.removeAttribute("hidden");
+        }
+      }
+      return;
     }
   }, { signal });
 
