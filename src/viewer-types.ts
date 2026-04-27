@@ -26,6 +26,8 @@ export type RecentLayout = {
 };
 
 export type SceneJobCreatePayload = {
+  job_id: string;
+  status: string;
   draft: {
     normalized_scene_query: string;
     compose_config_patch: Record<string, unknown>;
