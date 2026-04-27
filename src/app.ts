@@ -22,83 +22,70 @@ import type {
   FloatingLaneConfig,
   FLOATING_LANE_COLORS,
   FLOATING_LANE_LABELS,
+  SceneOption,
+  RecentLayout,
+  DesignPreset,
+  SceneJobResult,
+  SceneJobStatusPayload,
+  SceneJobCreatePayload,
+  DesignSchemeVariant,
+  BranchRunNode,
+  BranchScatterPoint,
+  BranchRunStatusPayload,
 } from "./viewer-types";
-import { PER_LANE_COLORS } from "./viewer-types";
+import {
+  GENERATION_STEPS,
+  DESIGN_SCHEME_VARIANTS,
+  VIEWER_DESIGN_PRESETS,
+  DEFAULT_GRAPH_TEMPLATE_ID,
+  PER_LANE_COLORS,
+} from "./viewer-types";
+import {
+  requireElement,
+  escapeHtml,
+  clamp,
+  sleep,
+  disposeObject,
+  asTriplet,
+  isFiniteTriplet,
+  createTextSprite,
+} from "./viewer-utils";
+import {
+  loadManifest,
+  loadRecentLayouts,
+  clearManifestCache,
+  clearRecentLayoutsCache,
+  apiJson,
+  postApiJson,
+  updateQueryLayout,
+} from "./viewer-api";
+import {
+  resolveHitDescriptor,
+  buildInfoCardContent,
+  formatMetric,
+  type HitDescriptor,
+} from "./viewer-hit-info";
+import {
+  sceneBoundsFromBox,
+  updateMinimapCamera,
+  worldToMinimap,
+  drawMinimapOverlay,
+  renderMinimap,
+  type SceneBounds,
+} from "./viewer-minimap";
+import {
+  exportTopDownMapPng,
+  exportTopDownMapSvg,
+} from "./viewer-export";
 import { API_BASE } from "./sg-constants";
 import type { DesktopShell } from "./desktop-shell";
-
-type SceneOption = {
-  key: string;
-  label: string;
-  glbUrl: string;
-};
-
-type RecentLayout = {
-  layout_path: string;
-  label: string;
-  relative_path?: string;
-  updated_at?: string;
-  mtime_ms?: number;
-};
 
 type RecentLayoutsPayload = {
   results?: RecentLayout[];
   error?: string;
 };
 
-type DesignPreset = {
-  id: string;
-  name: string;
-  nameEn: string;
-  description: string;
-  prompt: string;
-  configPatch: Record<string, string | number>;
-};
-
-type SceneJobResult = {
-  scene_layout_path: string;
-  scene_glb_path?: string;
-  scene_ply_path?: string;
-  viewer_url?: string;
-};
-
-type SceneJobOperation = string | {
-  name?: string;
-  status?: string;
-  message?: string;
-  stage?: string;
-  progress?: number;
-  detail?: Record<string, unknown>;
-  timestamp?: string;
-};
-
-type SceneJobStatusPayload = {
-  job_id: string;
-  status: string;
-  stage?: string;
-  progress?: number;
-  operations?: SceneJobOperation[];
-  error?: string;
-  result: SceneJobResult | null;
-};
-
-type SceneJobCreatePayload = {
-  job_id: string;
-  status: string;
-  created_at?: string;
-};
-
-type DesignSchemeVariant = {
-  id: string;
-  name: string;
-  densityMod: number;
-  widthMod: number;
-  seed: number;
-};
-
 type GeneratedDesignScheme = {
-  id: string;
-  name: string;
   layoutPath: string;
   status: "ready" | "failed";
   error?: string;
@@ -110,58 +97,7 @@ type BranchRunCreatePayload = {
   created_at?: string;
 };
 
-type BranchRunNode = {
-  node_id: string;
-  parent_id?: string | null;
-  depth: number;
-  rank: number;
-  status: string;
-  config_patch?: Record<string, unknown>;
-  rag_evidence?: Record<string, unknown>[];
-  optimization_directives?: Record<string, unknown>[];
-  llm_candidate_reasoning?: string;
-  directive_ids?: string[];
-  rejected_edits?: Record<string, unknown>[];
-  scene_layout_path?: string;
-  scene_glb_path?: string;
-  evaluation?: Record<string, unknown>;
-  score?: number;
-  error?: string;
-  blocker_details?: Record<string, unknown>;
-};
-
-type BranchScatterPoint = {
-  node_id: string;
-  parent_id?: string | null;
-  depth: number;
-  rank: number;
-  x?: number | null;
-  y?: number | null;
-  overall?: number | null;
-  walkability?: number | null;
-  safety?: number | null;
-  beauty?: number | null;
-  label?: string;
-  status: string;
-};
-
-type BranchRunStatusPayload = {
-  run_id: string;
-  status: string;
-  stage?: string;
-  progress?: number;
-  prompt?: string;
-  topk?: number;
-  rounds?: number;
-  graph_template_id?: string;
-  best_node_id?: string;
-  frontier?: string[];
-  nodes?: BranchRunNode[];
-  scatter_points?: BranchScatterPoint[];
-  operations?: SceneJobOperation[];
-  error?: string;
-  artifact_dir?: string;
-};
+// Branch types moved to viewer-types.ts
 
 type DesignRunSnapshot = {
   payload: SceneJobStatusPayload;
