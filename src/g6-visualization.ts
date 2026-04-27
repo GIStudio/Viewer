@@ -1,329 +1,120 @@
 /**
- * AntV G6-based visualization for scene generation stage tree and branch runs.
- * 
- * Provides interactive tree/graph visualization for:
- * 1. Stage Growth Tree - shows 10 generation stages with status
- * 2. Branch Run Tree - shows optimization tree with scores
+ * AntV G6 v5-based visualization for scene generation stage progress tree.
  */
 
-import G6 from '@antv/g6';
+import { Graph, treeToGraphData } from '@antv/g6';
 
-export type StageNodeStatus = 'pending' | 'active' | 'completed' | 'failed';
+export type StageStatus = 'pending' | 'active' | 'completed' | 'failed';
 
 export interface StageNode {
   id: string;
   label: string;
-  shortLabel: string;
-  status: StageNodeStatus;
+  status: StageStatus;
   progress: number;
   stepNumber: number;
 }
 
-export interface BranchNode {
-  id: string;
-  label: string;
-  depth: number;
-  rank: number;
-  status: string;
-  score: number | null;
-  parentId: string | null;
-}
-
-const STATUS_COLORS: Record<StageNodeStatus, string> = {
-  pending: '#94a3b8',
-  active: '#2563eb',
-  completed: '#16a34a',
-  failed: '#dc2626',
+const STATUS_CONFIG: Record<StageStatus, { color: string; bg: string; icon: string }> = {
+  pending: { color: '#94a3b8', bg: '#f1f5f9', icon: '○' },
+  active: { color: '#2563eb', bg: '#dbeafe', icon: '◉' },
+  completed: { color: '#16a34a', bg: '#dcfce7', icon: '✓' },
+  failed: { color: '#dc2626', bg: '#fee2e2', icon: '✗' },
 };
 
-const STATUS_ICONS: Record<StageNodeStatus, string> = {
-  pending: '○',
-  active: '◉',
-  completed: '✓',
-  failed: '✗',
-};
+let currentGraph: Graph | null = null;
 
 /**
- * Render stage generation tree using G6
+ * Render stage progress tree using G6 v5
  */
 export function renderStageTree(
-  container: HTMLElement,
+  container: string | HTMLElement,
   stages: StageNode[],
   onNodeClick?: (nodeId: string) => void,
-): G6.TreeGraph {
-  const width = container.clientWidth || 600;
-  const height = Math.max(400, stages.length * 55);
-
-  const graph = new G6.TreeGraph({
-    container,
-    width,
-    height,
-    modes: {
-      default: ['drag-canvas', 'zoom-canvas'],
-    },
-    defaultNode: {
-      size: [280, 48],
-      type: 'rect',
-      style: {
-        radius: 8,
-        fill: '#f8fafc',
-        stroke: '#cbd5e1',
-        lineWidth: 1,
-        cursor: 'pointer',
-      },
-      labelCfg: {
-        style: {
-          fill: '#0f172a',
-          fontSize: 13,
-          fontWeight: 500,
-        },
-      },
-    },
-    defaultEdge: {
-      type: 'cubic-vertical',
-      style: {
-        stroke: '#94a3b8',
-        lineWidth: 2,
-        endArrow: true,
-      },
-    },
-    layout: {
-      type: 'compactBox',
-      direction: 'TB',
-      getId: (d: any) => d.id,
-      getHeight: () => 48,
-      getWidth: () => 280,
-      getVGap: () => 12,
-      getHGap: () => 20,
-    },
-  });
-
-  // Custom node rendering
-  graph.node((node: any) => {
-    const status = node.status as StageNodeStatus;
-    const color = STATUS_COLORS[status];
-    const icon = STATUS_ICONS[status];
-    
-    return {
-      label: `${icon} ${node.label}`,
-      style: {
-        stroke: color,
-        lineWidth: status === 'active' ? 2 : 1,
-        fill: status === 'active' ? '#eff6ff' : '#f8fafc',
-      },
-      labelCfg: {
-        style: {
-          fill: status === 'active' ? '#2563eb' : '#0f172a',
-          fontSize: 13,
-          fontWeight: status === 'active' ? 600 : 500,
-        },
-        position: 'center',
-      },
-    };
-  });
-
-  // Prepare data
-  const data = {
-    id: 'root',
-    label: 'Scene Generation',
-    children: stages.map((stage) => ({
-      id: stage.id,
-      label: `[${stage.stepNumber}] ${stage.label} · ${stage.progress}%`,
-      shortLabel: stage.shortLabel,
-      status: stage.status,
-      progress: stage.progress,
-    })),
-  };
-
-  graph.data(data);
-  graph.render();
-
-  // Event handling
-  graph.on('node:click', (evt: any) => {
-    const nodeId = evt.item?.get('id');
-    if (nodeId && nodeId !== 'root' && onNodeClick) {
-      onNodeClick(nodeId);
-    }
-  });
-
-  // Fit view
-  graph.fitView(20);
-
-  return graph;
-}
-
-/**
- * Render branch run tree using G6
- */
-export function renderBranchTree(
-  container: HTMLElement,
-  nodes: BranchNode[],
-  selectedNodeId: string | null,
-  onNodeClick?: (nodeId: string) => void,
-): G6.TreeGraph {
-  const width = container.clientWidth || 600;
-  const height = Math.max(400, nodes.length * 60);
-
-  const graph = new G6.TreeGraph({
-    container,
-    width,
-    height,
-    modes: {
-      default: ['drag-canvas', 'zoom-canvas'],
-    },
-    defaultNode: {
-      size: [240, 56],
-      type: 'rect',
-      style: {
-        radius: 8,
-        fill: '#f8fafc',
-        stroke: '#cbd5e1',
-        lineWidth: 1,
-        cursor: 'pointer',
-      },
-      labelCfg: {
-        style: {
-          fill: '#0f172a',
-          fontSize: 12,
-        },
-      },
-    },
-    defaultEdge: {
-      type: 'cubic-vertical',
-      style: {
-        stroke: '#94a3b8',
-        lineWidth: 2,
-        endArrow: true,
-      },
-    },
-    layout: {
-      type: 'compactBox',
-      direction: 'TB',
-      getId: (d: any) => d.id,
-      getHeight: () => 56,
-      getWidth: () => 240,
-      getVGap: () => 16,
-      getHGap: () => 24,
-    },
-  });
-
-  // Custom node rendering
-  graph.node((node: any) => {
-    const isBest = node.isBest;
-    const isSelected = node.id === selectedNodeId;
-    const status = node.status;
-    
-    let bgColor = '#f8fafc';
-    let borderColor = '#cbd5e1';
-    let textColor = '#0f172a';
-    
-    if (isBest) {
-      bgColor = '#dcfce7';
-      borderColor = '#16a34a';
-      textColor = '#166534';
-    } else if (isSelected) {
-      bgColor = '#eff6ff';
-      borderColor = '#2563eb';
-      textColor = '#1e40af';
-    } else if (status === 'failed') {
-      bgColor = '#fef2f2';
-      borderColor = '#dc2626';
-      textColor = '#991b1b';
+): Graph | null {
+  try {
+    // Destroy previous graph
+    if (currentGraph) {
+      currentGraph.destroy();
+      currentGraph = null;
     }
 
-    const scoreText = node.score !== null ? `· Score ${node.score}` : '';
-    const bestBadge = isBest ? '⭐ Best' : '';
-    const label = `[D${node.depth}] ${node.label} ${scoreText} ${bestBadge}`;
-
-    return {
-      label,
-      style: {
-        stroke: borderColor,
-        lineWidth: isSelected || isBest ? 2 : 1,
-        fill: bgColor,
-      },
-      labelCfg: {
-        style: {
-          fill: textColor,
-          fontSize: 12,
-          fontWeight: isBest ? 600 : 500,
-        },
-        position: 'center',
-      },
-    };
-  });
-
-  // Build tree structure from flat nodes
-  const buildTree = (flatNodes: BranchNode[]): any => {
-    const nodeMap = new Map<string, any>();
-    const rootChildren: any[] = [];
-
-    // Create all nodes
-    flatNodes.forEach((node) => {
-      nodeMap.set(node.id, {
-        id: node.id,
-        label: `Node #${node.rank}`,
-        depth: node.depth,
-        rank: node.rank,
-        status: node.status,
-        score: node.score,
-        isBest: false,
-        children: [],
-      });
-    });
-
-    // Build parent-child relationships
-    flatNodes.forEach((node) => {
-      const treeNode = nodeMap.get(node.id);
-      if (!node.parentId) {
-        rootChildren.push(treeNode);
-      } else {
-        const parent = nodeMap.get(node.parentId);
-        if (parent) {
-          parent.children.push(treeNode);
-        }
-      }
-    });
-
-    // Mark best node
-    const bestNode = flatNodes.find((n) => n.status === 'succeeded' && n.score === Math.max(...flatNodes.filter(x => x.score !== null).map(x => x.score || 0)));
-    if (bestNode) {
-      const bestTreeNode = nodeMap.get(bestNode.id);
-      if (bestTreeNode) {
-        bestTreeNode.isBest = true;
-      }
-    }
-
-    return {
+    // Prepare tree data
+    const treeData = {
       id: 'root',
-      label: 'Branch Run',
-      children: rootChildren,
+      label: '场景生成',
+      children: stages.map((stage) => ({
+        id: stage.id,
+        label: `${STATUS_CONFIG[stage.status].icon} [${stage.stepNumber}] ${stage.label.split(' · ')[0]} · ${stage.progress}%`,
+        status: stage.status,
+        progress: stage.progress,
+      })),
     };
-  };
 
-  const data = buildTree(nodes);
-  graph.data(data);
-  graph.render();
+    // Convert to graph data
+    const data = treeToGraphData(treeData);
 
-  // Event handling
-  graph.on('node:click', (evt: any) => {
-    const nodeId = evt.item?.get('id');
-    if (nodeId && nodeId !== 'root' && onNodeClick) {
-      onNodeClick(nodeId);
-    }
-  });
+    // Create G6 v5 Graph
+    currentGraph = new Graph({
+      container: typeof container === 'string' 
+        ? (container.startsWith('#') ? container.substring(1) : container)
+        : (container as any),
+      width: 600,
+      height: Math.max(450, stages.length * 50 + 80),
+      autoFit: 'view',
+      data,
+      layout: {
+        type: 'compact-box',
+        direction: 'LR',
+        getHeight: () => 40,
+        getWidth: () => 260,
+        getVGap: () => 10,
+        getHGap: () => 40,
+      },
+      node: {
+        style: {
+          size: [260, 40],
+          type: 'rect',
+          radius: 8,
+          fill: (d: any) => {
+            const status = d.data?.status as StageStatus | undefined;
+            return (status && STATUS_CONFIG[status]?.bg) || '#f8fafc';
+          },
+          stroke: (d: any) => {
+            const status = d.data?.status as StageStatus | undefined;
+            return (status && STATUS_CONFIG[status]?.color) || '#cbd5e1';
+          },
+          lineWidth: (d: any) => d.data?.status === 'active' ? 2 : 1,
+          labelText: (d: any) => d.data?.label || d.id,
+          labelPlacement: 'center',
+          labelFontSize: 12,
+          labelFill: (d: any) => d.data?.status === 'active' ? '#2563eb' : '#0f172a',
+          labelFontWeight: (d: any) => d.data?.status === 'active' ? 600 : 500,
+          cursor: 'pointer',
+        },
+      },
+      edge: {
+        type: 'cubic-horizontal',
+        style: {
+          stroke: '#94a3b8',
+          lineWidth: 2,
+        },
+      },
+    });
 
-  // Fit view
-  graph.fitView(20);
+    // Render
+    currentGraph.render();
 
-  return graph;
-}
+    // Event handling
+    currentGraph.on('node:click', (evt: any) => {
+      const nodeId = evt.target?.id || evt.node?.id;
+      if (nodeId && nodeId !== 'root' && onNodeClick) {
+        onNodeClick(nodeId);
+      }
+    });
 
-/**
- * Destroy G6 graph instance
- */
-export function destroyGraph(graph: G6.TreeGraph | null): void {
-  if (graph) {
-    graph.destroy();
+    return currentGraph;
+  } catch (error) {
+    console.error('G6 stage tree render error:', error);
+    return null;
   }
 }

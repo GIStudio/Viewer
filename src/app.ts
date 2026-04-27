@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { renderStageTree as renderG6StageTree, StageNode } from "./g6-visualization";
 import { AudioManager } from "./audio-manager";
 import { createCompareMode } from "./compare-mode";
 import { HistoryScatterPlot, type SceneHistoryEntry } from "./history-scatter-plot";
@@ -2361,6 +2362,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   const canvasHost = requireElement<HTMLElement>(root, "#viewer-canvas");
   const designWorkspaceEl = requireElement<HTMLElement>(root, "#viewer-design-workspace");
+  let g6StageGraph: ReturnType<typeof renderG6StageTree> | null = null;
   const statusEl = requireElement<HTMLElement>(root, "#viewer-status");
   const overlayEl = requireElement<HTMLElement>(root, "#viewer-overlay");
   const errorEl = requireElement<HTMLElement>(root, "#viewer-error");
@@ -5426,37 +5428,62 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     `;
   }
 
-  function renderDesignStageTree(payload: SceneJobStatusPayload, currentStage: string, failed: boolean): string {
+  function renderDesignStageTree(payload: SceneJobStatusPayload, currentStage: string, failed: boolean): void {
     const currentIndex = Math.max(0, getStepIndex(currentStage));
-    return `
-      <div class="viewer-branch-tree">
-        ${GENERATION_STEPS.map((step, index) => {
-          const operation = latestOperationForStage(payload, step.key);
-          const state =
-            failed && index === currentIndex
-              ? "failed"
-              : index < currentIndex || step.key === "succeeded"
-                ? "completed"
-                : index === currentIndex
-                  ? "active"
-                  : "pending";
-          const percent = typeof operation?.progress === "number" ? operation.progress : step.progress;
-          return `
-            <button
-              class="viewer-branch-node"
-              data-design-stage="${escapeHtml(step.key)}"
-              data-depth="${escapeHtml(String(index))}"
-              data-status="${escapeHtml(state)}"
-              type="button"
-            >
-              <span>步骤 ${index + 1} · ${escapeHtml(step.shortLabel)}</span>
-              <strong>${escapeHtml(step.label)}</strong>
-              <small>${escapeHtml(state)} · ${Math.round(percent)}%</small>
-            </button>
-          `;
-        }).join("")}
-      </div>
-    `;
+    
+    // Prepare stage nodes data for G6
+    const stageNodes: StageNode[] = GENERATION_STEPS.map((step, index) => {
+      const operation = latestOperationForStage(payload, step.key);
+      const state =
+        failed && index === currentIndex
+          ? "failed"
+          : index < currentIndex || step.key === "succeeded"
+            ? "completed"
+            : index === currentIndex
+              ? "active"
+              : "pending";
+      const percent = typeof operation?.progress === "number" ? operation.progress : step.progress;
+      
+      return {
+        id: step.key,
+        label: `${step.label} · ${Math.round(percent)}%`,
+        status: state,
+        progress: percent,
+        stepNumber: index + 1,
+      };
+    });
+
+    // Destroy previous G6 graph if exists
+    if (g6StageGraph) {
+      g6StageGraph.destroy();
+      g6StageGraph = null;
+    }
+
+    // Create container for G6
+    const containerId = "viewer-g6-stage-tree";
+    let container = document.getElementById(containerId);
+    if (!container) {
+      container = document.createElement("div");
+      container.id = containerId;
+      container.style.width = "100%";
+      container.style.height = "500px";
+      container.style.background = "#fafbfc";
+      container.style.borderRadius = "8px";
+      container.style.border = "1px solid #e2e8f0";
+      
+      // Insert before stage cards
+      const stageCards = designWorkspaceEl.querySelector(".viewer-design-stage-cards");
+      if (stageCards && stageCards.parentNode) {
+        stageCards.parentNode.insertBefore(container, stageCards);
+      } else {
+        designWorkspaceEl.appendChild(container);
+      }
+    }
+
+    // Render G6 tree
+    g6StageGraph = renderG6StageTree(`#${containerId}`, stageNodes, (nodeId) => {
+      openDesignStageDiagnostic(nodeId);
+    });
   }
 
   function renderDesignStageCards(payload: SceneJobStatusPayload, currentStage: string, failed: boolean): string {
@@ -5531,7 +5558,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           ${renderDesignImprovementSummary(preset, variant, prompt, graphTemplateId)}
           <section class="viewer-design-workspace-panel">
             <div class="viewer-design-workspace-panel-title">场景生长树</div>
-            ${renderDesignStageTree(payload, stage, failed)}
+            <div id="viewer-g6-stage-tree"></div>
           </section>
           <section class="viewer-design-workspace-panel">
             <div class="viewer-design-workspace-panel-title">当前阶段在做什么</div>
@@ -5544,6 +5571,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         ${renderDesignStageCards(payload, stage, failed)}
       </div>
     `;
+    
+    // Render G6 stage tree after DOM is updated
+    requestAnimationFrame(() => {
+      renderDesignStageTree(payload, stage, failed);
+    });
   }
 
   function hideDesignWorkspace(): void {
