@@ -103,6 +103,65 @@ type GeneratedDesignScheme = {
   error?: string;
 };
 
+type BranchRunCreatePayload = {
+  run_id: string;
+  status: string;
+  created_at?: string;
+};
+
+type BranchRunNode = {
+  node_id: string;
+  parent_id?: string | null;
+  depth: number;
+  rank: number;
+  status: string;
+  config_patch?: Record<string, unknown>;
+  rag_evidence?: Record<string, unknown>[];
+  optimization_directives?: Record<string, unknown>[];
+  llm_candidate_reasoning?: string;
+  directive_ids?: string[];
+  rejected_edits?: Record<string, unknown>[];
+  scene_layout_path?: string;
+  scene_glb_path?: string;
+  evaluation?: Record<string, unknown>;
+  score?: number;
+  error?: string;
+  blocker_details?: Record<string, unknown>;
+};
+
+type BranchScatterPoint = {
+  node_id: string;
+  parent_id?: string | null;
+  depth: number;
+  rank: number;
+  x?: number | null;
+  y?: number | null;
+  overall?: number | null;
+  walkability?: number | null;
+  safety?: number | null;
+  beauty?: number | null;
+  label?: string;
+  status: string;
+};
+
+type BranchRunStatusPayload = {
+  run_id: string;
+  status: string;
+  stage?: string;
+  progress?: number;
+  prompt?: string;
+  topk?: number;
+  rounds?: number;
+  graph_template_id?: string;
+  best_node_id?: string;
+  frontier?: string[];
+  nodes?: BranchRunNode[];
+  scatter_points?: BranchScatterPoint[];
+  operations?: SceneJobOperation[];
+  error?: string;
+  artifact_dir?: string;
+};
+
 type DesignRunSnapshot = {
   payload: SceneJobStatusPayload;
   preset: DesignPreset | null;
@@ -1935,6 +1994,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
               <div id="viewer-design-result" class="viewer-design-result"></div>
             </div>
             <div class="viewer-slide-panel-footer">
+              <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Branch Run</button>
               <button id="viewer-design-generate" class="viewer-nav-button" type="button">Generate & Load</button>
             </div>
           </aside>
@@ -2344,6 +2404,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const designPromptEl = requireElement<HTMLTextAreaElement>(root, "#viewer-design-prompt");
   const designCountEl = requireElement<HTMLSelectElement>(root, "#viewer-design-count");
   const designTemplateEl = requireElement<HTMLInputElement>(root, "#viewer-design-template");
+  const designBranchRunEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-run");
   const designGenerateEl = requireElement<HTMLButtonElement>(root, "#viewer-design-generate");
   const designStatusEl = requireElement<HTMLElement>(root, "#viewer-design-status");
   const designResultEl = requireElement<HTMLElement>(root, "#viewer-design-result");
@@ -2690,6 +2751,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let statusResetHandle: number | null = null;
   let designOpen = false;
   let designIsGenerating = false;
+  let branchRunIsGenerating = false;
+  let lastBranchRunSnapshot: BranchRunStatusPayload | null = null;
+  let selectedBranchNodeId: string | null = null;
   let lastDesignRunSnapshot: DesignRunSnapshot | null = null;
   let evaluateOpen = false;
   let compareOpen = false;
@@ -5244,10 +5308,42 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         sidewalk_width_m: detail.sidewalk_width_m || detail.sidewalkWidthM,
       })),
       renderDiagnosticSection("配置补丁", renderDiagnosticKeyValues(asRecord(detail.config_patch || detail.configPatch || detail.compose_config_patch || detail.composeConfigPatch), 20)),
-      renderDiagnosticSection("RAG 引用证据", renderDiagnosticKeyValues({
-        citations_count: Array.isArray(detail.citations_by_field) ? detail.citations_by_field.length : Object.keys(asRecord(detail.citations_by_field || detail.citationsByField)).length,
-        knowledge_source: detail.knowledge_source || detail.knowledgeSource,
-      })),
+      renderDiagnosticSection("RAG 引用证据", (() => {
+        const citationsField = detail.citations_by_field || detail.citationsByField;
+        const citationsRecord = asRecord(citationsField);
+        const citationKeys = Object.keys(citationsRecord);
+        const totalCitations = citationKeys.reduce((sum, key) => {
+          const value = citationsRecord[key];
+          if (Array.isArray(value)) return sum + value.length;
+          if (typeof value === "string" && value) return sum + 1;
+          return sum;
+        }, 0);
+        
+        const knowledgeSource = String(detail.knowledge_source || detail.knowledgeSource || "graph_rag");
+        const evidenceCount = Number(detail.evidence_count || detail.evidenceCount || totalCitations);
+        
+        if (evidenceCount === 0) {
+          return renderDiagnosticKeyValues({
+            citations_count: 0,
+            knowledge_source: knowledgeSource,
+            status: "RAG 检索未返回结果或已禁用",
+          });
+        }
+        
+        // Build citation details
+        const citationDetails = citationKeys.map((key) => {
+          const value = citationsRecord[key];
+          const count = Array.isArray(value) ? value.length : (value ? 1 : 0);
+          return `${key}: ${count} 条引用`;
+        }).join("\n");
+        
+        return renderDiagnosticKeyValues({
+          citations_count: evidenceCount,
+          knowledge_source: knowledgeSource,
+          status: evidenceCount > 0 ? "✅ RAG 检索成功" : "❌ 无引用",
+          citation_details: citationDetails || "无详细引用",
+        });
+      })()),
     ].join("");
   }
 
@@ -5429,6 +5525,263 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       lastDesignRunSnapshot.graphTemplateId,
     );
     flashStatus("Design generation steps reopened.");
+  }
+
+  function branchNodes(payload: BranchRunStatusPayload): BranchRunNode[] {
+    return [...(payload.nodes ?? [])].sort((a, b) => a.depth - b.depth || b.score! - a.score! || a.rank - b.rank);
+  }
+
+  function selectedBranchNode(payload: BranchRunStatusPayload): BranchRunNode | null {
+    const nodes = branchNodes(payload);
+    if (selectedBranchNodeId) {
+      const selected = nodes.find((node) => node.node_id === selectedBranchNodeId);
+      if (selected) return selected;
+    }
+    if (payload.best_node_id) {
+      const best = nodes.find((node) => node.node_id === payload.best_node_id);
+      if (best) return best;
+    }
+    return nodes[0] ?? null;
+  }
+
+  function formatBranchScore(value: unknown): string {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "N/A";
+    return `${Math.round(value)}`;
+  }
+
+  function renderBranchTree(payload: BranchRunStatusPayload, selectedId: string | null): string {
+    const nodes = branchNodes(payload);
+    if (nodes.length === 0) return `<div class="viewer-design-workspace-muted">等待分支节点生成。</div>`;
+    const bestId = payload.best_node_id ?? "";
+    return `
+      <div class="viewer-branch-tree">
+        ${nodes.map((node) => `
+          <button
+            class="viewer-branch-node"
+            data-branch-node="${escapeHtml(node.node_id)}"
+            data-depth="${escapeHtml(String(node.depth))}"
+            data-status="${escapeHtml(node.status)}"
+            data-selected="${node.node_id === selectedId ? "true" : "false"}"
+            type="button"
+          >
+            <span>D${node.depth} · #${node.rank}</span>
+            <strong>${escapeHtml(node.node_id)}${node.node_id === bestId ? " · Best" : ""}</strong>
+            <small>${escapeHtml(node.status)} · score ${escapeHtml(formatBranchScore(node.score))}</small>
+          </button>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function renderBranchScatter(payload: BranchRunStatusPayload, selectedId: string | null): string {
+    const points = payload.scatter_points ?? [];
+    if (points.length === 0) {
+      return `<div class="viewer-design-workspace-muted">等待评价结果生成散点图。</div>`;
+    }
+    const plotWidth = 540;
+    const plotHeight = 320;
+    const padding = 34;
+    const scaleX = (value: number | null | undefined) => padding + (clamp(Number(value ?? 0), 0, 100) / 100) * (plotWidth - padding * 2);
+    const scaleY = (value: number | null | undefined) => plotHeight - padding - (clamp(Number(value ?? 0), 0, 100) / 100) * (plotHeight - padding * 2);
+    return `
+      <div class="viewer-branch-scatter-wrap">
+        <svg class="viewer-branch-scatter" viewBox="0 0 ${plotWidth} ${plotHeight}" role="img" aria-label="Branch evaluation scatter plot">
+          <line x1="${padding}" y1="${plotHeight - padding}" x2="${plotWidth - padding}" y2="${plotHeight - padding}" />
+          <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${plotHeight - padding}" />
+          <text x="${plotWidth / 2}" y="${plotHeight - 7}">Walkability</text>
+          <text x="10" y="20">Overall</text>
+          ${points.map((point) => {
+            const radius = point.status === "succeeded" ? 7 + clamp(Number(point.overall ?? 50), 0, 100) / 28 : 6;
+            return `
+              <circle
+                class="viewer-branch-point"
+                data-branch-node="${escapeHtml(point.node_id)}"
+                data-status="${escapeHtml(point.status)}"
+                data-selected="${point.node_id === selectedId ? "true" : "false"}"
+                cx="${scaleX(point.x)}"
+                cy="${scaleY(point.y)}"
+                r="${radius}"
+              />
+              <text class="viewer-branch-point-label" x="${scaleX(point.x) + 9}" y="${scaleY(point.y) - 8}">D${point.depth}</text>
+            `;
+          }).join("")}
+        </svg>
+      </div>
+    `;
+  }
+
+  function renderBranchNodeDetail(node: BranchRunNode | null): string {
+    if (!node) return `<div class="viewer-design-workspace-muted">选择一个分支节点查看细节。</div>`;
+    const evaluation = asRecord(node.evaluation);
+    return `
+      <div class="viewer-branch-detail">
+        <div class="viewer-branch-detail-actions">
+          ${node.scene_layout_path ? `
+            <button class="viewer-design-stage-detail-button" type="button" data-branch-load="${escapeHtml(node.scene_layout_path)}">Load Scene</button>
+          ` : ""}
+        </div>
+        ${renderDiagnosticSection("评价结果", renderDiagnosticKeyValues({
+          status: node.status,
+          score: node.score,
+          walkability: evaluation.walkability,
+          safety: evaluation.safety,
+          beauty: evaluation.beauty,
+          overall: evaluation.overall,
+          error: node.error,
+        }))}
+        ${renderDiagnosticSection("LLM 候选与实际参数", `
+          <p class="viewer-design-workspace-copy">${escapeHtml(node.llm_candidate_reasoning || "无 LLM reasoning。")}</p>
+          ${renderDiagnosticKeyValues(asRecord(node.config_patch), 28)}
+        `)}
+        ${renderDiagnosticSection("Rule-Based 优化方向", renderDiagnosticTable(asRecords(node.optimization_directives), [
+          ["directive_id", "Directive"],
+          ["target_metric", "目标"],
+          ["direction", "方向"],
+          ["allowed_fields", "允许字段"],
+          ["risk", "风险"],
+        ], "该节点尚未生成优化方向。"))}
+        ${renderDiagnosticSection("LLM 修改拦截", renderDiagnosticTable(asRecords(node.rejected_edits), [
+          ["field", "字段"],
+          ["value", "LLM 值"],
+          ["reason", "拦截原因"],
+        ], "没有被拦截的修改。"))}
+        ${renderDiagnosticSection("RAG 证据", renderDiagnosticTable(asRecords(node.rag_evidence), [
+          ["chunk_id", "Chunk"],
+          ["section_title", "章节"],
+          ["score", "相关度"],
+          ["knowledge_source", "来源"],
+        ], "该节点没有直接 RAG 证据。"))}
+      </div>
+    `;
+  }
+
+  function renderBranchWorkspace(payload: BranchRunStatusPayload): void {
+    lastBranchRunSnapshot = payload;
+    const selected = selectedBranchNode(payload);
+    selectedBranchNodeId = selected?.node_id ?? selectedBranchNodeId;
+    const progress = Math.round(clamp(Number(payload.progress ?? 0), 0, 100));
+    designWorkspaceEl.hidden = false;
+    minimapEl.hidden = true;
+    designWorkspaceEl.innerHTML = `
+      <div class="viewer-design-workspace-shell">
+        <header class="viewer-design-workspace-header">
+          <div>
+            <span class="viewer-design-workspace-kicker">Branch Run · Top-${escapeHtml(String(payload.topk ?? 3))} · ${escapeHtml(payload.graph_template_id ?? DEFAULT_GRAPH_TEMPLATE_ID)}</span>
+            <h2>Design Evolution</h2>
+            <p>${escapeHtml(payload.prompt ?? designPromptEl.value.trim())}</p>
+          </div>
+          <div class="viewer-design-workspace-progress">
+            <strong>${progress}%</strong>
+            <span>${escapeHtml(payload.stage || payload.status)}</span>
+          </div>
+        </header>
+        <div class="viewer-design-workspace-progressbar" aria-label="Branch run progress">
+          <div style="width:${progress}%"></div>
+        </div>
+        <div class="viewer-branch-layout">
+          <section class="viewer-design-workspace-panel">
+            <div class="viewer-design-workspace-panel-title">分支树</div>
+            ${renderBranchTree(payload, selected?.node_id ?? null)}
+          </section>
+          <section class="viewer-design-workspace-panel">
+            <div class="viewer-design-workspace-panel-title">评价散点图</div>
+            ${renderBranchScatter(payload, selected?.node_id ?? null)}
+          </section>
+          <section class="viewer-design-workspace-panel">
+            <div class="viewer-design-workspace-panel-title">节点详情</div>
+            ${renderBranchNodeDetail(selected)}
+          </section>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderBranchRunResults(payload: BranchRunStatusPayload): void {
+    const readyNodes = branchNodes(payload).filter((node) => node.status === "succeeded" && node.scene_layout_path);
+    if (readyNodes.length === 0) {
+      designResultEl.innerHTML = `<div class="viewer-design-workspace-muted">No branch scene is ready yet.</div>`;
+      return;
+    }
+    designResultEl.innerHTML = `
+      <div class="viewer-design-schemes">
+        ${readyNodes.map((node) => `
+          <button class="viewer-design-scheme" type="button" data-layout-path="${escapeHtml(node.scene_layout_path || "")}">
+            <span>
+              <strong>D${node.depth} · #${node.rank} · ${escapeHtml(node.node_id)}</strong>
+              <small>score ${escapeHtml(formatBranchScore(node.score))} · ${escapeHtml(node.scene_layout_path || "")}</small>
+            </span>
+            <em>Load</em>
+          </button>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  async function waitForBranchRun(runId: string): Promise<BranchRunStatusPayload> {
+    for (let attempt = 0; attempt < DESIGN_MAX_POLL_ATTEMPTS; attempt += 1) {
+      const payload = await apiJson<BranchRunStatusPayload>(`/api/design/branch-runs/${encodeURIComponent(runId)}`);
+      const progress = Math.round(clamp(Number(payload.progress ?? 0), 0, 100));
+      updateDesignStatus(`Branch run: ${payload.stage || payload.status} (${progress}%)`);
+      renderBranchWorkspace(payload);
+      renderBranchRunResults(payload);
+      if (payload.status === "succeeded") return payload;
+      if (payload.status === "failed") throw new Error(payload.error || "Branch run failed.");
+      await sleep(DESIGN_POLL_INTERVAL_MS);
+    }
+    throw new Error("Branch run timed out.");
+  }
+
+  async function runBranchGeneration(): Promise<void> {
+    if (branchRunIsGenerating || designIsGenerating) return;
+    const prompt = designPromptEl.value.trim() || selectedDesignPreset()?.prompt || "Generate a walkable complete street.";
+    const graphTemplateId = designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
+    branchRunIsGenerating = true;
+    designBranchRunEl.disabled = true;
+    designGenerateEl.disabled = true;
+    selectedBranchNodeId = null;
+    updateDesignStatus("Submitting branch run...");
+    designResultEl.innerHTML = "";
+    try {
+      const created = await postApiJson<BranchRunCreatePayload>("/api/design/branch-runs", {
+        prompt,
+        topk: 3,
+        rounds: 2,
+        graph_template_id: graphTemplateId,
+        knowledge_source: "graph_rag",
+        scene_context: {
+          layout_mode: "graph_template",
+          graph_template_id: graphTemplateId,
+        },
+        generation_options: {},
+        evaluation_weights: {
+          walkability: 0.4,
+          safety: 0.3,
+          beauty: 0.3,
+        },
+      });
+      const payload = await waitForBranchRun(created.run_id);
+      lastBranchRunSnapshot = payload;
+      renderBranchWorkspace(payload);
+      renderBranchRunResults(payload);
+      const best = branchNodes(payload).find((node) => node.node_id === payload.best_node_id);
+      if (best?.scene_layout_path) {
+        recentLayoutsCache = null;
+        clearManifestCache();
+        await loadLayoutSelection(best.scene_layout_path);
+        const recent = await loadRecentLayouts(50, false);
+        populateRecentLayoutOptions(recent, best.scene_layout_path);
+      }
+      updateDesignStatus("Branch run complete.", "success");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Branch run failed.";
+      updateDesignStatus(message, "error");
+      designResultEl.innerHTML = `<div class="viewer-design-error">${escapeHtml(message)}</div>`;
+      setError(errorEl, message);
+    } finally {
+      branchRunIsGenerating = false;
+      designBranchRunEl.disabled = false;
+      designGenerateEl.disabled = false;
+    }
   }
 
   function renderDesignSteps(payload: SceneJobStatusPayload, currentStage: string, failed: boolean = false): string {
@@ -6362,8 +6715,27 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
   }, { signal });
   designGenerateEl.addEventListener("click", () => void runDesignGeneration(), { signal });
+  designBranchRunEl.addEventListener("click", () => void runBranchGeneration(), { signal });
   designWorkspaceEl.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement;
+    const target = event.target as Element;
+    const loadButton = target.closest<HTMLElement>("[data-branch-load]");
+    const loadPath = loadButton?.dataset.branchLoad?.trim();
+    if (loadPath) {
+      void (async () => {
+        await loadLayoutSelection(loadPath);
+        const recent = await loadRecentLayouts(50, false);
+        populateRecentLayoutOptions(recent, loadPath);
+        flashStatus("Branch node scene loaded.");
+      })();
+      return;
+    }
+    const branchNodeButton = target.closest<HTMLElement>("[data-branch-node]");
+    const branchNodeId = branchNodeButton?.dataset.branchNode?.trim();
+    if (branchNodeId && lastBranchRunSnapshot) {
+      selectedBranchNodeId = branchNodeId;
+      renderBranchWorkspace(lastBranchRunSnapshot);
+      return;
+    }
     if (target.closest("[data-design-modal-close]")) {
       closeDesignStageDiagnostic();
       return;
