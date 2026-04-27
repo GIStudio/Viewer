@@ -105,7 +105,7 @@ type GeneratedDesignScheme = {
 
 type DesignRunSnapshot = {
   payload: SceneJobStatusPayload;
-  preset: DesignPreset;
+  preset: DesignPreset | null;
   variant: DesignSchemeVariant;
   prompt: string;
   graphTemplateId: string;
@@ -1910,7 +1910,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                 <span>Preset</span>
                 <button class="viewer-help-icon" type="button" data-help="design-preset" title="了解预设">?</button>
               </label>
-              <select id="viewer-design-preset" class="viewer-select viewer-select-compact"></select>
+              <select id="viewer-design-preset" class="viewer-select viewer-select-compact">
+                <option value="__custom__">Custom / LLM-Driven（自定义）</option>
+              </select>
               <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-prompt">
                 <span>Prompt</span>
                 <button class="viewer-help-icon" type="button" data-help="design-prompt" title="了解提示词">?</button>
@@ -4723,6 +4725,14 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   function populateDesignPresets(): void {
     designPresetEl.innerHTML = "";
+    
+    // Add custom/LLM-driven option first
+    const customOption = document.createElement("option");
+    customOption.value = "__custom__";
+    customOption.textContent = "Custom / LLM-Driven（自定义）";
+    designPresetEl.appendChild(customOption);
+    
+    // Add all presets
     for (const preset of VIEWER_DESIGN_PRESETS) {
       const optionEl = document.createElement("option");
       optionEl.value = preset.id;
@@ -4730,15 +4740,17 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       optionEl.title = preset.description;
       designPresetEl.appendChild(optionEl);
     }
-    const firstPreset = VIEWER_DESIGN_PRESETS[0];
-    if (firstPreset) {
-      designPresetEl.value = firstPreset.id;
-      designPromptEl.value = firstPreset.prompt;
-    }
+    
+    // Default to custom (LLM-driven)
+    designPresetEl.value = "__custom__";
   }
 
-  function selectedDesignPreset(): DesignPreset {
-    return VIEWER_DESIGN_PRESETS.find((preset) => preset.id === designPresetEl.value) ?? VIEWER_DESIGN_PRESETS[0]!;
+  function selectedDesignPreset(): DesignPreset | null {
+    const selectedId = designPresetEl.value;
+    if (selectedId === "__custom__") {
+      return null; // No preset, let LLM drive
+    }
+    return VIEWER_DESIGN_PRESETS.find((preset) => preset.id === selectedId) ?? null;
   }
 
   function updateDesignStatus(message: string, tone: "neutral" | "success" | "warning" | "error" = "neutral"): void {
@@ -4787,15 +4799,17 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   async function submitDesignJob(
-    preset: DesignPreset,
+    preset: DesignPreset | null,
     prompt: string,
     graphTemplateId: string,
     variant: DesignSchemeVariant,
   ): Promise<SceneJobCreatePayload> {
+    // If no preset selected, use empty configPatch to let LLM drive all parameters
+    const configPatch = preset?.configPatch ?? {};
     return postApiJson<SceneJobCreatePayload>("/api/scene/jobs", {
       draft: {
         normalized_scene_query: prompt,
-        compose_config_patch: configForDesignVariant(preset.configPatch, variant),
+        compose_config_patch: configForDesignVariant(configPatch, variant),
         citations_by_field: {},
         design_summary: prompt,
         risk_notes: [],
@@ -4810,7 +4824,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       },
       patch_overrides: {},
       generation_options: {
-        preset_id: preset.id,
+        preset_id: preset?.id ?? "custom",
         random_seed: variant.seed,
       },
     });
@@ -5275,24 +5289,29 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   function renderDesignImprovementSummary(
-    preset: DesignPreset,
+    preset: DesignPreset | null,
     variant: DesignSchemeVariant,
     prompt: string,
     graphTemplateId: string,
   ): string {
-    const config = configForDesignVariant(preset.configPatch, variant);
+    const configPatch = preset?.configPatch ?? {};
+    const config = configForDesignVariant(configPatch, variant);
+    const presetLabel = preset ? `${preset.nameEn} / ${preset.name}` : "Custom / LLM-Driven";
+    
     const items = [
-      ["设计规则", config.design_rule_profile],
-      ["目标 profile", config.objective_profile],
-      ["密度", config.density],
-      ["道路宽度", config.road_width_m ? `${config.road_width_m} m` : undefined],
-      ["行人需求", config.ped_demand_level],
-      ["自行车需求", config.bike_demand_level],
-      ["公交需求", config.transit_demand_level],
-      ["车流需求", config.vehicle_demand_level],
+      ["预设", presetLabel],
+      preset ? ["设计规则", config.design_rule_profile] : null,
+      preset ? ["目标 profile", config.objective_profile] : null,
+      preset ? ["密度", config.density] : ["密度", "LLM 自动推导"],
+      preset ? ["道路宽度", config.road_width_m ? `${config.road_width_m} m` : undefined] : ["道路宽度", "LLM 自动推导"],
+      preset ? ["行人需求", config.ped_demand_level] : ["行人需求", "LLM 自动推导"],
+      preset ? ["自行车需求", config.bike_demand_level] : ["自行车需求", "LLM 自动推导"],
+      preset ? ["公交需求", config.transit_demand_level] : ["公交需求", "LLM 自动推导"],
+      preset ? ["车流需求", config.vehicle_demand_level] : ["车流需求", "LLM 自动推导"],
       ["图模板", graphTemplateId],
       ["随机种子", variant.seed],
-    ].filter(([, value]) => value !== undefined && value !== "");
+    ].filter((item): item is [string, string | number] => item !== null && item[1] !== undefined && item[1] !== "");
+    
     return `
       <section class="viewer-design-workspace-panel">
         <div class="viewer-design-workspace-panel-title">本次方案实际改了什么</div>
@@ -5348,7 +5367,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   function renderDesignWorkspace(
     payload: SceneJobStatusPayload,
-    preset: DesignPreset,
+    preset: DesignPreset | null,
     variant: DesignSchemeVariant,
     prompt: string,
     graphTemplateId: string,
@@ -5358,12 +5377,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const { progress, message, stage } = describeDesignJobProgress(payload);
     const failed = payload.status === "failed";
     const step = stepForStage(stage);
+    const presetLabel = preset ? `${preset.nameEn}` : "Custom";
     designWorkspaceEl.hidden = false;
     designWorkspaceEl.innerHTML = `
       <div class="viewer-design-workspace-shell">
         <header class="viewer-design-workspace-header">
           <div>
-            <span class="viewer-design-workspace-kicker">${escapeHtml(variant.name)} · ${escapeHtml(preset.nameEn)}</span>
+            <span class="viewer-design-workspace-kicker">${escapeHtml(variant.name)} · ${escapeHtml(presetLabel)}</span>
             <h2>Design Run</h2>
             <p>${escapeHtml(message)}</p>
           </div>
@@ -5489,7 +5509,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   async function waitForDesignJob(
     jobId: string,
-    preset: DesignPreset,
+    preset: DesignPreset | null,
     variant: DesignSchemeVariant,
     prompt: string,
     graphTemplateId: string,
@@ -5522,7 +5542,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   async function runDesignGeneration(): Promise<void> {
     if (designIsGenerating) return;
     const preset = selectedDesignPreset();
-    const prompt = designPromptEl.value.trim() || preset.prompt;
+    const prompt = designPromptEl.value.trim() || (preset?.prompt ?? "");
     const graphTemplateId = designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
     const variants = designCountEl.value === "3" ? DESIGN_SCHEME_VARIANTS : [DESIGN_SCHEME_VARIANTS[0]];
     const generatedSchemes: GeneratedDesignScheme[] = [];
@@ -5532,11 +5552,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     updateDesignStatus("Submitting generation job...");
     designResultEl.innerHTML = "";
     designWorkspaceEl.hidden = false;
+    const presetLabel = preset ? `${preset.nameEn} / ${preset.name}` : "Custom / LLM-Driven";
     designWorkspaceEl.innerHTML = `
       <div class="viewer-design-workspace-shell">
         <header class="viewer-design-workspace-header">
           <div>
-            <span class="viewer-design-workspace-kicker">${escapeHtml(preset.nameEn)} · ${escapeHtml(graphTemplateId)}</span>
+            <span class="viewer-design-workspace-kicker">${escapeHtml(presetLabel)} · ${escapeHtml(graphTemplateId)}</span>
             <h2>Design Run</h2>
             <p>正在提交生成任务。</p>
           </div>
@@ -6329,7 +6350,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   designReviewRunEl.addEventListener("click", reviewLastDesignRun, { signal });
   designCloseEl.addEventListener("click", () => setDesignOpen(false), { signal });
   designPresetEl.addEventListener("change", () => {
-    designPromptEl.value = selectedDesignPreset().prompt;
+    const preset = selectedDesignPreset();
+    // Only auto-fill prompt if a real preset is selected (not custom)
+    if (preset && designPromptEl.value === "") {
+      designPromptEl.value = preset.prompt;
+    }
   }, { signal });
   designGenerateEl.addEventListener("click", () => void runDesignGeneration(), { signal });
   designWorkspaceEl.addEventListener("click", (event) => {
