@@ -5195,39 +5195,42 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   function renderContextResolvingDiagnostic(detail: Record<string, unknown>): string {
-    const config = asRecord(detail.config || detail.compose_config || {});
-    const sceneContext = asRecord(detail.scene_context || {});
-    const draftIntent = asRecord(detail.draft_intent || {});
-
+    // Backend actually passes simple fields like reference_plan_id, graph_template_id, layout_mode etc.
+    // from _emit_progress calls in design_runtime.py
+    const layoutMode = String(detail.layout_mode || detail.layoutMode || "graph_template");
+    
     return [
-      renderDiagnosticSection("设计意图解析", renderDiagnosticKeyValues({
-        normalized_scene_query: detail.normalized_scene_query || detail.scene_query,
-        design_summary: detail.design_summary,
-        target_street_type: config.target_street_type || detail.target_street_type,
-        objective_profile: config.objective_profile || detail.objective_profile,
-        design_rule_profile: config.design_rule_profile || detail.design_rule_profile,
+      renderDiagnosticSection("阶段说明", renderDiagnosticKeyValues({
+        stage: "context_resolving",
+        message: detail.message || "解析设计意图和构建场景上下文",
+        layout_mode: layoutMode,
       })),
-      renderDiagnosticSection("布局上下文", renderDiagnosticKeyValues({
-        layout_mode: sceneContext.layout_mode || config.layout_mode,
-        graph_template_id: sceneContext.graph_template_id || config.graph_template_id,
-        reference_plan_id: sceneContext.reference_plan_id,
-        city_name: sceneContext.city_name || config.city_name,
+      renderDiagnosticSection("图模板 / 参考方案", renderDiagnosticKeyValues({
+        graph_template_id: detail.graph_template_id || detail.graphTemplateId || "hkust_gz_gate",
+        reference_plan_id: detail.reference_plan_id || detail.referencePlanId,
+      })),
+      renderDiagnosticSection("设计意图", renderDiagnosticKeyValues({
+        normalized_scene_query: detail.normalized_scene_query || detail.sceneQuery || detail.scene_query,
+        design_summary: detail.design_summary || detail.designSummary,
+        target_street_type: detail.target_street_type || detail.targetStreetType,
+        objective_profile: detail.objective_profile || detail.objectiveProfile,
+        design_rule_profile: detail.design_rule_profile || detail.designRuleProfile,
       })),
       renderDiagnosticSection("需求参数", renderDiagnosticKeyValues({
-        density: config.density,
-        ped_demand_level: config.ped_demand_level,
-        bike_demand_level: config.bike_demand_level,
-        transit_demand_level: config.transit_demand_level,
-        vehicle_demand_level: config.vehicle_demand_level,
-        road_width_m: config.road_width_m,
-        length_m: config.length_m,
-        lane_count: config.lane_count,
-        sidewalk_width_m: config.sidewalk_width_m,
+        density: detail.density,
+        ped_demand_level: detail.ped_demand_level || detail.pedDemandLevel,
+        bike_demand_level: detail.bike_demand_level || detail.bikeDemandLevel,
+        transit_demand_level: detail.transit_demand_level || detail.transitDemandLevel,
+        vehicle_demand_level: detail.vehicle_demand_level || detail.vehicleDemandLevel,
+        road_width_m: detail.road_width_m || detail.roadWidthM,
+        length_m: detail.length_m || detail.lengthM,
+        lane_count: detail.lane_count || detail.laneCount,
+        sidewalk_width_m: detail.sidewalk_width_m || detail.sidewalkWidthM,
       })),
-      renderDiagnosticSection("生成配置补丁", renderDiagnosticKeyValues(asRecord(detail.config_patch || detail.compose_config_patch), 20)),
-      renderDiagnosticSection("引用证据", renderDiagnosticKeyValues({
-        citations_count: Array.isArray(detail.citations_by_field) ? detail.citations_by_field.length : Object.keys(asRecord(detail.citations_by_field)).length,
-        knowledge_source: detail.knowledge_source,
+      renderDiagnosticSection("配置补丁", renderDiagnosticKeyValues(asRecord(detail.config_patch || detail.configPatch || detail.compose_config_patch || detail.composeConfigPatch), 20)),
+      renderDiagnosticSection("RAG 引用证据", renderDiagnosticKeyValues({
+        citations_count: Array.isArray(detail.citations_by_field) ? detail.citations_by_field.length : Object.keys(asRecord(detail.citations_by_field || detail.citationsByField)).length,
+        knowledge_source: detail.knowledge_source || detail.knowledgeSource,
       })),
     ].join("");
   }
