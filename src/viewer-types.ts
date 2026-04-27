@@ -1,218 +1,361 @@
-export type SceneBounds = {
-  center: [number, number, number];
-  size: [number, number, number];
-  road_axis: [number, number, number];
+/**
+ * Type definitions and constants for the RoadGen3D Viewer.
+ * 
+ * Extracted from app.ts to improve modularity and maintainability.
+ */
+
+// ============================================================================
+// Scene and Layout Types
+// ============================================================================
+
+export type SceneOption = {
+  id: string;
+  label: string;
+  description?: string;
 };
 
-export type InstanceInfo = {
-  instance_id: string;
-  asset_id: string;
-  category: string;
-  placement_group?: string;
-  theme_id?: string;
-  selection_source?: string;
-  position_xyz?: [number, number, number] | number[];
-  bbox_xz?: [number, number, number, number] | number[];
-  anchor_poi_type?: string;
-  anchor_distance_m?: number | null;
-  feasibility_score?: number | null;
-  constraint_penalty?: number | null;
-  dist_to_road_edge_m?: number | null;
-  dist_to_nearest_junction_m?: number | null;
-  dist_to_nearest_entrance_m?: number | null;
-};
-
-export type AssetDescription = {
-  asset_id: string;
-  category: string;
-  text_desc?: string;
-  source?: string;
-  asset_role?: string;
-};
-
-export type StaticObjectDescription = {
-  match: "exact" | "prefix";
-  title: string;
-  category: string;
-  source?: string;
-  intro?: string;
-  design_note?: string;
-};
-
-export type SummaryMetrics = {
-  overlap_rate?: number | null;
-  dropped_slot_rate?: number | null;
-  spacing_uniformity?: number | null;
-  style_consistency?: number | null;
-  balance_score?: number | null;
-  compliance_rate_total?: number | null;
-  violations_total?: number | null;
-  avg_feasibility_score?: number | null;
-  instance_count?: number | null;
-  unique_asset_count?: number | null;
-  diversity_ratio?: number | null;
-  rule_satisfaction_rate?: number | null;
-  topology_validity?: number | null;
-  cross_section_feasibility?: number | null;
-  latency_ms_total?: number | null;
-  latency_ms_per_instance?: number | null;
-  design_rule_profile?: string | null;
-  program_generator_used?: string | null;
-  layout_solver_used?: string | null;
-  [key: string]: unknown;
-};
-
-export type AudioProfile = {
-  ambient: {
-    traffic: number;
-    nature: number;
-    urban: number;
-    transit: number;
-  };
-  point_sources: Array<{
-    type: string;
-    position: [number, number, number];
-    radius_m: number;
-  }>;
-};
-
-export type LayoutBand = {
-  name: string;
-  kind: string;
-  side: string;
-  width_m: number;
-  z_center_m: number;
-  allowed_categories?: string[];
-};
-
-// Floating Lane Overlay types
-export type FloatingLaneConfig = {
-  enabled: boolean;
-  height: number;           // 悬浮高度 (m)
-  opacity: number;         // 透明度 0-1
-  showEdgeLines: boolean;   // 显示边界线
-  showLabels: boolean;       // 显示车道标签
-  animated: boolean;        // 动画脉冲效果
-  colorScheme: "semantic" | "functional" | "safety";
-  selectedLaneIndex: number;
-  showBuildings: boolean;    // 显示建筑物悬浮层
-  showFeatures: boolean;    // 显示地物悬浮层（树木等）
-  buildingOpacity: number;   // 建筑物透明度
-  featureOpacity: number;    // 地物透明度
-};
-
-export type FloatingLaneState = FloatingLaneConfig & {
-  visibleLaneKinds: Set<string>;
-};
-
-export const FLOATING_LANE_COLORS: Record<string, number> = {
-  // 车道类型 - Semantic
-  carriageway: 0x3b82f6,    // 蓝色 - 机动车道
-  drive_lane: 0x60a5fa,     // 浅蓝
-  bike_lane: 0x22c55e,      // 绿色 - 自行车道
-  bus_lane: 0xf59e0b,      // 橙色 - 公交专用
-  parking_lane: 0x6b7280,   // 灰色
-
-  // 行人区 - Semantic
-  clear_path: 0xfaf5e6,     // 米白 - 清晰路径
-  furnishing: 0x92400e,     // 棕色 - 设施带
-  sidewalk: 0xd4c4a8,      // 浅棕
-
-  // 特殊 - Semantic
-  median: 0xf97316,        // 橙红
-  greenzone: 0x16a34a,     // 深绿
-  buffer: 0x8b5cf6,        // 紫色
-  frontage: 0x06b6d4,      // 青色
-  shared: 0xa78bfa,        // 薰衣草
-
-  // Building types
-  building: 0x8b5cf6,      // 紫色 - 建筑物
-  building_residential: 0x6366f1, // 靛蓝 - 住宅
-  building_commercial: 0xf43f5e,   // 玫红 - 商业
-  building_industrial: 0x78716c,   // 灰棕 - 工业
-
-  // Feature types
-  tree: 0x16a34a,         // 深绿 - 树木
-  lamp: 0xeab308,         // 黄色 - 路灯
-  bench: 0x78350f,        // 深棕 - 长椅
-  trash: 0x6b7280,        // 灰色 - 垃圾桶
-  bollard: 0xf59e0b,       // 橙色 - 阻车桩
-  bus_stop: 0x3b82f6,      // 蓝色 - 公交站
-
-  // 默认
-  default: 0x94a3b8,
-};
-
-export const FLOATING_LANE_LABELS: Record<string, string> = {
-  carriageway: "机动车道",
-  drive_lane: "行车道",
-  bike_lane: "自行车道",
-  bus_lane: "公交专用",
-  parking_lane: "停车带",
-  clear_path: "人行区",
-  furnishing: "设施带",
-  sidewalk: "人行道",
-  median: "中央分隔带",
-  greenzone: "绿化带",
-  buffer: "缓冲带",
-  frontage: "退缩带",
-  shared: "共享街道",
-  default: "道路",
-  // Building types
-  building: "建筑物",
-  // Feature types
-  tree: "树木",
-  lamp: "路灯",
-  bench: "长椅",
-  trash: "垃圾桶",
-  bollard: "阻车桩",
-  bus_stop: "公交站",
-};
-
-export type BuildingFootprint = {
-  footprint_id: string;
-  polygon_xz: number[][];
-  centroid_xz: number[];
-  target_height_m: number;
-  land_use_type?: string;
-  height_class?: string;
-};
-
-export type LayoutOverlayData = {
-  bands: LayoutBand[];
-  building_footprints: BuildingFootprint[];
-  length_m: number;
-};
-
-export type LightingPresetValues = {
-  exposure: number;
-  keyLightIntensity: number;
-  fillLightIntensity: number;
-  warmth: number;
-  shadowStrength: number;
-};
-
-export type ViewerManifest = {
+export type RecentLayout = {
+  id: string;
+  label: string;
   layout_path: string;
-  summary?: SummaryMetrics | null;
-  final_scene: {
-    label: string;
-    glb_url: string;
-  };
-  production_steps: Array<{
-    step_id: string;
-    title: string;
-    glb_url: string;
-  }>;
-  default_selection: string;
-  spawn_point?: [number, number, number];
-  forward_vector?: [number, number, number];
-  scene_bounds?: SceneBounds;
-  instances?: Record<string, InstanceInfo>;
-  asset_descriptions?: Record<string, AssetDescription>;
-  static_object_descriptions?: Record<string, StaticObjectDescription>;
-  layout_overlay?: LayoutOverlayData | null;
-  audio_profile?: AudioProfile | null;
-  lighting_preset?: string;
-  lighting_params?: LightingPresetValues;
+  created_at: string;
+  source?: string;
+  scene_layout_path?: string;
+  metrics?: Record<string, number>;
+  preset_id?: string;
 };
+
+export type SceneJobCreatePayload = {
+  draft: {
+    normalized_scene_query: string;
+    compose_config_patch: Record<string, unknown>;
+    citations_by_field: Record<string, string[]>;
+    design_summary: string;
+    risk_notes: string[];
+    parameter_sources_by_field: Record<string, string>;
+  };
+  scene_context: {
+    layout_mode: string;
+    aoi_bbox: string | null;
+    city_name_en: string | null;
+    reference_plan_id: string | null;
+    graph_template_id: string;
+  };
+  patch_overrides: Record<string, unknown>;
+  generation_options: {
+    preset_id: string;
+    random_seed?: number;
+  };
+};
+
+export type SceneJobStatusPayload = {
+  job_id: string;
+  status: "queued" | "running" | "processing" | "succeeded" | "failed";
+  stage?: string;
+  progress?: number;
+  operations?: Array<{
+    stage: string;
+    progress: number;
+    message: string;
+    detail?: Record<string, unknown>;
+  }>;
+  created_at?: string;
+  started_at?: string;
+  finished_at?: string;
+  error?: string;
+  result?: SceneJobResult;
+};
+
+export type SceneJobResult = {
+  plan_id: string;
+  layout_path: string;
+  scene_glb_path: string;
+  viewer_url?: string;
+};
+
+export type DesignRunSnapshot = {
+  payload: SceneJobStatusPayload;
+  preset: DesignPreset | null;
+  variant: DesignSchemeVariant;
+  prompt: string;
+  graphTemplateId: string;
+};
+
+// ============================================================================
+// Design Presets and Variants
+// ============================================================================
+
+export type DesignPreset = {
+  id: string;
+  name: string;
+  nameEn: string;
+  description: string;
+  prompt: string;
+  configPatch: Record<string, unknown>;
+};
+
+export type DesignSchemeVariant = {
+  name: string;
+  seed: number;
+  densityMod: number;
+  widthMod: number;
+};
+
+// ============================================================================
+// Branch Run Types
+// ============================================================================
+
+export type BranchRunCreatePayload = {
+  prompt: string;
+  topk: number;
+  rounds: number;
+  graph_template_id: string;
+  knowledge_source: string;
+  scene_context: Record<string, unknown>;
+  generation_options: Record<string, unknown>;
+  evaluation_weights: Record<string, number>;
+};
+
+export type BranchRunNode = {
+  node_id: string;
+  parent_id: string | null;
+  depth: number;
+  rank: number;
+  status: string;
+  score: number | null;
+  scene_layout_path?: string;
+  evaluation?: Record<string, number>;
+  config_patch?: Record<string, unknown>;
+  llm_candidate_reasoning?: string;
+  optimization_directives?: Array<Record<string, unknown>>;
+  rejected_edits?: Array<Record<string, unknown>>;
+  rag_evidence?: Array<Record<string, unknown>>;
+  error?: string;
+};
+
+export type BranchScatterPoint = {
+  node_id: string;
+  x: number | null;
+  y: number | null;
+  overall: number | null;
+  depth: number;
+  rank: number;
+  status: string;
+};
+
+export type BranchRunStatusPayload = {
+  run_id: string;
+  status: string;
+  stage?: string;
+  progress?: number;
+  prompt?: string;
+  topk?: number;
+  graph_template_id?: string;
+  best_node_id?: string;
+  frontier?: string[];
+  nodes?: BranchRunNode[];
+  scatter_points?: BranchScatterPoint[];
+  error?: string;
+};
+
+// ============================================================================
+// Generation Steps
+// ============================================================================
+
+export type GenerationStep = {
+  key: string;
+  label: string;
+  shortLabel: string;
+  progress: number;
+  purpose: string;
+  detailHint: string;
+};
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+export const DEFAULT_GRAPH_TEMPLATE_ID = "hkust_gz_gate";
+export const DESIGN_POLL_INTERVAL_MS = 2000;
+export const DESIGN_MAX_POLL_ATTEMPTS = 90;
+
+export const DESIGN_SCHEME_VARIANTS: DesignSchemeVariant[] = [
+  { name: "Scheme A", seed: 42, densityMod: 1.0, widthMod: 1.0 },
+  { name: "Scheme B", seed: 137, densityMod: 1.15, widthMod: 0.9 },
+  { name: "Scheme C", seed: 256, densityMod: 0.85, widthMod: 1.1 },
+];
+
+export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
+  {
+    id: "pedestrian_friendly",
+    name: "步行友好",
+    nameEn: "Pedestrian Friendly",
+    description: "行人优先，安全舒适",
+    prompt: "步行安全，全龄友好的完整街道，安静、安全、舒适",
+    configPatch: {
+      design_rule_profile: "pedestrian_priority_v1",
+      objective_profile: "balanced",
+      density: 0.5,
+      ped_demand_level: "high",
+      bike_demand_level: "medium",
+      transit_demand_level: "medium",
+      vehicle_demand_level: "low",
+    },
+  },
+  {
+    id: "commercial_vitality",
+    name: "商业活力",
+    nameEn: "Commercial Vitality",
+    description: "商业活跃，人流密集",
+    prompt: "商业活跃的街道，商业设施密集，人流穿梭",
+    configPatch: {
+      design_rule_profile: "balanced_complete_street_v1",
+      objective_profile: "commerce",
+      density: 0.9,
+      ped_demand_level: "high",
+      bike_demand_level: "medium",
+      transit_demand_level: "high",
+      vehicle_demand_level: "medium",
+    },
+  },
+  {
+    id: "transit_priority",
+    name: "公交优先",
+    nameEn: "Transit Priority",
+    description: "公交导向，换乘便利",
+    prompt: "公交优先的街道，公交可达性高，换乘便利",
+    configPatch: {
+      design_rule_profile: "transit_priority_v1",
+      objective_profile: "transit",
+      density: 0.85,
+      ped_demand_level: "high",
+      bike_demand_level: "medium",
+      transit_demand_level: "high",
+      vehicle_demand_level: "high",
+    },
+  },
+  {
+    id: "park_landscape",
+    name: "公园景观",
+    nameEn: "Park Landscape",
+    description: "绿化为主，休闲舒适",
+    prompt: "公园景观街道，绿化丰富，自然生态，休闲舒适",
+    configPatch: {
+      design_rule_profile: "pedestrian_priority_v1",
+      objective_profile: "greening",
+      density: 0.25,
+      ped_demand_level: "medium",
+      bike_demand_level: "medium",
+      transit_demand_level: "low",
+      vehicle_demand_level: "low",
+    },
+  },
+  {
+    id: "quiet_residential",
+    name: "安静居住",
+    nameEn: "Quiet Residential",
+    description: "住宅区安静，绿树成荫",
+    prompt: "安静居住街道，绿树成荫，步行安全，适合全龄",
+    configPatch: {
+      design_rule_profile: "pedestrian_priority_v1",
+      objective_profile: "greening",
+      density: 0.35,
+      ped_demand_level: "high",
+      bike_demand_level: "medium",
+      transit_demand_level: "low",
+      vehicle_demand_level: "low",
+    },
+  },
+  {
+    id: "balanced_complete",
+    name: "平衡街道",
+    nameEn: "Balanced Complete",
+    description: "各类使用者平衡",
+    prompt: "各类使用者平衡的完整街道，行人、自行车、公交、机动车和谐共处",
+    configPatch: {
+      design_rule_profile: "balanced_complete_street_v1",
+      objective_profile: "balanced",
+      density: 0.6,
+      ped_demand_level: "medium",
+      bike_demand_level: "medium",
+      transit_demand_level: "medium",
+      vehicle_demand_level: "medium",
+    },
+  },
+];
+
+// Generation steps definition
+export const GENERATION_STEPS: GenerationStep[] = [
+  {
+    key: "queued",
+    label: "任务排队中",
+    shortLabel: "排队",
+    progress: 5,
+    purpose: "等待后端服务处理生成请求。",
+    detailHint: "任务已进入队列，排队等待处理。",
+  },
+  {
+    key: "context_resolving",
+    label: "上下文解析",
+    shortLabel: "上下文",
+    progress: 15,
+    purpose: "把 prompt、preset、graph template 或外部道路上下文合并成可生成的 StreetComposeConfig。",
+    detailHint: "Resolving road graph, POI, and placement context.",
+  },
+  {
+    key: "layout_generation",
+    label: "布局模式",
+    shortLabel: "布局",
+    progress: 30,
+    purpose: "生成道路网络、交叉口和基础布局结构。",
+    detailHint: "Solving road segments, intersections, and cross-sections.",
+  },
+  {
+    key: "constraint_solving",
+    label: "约束求解",
+    shortLabel: "约束",
+    progress: 45,
+    purpose: "检查并调整布局以满足设计规则和合规性要求。",
+    detailHint: "Applying design rules and compliance checks.",
+  },
+  {
+    key: "asset_composition",
+    label: "资产组合",
+    shortLabel: "资产",
+    progress: 60,
+    purpose: "使用 CLIP 语义检索和放置街道家具到场景中。",
+    detailHint: "Placing street furniture via semantic retrieval.",
+  },
+  {
+    key: "mesh_generation",
+    label: "网格生成",
+    shortLabel: "网格",
+    progress: 70,
+    purpose: "合并所有资产为完整的 3D 场景网格。",
+    detailHint: "Merging geometry and computing scene mesh.",
+  },
+  {
+    key: "scene_rendering",
+    label: "场景渲染",
+    shortLabel: "渲染",
+    progress: 80,
+    purpose: "应用光照、材质和阴影生成最终场景。",
+    detailHint: "Applying lighting, materials, and tone mapping.",
+  },
+  {
+    key: "glb_export",
+    label: "GLB 导出",
+    shortLabel: "导出",
+    progress: 90,
+    purpose: "将场景导出为 GLB 格式供 Viewer 加载。",
+    detailHint: "Exporting scene.glb and scene_layout.json.",
+  },
+  {
+    key: "succeeded",
+    label: "生成完成",
+    shortLabel: "完成",
+    progress: 100,
+    purpose: "场景已成功生成并准备加载到 Viewer。",
+    detailHint: "Scene generation completed.",
+  },
+];
