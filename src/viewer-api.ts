@@ -5,31 +5,9 @@
  */
 
 import * as THREE from "three";
+import type { ViewerManifest, RecentLayout } from "./viewer-types";
 
 const API_BASE = (import.meta.env.VITE_ROADGEN_API_BASE as string | undefined) || "http://127.0.0.1:8010";
-
-export type ViewerManifest = {
-  final_scene: {
-    glb_url: string;
-    label: string;
-  };
-  production_steps?: Array<{
-    step_id: string;
-    title: string;
-    glb_url: string;
-  }>;
-  instances?: Array<Record<string, unknown>>;
-  asset_descriptions?: Record<string, unknown>;
-  audio_profile?: Record<string, unknown>;
-};
-
-export type RecentLayout = {
-  id: string;
-  label: string;
-  layout_path: string;
-  created_at: string;
-  source?: string;
-};
 
 // Manifest cache
 const manifestCache = new Map<string, ViewerManifest>();
