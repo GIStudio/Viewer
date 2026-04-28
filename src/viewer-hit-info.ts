@@ -56,6 +56,8 @@ export function resolveHitDescriptor(
   }
 
   return {
+    kind: instanceId ? "instance" as const : (category ? "static" as const : "generic" as const),
+    nodeName: object.name || "Unknown",
     object,
     point,
     distance,

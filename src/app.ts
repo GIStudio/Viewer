@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { renderStageTree as renderG6StageTree, StageNode } from "./g6-visualization";
-import { AudioManager } from "./audio-manager";
+import { AudioManager, type AudioProfile } from "./audio-manager";
 import { createCompareMode } from "./compare-mode";
 import { HistoryScatterPlot, type SceneHistoryEntry } from "./history-scatter-plot";
 import { HistoryFrequencyChart } from "./history-frequency-chart";
@@ -1676,7 +1676,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   function applyAudioProfile(): void {
     const profile = currentManifest?.audio_profile;
     if (profile) {
-      audioManager.applyProfile(profile);
+      audioManager.applyProfile(profile as AudioProfile);
       if (audioToggleEl.checked) {
         audioManager.play();
       }
@@ -2740,12 +2740,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           : floatingLaneConfig.opacity! * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
 
         // --- Carriageway: split into per-lane sub-lanes ---
-        if (band.kind === "carriageway" && laneCount > 0) {
-          const laneWidth = band.width_m / laneCount;
-          const zStart = bandZ - band.width_m / 2;
+        if ((band.kind as string) === "carriageway" && laneCount > 0) {
+          const laneWidth = (band.width_m as number) / laneCount;
+          const zStart = bandZ - (band.width_m as number) / 2;
 
           for (let i = 0; i < laneCount; i++) {
-            const laneZCenter = zStart + laneWidth * (i + 0.5);
+            const laneZCenter = zStart + (laneWidth as number) * (i + 0.5);
             const laneColor = PER_LANE_COLORS[i % PER_LANE_COLORS.length];
 
             const planeGeo = new THREE.PlaneGeometry(length, laneWidth);
@@ -2806,14 +2806,14 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           // End-cap lines for carriageway outer boundaries
           if (floatingLaneConfig.showEdgeLines) {
             const cwLeftZ = zStart;
-            const cwRightZ = zStart + band.width_m;
+            const cwRightZ = zStart + (band.width_m as number);
             addSolidEdgeLine(roadMinX, cwLeftZ, roadMinX, cwRightZ, isSelected ? 0xffffff : (PER_LANE_COLORS[0] as unknown as number), baseOpacity * 0.9);
             addSolidEdgeLine(roadMaxX, cwLeftZ, roadMaxX, cwRightZ, isSelected ? 0xffffff : (PER_LANE_COLORS[0] as unknown as number), baseOpacity * 0.9);
           }
 
           // Selection glow covers entire carriageway
           if (isSelected) {
-            const glowGeo = new THREE.PlaneGeometry(length + 0.5, band.width_m + 0.5);
+            const glowGeo = new THREE.PlaneGeometry(length + 0.5, (band.width_m as number) + 0.5);
             const glowMat = new THREE.MeshBasicMaterial({
               color: PER_LANE_COLORS[0],
               transparent: true,
