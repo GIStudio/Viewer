@@ -752,20 +752,20 @@ function buildHitDescriptorContent(
     return {
       html: composeInstanceInfoHtml(
         descriptor.nodeName,
-        descriptor.instanceInfo,
+        descriptor.instanceInfo!,
         descriptor.assetDescription,
       ),
       text: composeInstanceInfoText(
         descriptor.nodeName,
-        descriptor.instanceInfo,
+        descriptor.instanceInfo!,
         descriptor.assetDescription,
       ),
     };
   }
   if (descriptor.kind === "static") {
     return {
-      html: composeStaticInfoHtml(descriptor.nodeName, descriptor.staticDescription, descriptor.hitPoint, manifest),
-      text: composeStaticInfoText(descriptor.nodeName, descriptor.staticDescription),
+      html: composeStaticInfoHtml(descriptor.nodeName, descriptor.staticDescription!, descriptor.hitPoint, manifest),
+      text: composeStaticInfoText(descriptor.nodeName, descriptor.staticDescription!),
     };
   }
   return {
@@ -5174,7 +5174,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     if (options.length === 0) {
       throw new Error("No viewable GLB entries were found in this scene layout.");
     }
-    const defaultKey = optionsByKey.has(currentManifest.default_selection)
+    const defaultKey = optionsByKey.has(currentManifest.default_selection as string)
       ? currentManifest.default_selection
       : options[0]?.key ?? "";
     selectEl.value = defaultKey;
