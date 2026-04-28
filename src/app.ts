@@ -2415,7 +2415,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const sidewalkRings = (osmGeom.sidewalk_rings ?? []) as number[][][];
     const junctions = (osmGeom.junction_geometries ?? []) as Array<Record<string, unknown>>;
 
-    const height = floatingLaneConfig.height;
+    const height: number = floatingLaneConfig.height ?? 0;
+    if (floatingLaneConfig.height === undefined) {
+      console.warn("floatingLaneConfig.height is undefined, using 0");
+    }
 
     // ShapeGeometry is defined in XY plane; rotation.x = -PI/2 maps Shape(x,y) → World(x,0,-y).
     // Pre-negate Z so that after rotation, world Z matches the data Z.
@@ -4894,7 +4897,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       renderBranchRunResults(payload);
       const best = branchNodes(payload).find((node) => node.node_id === payload.best_node_id);
       if (best?.scene_layout_path) {
-        recentLayoutsCache = null;
+        clearRecentLayoutsCache();
         clearManifestCache();
         await loadLayoutSelection(best.scene_layout_path);
         const recent = await loadRecentLayouts(50, false);
@@ -5094,7 +5097,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       if (!firstReady) {
         throw new Error("No schemes were generated successfully.");
       }
-      recentLayoutsCache = null;
+      clearRecentLayoutsCache();
       clearManifestCache();
       await loadLayoutSelection(firstReady.layoutPath);
       const recent = await loadRecentLayouts(50, false);

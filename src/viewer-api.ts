@@ -38,18 +38,20 @@ let recentLayoutsCache: RecentLayout[] | null = null;
 /**
  * Load manifest with caching.
  */
-export async function loadManifest(manifestUrl: string): Promise<ViewerManifest> {
-  if (manifestCache.has(manifestUrl)) {
+export async function loadManifest(manifestUrl: string, useCache: boolean = true): Promise<ViewerManifest> {
+  if (useCache && manifestCache.has(manifestUrl)) {
     return manifestCache.get(manifestUrl)!;
   }
-  
+
   const response = await fetch(manifestUrl);
   if (!response.ok) {
     throw new Error(`Failed to load manifest: ${response.status}`);
   }
-  
+
   const manifest = await response.json() as ViewerManifest;
-  manifestCache.set(manifestUrl, manifest);
+  if (useCache) {
+    manifestCache.set(manifestUrl, manifest);
+  }
   return manifest;
 }
 
@@ -63,17 +65,20 @@ export function clearManifestCache(): void {
 /**
  * Load recent layouts with caching.
  */
-export async function loadRecentLayouts(limit: number = 20): Promise<RecentLayout[]> {
-  if (recentLayoutsCache) return recentLayoutsCache;
-  
+export async function loadRecentLayouts(limit: number = 20, useCache: boolean = true): Promise<RecentLayout[]> {
+  if (useCache && recentLayoutsCache) return recentLayoutsCache;
+
   const response = await fetch(`${API_BASE}/api/recent-layouts?limit=${limit}`);
   if (!response.ok) {
     throw new Error(`Failed to load recent layouts: ${response.status}`);
   }
-  
+
   const data = await response.json();
-  recentLayoutsCache = Array.isArray(data) ? data : (data.items || []);
-  return recentLayoutsCache as RecentLayout[];
+  const result = Array.isArray(data) ? data : (data.items || []);
+  if (useCache) {
+    recentLayoutsCache = result;
+  }
+  return result as RecentLayout[];
 }
 
 /**
