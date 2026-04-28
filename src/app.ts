@@ -2724,8 +2724,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         floatingLaneObjects.push(line);
       };
 
-      for (let bandIdx = 0; bandIdx < overlay.bands.length; bandIdx++) {
-        const band = overlay.bands[bandIdx];
+      const bands = overlay.bands ?? [];
+      for (let bandIdx = 0; bandIdx < bands.length; bandIdx++) {
+        const band = bands[bandIdx];
         if (!band.width_m || !Number.isFinite(band.width_m)) continue;
         if (!visibleLaneKinds.has(band.kind) && band.kind !== "default") continue;
 
@@ -2896,8 +2897,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
     // ========== 5. Render buildings as floating overlays ==========
     if (floatingLaneConfig.showBuildings) {
-      for (let i = 0; i < overlay.building_footprints.length; i++) {
-        const fp = overlay.building_footprints[i];
+      const footprints = overlay.building_footprints ?? [];
+      for (let i = 0; i < footprints.length; i++) {
+        const fp = footprints[i];
         const pts = fp.polygon_xz;
         if (!Array.isArray(pts) || pts.length < 3) continue;
 
