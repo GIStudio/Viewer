@@ -3623,7 +3623,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       if (!instanceId) {
         continue;
       }
-      const instanceInfo = currentManifest?.instances?.[instanceId];
+      const instances = currentManifest?.instances;
+      const instanceInfo = Array.isArray(instances) ? instances.find((inst) => inst.instance_id === instanceId) : undefined;
       if (instanceInfo) {
         return {
           kind: "instance",
