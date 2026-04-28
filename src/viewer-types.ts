@@ -14,20 +14,12 @@ export type SceneOption = {
   glbUrl: string;
 };
 
-export type StaticObjectDescription = {
-  match: "exact" | "prefix";
-  title: string;
-  category: string;
-  intro: string;
-  source?: string;
-  design_note?: string;
-};
-
 export type ViewerManifest = {
   layout_path?: string;
   lighting_preset?: string;
   lighting_params?: Record<string, unknown>;
   default_selection?: string;
+  static_object_descriptions?: Record<string, StaticObjectDescription>;
   summary?: Record<string, unknown>;
   final_scene: {
     glb_url: string;
@@ -179,7 +171,9 @@ export type SceneJobStatusPayload = {
   stage?: string;
   progress?: number;
   operations?: Array<{
+    name?: string;
     stage: string;
+    status?: string;
     progress: number;
     message: string;
     detail?: Record<string, unknown>;
@@ -192,9 +186,10 @@ export type SceneJobStatusPayload = {
 };
 
 export type SceneJobResult = {
-  plan_id: string;
-  layout_path: string;
-  scene_glb_path: string;
+  plan_id?: string;
+  layout_path?: string;
+  scene_layout_path?: string;
+  scene_glb_path?: string;
   viewer_url?: string;
 };
 
