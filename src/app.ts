@@ -2178,6 +2178,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let floatingLaneObjects: THREE.Object3D[] = [];
   let floatingLaneConfig: FloatingLaneConfig = {
     enabled: false,
+    showSurfaces: true,
     height: 0.5,
     opacity: 0.5,
     showEdgeLines: true,
@@ -2645,7 +2646,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
     // ========== 4. Render bands as rectangles (always, with per-lane carriageway split) ==========
     {
-      const bandHeight = height + 0.02; // Slight offset above OSM polygons to avoid z-fighting
+      const bandHeight = (height as number) + 0.02; // Slight offset above OSM polygons to avoid z-fighting
 
       // --- Compute road extent and center from actual scene geometry ---
       let roadMinX: number;
@@ -2731,9 +2732,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         if (!visibleLaneKinds.has(band.kind as string) && band.kind !== "default") continue;
 
         // Band z_center_m is relative to road center; offset by roadCenterZ for world position
-        const bandZ = roadCenterZ + (band.z_center_m ?? 0);
+        const bandZ = roadCenterZ + ((band.z_center_m as number) ?? 0);
 
-        const isSelected = floatingLaneConfig.selectedLaneIndex === bandIdx;
+        const isSelected = (floatingLaneConfig.selectedLaneIndex ?? -1) === bandIdx;
         const baseOpacity = isSelected
           ? Math.min(floatingLaneConfig.opacity! * 1.5, 0.9)
           : floatingLaneConfig.opacity! * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
@@ -3405,7 +3406,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       case "Digit9":
         if (active && !event.repeat && floatingLaneConfig.enabled) {
           const laneIndex = parseInt(event.code.replace("Digit", "")) - 1;
-          if (currentManifest?.layout_overlay && laneIndex < currentManifest.layout_overlay.bands.length) {
+          const bands = currentManifest?.layout_overlay?.bands ?? [];
+          if (laneIndex >= 0 && laneIndex < bands.length) {
             selectFloatingLane(laneIndex);
           }
         }
