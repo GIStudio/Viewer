@@ -5,10 +5,9 @@
  */
 
 import * as THREE from "three";
-import type { InstanceInfo, AssetDescription, StaticObjectDescription } from "./viewer-types";
+import type { StaticObjectDescription, InstanceInfo, AssetDescription } from "./viewer-types";
 
 export interface HitDescriptor {
-  kind: "instance" | "static" | "generic";
   nodeName: string;
   instanceId?: string;
   instanceInfo?: InstanceInfo;
@@ -18,28 +17,11 @@ export interface HitDescriptor {
   point?: THREE.Vector3;
   assetInfo?: Record<string, unknown>;
   distance?: number;
+  category?: string;
+  object?: THREE.Object3D;
 }
 
-export interface InstanceInfo {
-  instance_id: string;
-  asset_id: string;
-  category: string;
-  placement_group?: string;
-  theme_id?: string;
-  position_xyz?: [number, number, number];
-  bbox_xz?: [number, number, number, number];
-  anchor_poi_type?: string;
-  anchor_distance_m?: number;
-  feasibility_score?: number;
-}
-
-export interface AssetDescription {
-  asset_id: string;
-  category: string;
-  text_desc: string;
-  source: string;
-  asset_role?: string;
-}
+// InstanceInfo and AssetDescription types are imported from viewer-types.ts
 
 /**
  * Resolve hit descriptor from raycast hit.

@@ -87,6 +87,8 @@ type RecentLayoutsPayload = {
 };
 
 type GeneratedDesignScheme = {
+  id: string;
+  name: string;
   layoutPath: string;
   status: "ready" | "failed";
   error?: string;
