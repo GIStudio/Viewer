@@ -8,6 +8,7 @@ import * as THREE from "three";
 import type { StaticObjectDescription, InstanceInfo, AssetDescription } from "./viewer-types";
 
 export interface HitDescriptor {
+  kind: "instance" | "static" | "generic";
   nodeName: string;
   instanceId?: string;
   instanceInfo?: InstanceInfo;
@@ -32,8 +33,8 @@ export function resolveHitDescriptor(
   assetDescriptions?: Record<string, AssetDescription>,
 ): HitDescriptor | null {
   const object = hit.object;
-  const point = hit.point;
-  const distance = hit.distance;
+  const point = hit.point!;
+  const distance = hit.distance!;
 
   // Check for instance ID in userData
   const instanceId = object.userData?.instanceId || object.userData?.instance_id;
@@ -114,9 +115,9 @@ export function buildInfoCardContent(hit: HitDescriptor): string {
 
   // Hit point
   parts.push(
-    `<div class="info-row"><strong>Hit Point:</strong> (${hit.point.x.toFixed(2)}, ${hit.point.y.toFixed(2)}, ${hit.point.z.toFixed(2)})</div>`
+    `<div class="info-row"><strong>Hit Point:</strong> (${hit.point!.x.toFixed(2)}, ${hit.point!.y.toFixed(2)}, ${hit.point!.z.toFixed(2)})</div>`
   );
-  parts.push(`<div class="info-row"><strong>Distance:</strong> ${hit.distance.toFixed(2)}m</div>`);
+  parts.push(`<div class="info-row"><strong>Distance:</strong> ${hit.distance!.toFixed(2)}m</div>`);
 
   return parts.join("\n");
 }

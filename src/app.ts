@@ -2428,19 +2428,16 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         const shapeRing = ring.map(p => toShapeXY(p));
         const shape = buildPolygonShape(shapeRing);
         const geometry = new THREE.ShapeGeometry(shape);
-        if (floatingLaneConfig.opacity !== undefined) {
         const material = new THREE.MeshBasicMaterial({
           color: FLOATING_COLORS.carriageway,
           transparent: true,
-          opacity: floatingLaneConfig.opacity * 0.7,
+          opacity: floatingLaneConfig.opacity! * 0.7,
           depthWrite: false,
           side: THREE.DoubleSide,
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.rotation.x = -Math.PI / 2;
-        if (height !== undefined) {
-        mesh.position.set(0, height, 0);
-        }
+        mesh.position.set(0, height!, 0);
         mesh.userData.isFloatingLane = true;
         mesh.userData.overlayType = "road";
         scene.add(mesh);
@@ -2451,7 +2448,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           const edgeMaterial = new THREE.LineBasicMaterial({
             color: FLOATING_COLORS.carriageway,
             transparent: true,
-            opacity: floatingLaneConfig.opacity * 0.9,
+            opacity: floatingLaneConfig.opacity! * 0.9,
           });
           const points: THREE.Vector3[] = [];
           for (const point of ring) {
@@ -2475,11 +2472,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         const edgeMaterial = new THREE.LineBasicMaterial({
           color: FLOATING_COLORS.sidewalk,
           transparent: true,
-          opacity: floatingLaneConfig.opacity * 0.8,
+          opacity: floatingLaneConfig.opacity! * 0.8,
         });
         const points: THREE.Vector3[] = [];
         for (const point of ring) {
-          points.push(new THREE.Vector3(point[0], height, point[1]));
+          points.push(new THREE.Vector3(point[0], height!, point[1]));
         }
         points.push(points[0].clone());
         const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -2501,13 +2498,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         const material = new THREE.MeshBasicMaterial({
           color: FLOATING_COLORS.carriageway,
           transparent: true,
-          opacity: floatingLaneConfig.opacity * 0.75,
+          opacity: floatingLaneConfig.opacity! * 0.75,
           depthWrite: false,
           side: THREE.DoubleSide,
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(0, height, 0);
+        mesh.position.set(0, height!, 0);
         mesh.userData.isFloatingLane = true;
         mesh.userData.overlayType = "junction";
         scene.add(mesh);
@@ -2518,11 +2515,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           const edgeMaterial = new THREE.LineBasicMaterial({
             color: FLOATING_COLORS.carriageway,
             transparent: true,
-            opacity: floatingLaneConfig.opacity * 0.9,
+            opacity: floatingLaneConfig.opacity! * 0.9,
           });
           const points: THREE.Vector3[] = [];
           for (const point of ring) {
-            points.push(new THREE.Vector3(point[0], height, point[1]));
+            points.push(new THREE.Vector3(point[0], height!, point[1]));
           }
           points.push(points[0].clone());
           const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -2545,7 +2542,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           const material = new THREE.MeshBasicMaterial({
             color,
             transparent: true,
-            opacity: floatingLaneConfig.opacity * 0.42,
+            opacity: floatingLaneConfig.opacity! * 0.42,
             depthWrite: false,
             side: THREE.DoubleSide,
           });
@@ -2562,7 +2559,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
             const edgeMaterial = new THREE.LineBasicMaterial({
               color,
               transparent: true,
-              opacity: floatingLaneConfig.opacity * 0.8,
+              opacity: floatingLaneConfig.opacity! * 0.8,
             });
             const points: THREE.Vector3[] = [];
             for (const point of ring) {
@@ -2607,7 +2604,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
             const material = new THREE.MeshBasicMaterial({
               color,
               transparent: true,
-              opacity: floatingLaneConfig.opacity * (collection.kind === "merged" ? 0.35 : 0.28),
+              opacity: floatingLaneConfig.opacity! * (collection.kind === "merged" ? 0.35 : 0.28),
               depthWrite: false,
               side: THREE.DoubleSide,
             });
@@ -2624,7 +2621,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
               const edgeMaterial = new THREE.LineBasicMaterial({
                 color,
                 transparent: true,
-                opacity: floatingLaneConfig.opacity * 0.75,
+                opacity: floatingLaneConfig.opacity! * 0.75,
               });
               const points: THREE.Vector3[] = [];
               for (const point of ring) {
@@ -2733,8 +2730,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
         const isSelected = floatingLaneConfig.selectedLaneIndex === bandIdx;
         const baseOpacity = isSelected
-          ? Math.min(floatingLaneConfig.opacity * 1.5, 0.9)
-          : floatingLaneConfig.opacity * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
+          ? Math.min(floatingLaneConfig.opacity! * 1.5, 0.9)
+          : floatingLaneConfig.opacity! * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
 
         // --- Carriageway: split into per-lane sub-lanes ---
         if (band.kind === "carriageway" && laneCount > 0) {
@@ -2918,7 +2915,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(0, height, 0);
+        mesh.position.set(0, height!, 0);
         mesh.userData.isFloatingLane = true;
         mesh.userData.overlayType = "building";
         mesh.userData.buildingIndex = i;
@@ -2930,11 +2927,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           const edgeMaterial = new THREE.LineBasicMaterial({
             color: baseColor,
             transparent: true,
-            opacity: floatingLaneConfig.buildingOpacity * 1.2,
+            opacity: floatingLaneConfig.buildingOpacity! * 1.2,
           });
           const points: THREE.Vector3[] = [];
           for (const point of pts) {
-            points.push(new THREE.Vector3(point[0], height, point[1]));
+            points.push(new THREE.Vector3(point[0], height!, point[1]));
           }
           points.push(points[0].clone());
           const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -2986,7 +2983,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(x, height, z);
+        mesh.position.set(x, height!, z);
         mesh.userData.isFloatingLane = true;
         mesh.userData.overlayType = "feature";
         mesh.userData.featureCategory = category;
@@ -3069,7 +3066,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         <input type="range" id="flp-height" min="0.1" max="3" step="0.1" value="${floatingLaneConfig.height}">
       </div>
       <div class="flp-slider-group">
-        <label>Road Opacity: <span id="flp-opacity-val">${(floatingLaneConfig.opacity * 100).toFixed(0)}%</span></label>
+        <label>Road Opacity: <span id="flp-opacity-val">${(floatingLaneConfig.opacity! * 100).toFixed(0)}%</span></label>
         <input type="range" id="flp-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.opacity}">
       </div>
       <div class="flp-section">
@@ -3086,11 +3083,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         </div>
       </div>
       <div class="flp-slider-group" id="flp-building-opacity-group">
-        <label>Building Opacity: <span id="flp-building-opacity-val">${(floatingLaneConfig.buildingOpacity * 100).toFixed(0)}%</span></label>
+        <label>Building Opacity: <span id="flp-building-opacity-val">${(floatingLaneConfig.buildingOpacity! * 100).toFixed(0)}%</span></label>
         <input type="range" id="flp-building-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.buildingOpacity}">
       </div>
       <div class="flp-slider-group" id="flp-feature-opacity-group">
-        <label>Feature Opacity: <span id="flp-feature-opacity-val">${(floatingLaneConfig.featureOpacity * 100).toFixed(0)}%</span></label>
+        <label>Feature Opacity: <span id="flp-feature-opacity-val">${(floatingLaneConfig.featureOpacity! * 100).toFixed(0)}%</span></label>
         <input type="range" id="flp-feature-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.featureOpacity}">
       </div>
       <div class="flp-section">
@@ -3150,7 +3147,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
     document.getElementById("flp-opacity")?.addEventListener("input", (e) => {
       floatingLaneConfig.opacity = parseFloat((e.target as HTMLInputElement).value);
-      document.getElementById("flp-opacity-val")!.textContent = `${(floatingLaneConfig.opacity * 100).toFixed(0)}%`;
+      document.getElementById("flp-opacity-val")!.textContent = `${(floatingLaneConfig.opacity! * 100).toFixed(0)}%`;
       buildFloatingLaneOverlay();
     });
 
@@ -3186,13 +3183,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
     document.getElementById("flp-building-opacity")?.addEventListener("input", (e) => {
       floatingLaneConfig.buildingOpacity = parseFloat((e.target as HTMLInputElement).value);
-      document.getElementById("flp-building-opacity-val")!.textContent = `${(floatingLaneConfig.buildingOpacity * 100).toFixed(0)}%`;
+      document.getElementById("flp-building-opacity-val")!.textContent = `${(floatingLaneConfig.buildingOpacity! * 100).toFixed(0)}%`;
       buildFloatingLaneOverlay();
     });
 
     document.getElementById("flp-feature-opacity")?.addEventListener("input", (e) => {
       floatingLaneConfig.featureOpacity = parseFloat((e.target as HTMLInputElement).value);
-      document.getElementById("flp-feature-opacity-val")!.textContent = `${(floatingLaneConfig.featureOpacity * 100).toFixed(0)}%`;
+      document.getElementById("flp-feature-opacity-val")!.textContent = `${(floatingLaneConfig.featureOpacity! * 100).toFixed(0)}%`;
       buildFloatingLaneOverlay();
     });
 
@@ -5210,7 +5207,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       antialias: true,
       preserveDrawingBuffer: true,
     });
-    captureRenderer.setSize(width, height, false);
+    captureRenderer.setSize(width, height!, false);
     captureRenderer.setPixelRatio(1);
     captureRenderer.outputColorSpace = renderer.outputColorSpace;
     captureRenderer.toneMapping = renderer.toneMapping;
