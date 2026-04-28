@@ -2728,7 +2728,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       for (let bandIdx = 0; bandIdx < bands.length; bandIdx++) {
         const band = bands[bandIdx];
         if (!band.width_m || !Number.isFinite(band.width_m)) continue;
-        if (!visibleLaneKinds.has(band.kind) && band.kind !== "default") continue;
+        if (!visibleLaneKinds.has(band.kind as string) && band.kind !== "default") continue;
 
         // Band z_center_m is relative to road center; offset by roadCenterZ for world position
         const bandZ = roadCenterZ + (band.z_center_m ?? 0);
@@ -2829,7 +2829,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           }
         } else {
           // --- Non-carriageway band: render as single rectangle ---
-          const baseColor = getFloatingLaneColor(band.kind);
+          const baseColor = getFloatingLaneColor(band.kind as string);
           const planeGeo = new THREE.PlaneGeometry(length, band.width_m);
           const planeMat = new THREE.MeshBasicMaterial({
             color: baseColor,
@@ -2863,7 +2863,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           // Label
           if (floatingLaneConfig.showLabels) {
             const labelSprite = createFloatingLaneLabel(
-              band.kind,
+              band.kind as string,
               roadCenterX,
               bandHeight + 1.5,
               bandZ,
