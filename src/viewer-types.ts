@@ -14,12 +14,20 @@ export type SceneOption = {
   glbUrl: string;
 };
 
+export type StaticObjectDescription = {
+  match: "exact" | "prefix";
+  title: string;
+  category: string;
+  intro: string;
+  source?: string;
+  design_note?: string;
+};
+
 export type ViewerManifest = {
   layout_path?: string;
   lighting_preset?: string;
   lighting_params?: Record<string, unknown>;
   default_selection?: string;
-  static_object_descriptions?: Record<string, StaticObjectDescription>;
   summary?: Record<string, unknown>;
   final_scene: {
     glb_url: string;
@@ -188,6 +196,16 @@ export type SceneJobResult = {
   layout_path: string;
   scene_glb_path: string;
   viewer_url?: string;
+};
+
+export type SceneJobOperation = string | {
+  name?: string;
+  status?: string;
+  message?: string;
+  stage?: string;
+  progress?: number;
+  detail?: Record<string, unknown>;
+  timestamp?: string;
 };
 
 export type DesignRunSnapshot = {

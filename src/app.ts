@@ -32,6 +32,7 @@ import type {
   BranchRunNode,
   BranchScatterPoint,
   BranchRunStatusPayload,
+  SceneJobOperation,
 } from "./viewer-types";
 import {
   GENERATION_STEPS,
