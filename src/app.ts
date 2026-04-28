@@ -2772,11 +2772,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
               if (i === 0) {
                 // Outer boundary (first lane left edge) — solid
-                addSolidEdgeLine(roadMinX, laneLeftZ, roadMaxX, laneLeftZ, isSelected ? 0xffffff : laneColor, baseOpacity * 0.9);
+                addSolidEdgeLine(roadMinX, laneLeftZ, roadMaxX, laneLeftZ, isSelected ? 0xffffff : (laneColor as unknown as number), baseOpacity * 0.9);
               }
               if (i === laneCount - 1) {
                 // Outer boundary (last lane right edge) — solid
-                addSolidEdgeLine(roadMinX, laneRightZ, roadMaxX, laneRightZ, isSelected ? 0xffffff : laneColor, baseOpacity * 0.9);
+                addSolidEdgeLine(roadMinX, laneRightZ, roadMaxX, laneRightZ, isSelected ? 0xffffff : (laneColor as unknown as number), baseOpacity * 0.9);
               }
               if (i > 0) {
                 // Inter-lane boundary — dashed white
@@ -2805,8 +2805,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           if (floatingLaneConfig.showEdgeLines) {
             const cwLeftZ = zStart;
             const cwRightZ = zStart + band.width_m;
-            addSolidEdgeLine(roadMinX, cwLeftZ, roadMinX, cwRightZ, isSelected ? 0xffffff : PER_LANE_COLORS[0], baseOpacity * 0.9);
-            addSolidEdgeLine(roadMaxX, cwLeftZ, roadMaxX, cwRightZ, isSelected ? 0xffffff : PER_LANE_COLORS[0], baseOpacity * 0.9);
+            addSolidEdgeLine(roadMinX, cwLeftZ, roadMinX, cwRightZ, isSelected ? 0xffffff : (PER_LANE_COLORS[0] as unknown as number), baseOpacity * 0.9);
+            addSolidEdgeLine(roadMaxX, cwLeftZ, roadMaxX, cwRightZ, isSelected ? 0xffffff : (PER_LANE_COLORS[0] as unknown as number), baseOpacity * 0.9);
           }
 
           // Selection glow covers entire carriageway
