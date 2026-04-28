@@ -2748,7 +2748,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
             const laneZCenter = zStart + (laneWidth as number) * (i + 0.5);
             const laneColor = PER_LANE_COLORS[i % PER_LANE_COLORS.length];
 
-            const planeGeo = new THREE.PlaneGeometry(length, laneWidth);
+            const planeGeo = new THREE.PlaneGeometry(length, laneWidth as number);
             const planeMat = new THREE.MeshBasicMaterial({
               color: laneColor,
               transparent: true,
@@ -2831,7 +2831,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         } else {
           // --- Non-carriageway band: render as single rectangle ---
           const baseColor = getFloatingLaneColor(band.kind as string);
-          const planeGeo = new THREE.PlaneGeometry(length, band.width_m);
+          const planeGeo = new THREE.PlaneGeometry(length, band.width_m as number);
           const planeMat = new THREE.MeshBasicMaterial({
             color: baseColor,
             transparent: true,
@@ -2877,7 +2877,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
           // Selection glow
           if (isSelected) {
-            const glowGeo = new THREE.PlaneGeometry(length + 0.5, band.width_m + 0.5);
+            const glowGeo = new THREE.PlaneGeometry(length + 0.5, (band.width_m as number) + 0.5);
             const glowMat = new THREE.MeshBasicMaterial({
               color: baseColor,
               transparent: true,
@@ -3071,8 +3071,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         </label>
       </div>
       <div class="flp-slider-group">
-        <label>Height: <span id="flp-height-val">${floatingLaneConfig.height.toFixed(1)}m</span></label>
-        <input type="range" id="flp-height" min="0.1" max="3" step="0.1" value="${floatingLaneConfig.height}">
+        <label>Height: <span id="flp-height-val">${(floatingLaneConfig.height ?? 0.5).toFixed(1)}m</span></label>
+        <input type="range" id="flp-height" min="0.1" max="3" step="0.1" value="${floatingLaneConfig.height ?? 0.5}">
       </div>
       <div class="flp-slider-group">
         <label>Road Opacity: <span id="flp-opacity-val">${(floatingLaneConfig.opacity! * 100).toFixed(0)}%</span></label>
@@ -3415,7 +3415,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         }
         break;
       case "Escape":
-        if (active && floatingLaneConfig.selectedLaneIndex >= 0) {
+        if (active && (floatingLaneConfig.selectedLaneIndex ?? -1) >= 0) {
           floatingLaneConfig.selectedLaneIndex = -1;
           buildFloatingLaneOverlay();
         }
@@ -3634,8 +3634,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           kind: "instance",
           nodeName,
           instanceId,
-          instanceInfo,
-          assetDescription: currentManifest?.asset_descriptions?.[instanceInfo.asset_id],
+          instanceInfo: instanceInfo as InstanceInfo,
+          assetDescription: currentManifest?.asset_descriptions?.[(instanceInfo as InstanceInfo).asset_id],
           hitPoint,
         };
       }
