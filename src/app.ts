@@ -2744,9 +2744,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           const laneWidth = (band.width_m as number) / laneCount;
           const zStart = bandZ - (band.width_m as number) / 2;
 
+          const colorKeys = Object.keys(PER_LANE_COLORS);
           for (let i = 0; i < laneCount; i++) {
             const laneZCenter = zStart + (laneWidth as number) * (i + 0.5);
-            const laneColor = PER_LANE_COLORS[i % PER_LANE_COLORS.length];
+            const laneColor = (PER_LANE_COLORS[colorKeys[i % colorKeys.length]] as unknown as number);
 
             const planeGeo = new THREE.PlaneGeometry(length, laneWidth as number);
             const planeMat = new THREE.MeshBasicMaterial({
@@ -3635,7 +3636,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           nodeName,
           instanceId,
           instanceInfo: instanceInfo as InstanceInfo,
-          assetDescription: currentManifest?.asset_descriptions?.[(instanceInfo as InstanceInfo).asset_id],
+          assetDescription: (currentManifest?.asset_descriptions?.[(instanceInfo as InstanceInfo).asset_id] as AssetDescription | undefined),
           hitPoint,
         };
       }
@@ -5182,10 +5183,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       throw new Error("No viewable GLB entries were found in this scene layout.");
     }
     const defaultKey = optionsByKey.has(currentManifest.default_selection as string)
-      ? currentManifest.default_selection
+      ? (currentManifest.default_selection as string)
       : options[0]?.key ?? "";
     selectEl.value = defaultKey;
-    selectEl.title = optionsByKey.get(defaultKey)?.label ?? "";
+    selectEl.title = (optionsByKey.get(defaultKey)?.label) ?? "";
     updateQueryLayout(layoutPath);
     await loadScene(optionsByKey.get(defaultKey) ?? options[0]);
     // Refresh metrics panel
