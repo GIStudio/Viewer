@@ -2851,14 +2851,14 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
           // Edge lines
           if (floatingLaneConfig.showEdgeLines) {
-            const halfWidth = band.width_m / 2;
+            const halfWidth = (band.width_m as number) / 2;
             const leftZ = bandZ - halfWidth;
             const rightZ = bandZ + halfWidth;
 
-            addSolidEdgeLine(roadMinX, leftZ, roadMaxX, leftZ, isSelected ? 0xffffff : baseColor, baseOpacity * 0.9);
-            addSolidEdgeLine(roadMinX, rightZ, roadMaxX, rightZ, isSelected ? 0xffffff : baseColor, baseOpacity * 0.9);
-            addSolidEdgeLine(roadMinX, leftZ, roadMinX, rightZ, isSelected ? 0xffffff : baseColor, baseOpacity * 0.9);
-            addSolidEdgeLine(roadMaxX, leftZ, roadMaxX, rightZ, isSelected ? 0xffffff : baseColor, baseOpacity * 0.9);
+            addSolidEdgeLine(roadMinX, leftZ, roadMaxX, leftZ, isSelected ? 0xffffff : (baseColor as number), baseOpacity * 0.9);
+            addSolidEdgeLine(roadMinX, rightZ, roadMaxX, rightZ, isSelected ? 0xffffff : (baseColor as number), baseOpacity * 0.9);
+            addSolidEdgeLine(roadMinX, leftZ, roadMinX, rightZ, isSelected ? 0xffffff : (baseColor as number), baseOpacity * 0.9);
+            addSolidEdgeLine(roadMaxX, leftZ, roadMaxX, rightZ, isSelected ? 0xffffff : (baseColor as number), baseOpacity * 0.9);
           }
 
           // Label
@@ -2906,7 +2906,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
         const shape = buildPolygonShape(pts.map(p => [p[0], -p[1]]));
         const geometry = new THREE.ShapeGeometry(shape);
-        const landUseType = fp.land_use_type?.toLowerCase() ?? "";
+        const landUseType = (fp.land_use_type as string)?.toLowerCase() ?? "";
         const colorKey = landUseType.includes("residential") ? "building_residential"
           : landUseType.includes("commercial") ? "building_commercial"
           : landUseType.includes("industrial") ? "building_industrial"
@@ -2950,11 +2950,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
         // Building label at centroid
         if (floatingLaneConfig.showLabels && fp.centroid_xz) {
+          const centroid = fp.centroid_xz as [number, number];
           const labelSprite = createFloatingLaneLabel(
             "building",
-            fp.centroid_xz[0],
-            height + 2,
-            fp.centroid_xz[1]
+            centroid[0],
+            height! + 2,
+            centroid[1]
           );
           labelSprite.userData.isFloatingLane = true;
           labelSprite.userData.buildingIndex = i;
@@ -3022,10 +3023,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         const markerMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 });
         const marker = new THREE.Mesh(markerGeo, markerMat);
         if (info.position_xyz) {
+          const pos = info.position_xyz as [number, number, number];
           marker.position.set(
-            info.position_xyz[0],
-            (info.position_xyz[1] || 0) + 0.6,
-            info.position_xyz[2],
+            pos[0],
+            (pos[1] || 0) + 0.6,
+            pos[2],
           );
         }
         marker.userData.isFloatingLane = true;
