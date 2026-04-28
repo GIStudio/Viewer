@@ -3808,11 +3808,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const params = currentManifest?.lighting_params;
     if (params) {
       lightingState.preset = currentManifest?.lighting_preset || "custom";
-      lightingState.exposure = params.exposure;
-      lightingState.keyLightIntensity = params.keyLightIntensity;
-      lightingState.fillLightIntensity = params.fillLightIntensity;
-      lightingState.warmth = params.warmth;
-      lightingState.shadowStrength = params.shadowStrength;
+      lightingState.exposure = params.exposure as number;
+      lightingState.keyLightIntensity = params.keyLightIntensity as number;
+      lightingState.fillLightIntensity = params.fillLightIntensity as number;
+      lightingState.warmth = params.warmth as number;
+      lightingState.shadowStrength = params.shadowStrength as number;
     } else {
       const presetKey = currentManifest?.lighting_preset;
       if (presetKey && LIGHTING_PRESETS[presetKey]) {
