@@ -47,7 +47,6 @@ export type ViewerManifest = {
     lane_count?: number;
     road_width_m?: number;
   };
-  summary?: Record<string, unknown>;
 };
 
 export type InstanceInfo = {
@@ -229,23 +228,6 @@ export type DesignSchemeVariant = {
   seed: number;
 };
 
-export type SceneJobResult = {
-  scene_layout_path: string;
-  scene_glb_path?: string;
-  scene_ply_path?: string;
-  viewer_url?: string;
-};
-
-export type SceneJobOperation = string | {
-  name?: string;
-  status?: string;
-  message?: string;
-  stage?: string;
-  progress?: number;
-  detail?: Record<string, unknown>;
-  timestamp?: string;
-};
-
 // ============================================================================
 // Branch Run Types
 // ============================================================================
@@ -321,14 +303,6 @@ export type GenerationStep = {
 // ============================================================================
 
 export const DEFAULT_GRAPH_TEMPLATE_ID = "hkust_gz_gate";
-export const DESIGN_POLL_INTERVAL_MS = 2000;
-export const DESIGN_MAX_POLL_ATTEMPTS = 90;
-
-export const DESIGN_SCHEME_VARIANTS: DesignSchemeVariant[] = [
-  { id: "A", name: "Scheme A", seed: 42, densityMod: 1.0, widthMod: 1.0 },
-  { id: "B", name: "Scheme B", seed: 137, densityMod: 1.15, widthMod: 0.9 },
-  { id: "C", name: "Scheme C", seed: 256, densityMod: 0.85, widthMod: 1.1 },
-];
 
 export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
   {
