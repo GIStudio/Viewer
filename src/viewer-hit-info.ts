@@ -15,6 +15,9 @@ export interface HitDescriptor {
   assetDescription?: AssetDescription;
   staticDescription?: StaticObjectDescription;
   hitPoint?: THREE.Vector3;
+  point?: THREE.Vector3;
+  assetInfo?: Record<string, unknown>;
+  distance?: number;
 }
 
 export interface InstanceInfo {

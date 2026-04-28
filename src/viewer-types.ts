@@ -15,6 +15,7 @@ export type SceneOption = {
 };
 
 export type ViewerManifest = {
+  layout_path?: string;
   final_scene: {
     glb_url: string;
     label: string;
@@ -84,8 +85,11 @@ export type FloatingLaneConfig = {
   showLabels: boolean;
   showSurfaces: boolean;
   showBuildings?: boolean;
+  showFeatures?: boolean;
   surfaceColor?: string;
   laneOpacity?: number;
+  buildingOpacity?: number;
+  featureOpacity?: number;
   height?: number;
   colorScheme?: string;
   selectedLaneIndex?: number;
