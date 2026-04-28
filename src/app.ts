@@ -2428,6 +2428,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         const shapeRing = ring.map(p => toShapeXY(p));
         const shape = buildPolygonShape(shapeRing);
         const geometry = new THREE.ShapeGeometry(shape);
+        if (floatingLaneConfig.opacity !== undefined) {
         const material = new THREE.MeshBasicMaterial({
           color: FLOATING_COLORS.carriageway,
           transparent: true,
@@ -2437,7 +2438,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.rotation.x = -Math.PI / 2;
+        if (height !== undefined) {
         mesh.position.set(0, height, 0);
+        }
         mesh.userData.isFloatingLane = true;
         mesh.userData.overlayType = "road";
         scene.add(mesh);
@@ -2452,7 +2455,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           });
           const points: THREE.Vector3[] = [];
           for (const point of ring) {
-            points.push(new THREE.Vector3(point[0], height, point[1]));
+            const yPos = height !== undefined ? height : 0;
+            points.push(new THREE.Vector3(point[0], yPos, point[1]));
           }
           points.push(points[0].clone()); // close the loop
           const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
