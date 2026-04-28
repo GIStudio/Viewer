@@ -83,8 +83,15 @@ export type FloatingLaneConfig = {
   enabled: boolean;
   showLabels: boolean;
   showSurfaces: boolean;
+  showBuildings?: boolean;
   surfaceColor?: string;
   laneOpacity?: number;
+  height?: number;
+  colorScheme?: string;
+  selectedLaneIndex?: number;
+  showEdgeLines?: boolean;
+  opacity?: number;
+  animated?: boolean;
 };
 
 export const FLOATING_LANE_COLORS = [

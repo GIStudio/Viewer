@@ -49,6 +49,7 @@ import {
   asTriplet,
   isFiniteTriplet,
   createTextSprite,
+  finiteOrNull,
 } from "./viewer-utils";
 import {
   loadManifest,

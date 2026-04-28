@@ -5,14 +5,16 @@
  */
 
 import * as THREE from "three";
+import type { InstanceInfo, AssetDescription, StaticObjectDescription } from "./viewer-types";
 
 export interface HitDescriptor {
-  object: THREE.Object3D;
-  point: THREE.Vector3;
-  distance: number;
+  kind: "instance" | "static" | "generic";
+  nodeName: string;
   instanceId?: string;
-  category?: string;
-  assetInfo?: Record<string, unknown>;
+  instanceInfo?: InstanceInfo;
+  assetDescription?: AssetDescription;
+  staticDescription?: StaticObjectDescription;
+  hitPoint?: THREE.Vector3;
 }
 
 export interface InstanceInfo {

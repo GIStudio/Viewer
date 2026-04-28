@@ -11,7 +11,7 @@ import * as THREE from "three";
  */
 export function createTextSprite(
   text: string,
-  options: {
+  optionsOrColor?: {
     fontSize?: number;
     color?: string;
     bgColor?: string;
@@ -19,8 +19,27 @@ export function createTextSprite(
     borderRadius?: number;
     fontWeight?: string;
     maxWidth?: number;
-  } = {},
+  } | number,
 ): THREE.Sprite {
+  // Support legacy calling pattern where second arg is a color number
+  let options: {
+    fontSize?: number;
+    color?: string;
+    bgColor?: string;
+    padding?: number;
+    borderRadius?: number;
+    fontWeight?: string;
+    maxWidth?: number;
+  } = {};
+  
+  if (typeof optionsOrColor === "number") {
+    // Legacy: second arg is color number
+    const colorHex = "#" + optionsOrColor.toString(16).padStart(6, "0");
+    options = { color: colorHex, fontSize: 64 };
+  } else if (optionsOrColor) {
+    options = optionsOrColor;
+  }
+  
   const {
     fontSize = 48,
     color = "#000000",
@@ -79,6 +98,13 @@ export function createTextSprite(
   const sprite = new THREE.Sprite(material);
   sprite.scale.set(canvas.width / 100, canvas.height / 100, 1);
   return sprite;
+}
+
+/**
+ * Return value if finite, otherwise return fallback.
+ */
+export function finiteOrNull(value: unknown, fallback: number | null = null): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 /**
