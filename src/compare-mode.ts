@@ -546,12 +546,12 @@ export function createCompareMode(deps: CompareModeDependencies) {
       <div class="viewer-compare-images">
         <div class="viewer-compare-col">
           <div class="viewer-compare-layout-badge viewer-compare-layout-a">${t("Layout A", "布局 A")}</div>
-          <div class="viewer-compare-thumb-label">${deps.escapeHtml(deps.compactUiLabel(a.layout_path))}</div>
+          <div class="viewer-compare-thumb-label">${deps.escapeHtml(deps.compactUiLabel(a.layout_path!))}</div>
           ${imgA ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgA)}" alt="Layout A" />` : `<div class='viewer-compare-no-img'>${t("No preview", "无预览")}</div>`}
         </div>
         <div class="viewer-compare-col">
           <div class="viewer-compare-layout-badge viewer-compare-layout-b">${t("Layout B", "布局 B")}</div>
-          <div class="viewer-compare-thumb-label">${deps.escapeHtml(deps.compactUiLabel(b.layout_path))}</div>
+          <div class="viewer-compare-thumb-label">${deps.escapeHtml(deps.compactUiLabel(b.layout_path!))}</div>
           ${imgB ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgB)}" alt="Layout B" />` : `<div class='viewer-compare-no-img'>${t("No preview", "无预览")}</div>`}
         </div>
       </div>
@@ -580,7 +580,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
       if (!hostEl) return;
       hostEl.innerHTML = `<div class="viewer-evaluate-loading">${t("Rendering...", "正在渲染...")}</div>`;
       try {
-        const url = `./api/scenes/diff/image?layout_a=${encodeURIComponent(a.layout_path)}&layout_b=${encodeURIComponent(b.layout_path)}&mode=${encodeURIComponent(mode)}`;
+        const url = `./api/scenes/diff/image?layout_a=${encodeURIComponent(a.layout_path!)}&layout_b=${encodeURIComponent(b.layout_path!)}&mode=${encodeURIComponent(mode)}`;
         const response = await fetch(url);
         if (!response.ok) {
           const payload = (await response.json().catch(() => ({}))) as { error?: string };
