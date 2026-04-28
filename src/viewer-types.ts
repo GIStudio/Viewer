@@ -203,6 +203,15 @@ export type DesignRunSnapshot = {
 // Design Presets and Variants
 // ============================================================================
 
+export const DESIGN_POLL_INTERVAL_MS = 1500;
+export const DESIGN_MAX_POLL_ATTEMPTS = 240;
+
+export const DESIGN_SCHEME_VARIANTS: DesignSchemeVariant[] = [
+  { id: "A", name: "Scheme A", densityMod: 1.0, widthMod: 1.0, seed: 42 },
+  { id: "B", name: "Scheme B", densityMod: 1.2, widthMod: 0.9, seed: 137 },
+  { id: "C", name: "Scheme C", densityMod: 0.8, widthMod: 1.1, seed: 256 },
+];
+
 export type DesignPreset = {
   id: string;
   name: string;
@@ -316,9 +325,9 @@ export const DESIGN_POLL_INTERVAL_MS = 2000;
 export const DESIGN_MAX_POLL_ATTEMPTS = 90;
 
 export const DESIGN_SCHEME_VARIANTS: DesignSchemeVariant[] = [
-  { name: "Scheme A", seed: 42, densityMod: 1.0, widthMod: 1.0 },
-  { name: "Scheme B", seed: 137, densityMod: 1.15, widthMod: 0.9 },
-  { name: "Scheme C", seed: 256, densityMod: 0.85, widthMod: 1.1 },
+  { id: "A", name: "Scheme A", seed: 42, densityMod: 1.0, widthMod: 1.0 },
+  { id: "B", name: "Scheme B", seed: 137, densityMod: 1.15, widthMod: 0.9 },
+  { id: "C", name: "Scheme C", seed: 256, densityMod: 0.85, widthMod: 1.1 },
 ];
 
 export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [

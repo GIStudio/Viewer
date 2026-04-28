@@ -39,6 +39,8 @@ import {
   VIEWER_DESIGN_PRESETS,
   DEFAULT_GRAPH_TEMPLATE_ID,
   PER_LANE_COLORS,
+  DESIGN_POLL_INTERVAL_MS,
+  DESIGN_MAX_POLL_ATTEMPTS,
 } from "./viewer-types";
 import {
   requireElement,
@@ -59,6 +61,8 @@ import {
   apiJson,
   postApiJson,
   updateQueryLayout,
+  parseQueryLayoutPath,
+  inferSpawnFromBbox,
 } from "./viewer-api";
 import {
   resolveHitDescriptor,
@@ -5671,13 +5675,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   );
 
   exportTopdownMapEl.addEventListener("click", () => {
-    exportTopDownMapEnhanced(scene, currentRoot);
+    exportTopDownMapPng(scene, currentRoot);
     menuDropdownEl.hidden = true;
     menuToggleEl.setAttribute("aria-expanded", "false");
   }, { signal });
 
   exportTopdownSvgEl.addEventListener("click", () => {
-    exportTopDownSvg(scene, currentRoot);
+    exportTopDownMapSvg(scene, currentRoot);
     menuDropdownEl.hidden = true;
     menuToggleEl.setAttribute("aria-expanded", "false");
   }, { signal });

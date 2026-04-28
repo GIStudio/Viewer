@@ -1,8 +1,10 @@
 /**
  * API utilities for the RoadGen3D Viewer.
- * 
+ *
  * Handles manifest loading, recent layouts, and API calls with caching.
  */
+
+import * as THREE from "three";
 
 const API_BASE = (import.meta.env.VITE_ROADGEN_API_BASE as string | undefined) || "http://127.0.0.1:8010";
 
@@ -121,4 +123,44 @@ export function updateQueryLayout(layoutPath: string): void {
  */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Parse layout path from query string.
+ */
+export function parseQueryLayoutPath(): string | null {
+  const search = new URLSearchParams(window.location.search);
+  const layoutPath = search.get("layout") ?? "";
+  return layoutPath.trim() || null;
+}
+
+/**
+ * Infer spawn position from bounding box.
+ */
+export function inferSpawnFromBbox(
+  bbox: { center: THREE.Vector3 },
+  manifest: { spawn_point?: [number, number, number]; forward_vector?: [number, number, number] },
+): { position: THREE.Vector3; forward: THREE.Vector3 } {
+  if (
+    manifest.spawn_point &&
+    manifest.forward_vector
+  ) {
+    return {
+      position: new THREE.Vector3(
+        manifest.spawn_point[0],
+        manifest.spawn_point[1],
+        manifest.spawn_point[2],
+      ),
+      forward: new THREE.Vector3(
+        manifest.forward_vector[0],
+        manifest.forward_vector[1],
+        manifest.forward_vector[2],
+      ).normalize(),
+    };
+  }
+
+  return {
+    position: new THREE.Vector3(bbox.center.x, 1.65, bbox.center.z),
+    forward: new THREE.Vector3(1, 0, 0),
+  };
 }

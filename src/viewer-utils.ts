@@ -100,16 +100,6 @@ export function createTextSprite(
   return sprite;
 }
 
-/**
- * Return value if finite, otherwise return fallback.
- */
-export function finiteOrNull(value: unknown, fallback: number | null = null): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-/**
- * Require an element from the root, throwing if not found.
- */
 export function requireElement<T extends HTMLElement>(root: HTMLElement | Document, selector: string): T {
   const el = root.querySelector<T>(selector);
   if (!el) throw new Error(`Required element not found: ${selector}`);
