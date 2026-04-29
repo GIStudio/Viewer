@@ -4969,6 +4969,8 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(18rem, 0.9fr);
   gap: 0.9rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .viewer-design-workspace-panel,
@@ -4980,7 +4982,21 @@ body {
 }
 
 .viewer-design-workspace-panel {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding: 0.95rem;
+}
+
+#viewer-g6-stage-tree {
+  width: 100%;
+  max-width: 100%;
+  min-height: 420px;
+  max-height: 68vh;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fafbfc;
 }
 
 .viewer-design-workspace-panel-title {

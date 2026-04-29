@@ -1827,11 +1827,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     if (!container) {
       container = document.createElement("div");
       container.id = containerId;
-      container.style.width = "100%";
-      container.style.height = "500px";
-      container.style.background = "#fafbfc";
-      container.style.borderRadius = "8px";
-      container.style.border = "1px solid #e2e8f0";
       
       // Insert before stage cards
       const stageCards = designWorkspaceEl.querySelector(".viewer-design-stage-cards");

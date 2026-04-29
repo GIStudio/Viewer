@@ -39,6 +39,16 @@ function destroyCurrentGraph(): void {
   }
 }
 
+function resolveContainerElement(container: string | HTMLElement): HTMLElement | null {
+  if (typeof container !== 'string') {
+    return container;
+  }
+  if (container.startsWith('#')) {
+    return document.getElementById(container.substring(1));
+  }
+  return document.getElementById(container);
+}
+
 /**
  * Render stage progress tree using G6 v5
  */
@@ -91,26 +101,42 @@ export function renderStageTree(
     // Convert to graph data
     const data = treeToGraphData(treeData);
 
+    const containerEl = resolveContainerElement(container);
+    const availableWidth = containerEl?.clientWidth || Math.min(760, Math.max(320, window.innerWidth - 96));
+    const graphWidth = Math.max(320, Math.floor(availableWidth));
+    const graphHeight = Math.min(
+      Math.max(420, stages.length * 104 + 140),
+      Math.max(420, Math.floor(window.innerHeight * 0.68)),
+    );
+
+    if (containerEl) {
+      containerEl.style.width = '100%';
+      containerEl.style.maxWidth = '100%';
+      containerEl.style.height = `${graphHeight}px`;
+      containerEl.style.maxHeight = '68vh';
+      containerEl.style.overflow = 'hidden';
+    }
+
     // Create G6 v5 Graph
     currentGraph = new Graph({
       container: typeof container === 'string' 
         ? (container.startsWith('#') ? container.substring(1) : container)
         : (container as any),
-      width: 760,
-      height: Math.max(560, stages.length * 86 + 120),
+      width: graphWidth,
+      height: graphHeight,
       autoFit: 'view',
       data,
       layout: {
         type: 'compact-box',
-        direction: 'LR',
-        getHeight: () => 40,
-        getWidth: () => 260,
-        getVGap: () => 10,
-        getHGap: () => 40,
+        direction: 'TB',
+        getHeight: () => 42,
+        getWidth: () => 230,
+        getVGap: () => 42,
+        getHGap: () => 18,
       },
       node: {
         style: {
-          size: (d: any) => d.data?.nodeType === 'artifact' ? [220, 32] : [280, 42],
+          size: (d: any) => d.data?.nodeType === 'artifact' ? [190, 32] : [232, 42],
           type: 'rect',
           radius: (d: any) => d.data?.nodeType === 'artifact' ? 6 : 8,
           fill: (d: any) => {
@@ -134,7 +160,7 @@ export function renderStageTree(
         },
       },
       edge: {
-        type: 'cubic-horizontal',
+        type: 'cubic-vertical',
         style: {
           stroke: '#94a3b8',
           lineWidth: 2,
