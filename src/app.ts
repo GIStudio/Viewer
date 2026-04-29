@@ -1,13 +1,22 @@
+/**
+ * Viewer composition root.
+ *
+ * Keep this file focused on DOM lookup, controller wiring, shared Three.js runtime
+ * state, event delegation, and the animation loop. Do not add feature-specific
+ * business logic, large HTML renderers, API orchestration, or panel state machines
+ * here. New Viewer features should live in focused modules such as
+ * viewer-*-controller.ts, viewer-*-workspace.ts, viewer-*-helpers.ts, or
+ * viewer-*.ts render/data helpers, then be wired here through dependency injection.
+ *
+ * Before adding more than a small event binding to this file, read:
+ * ../ARCHITECTURE.md
+ */
 import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { renderStageTree as renderG6StageTree, StageNode } from "./g6-visualization";
 import { AudioManager, type AudioProfile } from "./audio-manager";
 import { createCompareMode } from "./compare-mode";
-import { HistoryScatterPlot, type SceneHistoryEntry } from "./history-scatter-plot";
-import { HistoryFrequencyChart } from "./history-frequency-chart";
-import { HistoryTrendChart } from "./history-trend-chart";
-import { ThreeSystemScorePanel } from "./history-three-system-scores";
 import {
   createRadarChart,
   resizeRadarCanvas,
@@ -16,66 +25,50 @@ import {
 } from "./scene-compare-radar";
 import type {
   ViewerManifest,
-  InstanceInfo,
-  AssetDescription,
-  StaticObjectDescription,
-  FloatingLaneConfig,
-  FLOATING_LANE_COLORS,
-  FLOATING_LANE_LABELS,
   SceneOption,
   RecentLayout,
   DesignPreset,
-  SceneJobResult,
   SceneJobStatusPayload,
-  SceneJobCreatePayload,
   DesignSchemeVariant,
-  BranchRunNode,
-  BranchScatterPoint,
   BranchRunStatusPayload,
-  SceneJobOperation,
 } from "./viewer-types";
 import {
-  GENERATION_STEPS,
-  DESIGN_SCHEME_VARIANTS,
   VIEWER_DESIGN_PRESETS,
   DEFAULT_GRAPH_TEMPLATE_ID,
-  PER_LANE_COLORS,
-  DESIGN_POLL_INTERVAL_MS,
-  DESIGN_MAX_POLL_ATTEMPTS,
 } from "./viewer-types";
 import {
   requireElement,
   escapeHtml,
   clamp,
-  sleep,
   disposeObject,
-  asTriplet,
-  isFiniteTriplet,
   createTextSprite,
-  finiteOrNull,
 } from "./viewer-utils";
 import {
   loadManifest,
   loadRecentLayouts,
   clearManifestCache,
   clearRecentLayoutsCache,
-  apiJson,
-  postApiJson,
-  updateQueryLayout,
   parseQueryLayoutPath,
   inferSpawnFromBbox,
 } from "./viewer-api";
 import {
+  categoryLabel,
   resolveHitDescriptor,
-  buildInfoCardContent,
-  formatMetric,
-  type HitDescriptor,
+  buildInfoCardContent as buildHitDescriptorContent,
+  resolveInstanceIdFromName,
 } from "./viewer-hit-info";
 import {
-  sceneBoundsFromBox,
+  createAssetBboxHelpers,
+  createFrameHelpers,
+  removeAssetBboxHelpers,
+  removeFrameAndAssetHelpers,
+  updateAssetBboxHelpers,
+} from "./viewer-scene-helpers";
+import { createViewerPanelController, type ViewerPanelController } from "./viewer-panel-controller";
+import {
+  sceneBoundsFromManifest,
   updateMinimapCamera,
-  worldToMinimap,
-  drawMinimapOverlay,
+  minimapToWorld,
   renderMinimap,
   type SceneBounds,
 } from "./viewer-minimap";
@@ -83,26 +76,48 @@ import {
   exportTopDownMapPng,
   exportTopDownMapSvg,
 } from "./viewer-export";
-import { API_BASE } from "./sg-constants";
+import {
+  buildDesignStageNodes,
+  latestOperationForStage,
+  renderDesignWorkspaceHtml,
+  renderStageDiagnosticContent,
+  stepForStage,
+} from "./viewer-design-workspace";
+import {
+  renderBranchRunResultsHtml,
+  renderBranchWorkspaceHtml,
+  selectedBranchNode as resolveSelectedBranchNode,
+} from "./viewer-branch-workspace";
+import { createViewerDesignController } from "./viewer-design-controller";
+import {
+  compactUiLabel,
+  makeDirectLayoutLabel,
+  turnLanePatchSvgClass,
+} from "./viewer-scene-options";
+import { createViewerSceneSelectionController } from "./viewer-scene-selection-controller";
+import {
+  DEFAULT_LIGHTING_STATE,
+  LIGHTING_PRESET_LABELS,
+  LIGHTING_PRESETS,
+  type LightingState,
+} from "./viewer-lighting";
+import { createFloatingLaneSystem } from "./viewer-floating-lane";
+import { createHistoryPanelController } from "./viewer-history-panel";
+import {
+  enforceVisualEvaluationAvailability,
+  renderMetricsPanel,
+  renderEvaluationResultHtml,
+  renderEvaluationViewsPreview,
+  requestUnifiedEvaluation,
+  type RenderedEvaluationView,
+} from "./viewer-evaluation";
+import { captureEvaluationViews } from "./viewer-evaluation-capture";
+import { createViewerPresetsController } from "./viewer-presets-controller";
 import type { DesktopShell } from "./desktop-shell";
 
 type RecentLayoutsPayload = {
   results?: RecentLayout[];
   error?: string;
-};
-
-type GeneratedDesignScheme = {
-  id: string;
-  name: string;
-  layoutPath: string;
-  status: "ready" | "failed";
-  error?: string;
-};
-
-type BranchRunCreatePayload = {
-  run_id: string;
-  status: string;
-  created_at?: string;
 };
 
 // Branch types moved to viewer-types.ts
@@ -115,16 +130,7 @@ type DesignRunSnapshot = {
   graphTemplateId: string;
 };
 
-type GenerationStep = {
-  key: string;
-  label: string;
-  shortLabel: string;
-  progress: number;
-  purpose: string;
-  detailHint: string;
-};
-
-// Constants moved to viewer-types.ts: DEFAULT_GRAPH_TEMPLATE_ID, DESIGN_POLL_INTERVAL_MS, DESIGN_MAX_POLL_ATTEMPTS, DESIGN_SCHEME_VARIANTS, VIEWER_DESIGN_PRESETS
+// Constants moved to viewer-types.ts: DEFAULT_GRAPH_TEMPLATE_ID, VIEWER_DESIGN_PRESETS
 
 type MovementState = {
   forward: boolean;
@@ -140,84 +146,7 @@ type CameraMode = "first_person" | "third_person" | "frame" | "graph_overlay";
 // Forward declaration for currentManifest (defined later in the file)
 let currentManifest: ViewerManifest | null = null;
 
-type LightingPresetValues = {
-  exposure: number;
-  keyLightIntensity: number;
-  fillLightIntensity: number;
-  warmth: number;
-  shadowStrength: number;
-};
-
-type LightingState = LightingPresetValues & {
-  preset: string;
-};
-
-type MinimapBounds = {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-  center: THREE.Vector3;
-  extent: number;
-};
-
 // HitDescriptor type moved to viewer-hit-info.ts
-
-const LIGHTING_PRESETS: Record<string, LightingPresetValues> = {
-  neutral_studio: {
-    exposure: 1.1,
-    keyLightIntensity: 1.0,
-    fillLightIntensity: 0.55,
-    warmth: 0.0,
-    shadowStrength: 0.45,
-  },
-  bright_day: {
-    exposure: 1.3,
-    keyLightIntensity: 1.2,
-    fillLightIntensity: 0.8,
-    warmth: -0.1,
-    shadowStrength: 0.3,
-  },
-  overcast: {
-    exposure: 1.05,
-    keyLightIntensity: 0.75,
-    fillLightIntensity: 0.95,
-    warmth: -0.15,
-    shadowStrength: 0.15,
-  },
-  golden_hour: {
-    exposure: 1.18,
-    keyLightIntensity: 1.05,
-    fillLightIntensity: 0.48,
-    warmth: 0.85,
-    shadowStrength: 0.58,
-  },
-  night_presentation: {
-    exposure: 0.82,
-    keyLightIntensity: 0.62,
-    fillLightIntensity: 0.24,
-    warmth: 0.2,
-    shadowStrength: 0.72,
-  },
-};
-
-const LIGHTING_PRESET_LABELS: Record<string, string> = {
-  neutral_studio: "Neutral Studio",
-  bright_day: "Bright Day",
-  overcast: "Overcast",
-  golden_hour: "Golden Hour",
-  night_presentation: "Night Presentation",
-  custom: "Custom",
-};
-
-const DEFAULT_LIGHTING_STATE: LightingState = {
-  preset: "custom",
-  exposure: 1.8,
-  keyLightIntensity: 1.7,
-  fillLightIntensity: 1.2,
-  warmth: 0.6,
-  shadowStrength: 0.05,
-};
 
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
 const AVATAR_HEIGHT_M = 1.7;
@@ -225,216 +154,14 @@ const AVATAR_EYE_HEIGHT_M = 1.62;
 const THIRD_PERSON_DISTANCE_M = 3.6;
 const THIRD_PERSON_VERTICAL_OFFSET_M = 1.1;
 
-const CATEGORY_LABELS: Record<string, string> = {
-  bench: "座椅",
-  lamp: "路灯",
-  tree: "树木",
-  trash: "垃圾桶",
-  bollard: "隔离桩",
-  mailbox: "邮箱",
-  hydrant: "消防栓",
-  bus_stop: "公交站",
-  building: "建筑",
-  road: "道路",
-  roadway: "道路",
-  sidewalk: "人行道",
-  marking: "道路标线",
-  crossing: "过街区",
-  transit: "公交设施",
-  landscape: "景观设施",
-  scene_object: "场景对象",
-};
-
-const FALLBACK_CATEGORY_INTRO: Record<string, string> = {
-  bench: "用于停留休憩，通常位于步行活动带。",
-  lamp: "用于夜间照明，通常沿步行界面连续布置。",
-  tree: "用于遮荫与界面塑造，通常位于路缘或家具带。",
-  trash: "用于保持街道整洁，通常布置在停留节点附近。",
-  bollard: "用于分隔交通与人行区域，强化安全边界。",
-  mailbox: "用于邮政投递，通常靠近停留节点或出入口。",
-  hydrant: "用于消防取水，通常靠近机动车或消防可达界面。",
-  bus_stop: "用于公交停靠与候车，通常锚定在公交站点附近。",
-  building: "用于塑造沿街界面和空间围合。",
-};
-
-const CATEGORY_BBOX_COLORS: Record<string, number> = {
-  tree: 0x22c55e,
-  lamp: 0xeab308,
-  bench: 0x92400e,
-  trash: 0x6b7280,
-  bollard: 0xef4444,
-  mailbox: 0x3b82f6,
-  hydrant: 0xdc2626,
-  bus_stop: 0x8b5cf6,
-  building: 0xa78bfa,
-  road: 0x64748b,
-  roadway: 0x64748b,
-  sidewalk: 0x94a3b8,
-  marking: 0xfbbf24,
-  crossing: 0xfde68a,
-  transit: 0x7c3aed,
-  landscape: 0x4ade80,
-  scene_object: 0x38bdf8,
-};
-
 // createTextSprite moved to viewer-utils.ts
 
 // Utility functions moved to viewer-utils.ts: requireElement, escapeHtml, clamp, finiteOrNull, asTriplet, asQuad, isFiniteTriplet
-
-type MetricEntry = { label: string; value: number; max: number };
-type LlmStatusEntry = {
-  enabled?: boolean;
-  available?: boolean;
-  source?: string;
-  cached?: boolean;
-  visual_input?: string;
-  reasoning?: string;
-  error?: string;
-};
-type EvaluationResult = {
-  walkability: number;
-  safety: number | null;
-  beauty: number | null;
-  overall: number | null;
-  evaluation: string;
-  suggestions: string[];
-  config_patch: Record<string, unknown>;
-  llm_status?: {
-    safety?: LlmStatusEntry;
-    beauty?: LlmStatusEntry;
-  };
-};
-type RenderedEvaluationView = {
-  view_id: "pedestrian_forward" | "pedestrian_reverse" | "overview_topdown";
-  label: string;
-  image_data_url: string;
-};
-type PresetConfig = { id: string; name: string; description: string; config: Record<string, unknown> };
-
-function metricColor(value: number, max: number): string {
-  const ratio = clamp(value / max, 0, 1);
-  if (ratio >= 0.8) return "#16a34a";
-  if (ratio >= 0.5) return "#eab308";
-  return "#dc2626";
-}
-
-function renderMetricsBarHtml(entry: MetricEntry): string {
-  const percent = Math.round(clamp(entry.value / entry.max, 0, 1) * 100);
-  const color = metricColor(entry.value, entry.max);
-  return `<div class="viewer-metric-row">
-  <div class="viewer-metric-label">${escapeHtml(entry.label)}</div>
-  <div class="viewer-metric-value">${entry.value.toFixed(2)}</div>
-  <div class="viewer-metric-bar-track"><div class="viewer-metric-bar-fill" style="width:${percent}%;background:${color}"></div></div>
-  </div>`;
-}
-
-function llmStatusPresentation(entry?: LlmStatusEntry): { label: string; className: string } {
-  const source = String(entry?.source || "unavailable").toLowerCase();
-  const visualInput = String(entry?.visual_input || "missing").toLowerCase();
-  if (visualInput !== "provided" && source !== "disabled") {
-    return { label: "N/A · No views", className: "unavailable" };
-  }
-  if (source === "llm") return { label: "Live · Visual", className: "live" };
-  if (source === "cache") return { label: "Cache · Visual", className: "cache" };
-  if (source === "disabled") return { label: "Disabled", className: "disabled" };
-  return { label: "Unavailable · Visual", className: "unavailable" };
-}
-
-function isScoreValue(value: number | null | undefined): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function formatScore(value: number | null | undefined): string {
-  return isScoreValue(value) ? String(Math.round(value)) : "N/A";
-}
-
-function hasProvidedVisualInput(entry?: LlmStatusEntry): boolean {
-  return Boolean(entry?.available) && String(entry?.visual_input || "").toLowerCase() === "provided";
-}
-
-function renderMetricsPanel(summary: Record<string, unknown>): string {
-  const layoutMetrics: MetricEntry[] = [
-    { label: "重叠率", value: Number(summary.overlap_rate ?? 0), max: 1 },
-    { label: "丢弃率", value: Number(summary.dropped_slot_rate ?? 0), max: 1 },
-    { label: "间距均匀性", value: Number(summary.spacing_uniformity ?? 0), max: 1 },
-    { label: "风格一致性", value: Number(summary.style_consistency ?? 0), max: 1 },
-    { label: "均衡度", value: Number(summary.balance_score ?? 0), max: 1 },
-  ];
-  const complianceMetrics: MetricEntry[] = [
-    { label: "合规率", value: Number(summary.compliance_rate_total ?? 0), max: 1 },
-    { label: "违规数", value: Number(summary.violations_total ?? 0), max: 100 },
-    { label: "可行性", value: Number(summary.avg_feasibility_score ?? 0), max: 1 },
-  ];
-  const sceneMetrics: MetricEntry[] = [
-    { label: "实例数", value: Number(summary.instance_count ?? 0), max: 200 },
-    { label: "资产种类", value: Number(summary.unique_asset_count ?? 0), max: 200 },
-    { label: "多样性", value: Number(summary.diversity_ratio ?? 0), max: 1 },
-  ];
-  const groups: Array<{ title: string; metrics: MetricEntry[] }> = [];
-  if (layoutMetrics.some(m => m.value > 0)) groups.push({ title: "布局质量", metrics: layoutMetrics });
-  if (complianceMetrics.some(m => m.value > 0)) groups.push({ title: "合规性", metrics: complianceMetrics });
-  if (sceneMetrics.some(m => m.value > 0)) groups.push({ title: "场景统计", metrics: sceneMetrics });
-  return groups.map(g => `<div class="viewer-metrics-group"><div class="viewer-metrics-group-title">${escapeHtml(g.title)}</div>${g.metrics.map(m => renderMetricsBarHtml(m)).join("")}</div>`).join("");
-}
 
 const CATEGORY_COLORS: Record<string, number> = {
   bench: 0x4ade80, lamp: 0xfbbf24, trash: 0xf87171, tree: 0x22c55e,
   mailbox: 0x60a5fa, hydrant: 0xef4444, bollard: 0xa78bfa, bus_stop: 0xfb923c,
 };
-
-const SYSTEM_NODE_DESCRIPTIONS: Record<string, StaticObjectDescription> = {
-  carriageway_arm_: {
-    match: "prefix",
-    title: "Road Carriageway Arm",
-    category: "road",
-    intro: "Individual road arm carriageway surface (one per road segment).",
-    design_note: "Previously merged into a single unified mesh; now split for easier inspection.",
-  },
-  carriageway_: {
-    match: "prefix",
-    title: "Road Carriageway Surface",
-    category: "road",
-    intro: "Unified carriageway surface across connected road segments.",
-    design_note: "May span multiple road arms and junction cores.",
-  },
-  sidewalk_: {
-    match: "prefix",
-    title: "Sidewalk Surface",
-    category: "sidewalk",
-    intro: "Pedestrian sidewalk surface.",
-  },
-  curb_: {
-    match: "prefix",
-    title: "Curb Stone",
-    category: "landscape",
-    intro: "Edge curb separating carriageway from sidewalk.",
-  },
-  junction_carriageway_core_: {
-    match: "prefix",
-    title: "Junction Core Surface",
-    category: "road",
-    intro: "Central intersection junction core surface.",
-  },
-  junction_crosswalk_: {
-    match: "prefix",
-    title: "Crosswalk",
-    category: "crossing",
-    intro: "Pedestrian crossing markings at junction.",
-  },
-  road_slab: {
-    match: "exact",
-    title: "Road Surface",
-    category: "road",
-    intro: "Template-mode road surface slab.",
-  },
-  context_ground: {
-    match: "exact",
-    title: "Ground Context",
-    category: "scene_object",
-    intro: "Surrounding ground plane.",
-  },
-};
-
 
 function setError(element: HTMLElement, message: string): void {
   element.textContent = message;
@@ -446,333 +173,13 @@ function clearError(element: HTMLElement): void {
   element.hidden = true;
 }
 
-function makeSceneOptions(manifest: ViewerManifest): SceneOption[] {
-  const options: SceneOption[] = [
-    {
-      key: "final_scene",
-      label: manifest.final_scene.label,
-      glbUrl: manifest.final_scene.glb_url,
-    },
-  ];
-  for (const step of manifest.production_steps ?? []) {
-    options.push({
-      key: step.step_id,
-      label: step.title,
-      glbUrl: step.glb_url,
-    });
-  }
-  return options;
-}
-
-function makeDirectLayoutLabel(layoutPath: string): string {
-  const normalized = layoutPath.replace(/\\/g, "/");
-  const parts = normalized.split("/").filter(Boolean);
-  const tail = parts.slice(-2).join("/");
-  return `Direct Layout · ${tail || normalized}`;
-}
-
-function compactUiLabel(label: string, maxLength = 54): string {
-  if (label.length <= maxLength) {
-    return label;
-  }
-
-  const normalized = label.replace(/\\/g, "/");
-  if (normalized.includes("/")) {
-    const parts = normalized.split("/").filter(Boolean);
-    const tail = parts.slice(-2).join("/");
-    const head = parts[0] ?? "";
-    const compactPath = `${head}/.../${tail}`;
-    if (compactPath.length <= maxLength) {
-      return compactPath;
-    }
-    if (tail.length + 1 >= maxLength) {
-      return `...${tail.slice(-(maxLength - 3))}`;
-    }
-  }
-
-  const left = Math.max(8, Math.floor((maxLength - 1) / 2));
-  const right = Math.max(8, maxLength - left - 1);
-  return `${label.slice(0, left)}...${label.slice(-right)}`;
-}
-
 // disposeObject moved to viewer-utils.ts
 
 // Export colors moved to viewer-export.ts
 
-function turnLanePatchSvgClass(patch: Record<string, unknown>): string {
-  const surfaceRole = String(patch.surface_role ?? "").toLowerCase();
-  const stripKind = String(patch.strip_kind ?? "").toLowerCase();
-  if (surfaceRole === "bike_lane" || stripKind === "bike_lane") return "bikelane";
-  if (surfaceRole === "bus_lane" || stripKind === "bus_lane") return "buslane";
-  if (surfaceRole === "parking_lane" || stripKind === "parking_lane") return "parking";
-  if (surfaceRole === "furnishing" || stripKind.includes("furnishing") || stripKind.includes("buffer")) return "furnishing";
-  if (surfaceRole === "context_ground" || stripKind === "frontage_reserve") return "frontage";
-  if (surfaceRole === "sidewalk" || stripKind === "clear_sidewalk") return "sidewalk";
-  return "road";
-}
-
 // exportTopDownMapEnhanced, exportTopDownSvg moved to viewer-export.ts
 // loadManifest, clearManifestCache, loadRecentLayouts moved to viewer-api.ts
 // inferSpawnFromBbox, manifestCache, parseQueryLayoutPath moved to viewer-api.ts
-
-function categoryLabel(category: string): string {
-  const key = String(category || "").trim().toLowerCase();
-  return CATEGORY_LABELS[key] ?? (key || "场景对象");
-}
-
-function prettifySource(source: string | undefined): string {
-  const value = String(source || "").trim();
-  if (!value) {
-    return "系统生成";
-  }
-  return value.replace(/_/g, " ");
-}
-
-// formatMetric moved to viewer-hit-info.ts
-
-function collectInstanceMetrics(instanceInfo: InstanceInfo): Array<[string, string]> {
-  const metrics: Array<[string, string]> = [
-    ["asset_id", String(instanceInfo.asset_id || "").trim()],
-    ["placement_group", String(instanceInfo.placement_group || "").trim()],
-    ["theme_id", String(instanceInfo.theme_id || "").trim()],
-    ["距道路边缘", formatMetric(finiteOrNull(instanceInfo.dist_to_road_edge_m), "m")],
-    ["距最近路口", formatMetric(finiteOrNull(instanceInfo.dist_to_nearest_junction_m), "m")],
-    ["距最近出入口", formatMetric(finiteOrNull(instanceInfo.dist_to_nearest_entrance_m), "m")],
-    ["可行性", formatMetric(finiteOrNull(instanceInfo.feasibility_score), "", 2)],
-    ["约束惩罚", formatMetric(finiteOrNull(instanceInfo.constraint_penalty), "", 3)],
-  ];
-  return metrics.filter((entry) => entry[1] && entry[1] !== "未记录");
-}
-
-function buildPlacementReason(instanceInfo: InstanceInfo, category: string): string {
-  const anchorPoiType = String(instanceInfo.anchor_poi_type || "").trim();
-  const anchorDistance = finiteOrNull(instanceInfo.anchor_distance_m);
-  if (anchorPoiType) {
-    return `该对象锚定在 ${anchorPoiType} 相关位置，当前距锚点 ${formatMetric(anchorDistance, "m")}。`;
-  }
-  const source = String(instanceInfo.selection_source || "").trim();
-  if (source) {
-    return `本对象由 ${prettifySource(source)} 选中，并按当前规则集落位。`;
-  }
-  return FALLBACK_CATEGORY_INTRO[category] ?? "该对象按当前街道规则自动布置。";
-}
-
-function composeInstanceInfoHtml(
-  nodeName: string,
-  instanceInfo: InstanceInfo,
-  assetDescription?: AssetDescription,
-): string {
-  const category = String(instanceInfo.category || "").trim().toLowerCase();
-  const title = categoryLabel(category);
-  const subtitleParts = [
-    category ? `类别：${categoryLabel(category)}` : "",
-    assetDescription?.source ? `来源：${prettifySource(assetDescription.source)}` : "",
-  ].filter(Boolean);
-  const intro = String(assetDescription?.text_desc || "").trim()
-    || FALLBACK_CATEGORY_INTRO[category]
-    || "这是场景中的自动生成对象。";
-  const metrics = collectInstanceMetrics(instanceInfo);
-
-  return `
-    <div class="viewer-card-title">${escapeHtml(title)}</div>
-    <div class="viewer-card-subtitle">${escapeHtml(subtitleParts.join(" · ") || `节点：${nodeName}`)}</div>
-    <div class="viewer-card-section">${escapeHtml(intro)}</div>
-    <div class="viewer-card-section viewer-card-highlight">${escapeHtml(buildPlacementReason(instanceInfo, category))}</div>
-    <dl class="viewer-card-metrics">
-      ${metrics
-        .map(
-          ([label, value]) =>
-            `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`,
-        )
-        .join("")}
-    </dl>
-  `;
-}
-
-function composeInstanceInfoText(
-  nodeName: string,
-  instanceInfo: InstanceInfo,
-  assetDescription?: AssetDescription,
-): string {
-  const category = String(instanceInfo.category || "").trim().toLowerCase();
-  const title = categoryLabel(category);
-  const subtitleParts = [
-    category ? `类别：${categoryLabel(category)}` : "",
-    assetDescription?.source ? `来源：${prettifySource(assetDescription.source)}` : "",
-  ].filter(Boolean);
-  const subtitle = subtitleParts.join(" · ") || `节点：${nodeName}`;
-  const intro = String(assetDescription?.text_desc || "").trim()
-    || FALLBACK_CATEGORY_INTRO[category]
-    || "这是场景中的自动生成对象。";
-  const metrics = collectInstanceMetrics(instanceInfo);
-  return [
-    title,
-    subtitle,
-    intro,
-    buildPlacementReason(instanceInfo, category),
-    ...metrics.map(([label, value]) => `${label}: ${value}`),
-  ].filter(Boolean).join("\n");
-}
-
-function pointInPolygonRing(x: number, z: number, ring: number[][]): boolean {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0];
-    const zi = ring[i][1];
-    const xj = ring[j][0];
-    const zj = ring[j][1];
-    const intersect = ((zi > z) !== (zj > z)) && (x < (xj - xi) * (z - zi) / (zj - zi + 1e-12) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
-function findZoneForPoint(x: number, z: number, manifest: ViewerManifest): { zone: string; details: string } | null {
-  const osm = (manifest.summary ?? {}) as Record<string, unknown>;
-  const osmGeom = (osm.osm_geometry ?? {}) as Record<string, unknown>;
-  const cwRings = (osmGeom.carriageway_rings ?? []) as number[][][];
-  for (let i = 0; i < cwRings.length; i++) {
-    if (pointInPolygonRing(x, z, cwRings[i])) {
-      return { zone: `Carriageway ${i}`, details: "Inside carriageway surface polygon" };
-    }
-  }
-  const swRings = (osmGeom.sidewalk_rings ?? []) as number[][][];
-  for (let i = 0; i < swRings.length; i++) {
-    if (pointInPolygonRing(x, z, swRings[i])) {
-      return { zone: `Sidewalk ${i}`, details: "Inside sidewalk surface polygon" };
-    }
-  }
-  const junctions = (osmGeom.junction_geometries ?? []) as Array<Record<string, unknown>>;
-  for (let i = 0; i < junctions.length; i++) {
-    const coreRings = (junctions[i].carriageway_core_rings ?? []) as number[][][];
-    for (let r = 0; r < coreRings.length; r++) {
-      if (pointInPolygonRing(x, z, coreRings[r])) {
-        return { zone: `Junction Core ${i}`, details: `Kind: ${junctions[i].kind ?? "unknown"}` };
-      }
-    }
-  }
-  return null;
-}
-
-function buildRoadAnalysisHtml(hitPoint: THREE.Vector3, manifest: ViewerManifest): string {
-  const summary = (manifest.summary ?? {}) as Record<string, unknown>;
-  const osm = (summary.osm_geometry ?? {}) as Record<string, unknown>;
-  const rows: string[] = [];
-
-  const zone = findZoneForPoint(hitPoint.x, hitPoint.z, manifest);
-  if (zone) {
-    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Zone</span><span class="viewer-analysis-value">${escapeHtml(zone.zone)}</span></div>`);
-    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Details</span><span class="viewer-analysis-value">${escapeHtml(zone.details)}</span></div>`);
-  }
-
-  const cwWidth = Number(summary.carriageway_width_m ?? summary.road_width_m ?? 0);
-  if (cwWidth > 0) {
-    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Carriageway Width</span><span class="viewer-analysis-value">${cwWidth.toFixed(2)} m</span></div>`);
-  }
-  const rowWidth = Number(summary.row_width_m ?? 0);
-  if (rowWidth > 0) {
-    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Total Row Width</span><span class="viewer-analysis-value">${rowWidth.toFixed(2)} m</span></div>`);
-  }
-  const lengthM = Number(summary.length_m ?? 0);
-  if (lengthM > 0) {
-    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Segment Length</span><span class="viewer-analysis-value">${lengthM.toFixed(1)} m</span></div>`);
-  }
-
-  const jCount = (osm.junction_geometries as unknown[] | undefined)?.length ?? 0;
-  if (jCount > 0) {
-    rows.push(`<div class="viewer-analysis-row"><span class="viewer-analysis-label">Junctions</span><span class="viewer-analysis-value">${jCount}</span></div>`);
-  }
-
-  if (rows.length === 0) return "";
-  return `<div class="viewer-card-section viewer-analysis-section"><div class="viewer-analysis-title">Road Analysis</div>${rows.join("")}</div>`;
-}
-
-function composeStaticInfoHtml(
-  nodeName: string,
-  description: StaticObjectDescription,
-  hitPoint?: THREE.Vector3,
-  manifest?: ViewerManifest,
-): string {
-  const subtitle = [
-    `类别：${categoryLabel(description.category)}`,
-    description.source ? `来源：${prettifySource(description.source)}` : "来源：系统构件",
-  ].join(" · ");
-  const analysis = hitPoint && manifest ? buildRoadAnalysisHtml(hitPoint, manifest) : "";
-  return `
-    <div class="viewer-card-title">${escapeHtml(description.title)}</div>
-    <div class="viewer-card-subtitle">${escapeHtml(subtitle)}</div>
-    <div class="viewer-card-section">${escapeHtml(description.intro || "这是场景中的基础构件。")}</div>
-    <div class="viewer-card-section viewer-card-highlight">${escapeHtml(description.design_note || "用于支撑街道空间组织与交通可读性。")}</div>
-    ${analysis}
-    <dl class="viewer-card-metrics">
-      <div><dt>node</dt><dd>${escapeHtml(nodeName)}</dd></div>
-    </dl>
-  `;
-}
-
-function composeStaticInfoText(nodeName: string, description: StaticObjectDescription): string {
-  const subtitle = [
-    `类别：${categoryLabel(description.category)}`,
-    description.source ? `来源：${prettifySource(description.source)}` : "来源：系统构件",
-  ].join(" · ");
-  return [
-    description.title,
-    subtitle,
-    description.intro || "这是场景中的基础构件。",
-    description.design_note || "用于支撑街道空间组织与交通可读性。",
-    `node: ${nodeName}`,
-  ].filter(Boolean).join("\n");
-}
-
-function composeGenericInfoHtml(nodeName: string): string {
-  return `
-    <div class="viewer-card-title">场景对象</div>
-    <div class="viewer-card-subtitle">未命名规则对象</div>
-    <div class="viewer-card-section">当前对象没有更详细的街道说明元数据。</div>
-    <dl class="viewer-card-metrics">
-      <div><dt>node</dt><dd>${escapeHtml(nodeName)}</dd></div>
-    </dl>
-  `;
-}
-
-function composeGenericInfoText(nodeName: string): string {
-  return [
-    "场景对象",
-    "未命名规则对象",
-    "当前对象没有更详细的街道说明元数据。",
-    `node: ${nodeName}`,
-  ].join("\n");
-}
-
-function buildHitDescriptorContent(
-  descriptor: HitDescriptor,
-  manifest?: ViewerManifest,
-): { html: string; text: string } {
-  if (descriptor.kind === "instance") {
-    return {
-      html: composeInstanceInfoHtml(
-        descriptor.nodeName,
-        descriptor.instanceInfo!,
-        descriptor.assetDescription,
-      ),
-      text: composeInstanceInfoText(
-        descriptor.nodeName,
-        descriptor.instanceInfo!,
-        descriptor.assetDescription,
-      ),
-    };
-  }
-  if (descriptor.kind === "static") {
-    return {
-      html: composeStaticInfoHtml(descriptor.nodeName, descriptor.staticDescription!, descriptor.hitPoint, manifest),
-      text: composeStaticInfoText(descriptor.nodeName, descriptor.staticDescription!),
-    };
-  }
-  return {
-    html: composeGenericInfoHtml(descriptor.nodeName),
-    text: composeGenericInfoText(descriptor.nodeName),
-  };
-}
 
 async function writeTextToClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
@@ -805,11 +212,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement
     || target instanceof HTMLTextAreaElement
     || target instanceof HTMLSelectElement;
-}
-
-function resolveInstanceIdFromName(name: string): string | null {
-  const match = String(name || "").match(/(inst_\d{4})/i);
-  return match ? match[1] : null;
 }
 
 function createAvatarFigure(): THREE.Group {
@@ -1489,167 +891,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const historyAnalysisPanelEl = requireElement<HTMLElement>(root, "#viewer-history-analysis-panel");
   const historyAnalysisCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-history-analysis-close");
   const historyAnalysisContentEl = requireElement<HTMLElement>(root, "#viewer-history-analysis-content");
-  let historyScatterPlot: HistoryScatterPlot | null = null;
-  let historyFrequencyChart: HistoryFrequencyChart | null = null;
-  let historyTrendChart: HistoryTrendChart | null = null;
-  let historyThreeSystemScores: ThreeSystemScorePanel | null = null;
-  let historyAnalysisOpen = false;
-
-  const setHistoryAnalysisOpen = (nextOpen: boolean) => {
-    if (nextOpen) {
-      closeAllSlidePanels();
-    }
-    historyAnalysisOpen = nextOpen;
-    historyAnalysisPanelEl.dataset.open = String(nextOpen);
-    if (nextOpen) {
-      shell.activateRightTab("history");
-      loadAndRenderHistory();
-    } else if (!settingsOpen && !designOpen && !evaluateOpen && !compareOpen && !presetsOpen) {
-      shell.activateRightTab(null);
-    }
-  };
-
-  const setupHistoryTabs = () => {
-    const tabs = historyAnalysisContentEl.querySelectorAll<HTMLButtonElement>(".viewer-history-tab");
-    const panels = historyAnalysisContentEl.querySelectorAll<HTMLElement>(".viewer-history-tab-panel");
-
-    tabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const target = tab.dataset.tab!;
-        tabs.forEach((t) => (t.dataset.active = String(t.dataset.tab === target)));
-        panels.forEach((p) => (p.dataset.active = String(p.dataset.tab === target)));
-      });
-    });
-  };
-
-  // 缓存历史数据，避免重复请求
-  let cachedHistoryData: SceneHistoryEntry[] | null = null;
-  let lastHistoryLoadTime = 0;
-  const HISTORY_CACHE_TTL_MS = 60 * 1000; // 1 分钟缓存
-
-  const loadAndRenderHistory = async (forceRefresh = false) => {
-    try {
-      // 检查缓存是否有效
-      const now = Date.now();
-      const cacheValid = !forceRefresh && cachedHistoryData !== null && (now - lastHistoryLoadTime) < HISTORY_CACHE_TTL_MS;
-
-      if (cacheValid && cachedHistoryData !== null && cachedHistoryData.length > 0) {
-        // 使用缓存数据快速渲染
-        await renderHistoryCharts(cachedHistoryData);
-        return;
-      }
-
-      // 显示加载状态
-      historyAnalysisContentEl.innerHTML = `
-        <div style="padding: 24px; text-align: center; color: #64748b;">
-          <div style="margin-bottom: 8px;">
-            <svg width="24" height="24" viewBox="0 0 24 24" style="animation: spin 1s linear infinite; vertical-align: middle;">
-              <circle cx="12" cy="12" r="10" stroke="#e2e8f0" stroke-width="3" fill="none"/>
-              <path d="M12 2a10 10 0 0 1 10 10" stroke="#3b82f6" stroke-width="3" fill="none" stroke-linecap="round"/>
-            </svg>
-            <span style="margin-left: 8px;">Loading history data...</span>
-          </div>
-          <p style="font-size: 12px; color: #94a3b8; margin-top: 8px;">Using cached data if available</p>
-        </div>
-        <style>@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }</style>
-      `;
-
-      const recentLayouts = await loadRecentLayouts(50, !forceRefresh);
-      const scenesWithMetrics: SceneHistoryEntry[] = [];
-      const total = recentLayouts.length;
-      let loaded = 0;
-
-      for (const layout of recentLayouts) {
-        try {
-          const manifest = await loadManifest(layout.layout_path, !forceRefresh);
-          if (manifest.summary) {
-            scenesWithMetrics.push({
-              layout_path: layout.layout_path,
-              label: layout.label,
-              relative_path: layout.relative_path,
-              updated_at: layout.updated_at,
-              mtime_ms: layout.mtime_ms,
-              summary: { ...manifest.summary },
-            });
-          }
-        } catch (e) {
-          console.warn(`Failed to load manifest for ${layout.layout_path}:`, e);
-        }
-        loaded++;
-
-        // 每加载 10 个更新一次进度
-        if (loaded % 10 === 0 || loaded === total) {
-          historyAnalysisContentEl.querySelector(".loading-progress")?.setAttribute(
-            "data-progress",
-            `${loaded}/${total}`
-          );
-        }
-      }
-
-      if (scenesWithMetrics.length === 0) {
-        historyAnalysisContentEl.innerHTML = `
-          <div style="padding: 24px; text-align: center; color: #999;">
-            <p>No scene data with metrics found.</p>
-            <p style="font-size: 12px; margin-top: 8px;">Generate some scenes first, then return here to analyze the history.</p>
-          </div>
-        `;
-        return;
-      }
-
-      // 缓存数据
-      cachedHistoryData = scenesWithMetrics;
-      lastHistoryLoadTime = Date.now();
-
-      await renderHistoryCharts(scenesWithMetrics);
-    } catch (error) {
-      console.error("Failed to load history data:", error);
-      historyAnalysisContentEl.innerHTML = `
-        <div style="padding: 24px; text-align: center; color: #f5222d;">
-          <p>Failed to load history data.</p>
-          <p style="font-size: 12px; margin-top: 8px;">${error instanceof Error ? error.message : "Unknown error"}</p>
-        </div>
-      `;
-    }
-  };
-
-  // 渲染历史图表（可复用）
-  const renderHistoryCharts = async (scenesWithMetrics: SceneHistoryEntry[]) => {
-    if (scenesWithMetrics.length === 0) return;
-
-    // 初始化图表组件
-    if (!historyScatterPlot) {
-      historyScatterPlot = new HistoryScatterPlot(
-        historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-scatter-plot")!
-      );
-    }
-
-    if (!historyFrequencyChart) {
-      historyFrequencyChart = new HistoryFrequencyChart(
-        historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-frequency")!
-      );
-    }
-
-    if (!historyTrendChart) {
-      historyTrendChart = new HistoryTrendChart(
-        historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-trend")!
-      );
-    }
-
-    if (!historyThreeSystemScores) {
-      historyThreeSystemScores = new ThreeSystemScorePanel(
-        historyAnalysisContentEl.querySelector<HTMLElement>("#viewer-history-scores")!
-      );
-    }
-
-    await historyScatterPlot.init(scenesWithMetrics);
-    await historyFrequencyChart.init(scenesWithMetrics);
-    await historyTrendChart.init(scenesWithMetrics);
-    await historyThreeSystemScores.init(scenesWithMetrics);
-
-    // Setup tab switching
-    setupHistoryTabs();
-  };
-
+  const historyPanelController = createHistoryPanelController({
+    contentEl: historyAnalysisContentEl,
+    loadRecentLayouts,
+    loadManifest,
+  });
   const exportTopdownMapEl = requireElement<HTMLButtonElement>(root, "#viewer-export-topdown-map");
   const exportTopdownSvgEl = requireElement<HTMLButtonElement>(root, "#viewer-export-topdown-svg");
   const presetsToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-presets-toggle");
@@ -1804,26 +1050,17 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let currentForward = new THREE.Vector3(1, 0, 0);
   let currentAvatarPosition = new THREE.Vector3(0, Math.max(0, 1.65 - AVATAR_EYE_HEIGHT_M), 0);
   let currentCameraMode: CameraMode = "first_person";
-  let currentSceneBounds: MinimapBounds | null = null;
+  let currentSceneBounds: SceneBounds | null = null;
   let currentLaserHitPoint: THREE.Vector3 | null = null;
   let currentLaserCopyText = "";
   let flyAnimation: { startPos: THREE.Vector3; targetPos: THREE.Vector3; startTime: number; duration: number } | null = null;
-  let settingsOpen = false;
   let resumeRoamAfterSettingsClose = false;
   let statusResetHandle: number | null = null;
-  let designOpen = false;
-  let designIsGenerating = false;
-  let branchRunIsGenerating = false;
   let lastBranchRunSnapshot: BranchRunStatusPayload | null = null;
   let selectedBranchNodeId: string | null = null;
   let lastDesignRunSnapshot: DesignRunSnapshot | null = null;
-  let evaluateOpen = false;
-  let compareOpen = false;
-  let presetsOpen = false;
-  let helpOpen = false;
   let graphOverlayActive = false;
   const graphOverlayMarkers: THREE.Object3D[] = [];
-  const optionsByKey = new Map<string, SceneOption>();
   const recentLayoutsByPath = new Map<string, RecentLayout>();
 
   // 语言状态
@@ -1833,6 +1070,133 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const lightingState: LightingState = {
     ...DEFAULT_LIGHTING_STATE,
   };
+
+  let panelController: ViewerPanelController;
+  const floatingLaneSystem = createFloatingLaneSystem({
+    scene,
+    camera,
+    getManifest: () => currentManifest,
+    getSceneBounds: () => currentSceneBounds,
+    cameraForwardHorizontal,
+    axisHudEl,
+    layoutOverlayToggleEl,
+    panelHost: requireElement<HTMLElement>(root, "#viewer-floating-lane-panel-host"),
+    shell,
+    shouldDeactivateTab: () => !panelController?.isAnyOpen(),
+  });
+
+  panelController = createViewerPanelController({
+    shell,
+    canvasHost,
+    panels: {
+      settings: settingsPanelEl,
+      design: designPanelEl,
+      evaluate: evaluatePanelEl,
+      compare: comparePanelEl,
+      presets: presetsPanelEl,
+      help: helpPanelEl,
+      history: historyAnalysisPanelEl,
+    },
+    settingsToggleEl,
+    onSettingsOpen: () => {
+      if (controls.isLocked) {
+        resumeRoamAfterSettingsClose = true;
+        controls.unlock();
+      }
+    },
+    onSettingsClose: (restoreRoam) => {
+      const shouldRestoreRoam = restoreRoam || resumeRoamAfterSettingsClose;
+      resumeRoamAfterSettingsClose = false;
+      if (shouldRestoreRoam) {
+        controls.lock();
+      }
+    },
+    onDesignOpen: populateDesignPresets,
+    onCompareOpen: populateCompareSelectors,
+    onPresetsOpen: () => presetsController.populatePresetsGrid(),
+    onHistoryOpen: () => void historyPanelController.loadAndRenderHistory(),
+    onCloseAllOverlays: () => {
+      if (graphOverlayActive) {
+        clearGraphOverlay();
+        graphOverlayActive = false;
+      }
+      if (layoutOverlayToggleEl.checked) {
+        layoutOverlayToggleEl.checked = false;
+        floatingLaneSystem.config.enabled = false;
+        floatingLaneSystem.clearOverlay();
+      }
+    },
+  });
+
+  const sceneSelectionController = createViewerSceneSelectionController({
+    selectEl,
+    errorEl,
+    setStatus,
+    clearError,
+    setCurrentLayoutPath: (layoutPath) => {
+      currentLayoutPath = layoutPath;
+    },
+    setCurrentManifest: (manifest) => {
+      currentManifest = manifest;
+    },
+    loadScene,
+    afterLayoutLoaded: () => {
+      updateMetricsPanel();
+      if (graphOverlayActive) {
+        graphOverlayToggleEl.checked = false;
+        graphOverlayActive = false;
+        clearGraphOverlay();
+        currentCameraMode = thirdPersonToggleEl.checked ? "third_person" : "first_person";
+        syncCameraRig();
+      }
+      if (layoutOverlayToggleEl.checked) {
+        layoutOverlayToggleEl.checked = false;
+        floatingLaneSystem.config.enabled = false;
+        floatingLaneSystem.clearOverlay();
+      }
+      applyAudioProfile();
+    },
+  });
+
+  const designController = createViewerDesignController({
+    designPromptEl,
+    designTemplateEl,
+    designCountEl,
+    designGenerateEl,
+    designBranchRunEl,
+    designReviewRunEl,
+    designResultEl,
+    designWorkspaceEl,
+    minimapEl,
+    errorEl,
+    getSelectedDesignPreset: selectedDesignPreset,
+    hasLastDesignRunSnapshot: () => lastDesignRunSnapshot !== null,
+    setSelectedBranchNodeId: (nodeId) => {
+      selectedBranchNodeId = nodeId;
+    },
+    setStatus,
+    setError,
+    flashStatus,
+    updateDesignStatus,
+    renderDesignWorkspace,
+    hideDesignWorkspace,
+    renderBranchWorkspace,
+    renderBranchRunResults,
+    loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
+    populateRecentLayoutOptions,
+  });
+
+  const presetsController = createViewerPresetsController({
+    presetsGridEl,
+    errorEl,
+    getCurrentManifest: () => currentManifest,
+    closePresetsPanel: () => panelController.setOpen("presets", false),
+    setStatus,
+    setError,
+    flashStatus,
+    loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
+    populateRecentLayoutOptions,
+  });
 
   function setStatus(message: string): void {
     if (statusResetHandle !== null) {
@@ -1898,144 +1262,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     shadowValueEl.textContent = lightingState.shadowStrength.toFixed(2);
     crosshairEl.hidden = !laserToggleEl.checked;
     applyLightingState();
-  }
-
-  function setSettingsOpen(nextOpen: boolean, restoreRoam = false): void {
-    settingsOpen = nextOpen;
-    settingsPanelEl.dataset.open = nextOpen ? "true" : "false";
-    settingsToggleEl.setAttribute("aria-expanded", nextOpen ? "true" : "false");
-    if (nextOpen) {
-      shell.activateRightTab("settings");
-    } else if (!designOpen && !evaluateOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
-      shell.activateRightTab(null);
-    }
-    if (nextOpen) {
-      if (controls.isLocked) {
-        resumeRoamAfterSettingsClose = true;
-        controls.unlock();
-      }
-      return;
-    }
-    const shouldRestoreRoam = restoreRoam || resumeRoamAfterSettingsClose;
-    resumeRoamAfterSettingsClose = false;
-    if (shouldRestoreRoam) {
-      controls.lock();
-    }
-  }
-
-  function toggleSettingsShortcut(): void {
-    if (settingsOpen) {
-      setSettingsOpen(false, true);
-      return;
-    }
-    setSettingsOpen(true);
-  }
-
-  function updateCanvasSlideOpenState(): void {
-    const anyOpen = designOpen || evaluateOpen || compareOpen || presetsOpen;
-    canvasHost.dataset.slideOpen = anyOpen ? "true" : "false";
-  }
-
-  function closeAllSlidePanels(): void {
-    if (settingsOpen) setSettingsOpen(false);
-    if (designOpen) {
-      designOpen = false;
-      designPanelEl.dataset.open = "false";
-    }
-    if (evaluateOpen) {
-      evaluateOpen = false;
-      evaluatePanelEl.dataset.open = "false";
-    }
-    if (compareOpen) {
-      compareOpen = false;
-      comparePanelEl.dataset.open = "false";
-    }
-    if (presetsOpen) {
-      presetsOpen = false;
-      presetsPanelEl.dataset.open = "false";
-    }
-    if (graphOverlayActive) {
-      clearGraphOverlay();
-      graphOverlayActive = false;
-    }
-    if (layoutOverlayToggleEl.checked) {
-      layoutOverlayToggleEl.checked = false;
-      floatingLaneConfig.enabled = false;
-      clearFloatingLaneOverlay();
-    }
-    shell.activateRightTab(null);
-    updateCanvasSlideOpenState();
-  }
-
-  function setDesignOpen(nextOpen: boolean): void {
-    if (nextOpen) {
-      closeAllSlidePanels();
-      populateDesignPresets();
-    }
-    designOpen = nextOpen;
-    designPanelEl.dataset.open = nextOpen ? "true" : "false";
-    if (nextOpen) {
-      shell.activateRightTab("design");
-    } else if (!settingsOpen && !evaluateOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
-      shell.activateRightTab(null);
-    }
-    updateCanvasSlideOpenState();
-  }
-
-  function setEvaluateOpen(nextOpen: boolean): void {
-    if (nextOpen) closeAllSlidePanels();
-    evaluateOpen = nextOpen;
-    evaluatePanelEl.dataset.open = nextOpen ? "true" : "false";
-    if (nextOpen) {
-      shell.activateRightTab("evaluate");
-    } else if (!settingsOpen && !designOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
-      shell.activateRightTab(null);
-    }
-    updateCanvasSlideOpenState();
-  }
-
-  function setCompareOpen(nextOpen: boolean): void {
-    if (nextOpen) {
-      closeAllSlidePanels();
-      populateCompareSelectors();
-    }
-    compareOpen = nextOpen;
-    comparePanelEl.dataset.open = nextOpen ? "true" : "false";
-    if (nextOpen) {
-      shell.activateRightTab("compare");
-    } else if (!settingsOpen && !designOpen && !evaluateOpen && !presetsOpen && !historyAnalysisOpen) {
-      shell.activateRightTab(null);
-    }
-    updateCanvasSlideOpenState();
-  }
-
-  function setPresetsOpen(nextOpen: boolean): void {
-    if (nextOpen) {
-      closeAllSlidePanels();
-      populatePresetsGrid();
-    }
-    presetsOpen = nextOpen;
-    presetsPanelEl.dataset.open = nextOpen ? "true" : "false";
-    if (nextOpen) {
-      shell.activateRightTab("presets");
-    } else if (!settingsOpen && !designOpen && !evaluateOpen && !compareOpen && !historyAnalysisOpen && !helpOpen) {
-      shell.activateRightTab(null);
-    }
-    updateCanvasSlideOpenState();
-  }
-
-  function setHelpOpen(nextOpen: boolean): void {
-    if (nextOpen) {
-      closeAllSlidePanels();
-    }
-    helpOpen = nextOpen;
-    helpPanelEl.dataset.open = nextOpen ? "true" : "false";
-    if (nextOpen) {
-      shell.activateRightTab("help");
-    } else if (!settingsOpen && !designOpen && !evaluateOpen && !compareOpen && !historyAnalysisOpen && !presetsOpen) {
-      shell.activateRightTab(null);
-    }
-    updateCanvasSlideOpenState();
   }
 
   /* ── Graph Overlay ──────────────────────────────────────────── */
@@ -2124,1127 +1350,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       );
       camera.lookAt(currentSceneBounds.center.x, 0, currentSceneBounds.center.z);
     }
-  }
-
-  /* ── Floating Lane Overlay ─────────────────────────────────── */
-
-  // Floating lane colors - HDR style (bright, saturated)
-  const FLOATING_COLORS: Record<string, number> = {
-    carriageway: 0x3b82f6,   // Blue
-    drive_lane: 0x60a5fa,    // Light blue
-    bike_lane: 0x22c55e,    // Green
-    bus_lane: 0xf59e0b,     // Orange
-    parking_lane: 0x6b7280,  // Gray
-    clear_path: 0xfaf5e6,    // Cream
-    furnishing: 0x92400e,    // Brown
-    sidewalk: 0xd4c4a8,     // Tan
-    median: 0xf97316,       // Orange-red
-    greenzone: 0x16a34a,    // Dark green
-    buffer: 0x8b5cf6,       // Purple
-    frontage: 0x06b6d4,     // Cyan
-    shared: 0xa78bfa,       // Lavender
-    default: 0x94a3b8,
-  };
-
-  // Safety color scheme
-  const SAFETY_COLORS: Record<string, number> = {
-    carriageway: 0xef4444,   // Red - dangerous
-    bike_lane: 0x22c55e,    // Green - safe
-    clear_path: 0x22c55e,   // Green - safe
-    sidewalk: 0x22c55e,     // Green - safe
-    furnishing: 0xeab308,   // Yellow - caution
-    default: 0x94a3b8,
-  };
-
-  // Lane kind labels
-  const LANE_LABELS: Record<string, string> = {
-    carriageway: "机动车道",
-    drive_lane: "行车道",
-    bike_lane: "自行车道",
-    bus_lane: "公交专用",
-    parking_lane: "停车带",
-    clear_path: "人行区",
-    furnishing: "设施带",
-    sidewalk: "人行道",
-    median: "中央分隔带",
-    greenzone: "绿化带",
-    buffer: "缓冲带",
-    frontage: "退缩带",
-    shared: "共享街道",
-    default: "道路",
-  };
-
-  // Floating lane overlay state
-  let floatingLaneObjects: THREE.Object3D[] = [];
-  let floatingLaneConfig: FloatingLaneConfig = {
-    enabled: false,
-    showSurfaces: true,
-    height: 0.5,
-    opacity: 0.5,
-    showEdgeLines: true,
-    showLabels: true,
-    animated: false,
-    colorScheme: "semantic",
-    selectedLaneIndex: -1,
-    showBuildings: true,
-    showFeatures: true,
-    showPlacementMarkers: true,
-    buildingOpacity: 0.4,
-    featureOpacity: 0.6,
-  };
-  let visibleLaneKinds: Set<string> = new Set([
-    "carriageway", "drive_lane", "clear_path", "furnishing", "sidewalk",
-  ]);
-  let floatingLaneAnimTime = 0;
-
-  function getFloatingLaneColor(kind: string): number {
-    const colors = floatingLaneConfig.colorScheme === "safety" ? SAFETY_COLORS : FLOATING_COLORS;
-    return colors[kind] ?? colors["default"] ?? 0x94a3b8;
-  }
-
-  function getTurnLaneFloatingKind(patch: Record<string, unknown>): string {
-    const surfaceRole = String(patch.surface_role ?? "").toLowerCase();
-    const stripKind = String(patch.strip_kind ?? "").toLowerCase();
-    if (surfaceRole === "bike_lane" || stripKind === "bike_lane") return "bike_lane";
-    if (surfaceRole === "bus_lane" || stripKind === "bus_lane") return "bus_lane";
-    if (surfaceRole === "parking_lane" || stripKind === "parking_lane") return "parking_lane";
-    if (surfaceRole === "furnishing" || stripKind.includes("furnishing") || stripKind.includes("buffer")) return "furnishing";
-    if (surfaceRole === "context_ground" || stripKind === "frontage_reserve") return "frontage";
-    if (surfaceRole === "sidewalk" || stripKind === "clear_sidewalk") return "sidewalk";
-    return "carriageway";
-  }
-
-  function clearFloatingLaneOverlay(): void {
-    for (const obj of floatingLaneObjects) {
-      scene.remove(obj);
-      if (obj instanceof THREE.Mesh) {
-        obj.geometry.dispose();
-        if (Array.isArray(obj.material)) {
-          obj.material.forEach(m => m.dispose());
-        } else {
-          (obj.material as THREE.Material).dispose();
-        }
-      }
-      if (obj instanceof THREE.Sprite) {
-        obj.material.map?.dispose();
-        obj.material.dispose();
-      }
-      if (obj instanceof THREE.LineSegments) {
-        obj.geometry.dispose();
-        (obj.material as THREE.Material).dispose();
-      }
-    }
-    floatingLaneObjects.length = 0;
-    floatingLaneConfig.selectedLaneIndex = -1;
-    updateAxisHud(); // Hide HUD when overlay is cleared
-  }
-
-  function createFloatingLaneLabel(kind: string, x: number, y: number, z: number, customLabel?: string): THREE.Sprite {
-    const label = customLabel ?? LANE_LABELS[kind] ?? LANE_LABELS["default"];
-    const canvas = document.createElement("canvas");
-    canvas.width = 256;
-    canvas.height = 64;
-    const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-    roundRect(ctx, 0, 0, 256, 64, 8);
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 24px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(label, 128, 32);
-    const texture = new THREE.CanvasTexture(canvas);
-    const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
-    const sprite = new THREE.Sprite(spriteMat);
-    sprite.scale.set(4, 1, 1);
-    sprite.position.set(x, y, z);
-    sprite.userData.isFloatingLane = true;
-    sprite.userData.laneLabel = label;
-    return sprite;
-  }
-
-  function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.closePath();
-  }
-
-  // ─── Axis HUD Drawing ────────────────────────────────────────────────────────
-
-  function updateAxisHud(): void {
-    const ctx = axisHudEl.getContext("2d");
-    if (!ctx) return;
-
-    // Setup high DPI
-    const dpr = window.devicePixelRatio || 1;
-    const displayWidth = 200;
-    const displayHeight = 60;
-    axisHudEl.width = Math.round(displayWidth * dpr);
-    axisHudEl.height = Math.round(displayHeight * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    // Clear canvas
-    ctx.clearRect(0, 0, displayWidth, displayHeight);
-
-    // Only show when floating lane overlay is enabled
-    if (!floatingLaneConfig.enabled) return;
-
-    // Background panel
-    ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
-    roundRect(ctx, 0, 0, displayWidth, displayHeight, 12);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // Get camera heading angle (0° = North = +Z in world space)
-    const forward = cameraForwardHorizontal();
-    const headingRad = Math.atan2(forward.x, forward.z);
-    let headingDeg = (-headingRad * 180 / Math.PI + 360) % 360;
-
-    // Compass circle
-    const compassX = 35;
-    const compassY = 30;
-    const compassRadius = 22;
-
-    // Compass background
-    ctx.fillStyle = "rgba(30, 41, 59, 0.9)";
-    ctx.beginPath();
-    ctx.arc(compassX, compassY, compassRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Draw compass tick marks and labels
-    const directions = [
-      { angle: 0, label: "N", color: "#ef4444" },      // North - red
-      { angle: 90, label: "E", color: "#ffffff" },    // East
-      { angle: 180, label: "S", color: "#ffffff" },   // South
-      { angle: 270, label: "W", color: "#ffffff" },   // West
-    ];
-
-    // Draw tick marks
-    for (let i = 0; i < 36; i++) {
-      const tickAngle = (i * 10 - headingDeg) * Math.PI / 180 - Math.PI / 2;
-      const isMajor = i % 9 === 0;
-      const tickLen = isMajor ? 6 : 3;
-      const x1 = compassX + Math.cos(tickAngle) * (compassRadius - tickLen);
-      const y1 = compassY + Math.sin(tickAngle) * (compassRadius - tickLen);
-      const x2 = compassX + Math.cos(tickAngle) * compassRadius;
-      const y2 = compassY + Math.sin(tickAngle) * compassRadius;
-      ctx.strokeStyle = isMajor ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.3)";
-      ctx.lineWidth = isMajor ? 2 : 1;
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-    }
-
-    // Draw direction labels
-    ctx.font = "bold 10px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    for (const dir of directions) {
-      const labelAngle = (dir.angle - headingDeg) * Math.PI / 180 - Math.PI / 2;
-      const labelX = compassX + Math.cos(labelAngle) * (compassRadius - 12);
-      const labelY = compassY + Math.sin(labelAngle) * (compassRadius - 12);
-      ctx.fillStyle = dir.color;
-      ctx.fillText(dir.label, labelX, labelY);
-    }
-
-    // Center dot
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(compassX, compassY, 3, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Heading angle text
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 18px monospace";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillText(`${headingDeg.toFixed(0)}°`, 70, 22);
-
-    // Heading label
-    ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
-    ctx.font = "11px sans-serif";
-    ctx.fillText("HEADING", 70, 42);
-
-    // Scene center info
-    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-    ctx.font = "10px monospace";
-    ctx.textAlign = "right";
-    ctx.fillText(`X: ${currentSceneBounds ? currentSceneBounds.center.x.toFixed(1) : "N/A"}`, 195, 18);
-    ctx.fillText(`Z: ${currentSceneBounds ? currentSceneBounds.center.z.toFixed(1) : "N/A"}`, 195, 32);
-  }
-
-  function buildPolygonShape(points: number[][]): THREE.Shape {
-    const shape = new THREE.Shape();
-    if (points.length < 3) return shape;
-    shape.moveTo(points[0][0], points[0][1]);
-    for (let i = 1; i < points.length; i++) {
-      shape.lineTo(points[i][0], points[i][1]);
-    }
-    shape.closePath();
-    return shape;
-  }
-
-  function buildFloatingLaneOverlay(): void {
-    clearFloatingLaneOverlay();
-    if (!currentManifest?.layout_overlay) {
-      updateAxisHud(); // Update HUD even when no overlay
-      return;
-    }
-
-    // Update axis HUD when overlay is enabled
-    updateAxisHud();
-
-    const overlay = currentManifest.layout_overlay;
-
-    // Get OSM geometry for carriageway rings (road polygons)
-    const summary = (currentManifest.summary ?? {}) as Record<string, unknown>;
-    const osmGeom = (summary.osm_geometry ?? {}) as Record<string, unknown>;
-    const carriagewayRings = (osmGeom.carriageway_rings ?? []) as number[][][];
-    const sidewalkRings = (osmGeom.sidewalk_rings ?? []) as number[][][];
-    const junctions = (osmGeom.junction_geometries ?? []) as Array<Record<string, unknown>>;
-
-    const height: number = floatingLaneConfig.height ?? 0;
-    if (floatingLaneConfig.height === undefined) {
-      console.warn("floatingLaneConfig.height is undefined, using 0");
-    }
-
-    // ShapeGeometry is defined in XY plane; rotation.x = -PI/2 maps Shape(x,y) → World(x,0,-y).
-    // Pre-negate Z so that after rotation, world Z matches the data Z.
-    const toShapeXY = (point: number[]): number[] => [point[0], -point[1]];
-
-    // ========== 1. Render road polygons using carriagewayRings ==========
-    if (carriagewayRings.length > 0) {
-      for (const ring of carriagewayRings) {
-        if (ring.length < 3) continue;
-        const shapeRing = ring.map(p => toShapeXY(p));
-        const shape = buildPolygonShape(shapeRing);
-        const geometry = new THREE.ShapeGeometry(shape);
-        const material = new THREE.MeshBasicMaterial({
-          color: FLOATING_COLORS.carriageway,
-          transparent: true,
-          opacity: floatingLaneConfig.opacity! * 0.7,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(0, height!, 0);
-        mesh.userData.isFloatingLane = true;
-        mesh.userData.overlayType = "road";
-        scene.add(mesh);
-        floatingLaneObjects.push(mesh);
-
-        // Add edge lines for road polygon
-        if (floatingLaneConfig.showEdgeLines) {
-          const edgeMaterial = new THREE.LineBasicMaterial({
-            color: FLOATING_COLORS.carriageway,
-            transparent: true,
-            opacity: floatingLaneConfig.opacity! * 0.9,
-          });
-          const points: THREE.Vector3[] = [];
-          for (const point of ring) {
-            const yPos = height !== undefined ? height : 0;
-            points.push(new THREE.Vector3(point[0], yPos, point[1]));
-          }
-          points.push(points[0].clone()); // close the loop
-          const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
-          const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
-          edgeLine.userData.isFloatingLane = true;
-          scene.add(edgeLine);
-          floatingLaneObjects.push(edgeLine);
-        }
-      }
-    }
-
-    // ========== 2. Render sidewalk rings ==========
-    if (floatingLaneConfig.showEdgeLines && sidewalkRings.length > 0) {
-      for (const ring of sidewalkRings) {
-        if (ring.length < 3) continue;
-        const edgeMaterial = new THREE.LineBasicMaterial({
-          color: FLOATING_COLORS.sidewalk,
-          transparent: true,
-          opacity: floatingLaneConfig.opacity! * 0.8,
-        });
-        const points: THREE.Vector3[] = [];
-        for (const point of ring) {
-          points.push(new THREE.Vector3(point[0], height!, point[1]));
-        }
-        points.push(points[0].clone());
-        const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
-        const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
-        edgeLine.userData.isFloatingLane = true;
-        scene.add(edgeLine);
-        floatingLaneObjects.push(edgeLine);
-      }
-    }
-
-    // ========== 3. Render junctions from junction_geometries ==========
-    for (const junction of junctions) {
-      const coreRings = (junction.carriageway_core_rings ?? []) as number[][][];
-      for (const ring of coreRings) {
-        if (ring.length < 3) continue;
-        const shapeRing = ring.map(p => toShapeXY(p));
-        const shape = buildPolygonShape(shapeRing);
-        const geometry = new THREE.ShapeGeometry(shape);
-        const material = new THREE.MeshBasicMaterial({
-          color: FLOATING_COLORS.carriageway,
-          transparent: true,
-          opacity: floatingLaneConfig.opacity! * 0.75,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(0, height!, 0);
-        mesh.userData.isFloatingLane = true;
-        mesh.userData.overlayType = "junction";
-        scene.add(mesh);
-        floatingLaneObjects.push(mesh);
-
-        // Edge lines for junction
-        if (floatingLaneConfig.showEdgeLines) {
-          const edgeMaterial = new THREE.LineBasicMaterial({
-            color: FLOATING_COLORS.carriageway,
-            transparent: true,
-            opacity: floatingLaneConfig.opacity! * 0.9,
-          });
-          const points: THREE.Vector3[] = [];
-          for (const point of ring) {
-            points.push(new THREE.Vector3(point[0], height!, point[1]));
-          }
-          points.push(points[0].clone());
-          const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
-          const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
-          edgeLine.userData.isFloatingLane = true;
-          scene.add(edgeLine);
-          floatingLaneObjects.push(edgeLine);
-        }
-      }
-
-      const turnLanePatches = (junction.turn_lane_patches ?? []) as Array<Record<string, unknown>>;
-      for (const [patchIndex, patch] of turnLanePatches.entries()) {
-        const rings = (patch.rings ?? []) as number[][][];
-        const color = getFloatingLaneColor(getTurnLaneFloatingKind(patch));
-        for (const [ringIndex, ring] of rings.entries()) {
-          if (ring.length < 3) continue;
-          const shapeRing = ring.map((point) => toShapeXY(point));
-          const shape = buildPolygonShape(shapeRing);
-          const geometry = new THREE.ShapeGeometry(shape);
-          const material = new THREE.MeshBasicMaterial({
-            color,
-            transparent: true,
-            opacity: floatingLaneConfig.opacity! * 0.42,
-            depthWrite: false,
-            side: THREE.DoubleSide,
-          });
-          const mesh = new THREE.Mesh(geometry, material);
-          mesh.rotation.x = -Math.PI / 2;
-          mesh.position.set(0, height + 0.012, 0);
-          mesh.userData.isFloatingLane = true;
-          mesh.userData.overlayType = "junction-turn-lane";
-          mesh.userData.surfaceId = patch.patch_id ?? `turn_lane_${patchIndex}_${ringIndex}`;
-          scene.add(mesh);
-          floatingLaneObjects.push(mesh);
-
-          if (floatingLaneConfig.showEdgeLines) {
-            const edgeMaterial = new THREE.LineBasicMaterial({
-              color,
-              transparent: true,
-              opacity: floatingLaneConfig.opacity! * 0.8,
-            });
-            const points: THREE.Vector3[] = [];
-            for (const point of ring) {
-              points.push(new THREE.Vector3(point[0], height + 0.012, point[1]));
-            }
-            points.push(points[0].clone());
-            const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
-            const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
-            edgeLine.userData.isFloatingLane = true;
-            edgeLine.userData.overlayType = "junction-turn-lane-edge";
-            scene.add(edgeLine);
-            floatingLaneObjects.push(edgeLine);
-          }
-        }
-      }
-
-      const surfacePatchCollections = [
-        {
-          patches: (junction.lane_surface_patches ?? []) as Array<Record<string, unknown>>,
-          kind: "lane" as const,
-        },
-        {
-          patches: (junction.merged_surface_patches ?? []) as Array<Record<string, unknown>>,
-          kind: "merged" as const,
-        },
-      ];
-
-      for (const collection of surfacePatchCollections) {
-        for (const [patchIndex, patch] of collection.patches.entries()) {
-          const rings = (patch.rings ?? []) as number[][][];
-          for (const [ringIndex, ring] of rings.entries()) {
-            if (ring.length < 3) continue;
-            const shapeRing = ring.map((point) => toShapeXY(point));
-            const shape = buildPolygonShape(shapeRing);
-            const geometry = new THREE.ShapeGeometry(shape);
-            const color =
-              collection.kind === "merged"
-                ? 0x8b5cf6
-                : patch.flow === "outbound"
-                  ? 0xdc2626
-                  : 0x2563eb;
-            const material = new THREE.MeshBasicMaterial({
-              color,
-              transparent: true,
-              opacity: floatingLaneConfig.opacity! * (collection.kind === "merged" ? 0.35 : 0.28),
-              depthWrite: false,
-              side: THREE.DoubleSide,
-            });
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.rotation.x = -Math.PI / 2;
-            mesh.position.set(0, height + 0.01, 0);
-            mesh.userData.isFloatingLane = true;
-            mesh.userData.overlayType = `junction-${collection.kind}`;
-            mesh.userData.surfaceId = patch.surface_id ?? `${collection.kind}_${patchIndex}_${ringIndex}`;
-            scene.add(mesh);
-            floatingLaneObjects.push(mesh);
-
-            if (floatingLaneConfig.showEdgeLines) {
-              const edgeMaterial = new THREE.LineBasicMaterial({
-                color,
-                transparent: true,
-                opacity: floatingLaneConfig.opacity! * 0.75,
-              });
-              const points: THREE.Vector3[] = [];
-              for (const point of ring) {
-                points.push(new THREE.Vector3(point[0], height + 0.01, point[1]));
-              }
-              points.push(points[0].clone());
-              const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
-              const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
-              edgeLine.userData.isFloatingLane = true;
-              scene.add(edgeLine);
-              floatingLaneObjects.push(edgeLine);
-            }
-          }
-        }
-      }
-    }
-
-    // ========== 4. Render bands as rectangles (always, with per-lane carriageway split) ==========
-    {
-      const bandHeight = (height as number) + 0.02; // Slight offset above OSM polygons to avoid z-fighting
-
-      // --- Compute road extent and center from actual scene geometry ---
-      let roadMinX: number;
-      let roadMaxX: number;
-      let roadCenterZ = 0; // Lateral offset: band z_center_m is relative to road center
-
-      if (carriagewayRings.length > 0) {
-        // Use actual carriageway ring bounds for positioning
-        let ringMinX = Infinity, ringMaxX = -Infinity;
-        let ringMinZ = Infinity, ringMaxZ = -Infinity;
-        for (const ring of carriagewayRings) {
-          for (const point of ring) {
-            ringMinX = Math.min(ringMinX, point[0]);
-            ringMaxX = Math.max(ringMaxX, point[0]);
-            ringMinZ = Math.min(ringMinZ, point[1]);
-            ringMaxZ = Math.max(ringMaxZ, point[1]);
-          }
-        }
-        // Also include junction rings in extent
-        for (const junctionObj of junctions) {
-          const coreRings = (junctionObj.carriageway_core_rings ?? []) as number[][][];
-          for (const ring of coreRings) {
-            for (const point of ring) {
-              ringMinX = Math.min(ringMinX, point[0]);
-              ringMaxX = Math.max(ringMaxX, point[0]);
-              ringMinZ = Math.min(ringMinZ, point[1]);
-              ringMaxZ = Math.max(ringMaxZ, point[1]);
-            }
-          }
-        }
-        roadMinX = ringMinX;
-        roadMaxX = ringMaxX;
-        roadCenterZ = (ringMinZ + ringMaxZ) / 2;
-      } else if (currentManifest?.scene_bounds) {
-        // Use scene bounds for positioning
-        const sb = currentManifest.scene_bounds;
-        roadMinX = sb.center[0] - sb.size[0] / 2;
-        roadMaxX = sb.center[0] + sb.size[0] / 2;
-        roadCenterZ = sb.center[2];
-      } else {
-        // Fallback: overlay.length_m centered at origin (template mode)
-        const halfLen = (overlay.length_m || 100) / 2;
-        roadMinX = -halfLen;
-        roadMaxX = halfLen;
-        roadCenterZ = 0;
-      }
-
-      const laneCount = Math.max(1, overlay.lane_count ?? 1);
-      const roadCenterX = (roadMinX + roadMaxX) / 2;
-      const length = roadMaxX - roadMinX;
-
-      const addSolidEdgeLine = (x1: number, z1: number, x2: number, z2: number, color: number, opacity: number) => {
-        const edgeLineMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
-        const points = [new THREE.Vector3(x1, bandHeight, z1), new THREE.Vector3(x2, bandHeight, z2)];
-        const geo = new THREE.BufferGeometry().setFromPoints(points);
-        const line = new THREE.Line(geo, edgeLineMat);
-        line.userData.isFloatingLane = true;
-        scene.add(line);
-        floatingLaneObjects.push(line);
-      };
-
-      const addDashedEdgeLine = (x1: number, z1: number, x2: number, z2: number, opacity: number) => {
-        const dashMat = new THREE.LineDashedMaterial({
-          color: 0xffffff,
-          transparent: true,
-          opacity,
-          dashSize: 1.5,
-          gapSize: 1.0,
-        });
-        const points = [new THREE.Vector3(x1, bandHeight, z1), new THREE.Vector3(x2, bandHeight, z2)];
-        const geo = new THREE.BufferGeometry().setFromPoints(points);
-        const line = new THREE.Line(geo, dashMat);
-        line.computeLineDistances();
-        line.userData.isFloatingLane = true;
-        scene.add(line);
-        floatingLaneObjects.push(line);
-      };
-
-      const bands = overlay.bands ?? [];
-      for (let bandIdx = 0; bandIdx < bands.length; bandIdx++) {
-        const band = bands[bandIdx];
-        if (!band.width_m || !Number.isFinite(band.width_m)) continue;
-        if (!visibleLaneKinds.has(band.kind as string) && band.kind !== "default") continue;
-
-        // Band z_center_m is relative to road center; offset by roadCenterZ for world position
-        const bandZ = roadCenterZ + ((band.z_center_m as number) ?? 0);
-
-        const isSelected = (floatingLaneConfig.selectedLaneIndex ?? -1) === bandIdx;
-        const baseOpacity = isSelected
-          ? Math.min(floatingLaneConfig.opacity! * 1.5, 0.9)
-          : floatingLaneConfig.opacity! * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
-
-        // --- Carriageway: split into per-lane sub-lanes ---
-        if ((band.kind as string) === "carriageway" && laneCount > 0) {
-          const laneWidth = (band.width_m as number) / laneCount;
-          const zStart = bandZ - (band.width_m as number) / 2;
-
-          const colorKeys = Object.keys(PER_LANE_COLORS);
-          for (let i = 0; i < laneCount; i++) {
-            const laneZCenter = zStart + (laneWidth as number) * (i + 0.5);
-            const laneColor = (PER_LANE_COLORS[colorKeys[i % colorKeys.length]] as unknown as number);
-
-            const planeGeo = new THREE.PlaneGeometry(length, laneWidth as number);
-            const planeMat = new THREE.MeshBasicMaterial({
-              color: laneColor,
-              transparent: true,
-              opacity: baseOpacity * 0.7,
-              depthWrite: false,
-              side: THREE.DoubleSide,
-            });
-            const planeMesh = new THREE.Mesh(planeGeo, planeMat);
-            planeMesh.rotation.x = -Math.PI / 2;
-            planeMesh.position.set(roadCenterX, bandHeight, laneZCenter);
-            planeMesh.userData.isFloatingLane = true;
-            planeMesh.userData.bandIndex = bandIdx;
-            planeMesh.userData.bandKind = "drive_lane";
-            planeMesh.userData.laneIndex = i;
-            planeMesh.userData.overlayType = "lane";
-            scene.add(planeMesh);
-            floatingLaneObjects.push(planeMesh);
-
-            // Edge lines for each lane
-            if (floatingLaneConfig.showEdgeLines) {
-              const laneLeftZ = laneZCenter - laneWidth / 2;
-              const laneRightZ = laneZCenter + laneWidth / 2;
-
-              if (i === 0) {
-                // Outer boundary (first lane left edge) — solid
-                addSolidEdgeLine(roadMinX, laneLeftZ, roadMaxX, laneLeftZ, isSelected ? 0xffffff : (laneColor as unknown as number), baseOpacity * 0.9);
-              }
-              if (i === laneCount - 1) {
-                // Outer boundary (last lane right edge) — solid
-                addSolidEdgeLine(roadMinX, laneRightZ, roadMaxX, laneRightZ, isSelected ? 0xffffff : (laneColor as unknown as number), baseOpacity * 0.9);
-              }
-              if (i > 0) {
-                // Inter-lane boundary — dashed white
-                addDashedEdgeLine(roadMinX, laneLeftZ, roadMaxX, laneLeftZ, baseOpacity * 0.7);
-              }
-            }
-
-            // Per-lane label
-            if (floatingLaneConfig.showLabels) {
-              const labelSprite = createFloatingLaneLabel(
-                "drive_lane",
-                roadCenterX,
-                bandHeight + 1.5,
-                laneZCenter,
-                `车道 ${i + 1}`,
-              );
-              labelSprite.userData.isFloatingLane = true;
-              labelSprite.userData.bandIndex = bandIdx;
-              labelSprite.userData.laneIndex = i;
-              scene.add(labelSprite);
-              floatingLaneObjects.push(labelSprite);
-            }
-          }
-
-          // End-cap lines for carriageway outer boundaries
-          if (floatingLaneConfig.showEdgeLines) {
-            const cwLeftZ = zStart;
-            const cwRightZ = zStart + (band.width_m as number);
-            addSolidEdgeLine(roadMinX, cwLeftZ, roadMinX, cwRightZ, isSelected ? 0xffffff : (PER_LANE_COLORS[0] as unknown as number), baseOpacity * 0.9);
-            addSolidEdgeLine(roadMaxX, cwLeftZ, roadMaxX, cwRightZ, isSelected ? 0xffffff : (PER_LANE_COLORS[0] as unknown as number), baseOpacity * 0.9);
-          }
-
-          // Selection glow covers entire carriageway
-          if (isSelected) {
-            const glowGeo = new THREE.PlaneGeometry(length + 0.5, (band.width_m as number) + 0.5);
-            const glowMat = new THREE.MeshBasicMaterial({
-              color: PER_LANE_COLORS[0],
-              transparent: true,
-              opacity: 0.2,
-              depthWrite: false,
-              side: THREE.DoubleSide,
-            });
-            const glowMesh = new THREE.Mesh(glowGeo, glowMat);
-            glowMesh.rotation.x = -Math.PI / 2;
-            glowMesh.position.set(roadCenterX, bandHeight - 0.01, bandZ);
-            glowMesh.userData.isFloatingLane = true;
-            scene.add(glowMesh);
-            floatingLaneObjects.push(glowMesh);
-          }
-        } else {
-          // --- Non-carriageway band: render as single rectangle ---
-          const baseColor = getFloatingLaneColor(band.kind as string);
-          const planeGeo = new THREE.PlaneGeometry(length, band.width_m as number);
-          const planeMat = new THREE.MeshBasicMaterial({
-            color: baseColor,
-            transparent: true,
-            opacity: baseOpacity * 0.7,
-            depthWrite: false,
-            side: THREE.DoubleSide,
-          });
-          const planeMesh = new THREE.Mesh(planeGeo, planeMat);
-          planeMesh.rotation.x = -Math.PI / 2;
-          planeMesh.position.set(roadCenterX, bandHeight, bandZ);
-          planeMesh.userData.isFloatingLane = true;
-          planeMesh.userData.bandIndex = bandIdx;
-          planeMesh.userData.bandKind = band.kind;
-          planeMesh.userData.overlayType = "band";
-          scene.add(planeMesh);
-          floatingLaneObjects.push(planeMesh);
-
-          // Edge lines
-          if (floatingLaneConfig.showEdgeLines) {
-            const halfWidth = (band.width_m as number) / 2;
-            const leftZ = bandZ - halfWidth;
-            const rightZ = bandZ + halfWidth;
-
-            addSolidEdgeLine(roadMinX, leftZ, roadMaxX, leftZ, isSelected ? 0xffffff : (baseColor as number), baseOpacity * 0.9);
-            addSolidEdgeLine(roadMinX, rightZ, roadMaxX, rightZ, isSelected ? 0xffffff : (baseColor as number), baseOpacity * 0.9);
-            addSolidEdgeLine(roadMinX, leftZ, roadMinX, rightZ, isSelected ? 0xffffff : (baseColor as number), baseOpacity * 0.9);
-            addSolidEdgeLine(roadMaxX, leftZ, roadMaxX, rightZ, isSelected ? 0xffffff : (baseColor as number), baseOpacity * 0.9);
-          }
-
-          // Label
-          if (floatingLaneConfig.showLabels) {
-            const labelSprite = createFloatingLaneLabel(
-              band.kind as string,
-              roadCenterX,
-              bandHeight + 1.5,
-              bandZ,
-            );
-            labelSprite.userData.isFloatingLane = true;
-            labelSprite.userData.bandIndex = bandIdx;
-            scene.add(labelSprite);
-            floatingLaneObjects.push(labelSprite);
-          }
-
-          // Selection glow
-          if (isSelected) {
-            const glowGeo = new THREE.PlaneGeometry(length + 0.5, (band.width_m as number) + 0.5);
-            const glowMat = new THREE.MeshBasicMaterial({
-              color: baseColor,
-              transparent: true,
-              opacity: 0.2,
-              depthWrite: false,
-              side: THREE.DoubleSide,
-            });
-            const glowMesh = new THREE.Mesh(glowGeo, glowMat);
-            glowMesh.rotation.x = -Math.PI / 2;
-            glowMesh.position.set(roadCenterX, bandHeight - 0.01, bandZ);
-            glowMesh.userData.isFloatingLane = true;
-            scene.add(glowMesh);
-            floatingLaneObjects.push(glowMesh);
-          }
-        }
-      }
-    }
-
-    // ========== 5. Render buildings as floating overlays ==========
-    if (floatingLaneConfig.showBuildings) {
-      const footprints = overlay.building_footprints ?? [];
-      for (let i = 0; i < footprints.length; i++) {
-        const fp = footprints[i];
-        const pts = fp.polygon_xz;
-        if (!Array.isArray(pts) || pts.length < 3) continue;
-
-        const shape = buildPolygonShape(pts.map(p => [p[0], -p[1]]));
-        const geometry = new THREE.ShapeGeometry(shape);
-        const landUseType = (fp.land_use_type as string)?.toLowerCase() ?? "";
-        const colorKey = landUseType.includes("residential") ? "building_residential"
-          : landUseType.includes("commercial") ? "building_commercial"
-          : landUseType.includes("industrial") ? "building_industrial"
-          : "building";
-        const baseColor = FLOATING_COLORS[colorKey] ?? FLOATING_COLORS.building;
-
-        const material = new THREE.MeshBasicMaterial({
-          color: baseColor,
-          transparent: true,
-          opacity: floatingLaneConfig.buildingOpacity,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(0, height!, 0);
-        mesh.userData.isFloatingLane = true;
-        mesh.userData.overlayType = "building";
-        mesh.userData.buildingIndex = i;
-        scene.add(mesh);
-        floatingLaneObjects.push(mesh);
-
-        // Building edge lines
-        if (floatingLaneConfig.showEdgeLines) {
-          const edgeMaterial = new THREE.LineBasicMaterial({
-            color: baseColor,
-            transparent: true,
-            opacity: floatingLaneConfig.buildingOpacity! * 1.2,
-          });
-          const points: THREE.Vector3[] = [];
-          for (const point of pts) {
-            points.push(new THREE.Vector3(point[0], height!, point[1]));
-          }
-          points.push(points[0].clone());
-          const edgeGeometry = new THREE.BufferGeometry().setFromPoints(points);
-          const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
-          edgeLine.userData.isFloatingLane = true;
-          scene.add(edgeLine);
-          floatingLaneObjects.push(edgeLine);
-        }
-
-        // Building label at centroid
-        if (floatingLaneConfig.showLabels && fp.centroid_xz) {
-          const centroid = fp.centroid_xz as [number, number];
-          const labelSprite = createFloatingLaneLabel(
-            "building",
-            centroid[0],
-            height! + 2,
-            centroid[1]
-          );
-          labelSprite.userData.isFloatingLane = true;
-          labelSprite.userData.buildingIndex = i;
-          scene.add(labelSprite);
-          floatingLaneObjects.push(labelSprite);
-        }
-      }
-    }
-
-    // ========== 6. Render features (trees, lamps, etc.) ==========
-    const instances = currentManifest.instances;
-    if (floatingLaneConfig.showFeatures && instances) {
-      const featureCategories = ["tree", "lamp", "bench", "trash", "bollard", "bus_stop"];
-      for (const [id, info] of Object.entries(instances)) {
-        const instanceInfo = info as InstanceInfo;
-        if (!instanceInfo.position_xyz) continue;
-        const category = String(instanceInfo.category || "").toLowerCase();
-        if (!featureCategories.includes(category)) continue;
-
-        const x = instanceInfo.position_xyz[0];
-        const z = instanceInfo.position_xyz[2];
-        const baseColor = FLOATING_COLORS[category] ?? FLOATING_COLORS.default;
-
-        // Feature marker (small circle/disc)
-        const radius = category === "tree" ? 1.5 : 0.5;
-        const geometry = new THREE.CircleGeometry(radius, 16);
-        const material = new THREE.MeshBasicMaterial({
-          color: baseColor,
-          transparent: true,
-          opacity: floatingLaneConfig.featureOpacity,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(x, height!, z);
-        mesh.userData.isFloatingLane = true;
-        mesh.userData.overlayType = "feature";
-        mesh.userData.featureCategory = category;
-        scene.add(mesh);
-        floatingLaneObjects.push(mesh);
-
-        // Feature label
-        if (floatingLaneConfig.showLabels) {
-          const labelSprite = createFloatingLaneLabel(
-            category,
-            x,
-            height + 1,
-            z
-          );
-          labelSprite.userData.isFloatingLane = true;
-          labelSprite.userData.featureCategory = category;
-          scene.add(labelSprite);
-          floatingLaneObjects.push(labelSprite);
-        }
-      }
-    }
-
-    // ========== 7. Render placement markers (absorbed from Layout Overlay) ==========
-    if (floatingLaneConfig.showPlacementMarkers && instances) {
-      const markerGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.2, 8);
-      for (const info of Object.values(instances)) {
-        const category = String(info.category || "").trim().toLowerCase();
-        const color = CATEGORY_COLORS[category] ?? 0x38bdf8;
-        const markerMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 });
-        const marker = new THREE.Mesh(markerGeo, markerMat);
-        if (info.position_xyz) {
-          const pos = info.position_xyz as [number, number, number];
-          marker.position.set(
-            pos[0],
-            (pos[1] || 0) + 0.6,
-            pos[2],
-          );
-        }
-        marker.userData.isFloatingLane = true;
-        marker.userData.overlayType = "marker";
-        scene.add(marker);
-        floatingLaneObjects.push(marker);
-
-        const label = createTextSprite(category, color);
-        label.position.set(marker.position.x, marker.position.y + 1.2, marker.position.z);
-        label.userData.isFloatingLane = true;
-        scene.add(label);
-        floatingLaneObjects.push(label);
-      }
-    }
-  }
-
-  function updateFloatingLaneOverlay(deltaTime: number): void {
-    if (!floatingLaneConfig.enabled) return;
-    if (floatingLaneConfig.animated) {
-      floatingLaneAnimTime += deltaTime;
-      buildFloatingLaneOverlay();
-    }
-  }
-
-  function createFloatingLaneControlPanel(): void {
-    const panelId = "floating-lane-panel";
-    if (document.getElementById(panelId)) return;
-
-    const panelHost = requireElement<HTMLElement>(root, "#viewer-floating-lane-panel-host");
-    panelHost.innerHTML = "";
-
-    const panel = document.createElement("div");
-    panel.id = panelId;
-    panel.className = "floating-lane-panel";
-    panel.innerHTML = `
-      <div class="flp-section">
-        <label>Controls</label>
-        <label class="flp-checkbox">
-          <input type="checkbox" id="flp-enabled" ${floatingLaneConfig.enabled ? "checked" : ""}>
-          Enable Overlay
-        </label>
-      </div>
-      <div class="flp-slider-group">
-        <label>Height: <span id="flp-height-val">${(floatingLaneConfig.height ?? 0.5).toFixed(1)}m</span></label>
-        <input type="range" id="flp-height" min="0.1" max="3" step="0.1" value="${floatingLaneConfig.height ?? 0.5}">
-      </div>
-      <div class="flp-slider-group">
-        <label>Road Opacity: <span id="flp-opacity-val">${(floatingLaneConfig.opacity! * 100).toFixed(0)}%</span></label>
-        <input type="range" id="flp-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.opacity}">
-      </div>
-      <div class="flp-section">
-        <label>Visible Elements</label>
-        <div class="flp-checkboxes-row">
-          <label class="flp-checkbox">
-            <input type="checkbox" id="flp-buildings" ${floatingLaneConfig.showBuildings ? "checked" : ""}>
-            Buildings
-          </label>
-          <label class="flp-checkbox">
-            <input type="checkbox" id="flp-features" ${floatingLaneConfig.showFeatures ? "checked" : ""}>
-            Features (Trees)
-          </label>
-        </div>
-      </div>
-      <div class="flp-slider-group" id="flp-building-opacity-group">
-        <label>Building Opacity: <span id="flp-building-opacity-val">${(floatingLaneConfig.buildingOpacity! * 100).toFixed(0)}%</span></label>
-        <input type="range" id="flp-building-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.buildingOpacity}">
-      </div>
-      <div class="flp-slider-group" id="flp-feature-opacity-group">
-        <label>Feature Opacity: <span id="flp-feature-opacity-val">${(floatingLaneConfig.featureOpacity! * 100).toFixed(0)}%</span></label>
-        <input type="range" id="flp-feature-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.featureOpacity}">
-      </div>
-      <div class="flp-section">
-        <label>Visible Lane Types</label>
-        <div class="flp-checkboxes" id="flp-lane-kinds">
-          ${["carriageway", "drive_lane", "bike_lane", "bus_lane", "clear_path", "furnishing", "sidewalk", "greenzone"].map(kind => `
-            <label class="flp-checkbox">
-              <input type="checkbox" data-kind="${kind}" ${visibleLaneKinds.has(kind) ? "checked" : ""}>
-              ${LANE_LABELS[kind] || kind}
-            </label>
-          `).join("")}
-        </div>
-      </div>
-      <div class="flp-section">
-        <label>Color Scheme</label>
-        <select id="flp-color-scheme">
-          <option value="semantic" ${floatingLaneConfig.colorScheme === "semantic" ? "selected" : ""}>Semantic</option>
-          <option value="functional" ${floatingLaneConfig.colorScheme === "functional" ? "selected" : ""}>Functional</option>
-          <option value="safety" ${floatingLaneConfig.colorScheme === "safety" ? "selected" : ""}>Safety</option>
-        </select>
-      </div>
-      <div class="flp-checkboxes-row">
-        <label class="flp-checkbox">
-          <input type="checkbox" id="flp-edges" ${floatingLaneConfig.showEdgeLines ? "checked" : ""}>
-          Edge Lines
-        </label>
-        <label class="flp-checkbox">
-          <input type="checkbox" id="flp-labels" ${floatingLaneConfig.showLabels ? "checked" : ""}>
-          Labels
-        </label>
-      </div>
-      <label class="flp-checkbox">
-        <input type="checkbox" id="flp-animated" ${floatingLaneConfig.animated ? "checked" : ""}>
-        Animated Pulse
-      </label>
-      <div class="flp-hint">Press L to toggle | Use carriagewayRings</div>
-    `;
-
-    panelHost.appendChild(panel);
-
-    // Add event listeners (no close button in inline mode)
-    document.getElementById("flp-enabled")?.addEventListener("change", (e) => {
-      floatingLaneConfig.enabled = (e.target as HTMLInputElement).checked;
-      layoutOverlayToggleEl.checked = floatingLaneConfig.enabled;
-      if (floatingLaneConfig.enabled) {
-        buildFloatingLaneOverlay();
-      } else {
-        clearFloatingLaneOverlay();
-      }
-    });
-
-    document.getElementById("flp-height")?.addEventListener("input", (e) => {
-      floatingLaneConfig.height = parseFloat((e.target as HTMLInputElement).value);
-      document.getElementById("flp-height-val")!.textContent = `${floatingLaneConfig.height.toFixed(1)}m`;
-      buildFloatingLaneOverlay();
-    });
-
-    document.getElementById("flp-opacity")?.addEventListener("input", (e) => {
-      floatingLaneConfig.opacity = parseFloat((e.target as HTMLInputElement).value);
-      document.getElementById("flp-opacity-val")!.textContent = `${(floatingLaneConfig.opacity! * 100).toFixed(0)}%`;
-      buildFloatingLaneOverlay();
-    });
-
-    document.getElementById("flp-color-scheme")?.addEventListener("change", (e) => {
-      floatingLaneConfig.colorScheme = (e.target as HTMLSelectElement).value as "semantic" | "functional" | "safety";
-      buildFloatingLaneOverlay();
-    });
-
-    document.getElementById("flp-edges")?.addEventListener("change", (e) => {
-      floatingLaneConfig.showEdgeLines = (e.target as HTMLInputElement).checked;
-      buildFloatingLaneOverlay();
-    });
-
-    document.getElementById("flp-labels")?.addEventListener("change", (e) => {
-      floatingLaneConfig.showLabels = (e.target as HTMLInputElement).checked;
-      buildFloatingLaneOverlay();
-    });
-
-    document.getElementById("flp-animated")?.addEventListener("change", (e) => {
-      floatingLaneConfig.animated = (e.target as HTMLInputElement).checked;
-      buildFloatingLaneOverlay();
-    });
-
-    document.getElementById("flp-buildings")?.addEventListener("change", (e) => {
-      floatingLaneConfig.showBuildings = (e.target as HTMLInputElement).checked;
-      buildFloatingLaneOverlay();
-    });
-
-    document.getElementById("flp-features")?.addEventListener("change", (e) => {
-      floatingLaneConfig.showFeatures = (e.target as HTMLInputElement).checked;
-      buildFloatingLaneOverlay();
-    });
-
-    document.getElementById("flp-building-opacity")?.addEventListener("input", (e) => {
-      floatingLaneConfig.buildingOpacity = parseFloat((e.target as HTMLInputElement).value);
-      document.getElementById("flp-building-opacity-val")!.textContent = `${(floatingLaneConfig.buildingOpacity! * 100).toFixed(0)}%`;
-      buildFloatingLaneOverlay();
-    });
-
-    document.getElementById("flp-feature-opacity")?.addEventListener("input", (e) => {
-      floatingLaneConfig.featureOpacity = parseFloat((e.target as HTMLInputElement).value);
-      document.getElementById("flp-feature-opacity-val")!.textContent = `${(floatingLaneConfig.featureOpacity! * 100).toFixed(0)}%`;
-      buildFloatingLaneOverlay();
-    });
-
-    document.getElementById("flp-lane-kinds")?.addEventListener("change", (e) => {
-      const target = e.target as HTMLInputElement;
-      if (target.dataset.kind) {
-        if (target.checked) {
-          visibleLaneKinds.add(target.dataset.kind);
-        } else {
-          visibleLaneKinds.delete(target.dataset.kind);
-        }
-        buildFloatingLaneOverlay();
-      }
-    });
-
-    if (!floatingLaneConfig.enabled) {
-      panel.style.display = "none";
-    }
-  }
-
-  function toggleFloatingLaneOverlay(): void {
-    floatingLaneConfig.enabled = !floatingLaneConfig.enabled;
-    if (floatingLaneConfig.enabled) {
-      buildFloatingLaneOverlay();
-      createFloatingLaneControlPanel();
-      shell.activateRightTab("floating-lane");
-      const panel = document.getElementById("floating-lane-panel");
-      if (panel) panel.style.display = "block";
-    } else {
-      clearFloatingLaneOverlay();
-      const panel = document.getElementById("floating-lane-panel");
-      if (panel) panel.style.display = "none";
-      if (!settingsOpen && !designOpen && !evaluateOpen && !compareOpen && !presetsOpen && !historyAnalysisOpen) {
-        shell.activateRightTab(null);
-      }
-    }
-  }
-
-  function selectFloatingLane(bandIndex: number): void {
-    if (floatingLaneConfig.selectedLaneIndex === bandIndex) {
-      floatingLaneConfig.selectedLaneIndex = -1;
-    } else {
-      floatingLaneConfig.selectedLaneIndex = bandIndex;
-    }
-    buildFloatingLaneOverlay();
   }
 
   function resizeRenderer(): void {
@@ -3390,12 +1495,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         break;
       case "KeyP":
         if (active && !event.repeat) {
-          toggleSettingsShortcut();
+          panelController.toggle("settings", { restoreRoam: true });
         }
         break;
       case "KeyL":
         if (active && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) {
-          toggleFloatingLaneOverlay();
+          floatingLaneSystem.toggleOverlay();
         }
         break;
       case "Digit1":
@@ -3407,18 +1512,18 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       case "Digit7":
       case "Digit8":
       case "Digit9":
-        if (active && !event.repeat && floatingLaneConfig.enabled) {
+        if (active && !event.repeat && floatingLaneSystem.config.enabled) {
           const laneIndex = parseInt(event.code.replace("Digit", "")) - 1;
           const bands = currentManifest?.layout_overlay?.bands ?? [];
           if (laneIndex >= 0 && laneIndex < bands.length) {
-            selectFloatingLane(laneIndex);
+            floatingLaneSystem.selectLane(laneIndex);
           }
         }
         break;
       case "Escape":
-        if (active && (floatingLaneConfig.selectedLaneIndex ?? -1) >= 0) {
-          floatingLaneConfig.selectedLaneIndex = -1;
-          buildFloatingLaneOverlay();
+        if (active && (floatingLaneSystem.config.selectedLaneIndex ?? -1) >= 0) {
+          floatingLaneSystem.config.selectedLaneIndex = -1;
+          floatingLaneSystem.buildOverlay();
         }
         break;
       default:
@@ -3445,218 +1550,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         mesh.material.depthWrite = false;
       }
     });
-  }
-
-  function sceneBoundsFromBox(box: THREE.Box3): MinimapBounds {
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const extent = Math.max(size.x, size.z) * 0.58 + 6;
-    return {
-      minX: center.x - extent,
-      maxX: center.x + extent,
-      minZ: center.z - extent,
-      maxZ: center.z + extent,
-      center,
-      extent,
-    };
-  }
-
-  function sceneBoundsFromManifest(box: THREE.Box3, manifest: ViewerManifest | null): MinimapBounds {
-    const fallback = sceneBoundsFromBox(box);
-    const bounds = manifest?.scene_bounds;
-    const center = asTriplet(bounds?.center);
-    const size = asTriplet(bounds?.size);
-    if (!center || !size) {
-      return fallback;
-    }
-    const extent = Math.max(size[0], size[2]) * 0.5;
-    if (!(extent > 0)) {
-      return fallback;
-    }
-    const paddedExtent = Math.max(extent + 4, fallback.extent);
-    return {
-      minX: center[0] - paddedExtent,
-      maxX: center[0] + paddedExtent,
-      minZ: center[2] - paddedExtent,
-      maxZ: center[2] + paddedExtent,
-      center: new THREE.Vector3(center[0], center[1], center[2]),
-      extent: paddedExtent,
-    };
-  }
-
-  function updateMinimapCamera(bounds: MinimapBounds, box: THREE.Box3): void {
-    currentSceneBounds = bounds;
-    minimapCamera.left = -bounds.extent;
-    minimapCamera.right = bounds.extent;
-    minimapCamera.top = bounds.extent;
-    minimapCamera.bottom = -bounds.extent;
-    minimapCamera.near = 0.1;
-    minimapCamera.far = Math.max(500, box.max.y - box.min.y + bounds.extent * 8);
-    minimapCamera.position.set(bounds.center.x, box.max.y + bounds.extent * 2.2 + 10, bounds.center.z);
-    minimapCamera.lookAt(bounds.center.x, 0, bounds.center.z);
-    minimapCamera.updateProjectionMatrix();
-  }
-
-  function worldToMinimap(x: number, z: number): { x: number; y: number } | null {
-    if (!currentSceneBounds) {
-      return null;
-    }
-    const width = minimapOverlayEl.clientWidth;
-    const height = minimapOverlayEl.clientHeight;
-    if (width <= 0 || height <= 0) {
-      return null;
-    }
-    const u = clamp((x - currentSceneBounds.minX) / (currentSceneBounds.maxX - currentSceneBounds.minX), 0, 1);
-    const v = clamp((z - currentSceneBounds.minZ) / (currentSceneBounds.maxZ - currentSceneBounds.minZ), 0, 1);
-    return {
-      x: u * width,
-      y: v * height,
-    };
-  }
-
-  function drawMinimapOverlay(): void {
-    const ctx = minimapOverlayEl.getContext("2d");
-    if (!ctx) {
-      return;
-    }
-    const width = minimapOverlayEl.width;
-    const height = minimapOverlayEl.height;
-    const cssWidth = minimapOverlayEl.clientWidth;
-    const cssHeight = minimapOverlayEl.clientHeight;
-    ctx.clearRect(0, 0, width, height);
-    if (!currentSceneBounds || cssWidth <= 0 || cssHeight <= 0) {
-      return;
-    }
-
-    const dpr = width / Math.max(cssWidth, 1);
-    ctx.save();
-    ctx.scale(dpr, dpr);
-
-    ctx.strokeStyle = "rgba(15, 23, 42, 0.12)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0.5, 0.5, cssWidth - 1, cssHeight - 1);
-
-    const camPos = worldToMinimap(currentAvatarPosition.x, currentAvatarPosition.z);
-    if (camPos) {
-      const arrowForward = cameraForwardHorizontal();
-      const arrow = new THREE.Vector2(arrowForward.x, arrowForward.z);
-      if (arrow.lengthSq() > 1e-6) {
-        arrow.normalize();
-      }
-      const arrowLength = 18;
-      const tipX = camPos.x + arrow.x * arrowLength;
-      const tipY = camPos.y + arrow.y * arrowLength;
-      ctx.fillStyle = "#1f4ed8";
-      ctx.beginPath();
-      ctx.arc(camPos.x, camPos.y, 4.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "#1f4ed8";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(camPos.x, camPos.y);
-      ctx.lineTo(tipX, tipY);
-      ctx.stroke();
-      ctx.fillStyle = "#1f4ed8";
-      ctx.beginPath();
-      ctx.arc(tipX, tipY, 2.8, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    if (currentLaserHitPoint) {
-      const hitPoint = worldToMinimap(currentLaserHitPoint.x, currentLaserHitPoint.z);
-      if (hitPoint) {
-        ctx.fillStyle = "#ff5a4f";
-        ctx.strokeStyle = "rgba(255, 90, 79, 0.25)";
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        ctx.arc(hitPoint.x, hitPoint.y, 5.5, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(hitPoint.x, hitPoint.y, 3.2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    ctx.restore();
-  }
-
-  function renderMinimap(): void {
-    if (!currentRoot || !currentSceneBounds) {
-      return;
-    }
-    minimapRenderer.render(scene, minimapCamera);
-    drawMinimapOverlay();
-  }
-
-  function staticDescriptionForNode(nodeName: string): StaticObjectDescription | null {
-    const descriptions = currentManifest?.static_object_descriptions ?? {};
-    for (const [pattern, description] of Object.entries(descriptions)) {
-      if (!description) {
-        continue;
-      }
-      if (description.match === "exact" && nodeName === pattern) {
-        return description;
-      }
-      if (description.match === "prefix" && nodeName.startsWith(pattern)) {
-        return description;
-      }
-    }
-    // Fallback to system node descriptions
-    for (const [prefix, description] of Object.entries(SYSTEM_NODE_DESCRIPTIONS)) {
-      if (description.match === "exact" && nodeName === prefix) {
-        return description;
-      }
-      if (description.match === "prefix" && nodeName.startsWith(prefix)) {
-        return description;
-      }
-    }
-    return null;
-  }
-
-  function resolveHitDescriptor(object: THREE.Object3D, hitPoint?: THREE.Vector3): HitDescriptor | null {
-    let cursor: THREE.Object3D | null = object;
-    const names: string[] = [];
-    while (cursor) {
-      if (cursor.name) {
-        names.push(cursor.name);
-      }
-      cursor = cursor.parent;
-    }
-
-    for (const nodeName of names) {
-      const instanceId = resolveInstanceIdFromName(nodeName);
-      if (!instanceId) {
-        continue;
-      }
-      const instances = currentManifest?.instances;
-      const instanceInfo = Array.isArray(instances) ? instances.find((inst) => inst.instance_id === instanceId) : undefined;
-      if (instanceInfo) {
-        return {
-          kind: "instance",
-          nodeName,
-          instanceId,
-          instanceInfo: instanceInfo as InstanceInfo,
-          assetDescription: (currentManifest?.asset_descriptions?.[(instanceInfo as InstanceInfo).asset_id] as AssetDescription | undefined),
-          hitPoint,
-        };
-      }
-      return { kind: "generic", nodeName, hitPoint };
-    }
-
-    for (const nodeName of names) {
-      const description = staticDescriptionForNode(nodeName);
-      if (description) {
-        return {
-          kind: "static",
-          nodeName,
-          staticDescription: description,
-          hitPoint,
-        };
-      }
-    }
-
-    const nodeName = names[0];
-    return nodeName ? { kind: "generic", nodeName } : null;
   }
 
   function updateLaserPointer(): void {
@@ -3699,14 +1592,14 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
     // Check if clicked on a floating lane
     if (hit.object.userData.isFloatingLane && typeof hit.object.userData.bandIndex === "number") {
-      selectFloatingLane(hit.object.userData.bandIndex);
+      floatingLaneSystem.selectLane(hit.object.userData.bandIndex);
       const bandKind = hit.object.userData.bandKind || "unknown";
-      const bandLabel = LANE_LABELS[bandKind] || bandKind;
+      const bandLabel = floatingLaneSystem.getLaneLabel(bandKind);
       setInfoCardContent(`<div class="hit-descriptor"><strong>${bandLabel}</strong><br>Click again to deselect</div>`);
       return;
     }
 
-    const descriptor = resolveHitDescriptor(hit.object, hit.point.clone());
+    const descriptor = resolveHitDescriptor(hit.object, hit.point.clone(), currentManifest ?? undefined);
     if (!descriptor) {
       clearInfoCard();
       return;
@@ -3728,16 +1621,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       disposeObject(currentRoot);
       currentRoot = null;
     }
-    // Clear existing frame helpers and asset bbox helpers
-    scene.traverse((child) => {
-      if (child.userData.isFrameHelper || child.userData.isAssetBboxHelper) {
-        scene.remove(child);
-        if (child instanceof THREE.LineSegments) {
-          child.geometry.dispose();
-          (child.material as THREE.Material).dispose();
-        }
-      }
-    });
+    removeFrameAndAssetHelpers(scene);
 
     applyAudioProfile();
 
@@ -3751,59 +1635,18 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     configureSceneObjectShadows(currentRoot);
     scene.add(currentRoot);
 
-    // Create bounding box helpers for top-level children (assets)
     if (frameModeToggleEl.checked && currentRoot) {
-      currentRoot.children.forEach((child, index) => {
-        const bbox = new THREE.Box3().setFromObject(child);
-        const size = new THREE.Vector3();
-        bbox.getSize(size);
-        // Only show frames for objects with meaningful size
-        if (size.length() > 0.1) {
-          const helper = new THREE.BoxHelper(child, 0x00ff00);
-          helper.userData.isFrameHelper = true;
-          helper.visible = true;
-          scene.add(helper);
-        }
-      });
+      createFrameHelpers(scene, currentRoot);
     }
 
-    // Create per-asset bounding box helpers with asset_id labels
     if (assetBboxToggleEl.checked && currentRoot) {
-      const instances = currentManifest?.instances;
-      currentRoot.traverse((child) => {
-        if (!child.name) return;
-        const instanceId = resolveInstanceIdFromName(child.name);
-        if (!instanceId) return;
-
-        const instanceInfo = instances?.[instanceId];
-        const category = instanceInfo?.category?.trim().toLowerCase() ?? "";
-        const assetId = instanceInfo?.asset_id?.trim() ?? instanceId;
-        const color = CATEGORY_BBOX_COLORS[category] ?? 0x38bdf8;
-
-        const bbox = new THREE.Box3().setFromObject(child);
-        const size = new THREE.Vector3();
-        bbox.getSize(size);
-        if (size.length() > 0.01) {
-          const helper = new THREE.BoxHelper(child, color);
-          helper.userData.isAssetBboxHelper = true;
-          helper.userData.assetInstanceId = instanceId;
-          helper.userData.assetCategory = category;
-          helper.visible = true;
-          scene.add(helper);
-
-          // Add text label showing asset_id above the bounding box
-          const center = new THREE.Vector3();
-          bbox.getCenter(center);
-          const label = createTextSprite(assetId, color);
-          label.position.set(center.x, bbox.max.y + 0.5, center.z);
-          label.userData.isAssetLabel = true;
-          scene.add(label);
-        }
-      });
+      createAssetBboxHelpers(scene, currentRoot, currentManifest);
     }
 
     const bbox = new THREE.Box3().setFromObject(currentRoot);
-    const spawn = inferSpawnFromBbox(bbox, currentManifest ?? {
+    const spawnCenter = new THREE.Vector3();
+    bbox.getCenter(spawnCenter);
+    const spawn = inferSpawnFromBbox({ center: spawnCenter }, currentManifest ?? {
       layout_path: "",
       final_scene: { label: "Final Scene", glb_url: option.glbUrl },
       production_steps: [],
@@ -3811,7 +1654,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     });
     currentSpawn = spawn.position;
     currentForward = spawn.forward;
-    updateMinimapCamera(sceneBoundsFromManifest(bbox, currentManifest), bbox);
+    currentSceneBounds = sceneBoundsFromManifest(bbox, currentManifest);
+    updateMinimapCamera(minimapCamera, currentSceneBounds, bbox);
     resetView();
     const params = currentManifest?.lighting_params;
     if (params) {
@@ -3899,536 +1743,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     shell.setStatusSummary(message);
   }
 
-  function configForDesignVariant(
-    configPatch: Record<string, string | number>,
-    variant: DesignSchemeVariant,
-  ): Record<string, string | number> {
-    const density = Number(configPatch.density ?? 0.6);
-    const roadWidth = Number(configPatch.road_width_m ?? 13.5);
-    return {
-      ...configPatch,
-      density: Math.max(0.1, Math.min(1.5, density * variant.densityMod)),
-      road_width_m: Math.max(5.0, Math.min(30.0, roadWidth * variant.widthMod)),
-    };
-  }
-
-  function renderGeneratedDesignSchemes(schemes: GeneratedDesignScheme[]): void {
-    if (schemes.length === 0) {
-      designResultEl.innerHTML = "";
-      return;
-    }
-    designResultEl.innerHTML = `
-      <div class="viewer-design-schemes">
-        ${schemes.map((scheme) => `
-          <button
-            class="viewer-design-scheme"
-            type="button"
-            data-layout-path="${escapeHtml(scheme.layoutPath)}"
-            ${scheme.status === "failed" ? "disabled" : ""}
-          >
-            <span>
-              <strong>${escapeHtml(scheme.name)}</strong>
-              <small>${scheme.status === "ready" ? escapeHtml(scheme.layoutPath) : escapeHtml(scheme.error || "Generation failed")}</small>
-            </span>
-            <em>${scheme.status === "ready" ? "Load" : "Failed"}</em>
-          </button>
-        `).join("")}
-      </div>
-    `;
-  }
-
-  async function submitDesignJob(
-    preset: DesignPreset | null,
-    prompt: string,
-    graphTemplateId: string,
-    variant: DesignSchemeVariant,
-  ): Promise<SceneJobCreatePayload> {
-    // If no preset selected (Custom/LLM-Driven), pass empty configPatch
-    // so backend will call LLM to derive all parameters
-    const configPatch = preset ? configForDesignVariant(preset.configPatch, variant) : {};
-    return postApiJson<SceneJobCreatePayload>("/api/scene/jobs", {
-      draft: {
-        normalized_scene_query: prompt,
-        compose_config_patch: configPatch,
-        citations_by_field: {},
-        design_summary: prompt,
-        risk_notes: [],
-        parameter_sources_by_field: {},
-      },
-      scene_context: {
-        layout_mode: "graph_template",
-        aoi_bbox: null,
-        city_name_en: null,
-        reference_plan_id: null,
-        graph_template_id: graphTemplateId,
-      },
-      patch_overrides: {},
-      generation_options: {
-        preset_id: preset?.id ?? "custom",
-        random_seed: variant.seed,
-      },
-    });
-  }
-
-  const GENERATION_STEPS: GenerationStep[] = [
-    {
-      key: "queued",
-      label: "任务排队中",
-      shortLabel: "排队",
-      progress: 5,
-      purpose: "任务已经进入后端 job service。当前后端是单 worker 流程，通常不会真正长时间排队。",
-      detailHint: "这里记录 job id、提交时间和即将使用的 preset/template。",
-    },
-    {
-      key: "context_resolving",
-      label: "上下文解析",
-      shortLabel: "上下文",
-      progress: 15,
-      purpose: "把 prompt、preset、graph template 或外部道路上下文合并成可生成的 StreetComposeConfig。",
-      detailHint: "重点看 layout_mode、graph_template_id/reference_plan_id，以及本次方案改动的需求等级和规则 profile。",
-    },
-    {
-      key: "asset_loading",
-      label: "资产加载",
-      shortLabel: "资产",
-      progress: 25,
-      purpose: "加载对象 manifest、建筑资产、地面材质、天空环境和检索索引。",
-      detailHint: "后端会回传 object_asset_count、building_asset_count 等数量，用来判断素材池是否足够。",
-    },
-    {
-      key: "layout_generation",
-      label: "布局生成",
-      shortLabel: "布局",
-      progress: 40,
-      purpose: "把道路图和设计目标转成主题分段、街道断面 program 与候选布局方案。",
-      detailHint: "这里能看到 theme_segment_count、道路宽度、密度、行人/自行车/公交/车流需求等参数。",
-    },
-    {
-      key: "constraint_solving",
-      label: "约束求解",
-      shortLabel: "约束",
-      progress: 50,
-      purpose: "使用 design_rule_profile 和布局 solver 检查断面、设施带、间距、可通行空间等约束。",
-      detailHint: "它不是 LLM 评价，而是规则/求解器层面对空间参数的约束计算。",
-    },
-    {
-      key: "asset_composition",
-      label: "资产组合",
-      shortLabel: "组合",
-      progress: 65,
-      purpose: "把求解得到的 slot plan 转成具体资产摆放：树、灯、座椅、站亭、建筑等都在这里落位。",
-      detailHint: "重点看 total_slots、placed_slots、placement_count；它回答“放了多少，放到哪里”。",
-    },
-    {
-      key: "mesh_generation",
-      label: "网格生成",
-      shortLabel: "网格",
-      progress: 75,
-      purpose: "生成或组装 Three.js 可导出的几何网格，包括道路表面、建筑体块和资产实例。",
-      detailHint: "这里的 mesh 不是 LLM 直接生成，而是由布局、资产和几何函数组合出来的 3D 数据。",
-    },
-    {
-      key: "glb_export",
-      label: "GLB 导出",
-      shortLabel: "导出",
-      progress: 88,
-      purpose: "把场景几何序列化为 GLB/PLY 文件，供 Viewer 直接加载。",
-      detailHint: "这是文件导出步骤；如果 export_format 是 glb，就会产出最终 3D 模型文件。",
-    },
-    {
-      key: "scene_rendering",
-      label: "场景渲染",
-      shortLabel: "渲染",
-      progress: 95,
-      purpose: "在导出 GLB 后生成 presentation views、top-down 图和 production steps，供评估和对比页面使用。",
-      detailHint: "所以导出后仍需要渲染：Viewer 加载 3D，评价/报告还需要 2D 视图和过程图。",
-    },
-    {
-      key: "finalizing",
-      label: "结果整理",
-      shortLabel: "整理",
-      progress: 99,
-      purpose: "写入 scene_layout.json、summary、metrics、render paths 和最终加载入口。",
-      detailHint: "这是必要步骤；Viewer 实际加载的是 layout manifest，而不是只加载一个裸 GLB。",
-    },
-  ];
-
-  function getStepIndex(stage: string): number {
-    return GENERATION_STEPS.findIndex((step) => step.key === stage);
-  }
-
-  function stepForStage(stage: string): GenerationStep {
-    return GENERATION_STEPS.find((step) => step.key === stage) ?? GENERATION_STEPS[0]!;
-  }
-
-  function isOperationObject(
-    operation: SceneJobOperation,
-  ): operation is {
-    name?: string;
-    status?: string;
-    message?: string;
-    stage?: string;
-    progress?: number;
-    detail?: Record<string, unknown>;
-    timestamp?: string;
-  } {
-    return typeof operation === "object" && operation !== null;
-  }
-
-  function latestOperationForStage(payload: SceneJobStatusPayload, stage: string): {
-    message?: string;
-    progress?: number;
-    detail?: Record<string, unknown>;
-  } | null {
-    const operations = payload.operations ?? [];
-    for (let index = operations.length - 1; index >= 0; index -= 1) {
-      const operation = operations[index];
-      if (!isOperationObject(operation)) continue;
-      if (operation.stage === stage) {
-        return {
-          message: operation.message || operation.name || operation.status,
-          progress: operation.progress,
-          detail: operation.detail,
-        };
-      }
-    }
-    return null;
-  }
-
-  function formatDesignDetailKey(key: string): string {
-    const labels: Record<string, string> = {
-      graph_template_id: "图模板",
-      reference_plan_id: "参考方案",
-      layout_mode: "布局模式",
-      object_asset_count: "对象资产",
-      building_asset_count: "建筑资产",
-      theme_segment_count: "主题分段",
-      total_slots: "资产槽位",
-      placed_slots: "已放置槽位",
-      placement_count: "最终放置",
-      export_format: "导出格式",
-      production_step_count: "过程产物",
-      layout_path: "布局文件",
-      error: "错误",
-    };
-    return labels[key] ?? key.replace(/_/g, " ");
-  }
-
-  function formatDesignDetailValue(value: unknown): string {
-    if (Array.isArray(value)) {
-      return value.map((item) => formatDesignDetailValue(item)).join(", ");
-    }
-    if (value && typeof value === "object") {
-      return JSON.stringify(value);
-    }
-    if (value === null || value === undefined || value === "") {
-      return "未提供";
-    }
-    return String(value);
-  }
-
-  function renderDesignDetailList(detail: Record<string, unknown> | undefined, limit = 6): string {
-    const entries = Object.entries(detail ?? {}).filter(([, value]) => value !== undefined && value !== "");
-    if (entries.length === 0) {
-      return `<div class="viewer-design-workspace-muted">等待后端返回该阶段的具体数据。</div>`;
-    }
-    return `
-      <dl class="viewer-design-detail-list">
-        ${entries.slice(0, limit).map(([key, value]) => `
-          <div>
-            <dt>${escapeHtml(formatDesignDetailKey(key))}</dt>
-            <dd>${escapeHtml(formatDesignDetailValue(value))}</dd>
-          </div>
-        `).join("")}
-      </dl>
-    `;
-  }
-
-  function isCoreDiagnosticStage(stage: string): boolean {
-    return stage === "context_resolving" || stage === "layout_generation" || stage === "constraint_solving" || stage === "asset_composition";
-  }
-
-  function asRecord(value: unknown): Record<string, unknown> {
-    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-  }
-
-  function asRecords(value: unknown): Array<Record<string, unknown>> {
-    return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
-  }
-
-  function renderDiagnosticKeyValues(record: Record<string, unknown>, limit = 24): string {
-    const entries = Object.entries(record).filter(([, value]) => value !== undefined && value !== "");
-    if (entries.length === 0) return `<div class="viewer-design-workspace-muted">暂无数据。</div>`;
-    return `
-      <dl class="viewer-design-diagnostic-kv">
-        ${entries.slice(0, limit).map(([key, value]) => `
-          <div>
-            <dt>${escapeHtml(formatDesignDetailKey(key))}</dt>
-            <dd>${escapeHtml(formatDesignDetailValue(value))}</dd>
-          </div>
-        `).join("")}
-      </dl>
-    `;
-  }
-
-  function renderDiagnosticTable(
-    rows: Array<Record<string, unknown>>,
-    columns: Array<[string, string]>,
-    emptyText = "暂无记录。",
-  ): string {
-    if (rows.length === 0) return `<div class="viewer-design-workspace-muted">${escapeHtml(emptyText)}</div>`;
-    return `
-      <div class="viewer-design-diagnostic-table-wrap">
-        <table class="viewer-design-diagnostic-table">
-          <thead>
-            <tr>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}</tr>
-          </thead>
-          <tbody>
-            ${rows.map((row) => `
-              <tr>
-                ${columns.map(([key]) => `<td>${escapeHtml(formatDesignDetailValue(row[key]))}</td>`).join("")}
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
-    `;
-  }
-
-  function renderDiagnosticSection(title: string, body: string): string {
-    return `
-      <section class="viewer-design-diagnostic-section">
-        <h4>${escapeHtml(title)}</h4>
-        ${body}
-      </section>
-    `;
-  }
-
-  function renderLayoutDiagnostic(detail: Record<string, unknown>): string {
-    const streetProgram = asRecord(detail.street_program);
-    return [
-      renderDiagnosticSection("算法与输入", renderDiagnosticKeyValues({
-        ...asRecord(detail.algorithm),
-        ...asRecord(detail.config_parameters),
-      })),
-      renderDiagnosticSection(
-        "主题分段",
-        renderDiagnosticTable(asRecords(detail.theme_segments), [
-          ["theme_id", "ID"],
-          ["theme_name", "主题"],
-          ["x_start_m", "起点 m"],
-          ["x_end_m", "终点 m"],
-          ["length_m", "长度 m"],
-          ["dominant_poi_types", "主导 POI"],
-          ["design_rule_profile", "规则"],
-        ]),
-      ),
-      renderDiagnosticSection("生成的街道 Program", renderDiagnosticKeyValues({
-        cross_section_type: streetProgram.cross_section_type,
-        lane_count: streetProgram.lane_count,
-        road_width_m: streetProgram.road_width_m,
-        sidewalk_width_m: streetProgram.sidewalk_width_m,
-        row_width_m: streetProgram.row_width_m,
-        width_expanded: streetProgram.width_expanded,
-        width_reallocation_reason: streetProgram.width_reallocation_reason,
-        poi_fit_feasible: streetProgram.poi_fit_feasible,
-        furniture_requirements: streetProgram.furniture_requirements,
-        throughput_requirements: streetProgram.throughput_requirements,
-        design_goals: streetProgram.design_goals,
-      })),
-      renderDiagnosticSection(
-        "断面功能带",
-        renderDiagnosticTable(asRecords(streetProgram.bands), [
-          ["name", "名称"],
-          ["kind", "类型"],
-          ["side", "侧向"],
-          ["width_m", "宽度 m"],
-          ["z_center_m", "中心 z"],
-          ["allowed_categories", "允许资产"],
-        ]),
-      ),
-    ].join("");
-  }
-
-  function renderConstraintDiagnostic(detail: Record<string, unknown>): string {
-    const solver = asRecord(detail.solver_summary);
-    return [
-      renderDiagnosticSection("Solver 与规则", renderDiagnosticKeyValues({
-        ...asRecord(solver.algorithm),
-        active_constraints: solver.active_constraints,
-        rule_evaluation_counts: solver.rule_evaluation_counts,
-      })),
-      renderDiagnosticSection("求解结果指标", renderDiagnosticKeyValues(asRecord(solver.metrics))),
-      renderDiagnosticSection(
-        "功能带求解结果",
-        renderDiagnosticTable(asRecords(solver.band_solutions), [
-          ["band_name", "功能带"],
-          ["band_kind", "类型"],
-          ["side", "侧向"],
-          ["width_m", "宽度"],
-          ["min_width_m", "最小"],
-          ["max_width_m", "最大"],
-          ["slack_m", "余量"],
-          ["active_constraint_names", "约束"],
-        ]),
-      ),
-      renderDiagnosticSection(
-        "被拦截/未满足的规则",
-        renderDiagnosticTable(asRecords(solver.flagged_rule_evaluations), [
-          ["rule_name", "规则"],
-          ["status", "状态"],
-          ["mode", "模式"],
-          ["score", "分数"],
-          ["explanation", "说明"],
-        ], "没有发现失败规则。"),
-      ),
-      renderDiagnosticSection(
-        "求解器修改与冲突",
-        `${renderDiagnosticTable(asRecords(solver.edits), [
-          ["action", "动作"],
-          ["target", "目标"],
-          ["before", "之前"],
-          ["after", "之后"],
-          ["reason", "原因"],
-        ], "没有 solver edit。")}
-        ${renderDiagnosticTable(asRecords(solver.conflicts), [
-          ["rule_name", "规则"],
-          ["severity", "严重性"],
-          ["affected_target", "对象"],
-          ["message", "说明"],
-        ], "没有 unresolved conflict。")}`,
-      ),
-      renderDiagnosticSection("Slot Plan 汇总", renderDiagnosticKeyValues(asRecord(solver.slot_plan_summary))),
-      renderDiagnosticSection(
-        "分主题方案",
-        renderDiagnosticTable(asRecords(solver.zone_programs), [
-          ["theme_id", "主题 ID"],
-          ["theme_name", "主题"],
-          ["design_rule_profile", "规则"],
-          ["cross_section_type", "断面"],
-          ["slot_count", "slot"],
-          ["backend_used", "Program"],
-          ["solver_backend_used", "Solver"],
-        ]),
-      ),
-    ].join("");
-  }
-
-  function renderCompositionDiagnostic(detail: Record<string, unknown>): string {
-    const blockerSummary = asRecord(detail.blocker_summary);
-    return [
-      renderDiagnosticSection("资产落位算法", renderDiagnosticKeyValues(asRecord(detail.algorithm))),
-      renderDiagnosticSection("Slot 与落位进度", renderDiagnosticKeyValues({
-        ...asRecord(detail.slot_plan_summary),
-        ...asRecord(detail.placement_progress),
-        category_slot_counts: detail.category_slot_counts,
-      })),
-      renderDiagnosticSection("拦截器结果", renderDiagnosticKeyValues({
-        blocked_reason_counts: blockerSummary.blocked_reason_counts,
-        search_tier_counts: blockerSummary.search_tier_counts,
-        category_status_counts: blockerSummary.category_status_counts,
-      })),
-      renderDiagnosticSection(
-        "未落位样例",
-        renderDiagnosticTable(asRecords(blockerSummary.unplaced_samples), [
-          ["slot_id", "Slot"],
-          ["category", "类别"],
-          ["theme_id", "主题"],
-          ["side", "侧向"],
-          ["band_name", "功能带"],
-          ["failure_reason", "拦截原因"],
-          ["blocked_reason_counts", "过滤统计"],
-        ], "当前没有未落位样例。"),
-      ),
-      renderDiagnosticSection("锚点与平衡修复", renderDiagnosticKeyValues({
-        anchor_resolution_summary: detail.anchor_resolution_summary,
-        balance_repair_summary: detail.balance_repair_summary,
-        composition_pass_report: detail.composition_pass_report,
-      })),
-    ].join("");
-  }
-
-  function renderContextResolvingDiagnostic(detail: Record<string, unknown>): string {
-    // Backend actually passes simple fields like reference_plan_id, graph_template_id, layout_mode etc.
-    // from _emit_progress calls in design_runtime.py
-    const layoutMode = String(detail.layout_mode || detail.layoutMode || "graph_template");
-    
-    return [
-      renderDiagnosticSection("阶段说明", renderDiagnosticKeyValues({
-        stage: "context_resolving",
-        message: detail.message || "解析设计意图和构建场景上下文",
-        layout_mode: layoutMode,
-      })),
-      renderDiagnosticSection("图模板 / 参考方案", renderDiagnosticKeyValues({
-        graph_template_id: detail.graph_template_id || detail.graphTemplateId || "hkust_gz_gate",
-        reference_plan_id: detail.reference_plan_id || detail.referencePlanId,
-      })),
-      renderDiagnosticSection("设计意图", renderDiagnosticKeyValues({
-        normalized_scene_query: detail.normalized_scene_query || detail.sceneQuery || detail.scene_query,
-        design_summary: detail.design_summary || detail.designSummary,
-        target_street_type: detail.target_street_type || detail.targetStreetType,
-        objective_profile: detail.objective_profile || detail.objectiveProfile,
-        design_rule_profile: detail.design_rule_profile || detail.designRuleProfile,
-      })),
-      renderDiagnosticSection("需求参数", renderDiagnosticKeyValues({
-        density: detail.density,
-        ped_demand_level: detail.ped_demand_level || detail.pedDemandLevel,
-        bike_demand_level: detail.bike_demand_level || detail.bikeDemandLevel,
-        transit_demand_level: detail.transit_demand_level || detail.transitDemandLevel,
-        vehicle_demand_level: detail.vehicle_demand_level || detail.vehicleDemandLevel,
-        road_width_m: detail.road_width_m || detail.roadWidthM,
-        length_m: detail.length_m || detail.lengthM,
-        lane_count: detail.lane_count || detail.laneCount,
-        sidewalk_width_m: detail.sidewalk_width_m || detail.sidewalkWidthM,
-      })),
-      renderDiagnosticSection("配置补丁", renderDiagnosticKeyValues(asRecord(detail.config_patch || detail.configPatch || detail.compose_config_patch || detail.composeConfigPatch), 20)),
-      renderDiagnosticSection("RAG 引用证据", (() => {
-        const citationsField = detail.citations_by_field || detail.citationsByField;
-        const citationsRecord = asRecord(citationsField);
-        const citationKeys = Object.keys(citationsRecord);
-        const totalCitations = citationKeys.reduce((sum, key) => {
-          const value = citationsRecord[key];
-          if (Array.isArray(value)) return sum + value.length;
-          if (typeof value === "string" && value) return sum + 1;
-          return sum;
-        }, 0);
-        
-        const knowledgeSource = String(detail.knowledge_source || detail.knowledgeSource || "graph_rag");
-        const evidenceCount = Number(detail.evidence_count || detail.evidenceCount || totalCitations);
-        
-        if (evidenceCount === 0) {
-          return renderDiagnosticKeyValues({
-            citations_count: 0,
-            knowledge_source: knowledgeSource,
-            status: "RAG 检索未返回结果或已禁用",
-          });
-        }
-        
-        // Build citation details
-        const citationDetails = citationKeys.map((key) => {
-          const value = citationsRecord[key];
-          const count = Array.isArray(value) ? value.length : (value ? 1 : 0);
-          return `${key}: ${count} 条引用`;
-        }).join("\n");
-        
-        return renderDiagnosticKeyValues({
-          citations_count: evidenceCount,
-          knowledge_source: knowledgeSource,
-          status: evidenceCount > 0 ? "✅ RAG 检索成功" : "❌ 无引用",
-          citation_details: citationDetails || "无详细引用",
-        });
-      })()),
-    ].join("");
-  }
-
-  function renderStageDiagnosticContent(stage: string, detail: Record<string, unknown>): string {
-    if (stage === "context_resolving") return renderContextResolvingDiagnostic(detail);
-    if (stage === "layout_generation") return renderLayoutDiagnostic(detail);
-    if (stage === "constraint_solving") return renderConstraintDiagnostic(detail);
-    if (stage === "asset_composition") return renderCompositionDiagnostic(detail);
-    return renderDiagnosticSection("Detail", renderDiagnosticKeyValues(detail, 80));
-  }
-
   function openDesignStageDiagnostic(stage: string): void {
     const snapshot = lastDesignRunSnapshot;
     if (!snapshot) return;
@@ -4460,70 +1774,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     designWorkspaceEl.querySelector(".viewer-design-diagnostic-modal")?.remove();
   }
 
-  function renderDesignImprovementSummary(
-    preset: DesignPreset | null,
-    variant: DesignSchemeVariant,
-    prompt: string,
-    graphTemplateId: string,
-  ): string {
-    const configPatch = preset?.configPatch ?? {};
-    const config = configForDesignVariant(configPatch, variant);
-    const presetLabel = preset ? `${preset.nameEn} / ${preset.name}` : "Custom / LLM-Driven";
-    
-    const items = [
-      ["预设", presetLabel],
-      preset ? ["设计规则", config.design_rule_profile] : null,
-      preset ? ["目标 profile", config.objective_profile] : null,
-      preset ? ["密度", config.density] : ["密度", "LLM 自动推导"],
-      preset ? ["道路宽度", config.road_width_m ? `${config.road_width_m} m` : undefined] : ["道路宽度", "LLM 自动推导"],
-      preset ? ["行人需求", config.ped_demand_level] : ["行人需求", "LLM 自动推导"],
-      preset ? ["自行车需求", config.bike_demand_level] : ["自行车需求", "LLM 自动推导"],
-      preset ? ["公交需求", config.transit_demand_level] : ["公交需求", "LLM 自动推导"],
-      preset ? ["车流需求", config.vehicle_demand_level] : ["车流需求", "LLM 自动推导"],
-      ["图模板", graphTemplateId],
-      ["随机种子", variant.seed],
-    ].filter((item): item is [string, string | number] => item !== null && item[1] !== undefined && item[1] !== "");
-    
-    return `
-      <section class="viewer-design-workspace-panel">
-        <div class="viewer-design-workspace-panel-title">本次方案实际改了什么</div>
-        <p class="viewer-design-workspace-copy">${escapeHtml(prompt)}</p>
-        <div class="viewer-design-improvement-grid">
-          ${items.map(([label, value]) => `
-            <div class="viewer-design-improvement-item">
-              <span>${escapeHtml(String(label))}</span>
-              <strong>${escapeHtml(formatDesignDetailValue(value))}</strong>
-            </div>
-          `).join("")}
-        </div>
-      </section>
-    `;
-  }
-
   function renderDesignStageTree(payload: SceneJobStatusPayload, currentStage: string, failed: boolean): void {
-    const currentIndex = Math.max(0, getStepIndex(currentStage));
-    
-    // Prepare stage nodes data for G6
-    const stageNodes: StageNode[] = GENERATION_STEPS.map((step, index) => {
-      const operation = latestOperationForStage(payload, step.key);
-      const state =
-        failed && index === currentIndex
-          ? "failed"
-          : index < currentIndex || step.key === "succeeded"
-            ? "completed"
-            : index === currentIndex
-              ? "active"
-              : "pending";
-      const percent = typeof operation?.progress === "number" ? operation.progress : step.progress;
-      
-      return {
-        id: step.key,
-        label: `${step.label} · ${Math.round(percent)}%`,
-        status: state,
-        progress: percent,
-        stepNumber: index + 1,
-      };
-    });
+    const stageNodes: StageNode[] = buildDesignStageNodes(payload, currentStage, failed);
 
     // Destroy previous G6 graph if exists
     if (g6StageGraph) {
@@ -4558,43 +1810,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     });
   }
 
-  function renderDesignStageCards(payload: SceneJobStatusPayload, currentStage: string, failed: boolean): string {
-    const currentIndex = Math.max(0, getStepIndex(currentStage));
-    return `
-      <div class="viewer-design-stage-grid">
-        ${GENERATION_STEPS.map((step, index) => {
-          const operation = latestOperationForStage(payload, step.key);
-          const state =
-            failed && index === currentIndex
-              ? "failed"
-              : index < currentIndex || step.key === "succeeded"
-                ? "completed"
-                : index === currentIndex
-                  ? "active"
-                  : "pending";
-          const percent = typeof operation?.progress === "number" ? operation.progress : step.progress;
-          return `
-            <article class="viewer-design-stage-card" data-state="${state}">
-              <div class="viewer-design-stage-head">
-                <span>${escapeHtml(step.shortLabel)}</span>
-                <strong>${escapeHtml(step.label)}</strong>
-                <em>${Math.round(percent)}%</em>
-              </div>
-              <p>${escapeHtml(step.purpose)}</p>
-              <div class="viewer-design-stage-hint">${escapeHtml(operation?.message || step.detailHint)}</div>
-              ${renderDesignDetailList(operation?.detail, state === "active" ? 8 : 3)}
-              ${isCoreDiagnosticStage(step.key) ? `
-                <button class="viewer-design-stage-detail-button" type="button" data-design-stage-detail="${escapeHtml(step.key)}">
-                  查看算法详情
-                </button>
-              ` : ""}
-            </article>
-          `;
-        }).join("")}
-      </div>
-    `;
-  }
-
   function renderDesignWorkspace(
     payload: SceneJobStatusPayload,
     preset: DesignPreset | null,
@@ -4604,49 +1819,14 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   ): void {
     lastDesignRunSnapshot = { payload, preset, variant, prompt, graphTemplateId };
     designReviewRunEl.disabled = false;
-    const { progress, message, stage } = describeDesignJobProgress(payload);
-    const failed = payload.status === "failed";
-    const step = stepForStage(stage);
-    const presetLabel = preset ? `${preset.nameEn}` : "Custom";
+    const rendered = renderDesignWorkspaceHtml(payload, preset, variant, prompt, graphTemplateId);
     designWorkspaceEl.hidden = false;
     minimapEl.hidden = true; // Hide minimap when design workspace is visible
-    designWorkspaceEl.innerHTML = `
-      <div class="viewer-design-workspace-shell">
-        <header class="viewer-design-workspace-header">
-          <div>
-            <span class="viewer-design-workspace-kicker">${escapeHtml(variant.name)} · ${escapeHtml(presetLabel)}</span>
-            <h2>Design Run</h2>
-            <p>${escapeHtml(message)}</p>
-          </div>
-          <div class="viewer-design-workspace-progress">
-            <strong>${Math.round(clamp(progress, 0, 100))}%</strong>
-            <span>${escapeHtml(step.label)}</span>
-          </div>
-        </header>
-        <div class="viewer-design-workspace-progressbar" aria-label="Generation progress">
-          <div style="width:${clamp(progress, 0, 100)}%"></div>
-        </div>
-        <div class="viewer-design-workspace-layout">
-          ${renderDesignImprovementSummary(preset, variant, prompt, graphTemplateId)}
-          <section class="viewer-design-workspace-panel">
-            <div class="viewer-design-workspace-panel-title">场景生长树</div>
-            <div id="viewer-g6-stage-tree"></div>
-          </section>
-          <section class="viewer-design-workspace-panel">
-            <div class="viewer-design-workspace-panel-title">当前阶段在做什么</div>
-            <h3>${escapeHtml(step.label)}</h3>
-            <p class="viewer-design-workspace-copy">${escapeHtml(step.purpose)}</p>
-            <div class="viewer-design-stage-hint">${escapeHtml(step.detailHint)}</div>
-            ${renderDesignDetailList(latestOperationForStage(payload, stage)?.detail, 10)}
-          </section>
-        </div>
-        ${renderDesignStageCards(payload, stage, failed)}
-      </div>
-    `;
+    designWorkspaceEl.innerHTML = rendered.html;
     
     // Render G6 stage tree after DOM is updated
     requestAnimationFrame(() => {
-      renderDesignStageTree(payload, stage, failed);
+      renderDesignStageTree(payload, rendered.stage, rendered.failed);
     });
   }
 
@@ -4668,700 +1848,21 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     flashStatus("Design generation steps reopened.");
   }
 
-  function branchNodes(payload: BranchRunStatusPayload): BranchRunNode[] {
-    return [...(payload.nodes ?? [])].sort((a, b) => a.depth - b.depth || b.score! - a.score! || a.rank - b.rank);
-  }
-
-  function selectedBranchNode(payload: BranchRunStatusPayload): BranchRunNode | null {
-    const nodes = branchNodes(payload);
-    if (selectedBranchNodeId) {
-      const selected = nodes.find((node) => node.node_id === selectedBranchNodeId);
-      if (selected) return selected;
-    }
-    if (payload.best_node_id) {
-      const best = nodes.find((node) => node.node_id === payload.best_node_id);
-      if (best) return best;
-    }
-    return nodes[0] ?? null;
-  }
-
-  function formatBranchScore(value: unknown): string {
-    if (typeof value !== "number" || !Number.isFinite(value)) return "N/A";
-    return `${Math.round(value)}`;
-  }
-
-  function renderBranchTree(payload: BranchRunStatusPayload, selectedId: string | null): string {
-    const nodes = branchNodes(payload);
-    if (nodes.length === 0) return `<div class="viewer-design-workspace-muted">等待分支节点生成。</div>`;
-    const bestId = payload.best_node_id ?? "";
-    return `
-      <div class="viewer-branch-tree">
-        ${nodes.map((node) => `
-          <button
-            class="viewer-branch-node"
-            data-branch-node="${escapeHtml(node.node_id)}"
-            data-depth="${escapeHtml(String(node.depth))}"
-            data-status="${escapeHtml(node.status)}"
-            data-selected="${node.node_id === selectedId ? "true" : "false"}"
-            type="button"
-          >
-            <span>D${node.depth} · #${node.rank}</span>
-            <strong>${escapeHtml(node.node_id)}${node.node_id === bestId ? " · Best" : ""}</strong>
-            <small>${escapeHtml(node.status)} · score ${escapeHtml(formatBranchScore(node.score))}</small>
-          </button>
-        `).join("")}
-      </div>
-    `;
-  }
-
-  function renderBranchScatter(payload: BranchRunStatusPayload, selectedId: string | null): string {
-    const points = payload.scatter_points ?? [];
-    if (points.length === 0) {
-      return `<div class="viewer-design-workspace-muted">等待评价结果生成散点图。</div>`;
-    }
-    const plotWidth = 540;
-    const plotHeight = 320;
-    const padding = 34;
-    const scaleX = (value: number | null | undefined) => padding + (clamp(Number(value ?? 0), 0, 100) / 100) * (plotWidth - padding * 2);
-    const scaleY = (value: number | null | undefined) => plotHeight - padding - (clamp(Number(value ?? 0), 0, 100) / 100) * (plotHeight - padding * 2);
-    return `
-      <div class="viewer-branch-scatter-wrap">
-        <svg class="viewer-branch-scatter" viewBox="0 0 ${plotWidth} ${plotHeight}" role="img" aria-label="Branch evaluation scatter plot">
-          <line x1="${padding}" y1="${plotHeight - padding}" x2="${plotWidth - padding}" y2="${plotHeight - padding}" />
-          <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${plotHeight - padding}" />
-          <text x="${plotWidth / 2}" y="${plotHeight - 7}">Walkability</text>
-          <text x="10" y="20">Overall</text>
-          ${points.map((point) => {
-            const radius = point.status === "succeeded" ? 7 + clamp(Number(point.overall ?? 50), 0, 100) / 28 : 6;
-            return `
-              <circle
-                class="viewer-branch-point"
-                data-branch-node="${escapeHtml(point.node_id)}"
-                data-status="${escapeHtml(point.status)}"
-                data-selected="${point.node_id === selectedId ? "true" : "false"}"
-                cx="${scaleX(point.x)}"
-                cy="${scaleY(point.y)}"
-                r="${radius}"
-              />
-              <text class="viewer-branch-point-label" x="${scaleX(point.x) + 9}" y="${scaleY(point.y) - 8}">D${point.depth}</text>
-            `;
-          }).join("")}
-        </svg>
-      </div>
-    `;
-  }
-
-  function renderBranchNodeDetail(node: BranchRunNode | null): string {
-    if (!node) return `<div class="viewer-design-workspace-muted">选择一个分支节点查看细节。</div>`;
-    const evaluation = asRecord(node.evaluation);
-    return `
-      <div class="viewer-branch-detail">
-        <div class="viewer-branch-detail-actions">
-          ${node.scene_layout_path ? `
-            <button class="viewer-design-stage-detail-button" type="button" data-branch-load="${escapeHtml(node.scene_layout_path)}">Load Scene</button>
-          ` : ""}
-        </div>
-        ${renderDiagnosticSection("评价结果", renderDiagnosticKeyValues({
-          status: node.status,
-          score: node.score,
-          walkability: evaluation.walkability,
-          safety: evaluation.safety,
-          beauty: evaluation.beauty,
-          overall: evaluation.overall,
-          error: node.error,
-        }))}
-        ${renderDiagnosticSection("LLM 候选与实际参数", `
-          <p class="viewer-design-workspace-copy">${escapeHtml(node.llm_candidate_reasoning || "无 LLM reasoning。")}</p>
-          ${renderDiagnosticKeyValues(asRecord(node.config_patch), 28)}
-        `)}
-        ${renderDiagnosticSection("Rule-Based 优化方向", renderDiagnosticTable(asRecords(node.optimization_directives), [
-          ["directive_id", "Directive"],
-          ["target_metric", "目标"],
-          ["direction", "方向"],
-          ["allowed_fields", "允许字段"],
-          ["risk", "风险"],
-        ], "该节点尚未生成优化方向。"))}
-        ${renderDiagnosticSection("LLM 修改拦截", renderDiagnosticTable(asRecords(node.rejected_edits), [
-          ["field", "字段"],
-          ["value", "LLM 值"],
-          ["reason", "拦截原因"],
-        ], "没有被拦截的修改。"))}
-        ${renderDiagnosticSection("RAG 证据", renderDiagnosticTable(asRecords(node.rag_evidence), [
-          ["chunk_id", "Chunk"],
-          ["section_title", "章节"],
-          ["score", "相关度"],
-          ["knowledge_source", "来源"],
-        ], "该节点没有直接 RAG 证据。"))}
-      </div>
-    `;
-  }
-
   function renderBranchWorkspace(payload: BranchRunStatusPayload): void {
     lastBranchRunSnapshot = payload;
-    const selected = selectedBranchNode(payload);
+    const selected = resolveSelectedBranchNode(payload, selectedBranchNodeId);
     selectedBranchNodeId = selected?.node_id ?? selectedBranchNodeId;
-    const progress = Math.round(clamp(Number(payload.progress ?? 0), 0, 100));
     designWorkspaceEl.hidden = false;
     minimapEl.hidden = true;
-    designWorkspaceEl.innerHTML = `
-      <div class="viewer-design-workspace-shell">
-        <header class="viewer-design-workspace-header">
-          <div>
-            <span class="viewer-design-workspace-kicker">Branch Run · Top-${escapeHtml(String(payload.topk ?? 3))} · ${escapeHtml(payload.graph_template_id ?? DEFAULT_GRAPH_TEMPLATE_ID)}</span>
-            <h2>Design Evolution</h2>
-            <p>${escapeHtml(payload.prompt ?? designPromptEl.value.trim())}</p>
-          </div>
-          <div class="viewer-design-workspace-progress">
-            <strong>${progress}%</strong>
-            <span>${escapeHtml(payload.stage || payload.status)}</span>
-          </div>
-        </header>
-        <div class="viewer-design-workspace-progressbar" aria-label="Branch run progress">
-          <div style="width:${progress}%"></div>
-        </div>
-        <div class="viewer-branch-layout">
-          <section class="viewer-design-workspace-panel">
-            <div class="viewer-design-workspace-panel-title">分支树</div>
-            ${renderBranchTree(payload, selected?.node_id ?? null)}
-          </section>
-          <section class="viewer-design-workspace-panel">
-            <div class="viewer-design-workspace-panel-title">评价散点图</div>
-            ${renderBranchScatter(payload, selected?.node_id ?? null)}
-          </section>
-          <section class="viewer-design-workspace-panel">
-            <div class="viewer-design-workspace-panel-title">节点详情</div>
-            ${renderBranchNodeDetail(selected)}
-          </section>
-        </div>
-      </div>
-    `;
+    designWorkspaceEl.innerHTML = renderBranchWorkspaceHtml(payload, selected, designPromptEl.value.trim());
   }
 
   function renderBranchRunResults(payload: BranchRunStatusPayload): void {
-    const readyNodes = branchNodes(payload).filter((node) => node.status === "succeeded" && node.scene_layout_path);
-    if (readyNodes.length === 0) {
-      designResultEl.innerHTML = `<div class="viewer-design-workspace-muted">No branch scene is ready yet.</div>`;
-      return;
-    }
-    designResultEl.innerHTML = `
-      <div class="viewer-design-schemes">
-        ${readyNodes.map((node) => `
-          <button class="viewer-design-scheme" type="button" data-layout-path="${escapeHtml(node.scene_layout_path || "")}">
-            <span>
-              <strong>D${node.depth} · #${node.rank} · ${escapeHtml(node.node_id)}</strong>
-              <small>score ${escapeHtml(formatBranchScore(node.score))} · ${escapeHtml(node.scene_layout_path || "")}</small>
-            </span>
-            <em>Load</em>
-          </button>
-        `).join("")}
-      </div>
-    `;
+    designResultEl.innerHTML = renderBranchRunResultsHtml(payload);
   }
 
-  async function waitForBranchRun(runId: string): Promise<BranchRunStatusPayload> {
-    for (let attempt = 0; attempt < DESIGN_MAX_POLL_ATTEMPTS; attempt += 1) {
-      const payload = await apiJson<BranchRunStatusPayload>(`/api/design/branch-runs/${encodeURIComponent(runId)}`);
-      const progress = Math.round(clamp(Number(payload.progress ?? 0), 0, 100));
-      updateDesignStatus(`Branch run: ${payload.stage || payload.status} (${progress}%)`);
-      renderBranchWorkspace(payload);
-      renderBranchRunResults(payload);
-      if (payload.status === "succeeded") return payload;
-      if (payload.status === "failed") throw new Error(payload.error || "Branch run failed.");
-      await sleep(DESIGN_POLL_INTERVAL_MS);
-    }
-    throw new Error("Branch run timed out.");
-  }
-
-  async function runBranchGeneration(): Promise<void> {
-    if (branchRunIsGenerating || designIsGenerating) return;
-    const prompt = designPromptEl.value.trim() || selectedDesignPreset()?.prompt || "Generate a walkable complete street.";
-    const graphTemplateId = designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
-    branchRunIsGenerating = true;
-    designBranchRunEl.disabled = true;
-    designGenerateEl.disabled = true;
-    selectedBranchNodeId = null;
-    updateDesignStatus("Submitting branch run...");
-    designResultEl.innerHTML = "";
-    try {
-      const created = await postApiJson<BranchRunCreatePayload>("/api/design/branch-runs", {
-        prompt,
-        topk: 3,
-        rounds: 2,
-        graph_template_id: graphTemplateId,
-        knowledge_source: "graph_rag",
-        scene_context: {
-          layout_mode: "graph_template",
-          graph_template_id: graphTemplateId,
-        },
-        generation_options: {},
-        evaluation_weights: {
-          walkability: 0.4,
-          safety: 0.3,
-          beauty: 0.3,
-        },
-      });
-      const payload = await waitForBranchRun(created.run_id);
-      lastBranchRunSnapshot = payload;
-      renderBranchWorkspace(payload);
-      renderBranchRunResults(payload);
-      const best = branchNodes(payload).find((node) => node.node_id === payload.best_node_id);
-      if (best?.scene_layout_path) {
-        clearRecentLayoutsCache();
-        clearManifestCache();
-        await loadLayoutSelection(best.scene_layout_path);
-        const recent = await loadRecentLayouts(50, false);
-        populateRecentLayoutOptions(recent, best.scene_layout_path);
-      }
-      updateDesignStatus("Branch run complete.", "success");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Branch run failed.";
-      updateDesignStatus(message, "error");
-      designResultEl.innerHTML = `<div class="viewer-design-error">${escapeHtml(message)}</div>`;
-      setError(errorEl, message);
-    } finally {
-      branchRunIsGenerating = false;
-      designBranchRunEl.disabled = false;
-      designGenerateEl.disabled = false;
-    }
-  }
-
-  function renderDesignSteps(payload: SceneJobStatusPayload, currentStage: string, failed: boolean = false): string {
-    const currentIndex = getStepIndex(currentStage);
-    const steps = GENERATION_STEPS.map((step, idx) => {
-      let stateClass = "";
-      let iconSvg = "";
-      const operation = latestOperationForStage(payload, step.key);
-
-      if (idx < currentIndex) {
-        // 已完成的步骤
-        stateClass = "completed";
-        iconSvg = `<svg viewBox="0 0 12 12" fill="none" stroke="white" stroke-width="2"><path d="M2 6l3 3 5-5"/></svg>`;
-      } else if (idx === currentIndex && !failed) {
-        // 当前活跃步骤
-        stateClass = "active";
-      } else if (idx === currentIndex && failed) {
-        // 失败步骤
-        stateClass = "failed";
-        iconSvg = `<svg viewBox="0 0 12 12" fill="none" stroke="white" stroke-width="2"><path d="M3 3l6 6M9 3l-6 6"/></svg>`;
-      }
-
-      return `<div class="viewer-design-step ${stateClass}">
-        <div class="viewer-design-step-indicator">${iconSvg}</div>
-        <span>
-          <strong>${step.label}</strong>
-          <small>${escapeHtml(operation?.message || step.detailHint)}</small>
-        </span>
-      </div>`;
-    });
-
-    return `<div class="viewer-design-steps">${steps.join("")}</div>`;
-  }
-
-  function describeDesignJobProgress(payload: SceneJobStatusPayload): { progress: number; message: string; stage: string } {
-    let progress = 10;
-    let message = "Waiting for generation...";
-    let stage = "queued";
-
-    if (payload.status === "queued") {
-      progress = 5;
-      message = "Generation job queued...";
-      stage = "queued";
-    } else if (payload.status === "running" || payload.status === "processing") {
-      stage = payload.stage || "processing";
-      const stageProgress: Record<string, number> = {
-        context_resolving: 15,
-        asset_loading: 25,
-        layout_generation: 40,
-        constraint_solving: 50,
-        asset_composition: 65,
-        mesh_generation: 75,
-        glb_export: 88,
-        scene_rendering: 95,
-        finalizing: 99,
-      };
-      progress = stageProgress[stage] ?? 50;
-      message = `Generating: ${stage.replace(/_/g, " ")}`;
-    } else if (payload.status === "succeeded") {
-      progress = 100;
-      message = "Generation complete. Loading scene...";
-      stage = "finalizing";
-    } else if (payload.status === "failed") {
-      progress = 0;
-      message = payload.error || "Generation failed.";
-      stage = payload.stage || "processing";
-    }
-
-    if (typeof payload.progress === "number" && payload.progress > 0) {
-      progress = Math.round(payload.progress);
-    }
-
-    const currentOp = payload.operations?.[payload.operations.length - 1];
-    if (typeof currentOp === "string" && currentOp.trim()) {
-      message = currentOp;
-    } else if (currentOp && typeof currentOp === "object") {
-      message = currentOp.message || currentOp.name || currentOp.status || message;
-    }
-
-    return { progress, message, stage };
-  }
-
-  async function waitForDesignJob(
-    jobId: string,
-    preset: DesignPreset | null,
-    variant: DesignSchemeVariant,
-    prompt: string,
-    graphTemplateId: string,
-  ): Promise<SceneJobResult> {
-    for (let attempt = 0; attempt < DESIGN_MAX_POLL_ATTEMPTS; attempt += 1) {
-      const payload = await apiJson<SceneJobStatusPayload>(`/api/scene/jobs/${encodeURIComponent(jobId)}`);
-      const { progress, message, stage } = describeDesignJobProgress(payload);
-      updateDesignStatus(`${message} (${progress}%)`);
-      renderDesignWorkspace(payload, preset, variant, prompt, graphTemplateId);
-      
-      const isFailed = payload.status === "failed";
-      designResultEl.innerHTML = `
-        <div class="viewer-design-progress" aria-label="Generation progress">
-          <div style="width:${clamp(progress, 0, 100)}%"></div>
-        </div>
-        ${renderDesignSteps(payload, stage, isFailed)}
-      `;
-      
-      if (payload.status === "succeeded" && payload.result) {
-        return payload.result;
-      }
-      if (payload.status === "failed") {
-        throw new Error(payload.error || "Generation job failed.");
-      }
-      await sleep(DESIGN_POLL_INTERVAL_MS);
-    }
-    throw new Error("Generation timed out.");
-  }
-
-  async function runDesignGeneration(): Promise<void> {
-    if (designIsGenerating) return;
-    const preset = selectedDesignPreset();
-    const prompt = designPromptEl.value.trim() || (preset?.prompt ?? "");
-    const graphTemplateId = designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
-    const variants = designCountEl.value === "3" ? DESIGN_SCHEME_VARIANTS : [DESIGN_SCHEME_VARIANTS[0]];
-    const generatedSchemes: GeneratedDesignScheme[] = [];
-    designIsGenerating = true;
-    designGenerateEl.disabled = true;
-    designReviewRunEl.disabled = lastDesignRunSnapshot === null;
-    updateDesignStatus("Submitting generation job...");
-    designResultEl.innerHTML = "";
-    designWorkspaceEl.hidden = false;
-    minimapEl.hidden = true; // Hide minimap when design workspace is visible
-    const presetLabel = preset ? `${preset.nameEn} / ${preset.name}` : "Custom / LLM-Driven";
-    designWorkspaceEl.innerHTML = `
-      <div class="viewer-design-workspace-shell">
-        <header class="viewer-design-workspace-header">
-          <div>
-            <span class="viewer-design-workspace-kicker">${escapeHtml(presetLabel)} · ${escapeHtml(graphTemplateId)}</span>
-            <h2>Design Run</h2>
-            <p>正在提交生成任务。</p>
-          </div>
-          <div class="viewer-design-workspace-progress">
-            <strong>0%</strong>
-            <span>准备提交</span>
-          </div>
-        </header>
-        ${renderDesignImprovementSummary(preset, variants[0]!, prompt, graphTemplateId)}
-      </div>
-    `;
-    setStatus("Submitting design generation job...");
-
-    try {
-      for (const variant of variants) {
-        updateDesignStatus(`Submitting ${variant.name}...`);
-        try {
-          const createPayload = await submitDesignJob(preset, prompt, graphTemplateId, variant);
-          updateDesignStatus(`${variant.name}: job ${createPayload.job_id} submitted.`);
-          const result = await waitForDesignJob(createPayload.job_id, preset, variant, prompt, graphTemplateId);
-          if (!result.scene_layout_path) {
-            throw new Error("Generation finished without a scene_layout_path.");
-          }
-          generatedSchemes.push({
-            id: variant.id,
-            name: variant.name,
-            layoutPath: result.scene_layout_path,
-            status: "ready",
-          });
-          renderGeneratedDesignSchemes(generatedSchemes);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : `${variant.name} generation failed.`;
-          generatedSchemes.push({
-            id: variant.id,
-            name: variant.name,
-            layoutPath: "",
-            status: "failed",
-            error: message,
-          });
-          renderGeneratedDesignSchemes(generatedSchemes);
-          if (variants.length === 1) {
-            throw err;
-          }
-        }
-      }
-      const firstReady = generatedSchemes.find((scheme) => scheme.status === "ready");
-      if (!firstReady) {
-        throw new Error("No schemes were generated successfully.");
-      }
-      clearRecentLayoutsCache();
-      clearManifestCache();
-      await loadLayoutSelection(firstReady.layoutPath);
-      const recent = await loadRecentLayouts(50, false);
-      populateRecentLayoutOptions(recent, firstReady.layoutPath);
-      renderGeneratedDesignSchemes(generatedSchemes);
-      hideDesignWorkspace();
-      updateDesignStatus(`${generatedSchemes.filter((scheme) => scheme.status === "ready").length}/${variants.length} schemes generated.`, "success");
-      flashStatus(`${firstReady.name} loaded in Viewer.`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Design generation failed.";
-      updateDesignStatus(message, "error");
-      designResultEl.innerHTML = `<div class="viewer-design-error">${escapeHtml(message)}</div>`;
-      setError(errorEl, message);
-    } finally {
-      designIsGenerating = false;
-      designGenerateEl.disabled = false;
-      designReviewRunEl.disabled = lastDesignRunSnapshot === null;
-    }
-  }
-
-  // 从manifest创建场景选项
-  function makeSceneOptionsFromManifest(manifest: ViewerManifest, layoutPath: string): SceneOption[] {
-    const options: SceneOption[] = [];
-    
-    // 添加production_steps场景
-    if (manifest.production_steps) {
-      for (const step of manifest.production_steps) {
-        options.push({
-          key: step.step_id,
-          label: `${step.title} (${layoutPath.split('/').pop()})`,
-          glbUrl: step.glb_url,
-        });
-      }
-    }
-    
-    // 添加final_scene
-    if (manifest.final_scene) {
-      options.push({
-        key: "final_scene",
-        label: `Final Scene (${layoutPath.split('/').pop()})`,
-        glbUrl: manifest.final_scene.glb_url,
-      });
-    }
-    
-    return options;
-  }
-
-  function populateSceneOptions(manifest: ViewerManifest): SceneOption[] {
-    optionsByKey.clear();
-    selectEl.innerHTML = "";
-    const options = makeSceneOptions(manifest);
-    for (const option of options) {
-      optionsByKey.set(option.key, option);
-      const optionEl = document.createElement("option");
-      optionEl.value = option.key;
-      optionEl.textContent = compactUiLabel(option.label, 42);
-      optionEl.title = option.label;
-      selectEl.appendChild(optionEl);
-    }
-    selectEl.disabled = options.length === 0;
-    const selectedOption = options.find((option) => option.key === selectEl.value) ?? options[0];
-    selectEl.title = selectedOption?.label ?? "";
-    
-    return options;
-  }
-
-  async function loadLayoutSelection(layoutPath: string): Promise<void> {
-    clearError(errorEl);
-    setStatus("Loading scene set…");
-    currentLayoutPath = layoutPath;
-    currentManifest = await loadManifest(layoutPath);
-    const options = populateSceneOptions(currentManifest);
-    if (options.length === 0) {
-      throw new Error("No viewable GLB entries were found in this scene layout.");
-    }
-    const defaultKey = optionsByKey.has(currentManifest.default_selection as string)
-      ? (currentManifest.default_selection as string)
-      : options[0]?.key ?? "";
-    selectEl.value = defaultKey;
-    selectEl.title = (optionsByKey.get(defaultKey)?.label) ?? "";
-    updateQueryLayout(layoutPath);
-    await loadScene(optionsByKey.get(defaultKey) ?? options[0]);
-    // Refresh metrics panel
-    updateMetricsPanel();
-    // Reset graph overlay if active
-    if (graphOverlayActive) {
-      graphOverlayToggleEl.checked = false;
-      graphOverlayActive = false;
-      clearGraphOverlay();
-      currentCameraMode = thirdPersonToggleEl.checked ? "third_person" : "first_person";
-      syncCameraRig();
-    }
-    // Reset layout overlay if active
-    if (layoutOverlayToggleEl.checked) {
-      layoutOverlayToggleEl.checked = false;
-      floatingLaneConfig.enabled = false;
-      clearFloatingLaneOverlay();
-    }
-    applyAudioProfile();
-  }
 
   /* ── Evaluate ────────────────────────────────────────────── */
-
-  function renderEvaluationCameraToDataUrl(
-    renderCamera: THREE.Camera,
-    width = 960,
-    height = 540,
-  ): string {
-    const captureRenderer = new THREE.WebGLRenderer({
-      antialias: true,
-      preserveDrawingBuffer: true,
-    });
-    captureRenderer.setSize(width, height!, false);
-    captureRenderer.setPixelRatio(1);
-    captureRenderer.outputColorSpace = renderer.outputColorSpace;
-    captureRenderer.toneMapping = renderer.toneMapping;
-    captureRenderer.toneMappingExposure = renderer.toneMappingExposure;
-    captureRenderer.shadowMap.enabled = renderer.shadowMap.enabled;
-    captureRenderer.shadowMap.type = renderer.shadowMap.type;
-    const bgColor = scene.background instanceof THREE.Color ? scene.background : new THREE.Color("#f7f6f3");
-    captureRenderer.setClearColor(bgColor);
-    captureRenderer.render(scene, renderCamera);
-    const dataUrl = captureRenderer.domElement.toDataURL("image/png");
-    captureRenderer.dispose();
-    return dataUrl;
-  }
-
-  function currentEvaluationForward(): THREE.Vector3 {
-    const forward = currentForward.clone().setY(0);
-    if (forward.lengthSq() > 1e-6) {
-      return forward.normalize();
-    }
-    const cameraForward = cameraForwardHorizontal();
-    if (cameraForward.lengthSq() > 1e-6) {
-      return cameraForward.normalize();
-    }
-    return new THREE.Vector3(1, 0, 0);
-  }
-
-  function makePedestrianEvaluationCamera(direction: 1 | -1): THREE.PerspectiveCamera {
-    const bbox = currentRoot ? new THREE.Box3().setFromObject(currentRoot) : null;
-    const eye = currentSpawn.clone();
-    if (!Number.isFinite(eye.x) || !Number.isFinite(eye.y) || !Number.isFinite(eye.z)) {
-      eye.set(0, AVATAR_EYE_HEIGHT_M, 0);
-    }
-    const groundY = bbox ? bbox.min.y : 0;
-    eye.y = Math.max(eye.y, groundY + AVATAR_EYE_HEIGHT_M);
-
-    const forward = currentEvaluationForward().multiplyScalar(direction);
-    const target = eye.clone().add(forward.multiplyScalar(12));
-    target.y = eye.y - 0.05;
-
-    const renderCamera = new THREE.PerspectiveCamera(68, 16 / 9, 0.05, 2000);
-    renderCamera.position.copy(eye);
-    renderCamera.lookAt(target);
-    renderCamera.updateProjectionMatrix();
-    return renderCamera;
-  }
-
-  function makeOverviewEvaluationCamera(width = 960, height = 540): THREE.OrthographicCamera {
-    if (!currentRoot) {
-      throw new Error("No scene root available for top-down evaluation view.");
-    }
-    const bbox = new THREE.Box3().setFromObject(currentRoot);
-    const center = bbox.getCenter(new THREE.Vector3());
-    const size = bbox.getSize(new THREE.Vector3());
-    const maxExtent = Math.max(size.x, size.z);
-    if (!Number.isFinite(maxExtent) || maxExtent <= 0) {
-      throw new Error("Scene bounds are too small for evaluation screenshots.");
-    }
-    const padding = maxExtent * 0.18;
-    const viewSize = maxExtent + padding * 2;
-    const aspect = width / height;
-    const halfHeight = viewSize / 2;
-    const halfWidth = halfHeight * aspect;
-    const renderCamera = new THREE.OrthographicCamera(
-      -halfWidth,
-      halfWidth,
-      halfHeight,
-      -halfHeight,
-      0.1,
-      5000,
-    );
-    renderCamera.position.set(center.x, center.y + size.y * 0.5 + viewSize * 1.2, center.z);
-    renderCamera.lookAt(center.x, center.y, center.z);
-    renderCamera.updateProjectionMatrix();
-    return renderCamera;
-  }
-
-  async function captureEvaluationViews(): Promise<RenderedEvaluationView[]> {
-    if (!currentRoot) {
-      throw new Error("No scene loaded for visual evaluation.");
-    }
-    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-    const views: RenderedEvaluationView[] = [
-      {
-        view_id: "pedestrian_forward",
-        label: "Pedestrian forward view",
-        image_data_url: renderEvaluationCameraToDataUrl(makePedestrianEvaluationCamera(1)),
-      },
-      {
-        view_id: "pedestrian_reverse",
-        label: "Pedestrian reverse view",
-        image_data_url: renderEvaluationCameraToDataUrl(makePedestrianEvaluationCamera(-1)),
-      },
-      {
-        view_id: "overview_topdown",
-        label: "Overview top-down view",
-        image_data_url: renderEvaluationCameraToDataUrl(makeOverviewEvaluationCamera()),
-      },
-    ];
-    return views.every((view) => view.image_data_url.startsWith("data:image/")) ? views : [];
-  }
-
-  function renderEvaluationViewsPreview(views: RenderedEvaluationView[]): string {
-    const complete = views.length === 3;
-    if (!complete) {
-      return `
-        <div class="viewer-evaluate-views" data-state="missing">
-          <div class="viewer-evaluate-views-header">
-            <span>Rendered views</span>
-            <strong>0 / 3 captured</strong>
-          </div>
-          <div class="viewer-evaluate-views-note">Safety and Beauty will stay N/A until Viewer captures all three visual inputs.</div>
-        </div>
-      `;
-    }
-    return `
-      <div class="viewer-evaluate-views" data-state="provided">
-        <div class="viewer-evaluate-views-header">
-          <span>Rendered views</span>
-          <strong>${views.length} / 3 captured</strong>
-        </div>
-        <div class="viewer-evaluate-view-grid">
-          ${views.map((view) => `
-            <figure class="viewer-evaluate-view-card">
-              <img src="${view.image_data_url}" alt="${escapeHtml(view.label)}" />
-              <figcaption>${escapeHtml(view.label)}</figcaption>
-            </figure>
-          `).join("")}
-        </div>
-      </div>
-    `;
-  }
-
-  function enforceVisualEvaluationAvailability(result: EvaluationResult): EvaluationResult {
-    const safetyHasVisual = hasProvidedVisualInput(result.llm_status?.safety);
-    const beautyHasVisual = hasProvidedVisualInput(result.llm_status?.beauty);
-    return {
-      ...result,
-      safety: safetyHasVisual ? result.safety : null,
-      beauty: beautyHasVisual ? result.beauty : null,
-      overall: safetyHasVisual && beautyHasVisual ? result.overall : null,
-    };
-  }
 
   async function runEvaluation(): Promise<void> {
     if (!currentLayoutPath) {
@@ -5375,7 +1876,15 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       setStatus("Capturing evaluation views...");
       let renderedViews: RenderedEvaluationView[] = [];
       try {
-        renderedViews = await captureEvaluationViews();
+        renderedViews = await captureEvaluationViews({
+          scene,
+          renderer,
+          cameraForwardHorizontal,
+          currentRoot,
+          currentSpawn,
+          currentForward,
+          avatarEyeHeightM: AVATAR_EYE_HEIGHT_M,
+        });
       } catch (captureError) {
         console.warn("Visual evaluation screenshots failed:", captureError);
         renderedViews = [];
@@ -5394,35 +1903,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         setStatus("Visual evaluation unavailable; requesting walkability only.");
       }
 
-      const response = await fetch(`${API_BASE}/api/design/evaluate/unified`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          layout_path: currentLayoutPath,
-          rendered_views: renderedViews,
-        }),
-      });
-
-      // Handle empty response or non-JSON responses
-      const text = await response.text();
-      if (!text) {
-        throw new Error("Server returned empty response");
-      }
-
-      let result: EvaluationResult | { error?: string };
-      try {
-        result = JSON.parse(text) as EvaluationResult | { error?: string };
-      } catch {
-        throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          (result && "error" in result ? result.error : "Evaluation failed") as string,
-        );
-      }
-      const evalResult = enforceVisualEvaluationAvailability(result as EvaluationResult);
-      renderEvaluationResult(evalResult, renderedViews);
+      const result = await requestUnifiedEvaluation(currentLayoutPath, renderedViews);
+      const evalResult = enforceVisualEvaluationAvailability(result);
+      evaluateContentEl.innerHTML = renderEvaluationResultHtml(evalResult, renderedViews);
       flashStatus(
         renderedViews.length === 3
           ? "Visual evaluation complete."
@@ -5435,69 +1918,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     } finally {
       evaluateRunEl.disabled = false;
     }
-  }
-
-  function renderEvaluationResult(result: EvaluationResult, renderedViews: RenderedEvaluationView[] = []): void {
-    const overallScore = result.overall;
-    const hasOverall = isScoreValue(overallScore);
-    const scorePercent = hasOverall ? Math.round(clamp(overallScore, 0, 100)) : 0;
-    const scoreColor = hasOverall ? metricColor(overallScore, 100) : "#94a3b8";
-    const safetyStatus = llmStatusPresentation(result.llm_status?.safety);
-    const beautyStatus = llmStatusPresentation(result.llm_status?.beauty);
-    evaluateContentEl.innerHTML = `
-      <div class="viewer-evaluate-score">
-        <div class="viewer-evaluate-score-ring" style="--score-color:${scoreColor};--score-percent:${scorePercent}">
-          <span>${hasOverall ? scorePercent : "N/A"}</span>
-        </div>
-        <div class="viewer-evaluate-score-label">Visual Overall Score</div>
-      </div>
-      <div class="viewer-evaluate-score-grid">
-        <div class="viewer-evaluate-score-card">
-          <div class="viewer-evaluate-score-card-label">Walkability</div>
-          <div class="viewer-evaluate-score-card-value">${formatScore(result.walkability)}</div>
-        </div>
-        <div class="viewer-evaluate-score-card">
-          <div class="viewer-evaluate-score-card-label">Visual Safety</div>
-          <div class="viewer-evaluate-score-card-value">${formatScore(result.safety)}</div>
-        </div>
-        <div class="viewer-evaluate-score-card">
-          <div class="viewer-evaluate-score-card-label">Visual Beauty</div>
-          <div class="viewer-evaluate-score-card-value">${formatScore(result.beauty)}</div>
-        </div>
-      </div>
-      ${renderEvaluationViewsPreview(renderedViews)}
-      <div class="viewer-evaluate-section">
-        <div class="viewer-metrics-group-title">Visual LLM Status</div>
-        <div class="viewer-evaluate-llm-status">
-          <div class="viewer-evaluate-llm-row">
-            <span class="viewer-evaluate-llm-label">Safety Visual LLM</span>
-            <span class="viewer-evaluate-llm-pill ${safetyStatus.className}">${safetyStatus.label}</span>
-          </div>
-          <div class="viewer-evaluate-llm-row">
-            <span class="viewer-evaluate-llm-label">Beauty Visual LLM</span>
-            <span class="viewer-evaluate-llm-pill ${beautyStatus.className}">${beautyStatus.label}</span>
-          </div>
-        </div>
-      </div>
-      <div class="viewer-evaluate-section">
-        <div class="viewer-metrics-group-title">Evaluation Summary</div>
-        <div class="viewer-evaluate-text">${escapeHtml(result.evaluation)}</div>
-      </div>
-      ${result.suggestions.length > 0 ? `
-        <div class="viewer-evaluate-section">
-          <div class="viewer-metrics-group-title">Suggestions</div>
-          <ul class="viewer-evaluate-suggestions">
-            ${result.suggestions.map(s => `<li>${escapeHtml(s)}</li>`).join("")}
-          </ul>
-        </div>
-      ` : ""}
-      ${Object.keys(result.config_patch).length > 0 ? `
-        <div class="viewer-evaluate-section">
-          <div class="viewer-metrics-group-title">Suggested Config Patch</div>
-          <pre class="viewer-evaluate-config">${escapeHtml(JSON.stringify(result.config_patch, null, 2))}</pre>
-        </div>
-      ` : ""}
-    `;
   }
 
   function populateCompareSelectors(): void {
@@ -5529,116 +1949,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
   }
 
-  function minimapToWorld(mx: number, my: number): { x: number; z: number } | null {
-    if (!currentSceneBounds) return null;
-    const width = minimapOverlayEl.clientWidth;
-    const height = minimapOverlayEl.clientHeight;
-    if (width <= 0 || height <= 0) return null;
-    const u = clamp(mx / width, 0, 1);
-    const v = clamp(my / height, 0, 1);
-    return {
-      x: currentSceneBounds.minX + u * (currentSceneBounds.maxX - currentSceneBounds.minX),
-      z: currentSceneBounds.minZ + v * (currentSceneBounds.maxZ - currentSceneBounds.minZ),
-    };
-  }
-
-  /* ── Presets ────────────────────────────────────────────── */
-
-  const BUILTIN_PRESETS: PresetConfig[] = [
-    {
-      id: "urban_downtown",
-      name: "Urban Downtown",
-      description: "Dense urban core with mixed-use streetscape, heavy pedestrian flow",
-      config: { density: "high", style: "modern", road_type: "arterial", furniture_level: "full" },
-    },
-    {
-      id: "residential_quiet",
-      name: "Quiet Residential",
-      description: "Low-density residential street with trees and minimal furniture",
-      config: { density: "low", style: "suburban", road_type: "local", furniture_level: "minimal" },
-    },
-    {
-      id: "waterfront_promenade",
-      name: "Waterfront Promenade",
-      description: "Scenic waterfront walkway with benches, lamps, and landscape",
-      config: { density: "medium", style: "scenic", road_type: "promenade", furniture_level: "moderate" },
-    },
-    {
-      id: "commercial_strip",
-      name: "Commercial Strip",
-      description: "Busy commercial street with bus stops, signage, and heavy furniture",
-      config: { density: "high", style: "commercial", road_type: "collector", furniture_level: "full" },
-    },
-    {
-      id: "park_pathway",
-      name: "Park Pathway",
-      description: "Green park pathway with scattered trees and landscape elements",
-      config: { density: "low", style: "natural", road_type: "path", furniture_level: "light" },
-    },
-    {
-      id: "transit_corridor",
-      name: "Transit Corridor",
-      description: "Transit-oriented corridor with bus stops, shelters, and wide sidewalks",
-      config: { density: "high", style: "transit", road_type: "arterial", furniture_level: "full" },
-    },
-  ];
-
-  function populatePresetsGrid(): void {
-    const activePresetId = (currentManifest?.summary as Record<string, unknown> | undefined)?.preset_id as string | undefined || null;
-    presetsGridEl.innerHTML = BUILTIN_PRESETS.map(preset => {
-      const isActive = activePresetId && activePresetId === preset.id;
-      return `
-      <button class="viewer-preset-card${isActive ? " viewer-preset-card--active" : ""}" data-preset-id="${escapeHtml(preset.id)}" type="button">
-        <div class="viewer-preset-name">${escapeHtml(preset.name)}</div>
-        <div class="viewer-preset-desc">${escapeHtml(preset.description)}</div>
-        ${isActive ? `<div class="viewer-preset-badge">Currently viewing</div>` : ""}
-      </button>
-    `;
-    }).join("");
-  }
-
-  async function applyPreset(presetId: string): Promise<void> {
-    const preset = BUILTIN_PRESETS.find(p => p.id === presetId);
-    if (!preset) return;
-    setStatus(`Generating scene with preset: ${preset.name}...`);
-    presetsOpen = false;
-    presetsPanelEl.dataset.open = "false";
-
-    try {
-      const response = await fetch("./api/design/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preset: preset.id, config: preset.config }),
-      });
-      const text = await response.text();
-      if (!text) {
-        throw new Error("Server returned empty response");
-      }
-      let result: { layout_path?: string; error?: string };
-      try {
-        result = JSON.parse(text) as { layout_path?: string; error?: string };
-      } catch {
-        throw new Error(`Invalid JSON: ${text.substring(0, 100)}`);
-      }
-      if (!response.ok) {
-        throw new Error(result.error ?? "Scene generation failed.");
-      }
-      if (result.layout_path) {
-        await loadLayoutSelection(result.layout_path);
-        // Refresh recent layouts list
-        const recent = await loadRecentLayouts();
-        populateRecentLayoutOptions(recent, result.layout_path);
-        flashStatus(`Preset "${preset.name}" applied successfully.`);
-      } else {
-        throw new Error("No layout_path returned from generation.");
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Preset generation failed.";
-      setError(errorEl, message);
-      flashStatus("Preset generation failed");
-    }
-  }
-
   /* ── Metrics Panel in Info Card ──────────────────────────── */
 
   function updateMetricsPanel(): void {
@@ -5655,7 +1965,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   renderer.domElement.addEventListener(
     "click",
     () => {
-      if (!settingsOpen && !controls.isLocked) {
+      if (!panelController.isOpen("settings") && !controls.isLocked) {
         controls.lock();
       }
     },
@@ -5694,7 +2004,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }, { signal });
 
   exportTopdownSvgEl.addEventListener("click", () => {
-    exportTopDownMapSvg(scene, currentRoot);
+    exportTopDownMapSvg(currentRoot);
     menuDropdownEl.hidden = true;
     menuToggleEl.setAttribute("aria-expanded", "false");
   }, { signal });
@@ -5713,14 +2023,14 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }, { signal });
 
   settingsToggleEl.addEventListener("click", () => {
-    if (settingsOpen) {
-      setSettingsOpen(false);
+    if (panelController.isOpen("settings")) {
+      panelController.setOpen("settings", false);
     } else {
-      closeAllSlidePanels();
-      setSettingsOpen(true);
+      panelController.closeAll();
+      panelController.setOpen("settings", true);
     }
   }, { signal });
-  settingsCloseEl.addEventListener("click", () => setSettingsOpen(false), { signal });
+  settingsCloseEl.addEventListener("click", () => panelController.setOpen("settings", false), { signal });
 
   // 语言切换
   const langEnBtn = requireElement<HTMLButtonElement>(root, "#viewer-lang-en");
@@ -5794,24 +2104,24 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     "view-language-zh": () => langZhBtn.click(),
     "view-language-mixed": () => langMixedBtn.click(),
     "tools-open-settings": () => {
-      if (settingsOpen) {
-        setSettingsOpen(false);
+      if (panelController.isOpen("settings")) {
+        panelController.setOpen("settings", false);
       } else {
-        closeAllSlidePanels();
-        setSettingsOpen(true);
+        panelController.closeAll();
+        panelController.setOpen("settings", true);
       }
     },
-    "tools-open-design": () => setDesignOpen(!designOpen),
-    "tools-open-evaluate": () => setEvaluateOpen(!evaluateOpen),
-    "tools-open-compare": () => setCompareOpen(!compareOpen),
-    "tools-open-history": () => setHistoryAnalysisOpen(!historyAnalysisOpen),
-    "tools-open-presets": () => setPresetsOpen(!presetsOpen),
+    "tools-open-design": () => panelController.setOpen("design", !panelController.isOpen("design")),
+    "tools-open-evaluate": () => panelController.setOpen("evaluate", !panelController.isOpen("evaluate")),
+    "tools-open-compare": () => panelController.setOpen("compare", !panelController.isOpen("compare")),
+    "tools-open-history": () => panelController.setOpen("history", !panelController.isOpen("history")),
+    "tools-open-presets": () => panelController.setOpen("presets", !panelController.isOpen("presets")),
     "tools-open-floating-lane": () => {
       shell.activateRightTab("floating-lane");
-      if (!floatingLaneConfig.enabled) {
-        toggleFloatingLaneOverlay();
+      if (!floatingLaneSystem.config.enabled) {
+        floatingLaneSystem.toggleOverlay();
       }
-      createFloatingLaneControlPanel();
+      floatingLaneSystem.mountControlPanel();
     },
     "help-shortcuts": () => {
       shell.setBottomOpen(true);
@@ -5820,34 +2130,34 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   });
 
   root.querySelector<HTMLButtonElement>('[data-shell-tab="settings"]')?.addEventListener("click", () => {
-    setSettingsOpen(true);
+    panelController.setOpen("settings", true);
   }, { signal });
   root.querySelector<HTMLButtonElement>('[data-shell-tab="design"]')?.addEventListener("click", () => {
-    setDesignOpen(true);
+    panelController.setOpen("design", true);
   }, { signal });
   root.querySelector<HTMLButtonElement>('[data-shell-tab="evaluate"]')?.addEventListener("click", () => {
-    setEvaluateOpen(true);
+    panelController.setOpen("evaluate", true);
   }, { signal });
   root.querySelector<HTMLButtonElement>('[data-shell-tab="compare"]')?.addEventListener("click", () => {
-    setCompareOpen(true);
+    panelController.setOpen("compare", true);
   }, { signal });
   root.querySelector<HTMLButtonElement>('[data-shell-tab="history"]')?.addEventListener("click", () => {
-    setHistoryAnalysisOpen(true);
+    panelController.setOpen("history", true);
   }, { signal });
   root.querySelector<HTMLButtonElement>('[data-shell-tab="presets"]')?.addEventListener("click", () => {
-    setPresetsOpen(true);
+    panelController.setOpen("presets", true);
   }, { signal });
   root.querySelector<HTMLButtonElement>('[data-shell-tab="floating-lane"]')?.addEventListener("click", () => {
-    if (!floatingLaneConfig.enabled) {
-      toggleFloatingLaneOverlay();
+    if (!floatingLaneSystem.config.enabled) {
+      floatingLaneSystem.toggleOverlay();
     }
-    createFloatingLaneControlPanel();
+    floatingLaneSystem.mountControlPanel();
     shell.activateRightTab("floating-lane");
   }, { signal });
 
-  designToggleEl.addEventListener("click", () => setDesignOpen(!designOpen), { signal });
+  designToggleEl.addEventListener("click", () => panelController.setOpen("design", !panelController.isOpen("design")), { signal });
   designReviewRunEl.addEventListener("click", reviewLastDesignRun, { signal });
-  designCloseEl.addEventListener("click", () => setDesignOpen(false), { signal });
+  designCloseEl.addEventListener("click", () => panelController.setOpen("design", false), { signal });
   designPresetEl.addEventListener("change", () => {
     const preset = selectedDesignPreset();
     // Only auto-fill prompt if a real preset is selected (not custom)
@@ -5855,15 +2165,15 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       designPromptEl.value = preset.prompt;
     }
   }, { signal });
-  designGenerateEl.addEventListener("click", () => void runDesignGeneration(), { signal });
-  designBranchRunEl.addEventListener("click", () => void runBranchGeneration(), { signal });
+  designGenerateEl.addEventListener("click", () => void designController.runDesignGeneration(), { signal });
+  designBranchRunEl.addEventListener("click", () => void designController.runBranchGeneration(), { signal });
   designWorkspaceEl.addEventListener("click", (event) => {
     const target = event.target as Element;
     const loadButton = target.closest<HTMLElement>("[data-branch-load]");
     const loadPath = loadButton?.dataset.branchLoad?.trim();
     if (loadPath) {
       void (async () => {
-        await loadLayoutSelection(loadPath);
+        await sceneSelectionController.loadLayoutSelection(loadPath);
         const recent = await loadRecentLayouts(50, false);
         populateRecentLayoutOptions(recent, loadPath);
         flashStatus("Branch node scene loaded.");
@@ -5899,38 +2209,32 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const layoutPath = button?.dataset.layoutPath?.trim();
     if (!layoutPath) return;
     void (async () => {
-      await loadLayoutSelection(layoutPath);
+      await sceneSelectionController.loadLayoutSelection(layoutPath);
       const recent = await loadRecentLayouts(50, false);
       populateRecentLayoutOptions(recent, layoutPath);
       flashStatus("Selected generated scheme loaded.");
     })();
   }, { signal });
 
-  evaluateToggleEl.addEventListener("click", () => setEvaluateOpen(!evaluateOpen), { signal });
-  evaluateCloseEl.addEventListener("click", () => setEvaluateOpen(false), { signal });
+  evaluateToggleEl.addEventListener("click", () => panelController.setOpen("evaluate", !panelController.isOpen("evaluate")), { signal });
+  evaluateCloseEl.addEventListener("click", () => panelController.setOpen("evaluate", false), { signal });
   evaluateRunEl.addEventListener("click", () => void runEvaluation(), { signal });
 
-  compareToggleEl.addEventListener("click", () => setCompareOpen(!compareOpen), { signal });
-  compareCloseEl.addEventListener("click", () => setCompareOpen(false), { signal });
+  compareToggleEl.addEventListener("click", () => panelController.setOpen("compare", !panelController.isOpen("compare")), { signal });
+  compareCloseEl.addEventListener("click", () => panelController.setOpen("compare", false), { signal });
   compareSelectAEl.addEventListener("change", () => void compareMode.runComparison(), { signal });
   compareSelectBEl.addEventListener("change", () => void compareMode.runComparison(), { signal });
 
-  historyAnalysisToggleEl.addEventListener("click", () => setHistoryAnalysisOpen(!historyAnalysisOpen), { signal });
-  historyAnalysisCloseEl.addEventListener("click", () => setHistoryAnalysisOpen(false), { signal });
+  historyAnalysisToggleEl.addEventListener("click", () => panelController.setOpen("history", !panelController.isOpen("history")), { signal });
+  historyAnalysisCloseEl.addEventListener("click", () => panelController.setOpen("history", false), { signal });
 
-  presetsToggleEl.addEventListener("click", () => setPresetsOpen(!presetsOpen), { signal });
-  presetsCloseEl.addEventListener("click", () => setPresetsOpen(false), { signal });
-  presetsGridEl.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement;
-    const card = target.closest<HTMLElement>("[data-preset-id]");
-    if (card?.dataset.presetId) {
-      void applyPreset(card.dataset.presetId);
-    }
-  }, { signal });
+  presetsToggleEl.addEventListener("click", () => panelController.setOpen("presets", !panelController.isOpen("presets")), { signal });
+  presetsCloseEl.addEventListener("click", () => panelController.setOpen("presets", false), { signal });
+  presetsGridEl.addEventListener("click", presetsController.handleGridClick, { signal });
 
   // Help panel toggle and close
-  helpToggleEl.addEventListener("click", () => setHelpOpen(!helpOpen), { signal });
-  helpCloseEl.addEventListener("click", () => setHelpOpen(false), { signal });
+  helpToggleEl.addEventListener("click", () => panelController.setOpen("help", !panelController.isOpen("help")), { signal });
+  helpCloseEl.addEventListener("click", () => panelController.setOpen("help", false), { signal });
 
   // Help icons in Design panel - click to open Help panel
   root.addEventListener("click", (event) => {
@@ -5941,7 +2245,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     if (helpIcon && helpIcon.dataset.help) {
       event.preventDefault();
       event.stopPropagation();
-      setHelpOpen(true);
+      panelController.setOpen("help", true);
       // Optionally scroll to the relevant section
       return;
     }
@@ -5968,7 +2272,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   // Floating Lane Overlay toggle
   const floatingLaneToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-floating-lane-toggle");
   floatingLaneToggleEl.addEventListener("click", () => {
-    toggleFloatingLaneOverlay();
+    floatingLaneSystem.toggleOverlay();
   }, { signal });
 
   minimapOverlayEl.addEventListener(
@@ -5983,11 +2287,15 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       if (rect.width <= 0 || rect.height <= 0) {
         return;
       }
-      const nx = clamp((event.clientX - rect.left) / rect.width, 0, 1);
-      const nz = clamp((event.clientY - rect.top) / rect.height, 0, 1);
-      const worldX = currentSceneBounds.minX + nx * (currentSceneBounds.maxX - currentSceneBounds.minX);
-      const worldZ = currentSceneBounds.minZ + nz * (currentSceneBounds.maxZ - currentSceneBounds.minZ);
-      flyCameraTo(worldX, Math.max(0, currentSpawn.y - AVATAR_EYE_HEIGHT_M), worldZ);
+      const world = minimapToWorld(
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+        currentSceneBounds,
+        minimapOverlayEl,
+      );
+      if (world) {
+        flyCameraTo(world.x, Math.max(0, currentSpawn.y - AVATAR_EYE_HEIGHT_M), world.z);
+      }
     },
     { signal },
   );
@@ -6080,74 +2388,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     },
     { signal },
   );
-  function removeAssetBboxHelpers(): void {
-    scene.traverse((child) => {
-      if (child.userData.isAssetBboxHelper || child.userData.isAssetLabel) {
-        scene.remove(child);
-        if (child instanceof THREE.LineSegments) {
-          child.geometry.dispose();
-          (child.material as THREE.Material).dispose();
-        }
-        if (child instanceof THREE.Sprite) {
-          child.material.map?.dispose();
-          child.material.dispose();
-        }
-      }
-    });
-  }
-
-  function createAssetBboxHelpers(): void {
-    if (!currentRoot || !currentManifest) return;
-
-    removeAssetBboxHelpers();
-    const instances = currentManifest.instances;
-    currentRoot.traverse((child) => {
-      const name = child.name || "";
-      const instanceId = resolveInstanceIdFromName(name);
-      if (!instanceId) return;
-      const instanceInfo = instances?.[instanceId];
-      if (!instanceInfo) return;
-      const category = String(instanceInfo.category || "").trim().toLowerCase();
-      const assetId = String(instanceInfo.asset_id || "").trim() || instanceId;
-      const color = CATEGORY_BBOX_COLORS[category] ?? 0x38bdf8;
-
-      const bbox = new THREE.Box3().setFromObject(child);
-      const size = new THREE.Vector3();
-      bbox.getSize(size);
-      if (size.length() > 0.01) {
-        const helper = new THREE.BoxHelper(child, color);
-        helper.userData.isAssetBboxHelper = true;
-        helper.userData.assetInstanceId = instanceId;
-        helper.userData.assetCategory = category;
-        helper.visible = true;
-        scene.add(helper);
-
-        // Add text label showing asset_id above the bounding box
-        const center = new THREE.Vector3();
-        bbox.getCenter(center);
-        const label = createTextSprite(assetId, color);
-        label.position.set(center.x, bbox.max.y + 0.5, center.z);
-        label.userData.isAssetLabel = true;
-        scene.add(label);
-      }
-    });
-  }
-
-  function updateAssetBboxHelpers(): void {
-    scene.traverse((child) => {
-      if (child.userData.isAssetBboxHelper && child instanceof THREE.BoxHelper) {
-        child.update();
-      }
-    });
-  }
-
   assetBboxToggleEl.addEventListener(
     "change",
     () => {
       if (assetBboxToggleEl.checked) {
-        createAssetBboxHelpers();
+        createAssetBboxHelpers(scene, currentRoot, currentManifest);
       } else {
-        removeAssetBboxHelpers();
+        removeAssetBboxHelpers(scene);
       }
     },
     { signal },
@@ -6157,7 +2404,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     "change",
     async () => {
       // Reload current scene to apply/remove frame helpers
-      const currentOption = optionsByKey.get(selectEl.value);
+      const currentOption = sceneSelectionController.selectedSceneOption();
       if (currentOption && currentRoot) {
         await loadScene(currentOption);
       }
@@ -6168,7 +2415,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     "change",
     async () => {
       // Reload current scene to apply/remove asset bbox helpers
-      const currentOption = optionsByKey.get(selectEl.value);
+      const currentOption = sceneSelectionController.selectedSceneOption();
       if (currentOption && currentRoot) {
         await loadScene(currentOption);
       }
@@ -6178,7 +2425,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   assetBboxToggleEl.addEventListener(
     "change",
     async () => {
-      const currentOption = optionsByKey.get(selectEl.value);
+      const currentOption = sceneSelectionController.selectedSceneOption();
       if (currentOption && currentRoot) {
         await loadScene(currentOption);
       }
@@ -6207,14 +2454,14 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   layoutOverlayToggleEl.addEventListener(
     "change",
     () => {
-      floatingLaneConfig.enabled = layoutOverlayToggleEl.checked;
+      floatingLaneSystem.config.enabled = layoutOverlayToggleEl.checked;
       const flpEnabledEl = document.getElementById("flp-enabled") as HTMLInputElement | null;
       if (flpEnabledEl) flpEnabledEl.checked = layoutOverlayToggleEl.checked;
-      if (floatingLaneConfig.enabled) {
-        buildFloatingLaneOverlay();
+      if (floatingLaneSystem.config.enabled) {
+        floatingLaneSystem.buildOverlay();
         flashStatus("Scene overlay enabled");
       } else {
-        clearFloatingLaneOverlay();
+        floatingLaneSystem.clearOverlay();
         flashStatus("Scene overlay disabled");
       }
     },
@@ -6237,7 +2484,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         return;
       }
       try {
-        await loadLayoutSelection(nextLayoutPath);
+        await sceneSelectionController.loadLayoutSelection(nextLayoutPath);
         layoutSelectEl.title = recentLayoutsByPath.get(nextLayoutPath)?.label ?? makeDirectLayoutLabel(nextLayoutPath);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to load scene layout.";
@@ -6250,7 +2497,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   selectEl.addEventListener(
     "change",
     async () => {
-      const nextOption = optionsByKey.get(selectEl.value);
+      const nextOption = sceneSelectionController.sceneOptionByKey(selectEl.value);
       if (!nextOption) {
         return;
       }
@@ -6296,16 +2543,26 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       syncCameraRig();
     }
 
-    updateAssetBboxHelpers();
+    updateAssetBboxHelpers(scene);
     updateLaserPointer();
-    updateFloatingLaneOverlay(delta);
+    floatingLaneSystem.updateAnimation(delta);
 
     const didRenderCompare = compareMode.renderCompare3dFrame();
     if (!didRenderCompare) {
       renderer.render(scene, camera);
     }
 
-    renderMinimap();
+    renderMinimap(
+      minimapRenderer,
+      scene,
+      minimapCamera,
+      currentRoot,
+      currentSceneBounds,
+      minimapOverlayEl,
+      currentAvatarPosition,
+      cameraForwardHorizontal,
+      currentLaserHitPoint,
+    );
     animationFrameId = requestAnimationFrame(animate);
   }
   try {
@@ -6320,7 +2577,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
     populateRecentLayoutOptions(recentLayouts, initialLayoutPath);
     resizeRenderer();
-    await loadLayoutSelection(initialLayoutPath);
+    await sceneSelectionController.loadLayoutSelection(initialLayoutPath);
     animate();
     updateOverlay();
   } catch (error) {
@@ -6341,7 +2598,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       controls.unlock();
     }
     clearGraphOverlay();
-    clearFloatingLaneOverlay();
+    floatingLaneSystem.clearOverlay();
     renderer.dispose();
     minimapRenderer.dispose();
   };

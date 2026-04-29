@@ -30,7 +30,7 @@ export type ViewerManifest = {
     title: string;
     glb_url: string;
   }>;
-  instances?: Array<Record<string, unknown>>;
+  instances?: Record<string, Record<string, unknown>>;
   asset_descriptions?: Record<string, unknown>;
   audio_profile?: Record<string, unknown>;
   spawn_point?: [number, number, number];

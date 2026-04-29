@@ -46,17 +46,36 @@ export function clearManifestCache(): void {
 export async function loadRecentLayouts(limit: number = 20, useCache: boolean = true): Promise<RecentLayout[]> {
   if (useCache && recentLayoutsCache) return recentLayoutsCache;
 
-  const response = await fetch(`${API_BASE}/api/recent-layouts?limit=${limit}`);
+  // Try Vite dev server endpoint first, fall back to FastAPI /api/scenes/recent
+  let response = await fetch(`${API_BASE}/api/recent-layouts?limit=${limit}`);
+  if (response.status === 404) {
+    response = await fetch(`${API_BASE}/api/scenes/recent?limit=${limit}`);
+  }
   if (!response.ok) {
     throw new Error(`Failed to load recent layouts: ${response.status}`);
   }
 
   const data = await response.json();
-  const result = Array.isArray(data) ? data : (data.items || []);
+  const raw = Array.isArray(data) ? data : (data.results || data.items || []);
+
+  // Map FastAPI SceneRecord fields to RecentLayout if needed
+  const result: RecentLayout[] = raw.map((item: Record<string, unknown>) => ({
+    id: String(item.id ?? item.job_id ?? ""),
+    label: String(item.label ?? `${item.job_id ?? "scene"}`),
+    layout_path: String(item.layout_path ?? item.scene_layout_path ?? ""),
+    created_at: String(item.created_at ?? ""),
+    source: item.source as string | undefined,
+    scene_layout_path: item.scene_layout_path as string | undefined,
+    metrics: item.metrics as Record<string, number> | undefined,
+    preset_id: item.preset_id as string | undefined,
+    relative_path: item.relative_path as string | undefined,
+    updated_at: item.updated_at as string | undefined,
+  }));
+
   if (useCache) {
     recentLayoutsCache = result;
   }
-  return result as RecentLayout[];
+  return result;
 }
 
 /**

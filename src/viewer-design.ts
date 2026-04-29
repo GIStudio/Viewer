@@ -12,6 +12,7 @@ import {
   SceneJobCreatePayload,
   SceneJobStatusPayload,
   SceneJobResult,
+  SceneJobOperation,
   GenerationStep,
   GENERATION_STEPS,
   DESIGN_SCHEME_VARIANTS,
@@ -109,20 +110,23 @@ export function describeDesignJobProgress(payload: SceneJobStatusPayload): {
   } else if (payload.status === "running" || payload.status === "processing") {
     stage = payload.stage || "processing";
     const stageProgress: Record<string, number> = {
-      layout_generation: 20,
+      context_resolving: 15,
+      asset_loading: 25,
       graph_parsing: 30,
-      constraint_solving: 45,
-      asset_composition: 55,
-      mesh_generation: 65,
-      scene_rendering: 75,
-      glb_export: 85,
+      layout_generation: 40,
+      constraint_solving: 50,
+      asset_composition: 65,
+      mesh_generation: 75,
+      glb_export: 88,
+      scene_rendering: 95,
+      finalizing: 99,
     };
     progress = stageProgress[stage] ?? 50;
     message = `Generating: ${stage.replace(/_/g, " ")}`;
   } else if (payload.status === "succeeded") {
-    progress = 95;
+    progress = 100;
     message = "Generation complete. Loading scene...";
-    stage = "glb_export";
+    stage = "finalizing";
   } else if (payload.status === "failed") {
     progress = 0;
     message = payload.error || "Generation failed.";
@@ -131,6 +135,14 @@ export function describeDesignJobProgress(payload: SceneJobStatusPayload): {
 
   if (typeof payload.progress === "number" && payload.progress > 0) {
     progress = Math.round(payload.progress);
+  }
+
+  const operations = payload.operations as SceneJobOperation[] | undefined;
+  const currentOp = operations?.[operations.length - 1];
+  if (typeof currentOp === "string" && currentOp.trim()) {
+    message = currentOp;
+  } else if (currentOp && typeof currentOp === "object") {
+    message = currentOp.message || currentOp.name || currentOp.status || message;
   }
 
   return { progress, message, stage };
