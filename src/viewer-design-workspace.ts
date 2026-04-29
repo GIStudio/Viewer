@@ -507,6 +507,17 @@ export function buildDesignStageNodes(payload: SceneJobStatusPayload, currentSta
   status: "pending" | "active" | "completed" | "failed";
   progress: number;
   stepNumber: number;
+  nodeType?: "stage" | "artifact";
+  stageId?: string;
+  children?: Array<{
+    id: string;
+    label: string;
+    status: "pending" | "active" | "completed" | "failed";
+    progress: number;
+    stepNumber: number;
+    nodeType: "artifact";
+    stageId: string;
+  }>;
 }> {
   const currentIndex = Math.max(0, getStepIndex(currentStage));
   return DESIGN_GENERATION_STEPS.map((step, index) => {
@@ -526,8 +537,164 @@ export function buildDesignStageNodes(payload: SceneJobStatusPayload, currentSta
       status: state,
       progress: percent,
       stepNumber: index + 1,
+      nodeType: "stage",
+      stageId: step.key,
+      children: buildStageArtifactNodes(step.key, operation?.detail, state, percent),
     };
   });
+}
+
+function buildStageArtifactNodes(
+  stage: string,
+  detail: Record<string, unknown> | undefined,
+  status: "pending" | "active" | "completed" | "failed",
+  progress: number,
+): Array<{
+  id: string;
+  label: string;
+  status: "pending" | "active" | "completed" | "failed";
+  progress: number;
+  stepNumber: number;
+  nodeType: "artifact";
+  stageId: string;
+}> {
+  const items = summarizeStageArtifacts(stage, detail);
+  return items.slice(0, 4).map((label, index) => ({
+    id: `artifact:${stage}:${index}`,
+    label,
+    status,
+    progress,
+    stepNumber: index + 1,
+    nodeType: "artifact",
+    stageId: stage,
+  }));
+}
+
+function summarizeStageArtifacts(stage: string, detail: Record<string, unknown> | undefined): string[] {
+  const record = detail ?? {};
+  if (Object.keys(record).length === 0) return [];
+  const summaries: string[] = [];
+  const push = (label: string, value: unknown): void => {
+    if (value === undefined || value === null || value === "") return;
+    summaries.push(`${label}: ${formatCompactArtifactValue(value)}`);
+  };
+
+  if (stage === "context_resolving") {
+    push("上下文", record.layout_mode || record.graph_template_id || record.reference_plan_id);
+    push("设计规则", record.design_rule_profile || record.objective_profile);
+    push("参数补丁", countObjectKeys(record.config_patch || record.compose_config_patch));
+    push("RAG 证据", record.evidence_count || countObjectKeys(record.citations_by_field));
+    return summaries;
+  }
+
+  if (stage === "asset_loading") {
+    push("对象资产", record.object_asset_count);
+    push("建筑资产", record.building_asset_count);
+    push("资产类别", countObjectKeys(record.inventory_category_counts || record.category_counts));
+    return summaries;
+  }
+
+  if (stage === "layout_generation") {
+    push("主题分段", record.theme_segment_count || countArrayItems(record.theme_segments));
+    push("街道 program", summarizeProgram(record.street_program));
+    push("道路参数", record.config_parameters);
+    push("资产库存", countObjectKeys(record.inventory_category_counts));
+    return summaries;
+  }
+
+  if (stage === "constraint_solving") {
+    const solver = asRecord(record.solver_summary);
+    push("约束规则", countArrayItems(record.active_constraint_names) || solver.rule_count);
+    push("求解器", solver.backend_used || solver.solver_backend_used || asRecord(record.algorithm).solver_backend_requested);
+    push("slot plan", solver.slot_count || solver.total_slots || solver.slot_plan_count);
+    push("约束结果", solver.violation_count ?? solver.conflict_count ?? solver.status);
+    return summaries;
+  }
+
+  if (stage === "asset_composition") {
+    const progressRecord = asRecord(record.placement_progress);
+    push("资产槽位", record.total_slots || progressRecord.total_slots);
+    push("已落位", record.placed_slots || progressRecord.placed_count);
+    push("拦截/失败", summarizeBlockers(record.blocker_summary));
+    push("类别分布", countObjectKeys(record.category_slot_counts || progressRecord.placed_counts_by_category));
+    return summaries;
+  }
+
+  if (stage === "mesh_generation") {
+    push("网格产物", record.mesh_count || record.geometry_count || record.generated_meshes);
+    push("实例", record.instance_count || record.placement_count);
+    return summaries;
+  }
+
+  if (stage === "glb_export") {
+    push("导出格式", record.export_format);
+    push("GLB", record.scene_glb || record.glb_path || record.output_path);
+    return summaries;
+  }
+
+  if (stage === "scene_rendering") {
+    push("过程产物", record.production_step_count || countArrayItems(record.production_step_ids));
+    push("渲染视图", record.rendered_view_count || countArrayItems(record.rendered_views));
+    return summaries;
+  }
+
+  if (stage === "finalizing") {
+    push("布局文件", record.layout_path);
+    push("过程步骤", record.production_step_count || countArrayItems(record.production_step_ids));
+    push("最终入口", record.final_production_step_id || record.default_selection);
+    return summaries;
+  }
+
+  return Object.entries(record)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .slice(0, 4)
+    .map(([key, value]) => `${formatDesignDetailKey(key)}: ${formatCompactArtifactValue(value)}`);
+}
+
+function countArrayItems(value: unknown): number | undefined {
+  return Array.isArray(value) ? value.length : undefined;
+}
+
+function countObjectKeys(value: unknown): number | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? Object.keys(value as Record<string, unknown>).length
+    : undefined;
+}
+
+function summarizeProgram(value: unknown): string | undefined {
+  const program = asRecord(value);
+  if (Object.keys(program).length === 0) return undefined;
+  const bandCount = countArrayItems(program.bands);
+  const crossSection = program.cross_section_type || program.crossSectionType;
+  if (bandCount !== undefined && crossSection) return `${crossSection}, ${bandCount} bands`;
+  if (bandCount !== undefined) return `${bandCount} bands`;
+  return formatCompactArtifactValue(program);
+}
+
+function summarizeBlockers(value: unknown): string | undefined {
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0) return undefined;
+  const total = record.dropped_slots || record.failure_count || record.total_blocked || record.blocked_count;
+  const reasonCount = countObjectKeys(record.reason_counts || record.blocked_reason_counts);
+  if (total !== undefined && reasonCount !== undefined) return `${total} blocked, ${reasonCount} reasons`;
+  if (total !== undefined) return String(total);
+  if (reasonCount !== undefined) return `${reasonCount} reasons`;
+  return formatCompactArtifactValue(record);
+}
+
+function formatCompactArtifactValue(value: unknown): string {
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  if (typeof value === "string") {
+    return value.length > 42 ? `${value.slice(0, 39)}...` : value;
+  }
+  if (Array.isArray(value)) return `${value.length} items`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined && entry !== null && entry !== "")
+      .slice(0, 3);
+    return entries.map(([key, entry]) => `${formatDesignDetailKey(key)}=${formatCompactArtifactValue(entry)}`).join(", ");
+  }
+  return formatDesignDetailValue(value);
 }
 
 export function renderDesignStageCards(payload: SceneJobStatusPayload, currentStage: string, failed: boolean): string {
@@ -590,9 +757,12 @@ export function renderDesignWorkspaceHtml(
             <h2>Design Run</h2>
             <p>${escapeHtml(message)}</p>
           </div>
-          <div class="viewer-design-workspace-progress">
-            <strong>${Math.round(boundedProgress)}%</strong>
-            <span>${escapeHtml(step.label)}</span>
+          <div class="viewer-design-workspace-header-actions">
+            <button class="viewer-design-workspace-close" type="button" data-design-workspace-close aria-label="Close Design Run" title="Close Design Run">×</button>
+            <div class="viewer-design-workspace-progress">
+              <strong>${Math.round(boundedProgress)}%</strong>
+              <span>${escapeHtml(step.label)}</span>
+            </div>
           </div>
         </header>
         <div class="viewer-design-workspace-progressbar" aria-label="Generation progress">

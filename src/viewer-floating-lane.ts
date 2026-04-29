@@ -64,9 +64,19 @@ export interface FloatingLaneSystem {
   updateAnimation: (deltaTime: number) => void;
   toggleOverlay: () => void;
   selectLane: (bandIndex: number) => void;
+  selectInstance: (instanceId: string) => void;
   mountControlPanel: () => void;
   getLaneLabel: (kind: string) => string;
 }
+
+type InstanceOrientationInfo = {
+  instanceId: string;
+  assetId: string;
+  category: string;
+  position: [number, number, number];
+  yawDeg: number;
+  previewYawDeg: number;
+};
 
 // ── Factory ────────────────────────────────────────────────────
 
@@ -92,6 +102,121 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
   };
   let visibleLaneKinds: Set<string> = new Set(["carriageway", "drive_lane", "clear_path", "furnishing", "sidewalk"]);
   let floatingLaneAnimTime = 0;
+  let showOrientationArrows = true;
+  let selectedInstanceId = "";
+  let orientationCategoryFilter = "all";
+  const orientationYawOverrides = new Map<string, number>();
+
+  function escapeHtml(value: unknown): string {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function normalizeYawDeg(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    const normalized = ((value % 360) + 360) % 360;
+    return normalized >= 180 ? normalized - 360 : normalized;
+  }
+
+  function readNumericField(record: Record<string, unknown>, keys: string[]): number | null {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string" && value.trim() !== "") {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+    }
+    return null;
+  }
+
+  function readYawDeg(record: Record<string, unknown>): number {
+    const deg = readNumericField(record, ["yaw_deg", "rotation_y_deg", "heading_deg", "orientation_deg"]);
+    if (deg !== null) return normalizeYawDeg(deg);
+    const rad = readNumericField(record, ["yaw_rad", "rotation_y_rad"]);
+    if (rad !== null) return normalizeYawDeg(rad * 180 / Math.PI);
+    const ambiguous = readNumericField(record, ["yaw", "rotation_y", "heading"]);
+    if (ambiguous === null) return 0;
+    return normalizeYawDeg(Math.abs(ambiguous) <= Math.PI * 2 ? ambiguous * 180 / Math.PI : ambiguous);
+  }
+
+  function readPosition(record: Record<string, unknown>): [number, number, number] | null {
+    const position = record.position_xyz;
+    if (Array.isArray(position) && position.length >= 3) {
+      const x = Number(position[0]);
+      const y = Number(position[1]);
+      const z = Number(position[2]);
+      if ([x, y, z].every(Number.isFinite)) return [x, y, z];
+    }
+    const x = readNumericField(record, ["x", "position_x"]);
+    const y = readNumericField(record, ["y", "position_y"]);
+    const z = readNumericField(record, ["z", "position_z"]);
+    if (x !== null && y !== null && z !== null) return [x, y, z];
+    return null;
+  }
+
+  function collectInstanceOrientationInfos(): InstanceOrientationInfo[] {
+    const instances = getManifest()?.instances ?? {};
+    const infos: InstanceOrientationInfo[] = [];
+    for (const [key, raw] of Object.entries(instances)) {
+      const record = raw as Record<string, unknown>;
+      const position = readPosition(record);
+      if (!position) continue;
+      const instanceId = String(record.instance_id ?? record.id ?? key);
+      const category = String(record.category ?? record.kind ?? "asset").trim().toLowerCase() || "asset";
+      const assetId = String(record.asset_id ?? record.assetId ?? record.model_id ?? record.glb_path ?? "");
+      const yawDeg = readYawDeg(record);
+      infos.push({
+        instanceId,
+        assetId,
+        category,
+        position,
+        yawDeg,
+        previewYawDeg: orientationYawOverrides.get(instanceId) ?? yawDeg,
+      });
+    }
+    infos.sort((a, b) => a.category.localeCompare(b.category) || a.instanceId.localeCompare(b.instanceId));
+    return infos;
+  }
+
+  function filteredOrientationInfos(): InstanceOrientationInfo[] {
+    const infos = collectInstanceOrientationInfos();
+    if (orientationCategoryFilter === "all") return infos;
+    return infos.filter(info => info.category === orientationCategoryFilter);
+  }
+
+  function selectedOrientationInfo(): InstanceOrientationInfo | null {
+    const infos = collectInstanceOrientationInfos();
+    if (!infos.length) return null;
+    let selected = infos.find(info => info.instanceId === selectedInstanceId) ?? null;
+    if (!selected) {
+      selected = filteredOrientationInfos()[0] ?? infos[0];
+      selectedInstanceId = selected.instanceId;
+    }
+    return selected;
+  }
+
+  function orientationPayload(info: InstanceOrientationInfo): Record<string, unknown> {
+    return {
+      instance_id: info.instanceId,
+      asset_id: info.assetId,
+      category: info.category,
+      position_xyz: info.position.map(value => Number(value.toFixed(3))),
+      original_yaw_deg: Number(normalizeYawDeg(info.yawDeg).toFixed(2)),
+      preview_yaw_deg: Number(normalizeYawDeg(info.previewYawDeg).toFixed(2)),
+      delta_yaw_deg: Number(normalizeYawDeg(info.previewYawDeg - info.yawDeg).toFixed(2)),
+    };
+  }
+
+  function orientationColor(category: string, selected: boolean): number {
+    if (selected) return 0xffffff;
+    if (category.includes("rail") || category.includes("fence") || category.includes("barrier")) return 0xf43f5e;
+    return CATEGORY_COLORS[category] ?? 0x38bdf8;
+  }
 
   function getFloatingLaneColor(kind: string): number {
     const colors = floatingLaneConfig.colorScheme === "safety" ? SAFETY_COLORS : FLOATING_COLORS;
@@ -221,19 +346,84 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
 
   function disposeObject(obj: THREE.Object3D): void {
     scene.remove(obj);
-    if (obj instanceof THREE.Mesh) {
-      obj.geometry.dispose();
-      if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
-      else (obj.material as THREE.Material).dispose();
-    }
-    if (obj instanceof THREE.Sprite) { obj.material.map?.dispose(); obj.material.dispose(); }
-    if (obj instanceof THREE.LineSegments) { obj.geometry.dispose(); (obj.material as THREE.Material).dispose(); }
+    obj.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+        else (child.material as THREE.Material).dispose();
+      }
+      if (child instanceof THREE.Sprite) { child.material.map?.dispose(); child.material.dispose(); }
+      if (child instanceof THREE.Line || child instanceof THREE.LineSegments) {
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
+    });
   }
 
-  function clearFloatingLaneOverlay(): void {
+  function addOrientationArrow(info: InstanceOrientationInfo, h: number): void {
+    const selected = info.instanceId === selectedInstanceId;
+    const color = orientationColor(info.category, selected);
+    const yawRad = info.previewYawDeg * Math.PI / 180;
+    const dir = new THREE.Vector3(Math.sin(yawRad), 0, Math.cos(yawRad)).normalize();
+    const origin = new THREE.Vector3(info.position[0], Math.max(info.position[1], h) + (selected ? 1.45 : 1.05), info.position[2]);
+    const length = selected ? 3.2 : info.category.includes("rail") || info.category.includes("fence") ? 2.4 : 1.7;
+    const end = origin.clone().add(dir.clone().multiplyScalar(length));
+    const group = new THREE.Group();
+    group.userData.isFloatingLane = true;
+    group.userData.overlayType = "orientation";
+    group.userData.instanceId = info.instanceId;
+
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([origin, end]),
+      new THREE.LineBasicMaterial({ color, transparent: true, opacity: selected ? 1 : 0.82 }),
+    );
+    line.userData.isFloatingLane = true;
+    line.userData.overlayType = "orientation";
+    line.userData.instanceId = info.instanceId;
+    group.add(line);
+
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(selected ? 0.28 : 0.2, selected ? 0.8 : 0.56, 16),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: selected ? 1 : 0.9, depthWrite: false }),
+    );
+    cone.position.copy(end);
+    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    cone.userData.isFloatingLane = true;
+    cone.userData.overlayType = "orientation";
+    cone.userData.instanceId = info.instanceId;
+    group.add(cone);
+
+    if (selected) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.65, 0.78, 32),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(info.position[0], h + 0.035, info.position[2]);
+      ring.userData.isFloatingLane = true;
+      ring.userData.overlayType = "orientation";
+      ring.userData.instanceId = info.instanceId;
+      group.add(ring);
+
+      const label = createTextSprite(`${info.category} ${normalizeYawDeg(info.previewYawDeg).toFixed(0)}°`, color);
+      label.position.set(info.position[0], origin.y + 1.05, info.position[2]);
+      label.userData.isFloatingLane = true;
+      label.userData.overlayType = "orientation";
+      label.userData.instanceId = info.instanceId;
+      group.add(label);
+    }
+
+    scene.add(group);
+    floatingLaneObjects.push(group);
+  }
+
+  function clearFloatingLaneOverlay(options: { resetSelection?: boolean } = {}): void {
     floatingLaneObjects.forEach(disposeObject);
     floatingLaneObjects.length = 0;
-    floatingLaneConfig.selectedLaneIndex = -1;
+    if (options.resetSelection) {
+      floatingLaneConfig.selectedLaneIndex = -1;
+      selectedInstanceId = "";
+    }
     updateAxisHud();
   }
 
@@ -516,8 +706,9 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
     const insts = getManifest()?.instances;
     if (floatingLaneConfig.showFeatures && insts) {
       const fCats = ["tree", "lamp", "bench", "trash", "bollard", "bus_stop"];
-      for (const [, info] of Object.entries(insts)) {
+      for (const [instanceId, info] of Object.entries(insts)) {
         const ii = info as { category?: string; position_xyz?: [number, number, number] };
+        const iid = String((info as Record<string, unknown>).instance_id ?? (info as Record<string, unknown>).id ?? instanceId);
         if (!ii.position_xyz) continue;
         const cat = String(ii.category || "").toLowerCase();
         if (!fCats.includes(cat)) continue;
@@ -532,11 +723,13 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
         );
         mesh.rotation.x = -Math.PI / 2; mesh.position.set(x, h, z);
         mesh.userData.isFloatingLane = true; mesh.userData.overlayType = "feature"; mesh.userData.featureCategory = cat;
+        mesh.userData.instanceId = iid;
         scene.add(mesh); floatingLaneObjects.push(mesh);
 
         if (floatingLaneConfig.showLabels) {
           const sp = createFloatingLaneLabel(cat, x, h + 1, z);
           sp.userData.isFloatingLane = true; sp.userData.featureCategory = cat;
+          sp.userData.instanceId = iid;
           scene.add(sp); floatingLaneObjects.push(sp);
         }
       }
@@ -544,22 +737,33 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
 
     if (floatingLaneConfig.showPlacementMarkers && insts) {
       const geo = new THREE.CylinderGeometry(0.5, 0.5, 1.2, 8);
-      for (const [, info] of Object.entries(insts)) {
+      for (const [instanceId, info] of Object.entries(insts)) {
         const ii = info as { category?: string; position_xyz?: [number, number, number] };
+        const iid = String((info as Record<string, unknown>).instance_id ?? (info as Record<string, unknown>).id ?? instanceId);
         const cat = String(ii.category || "").trim().toLowerCase();
         const col = CATEGORY_COLORS[cat] ?? 0x38bdf8;
 
         const marker = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8 }));
         if (ii.position_xyz) marker.position.set(ii.position_xyz[0], (ii.position_xyz[1] || 0) + 0.6, ii.position_xyz[2]);
         marker.userData.isFloatingLane = true; marker.userData.overlayType = "marker";
+        marker.userData.instanceId = iid;
         scene.add(marker); floatingLaneObjects.push(marker);
 
         const label = createTextSprite(cat, col);
         label.position.set(marker.position.x, marker.position.y + 1.2, marker.position.z);
         label.userData.isFloatingLane = true;
+        label.userData.instanceId = iid;
         scene.add(label); floatingLaneObjects.push(label);
       }
     }
+
+    if (showOrientationArrows) {
+      const infos = collectInstanceOrientationInfos();
+      if (!selectedInstanceId && infos.length > 0) selectedInstanceId = infos[0].instanceId;
+      for (const info of infos) addOrientationArrow(info, h);
+    }
+
+    renderOrientationInspector();
   }
 
   function updateFloatingLaneOverlay(deltaTime: number): void {
@@ -573,6 +777,142 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
     if (panel) {
       panel.style.display = floatingLaneConfig.enabled ? "block" : "none";
     }
+  }
+
+  function setSelectedInstance(instanceId: string): void {
+    if (selectedInstanceId === instanceId) {
+      renderOrientationInspector();
+      return;
+    }
+    selectedInstanceId = instanceId;
+    const info = selectedOrientationInfo();
+    if (info) orientationCategoryFilter = orientationCategoryFilter === "all" ? "all" : info.category;
+    buildFloatingLaneOverlay();
+    renderOrientationInspector();
+  }
+
+  function adjustSelectedYaw(deltaDeg: number): void {
+    const info = selectedOrientationInfo();
+    if (!info) return;
+    orientationYawOverrides.set(info.instanceId, normalizeYawDeg(info.previewYawDeg + deltaDeg));
+    buildFloatingLaneOverlay();
+    renderOrientationInspector();
+  }
+
+  function resetSelectedYaw(): void {
+    const info = selectedOrientationInfo();
+    if (!info) return;
+    orientationYawOverrides.delete(info.instanceId);
+    buildFloatingLaneOverlay();
+    renderOrientationInspector();
+  }
+
+  async function copySelectedOrientation(): Promise<void> {
+    const info = selectedOrientationInfo();
+    const status = document.getElementById("flp-orientation-copy-status");
+    if (!info) return;
+    const text = JSON.stringify(orientationPayload(info), null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      if (status) status.textContent = "Copied";
+    } catch {
+      const textArea = document.getElementById("flp-orientation-payload") as HTMLTextAreaElement | null;
+      textArea?.select();
+      if (status) status.textContent = "Select text to copy";
+    }
+  }
+
+  function renderOrientationInspector(): void {
+    const host = document.getElementById("flp-orientation-inspector");
+    if (!host) return;
+
+    const allInfos = collectInstanceOrientationInfos();
+    const categories = Array.from(new Set(allInfos.map(info => info.category))).sort();
+    if (orientationCategoryFilter !== "all" && !categories.includes(orientationCategoryFilter)) {
+      orientationCategoryFilter = "all";
+    }
+    const filtered = filteredOrientationInfos();
+    if (selectedInstanceId && !allInfos.some(info => info.instanceId === selectedInstanceId)) selectedInstanceId = "";
+    if (!selectedInstanceId && filtered.length) selectedInstanceId = filtered[0].instanceId;
+    if (filtered.length && !filtered.some(info => info.instanceId === selectedInstanceId)) {
+      selectedInstanceId = filtered[0].instanceId;
+    }
+
+    const selected = selectedOrientationInfo();
+    if (!allInfos.length) {
+      host.innerHTML = `<div class="flp-empty">No model instances with position data.</div>`;
+      return;
+    }
+
+    const payloadText = selected ? JSON.stringify(orientationPayload(selected), null, 2) : "";
+    host.innerHTML = `
+      <label class="flp-checkbox">
+        <input type="checkbox" id="flp-orientation-enabled" ${showOrientationArrows ? "checked" : ""}>
+        Show orientation arrows
+      </label>
+      <div class="flp-orientation-grid">
+        <label>
+          Category
+          <select id="flp-orientation-category">
+            <option value="all" ${orientationCategoryFilter === "all" ? "selected" : ""}>All (${allInfos.length})</option>
+            ${categories.map(category => `
+              <option value="${escapeHtml(category)}" ${orientationCategoryFilter === category ? "selected" : ""}>
+                ${escapeHtml(category)} (${allInfos.filter(info => info.category === category).length})
+              </option>
+            `).join("")}
+          </select>
+        </label>
+        <label>
+          Model Instance
+          <select id="flp-orientation-instance">
+            ${filtered.map(info => `
+              <option value="${escapeHtml(info.instanceId)}" ${selected?.instanceId === info.instanceId ? "selected" : ""}>
+                ${escapeHtml(info.category)} · ${escapeHtml(info.instanceId)}
+              </option>
+            `).join("")}
+          </select>
+        </label>
+      </div>
+      <div class="flp-orientation-summary">
+        <div><span>ID</span><strong>${escapeHtml(selected?.instanceId ?? "-")}</strong></div>
+        <div><span>Asset</span><strong>${escapeHtml(selected?.assetId || "-")}</strong></div>
+        <div><span>Yaw</span><strong>${selected ? `${normalizeYawDeg(selected.previewYawDeg).toFixed(1)}°` : "-"}</strong></div>
+        <div><span>Delta</span><strong>${selected ? `${normalizeYawDeg(selected.previewYawDeg - selected.yawDeg).toFixed(1)}°` : "-"}</strong></div>
+      </div>
+      <div class="flp-orientation-actions">
+        <button type="button" data-yaw-delta="-90">-90°</button>
+        <button type="button" data-yaw-delta="90">+90°</button>
+        <button type="button" data-yaw-delta="180">Flip</button>
+        <button type="button" id="flp-orientation-reset">Reset</button>
+      </div>
+      <textarea id="flp-orientation-payload" readonly>${escapeHtml(payloadText)}</textarea>
+      <div class="flp-orientation-copy-row">
+        <button type="button" id="flp-orientation-copy">Copy Params</button>
+        <span id="flp-orientation-copy-status"></span>
+      </div>
+    `;
+
+    document.getElementById("flp-orientation-enabled")?.addEventListener("change", (event) => {
+      showOrientationArrows = (event.target as HTMLInputElement).checked;
+      buildFloatingLaneOverlay();
+    });
+    document.getElementById("flp-orientation-category")?.addEventListener("change", (event) => {
+      orientationCategoryFilter = (event.target as HTMLSelectElement).value;
+      const next = filteredOrientationInfos()[0];
+      selectedInstanceId = next?.instanceId ?? "";
+      buildFloatingLaneOverlay();
+      renderOrientationInspector();
+    });
+    document.getElementById("flp-orientation-instance")?.addEventListener("change", (event) => {
+      selectedInstanceId = (event.target as HTMLSelectElement).value;
+      buildFloatingLaneOverlay();
+      renderOrientationInspector();
+    });
+    host.querySelectorAll<HTMLButtonElement>("[data-yaw-delta]").forEach((button) => {
+      button.addEventListener("click", () => adjustSelectedYaw(Number(button.dataset.yawDelta ?? 0)));
+    });
+    document.getElementById("flp-orientation-reset")?.addEventListener("click", resetSelectedYaw);
+    document.getElementById("flp-orientation-copy")?.addEventListener("click", () => { void copySelectedOrientation(); });
   }
 
   function mountControlPanel(): void {
@@ -656,6 +996,10 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
         <input type="checkbox" id="flp-animated" ${floatingLaneConfig.animated ? "checked" : ""}>
         Animated Pulse
       </label>
+      <div class="flp-section">
+        <label>Model Orientation</label>
+        <div id="flp-orientation-inspector"></div>
+      </div>
       <div class="flp-hint">Press L to toggle | Use carriagewayRings</div>
     `;
 
@@ -738,6 +1082,7 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
     });
 
     updateControlPanelVisibility();
+    renderOrientationInspector();
   }
 
   function toggleFloatingLaneOverlay(): void {
@@ -750,7 +1095,7 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
       mountControlPanel();
       shell.activateRightTab("floating-lane");
     } else {
-      clearFloatingLaneOverlay();
+      clearFloatingLaneOverlay({ resetSelection: true });
       updateControlPanelVisibility();
       if (shouldDeactivateTab()) {
         shell.activateRightTab(null);
@@ -759,17 +1104,19 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
   }
 
   function selectFloatingLane(bandIndex: number): void {
-    floatingLaneConfig.selectedLaneIndex = floatingLaneConfig.selectedLaneIndex === bandIndex ? -1 : bandIndex;
+    if (floatingLaneConfig.selectedLaneIndex === bandIndex) return;
+    floatingLaneConfig.selectedLaneIndex = bandIndex;
     buildFloatingLaneOverlay();
   }
 
   return {
     get config() { return floatingLaneConfig; },
     buildOverlay: buildFloatingLaneOverlay,
-    clearOverlay: clearFloatingLaneOverlay,
+    clearOverlay: () => clearFloatingLaneOverlay({ resetSelection: true }),
     updateAnimation: updateFloatingLaneOverlay,
     toggleOverlay: toggleFloatingLaneOverlay,
     selectLane: selectFloatingLane,
+    selectInstance: setSelectedInstance,
     mountControlPanel,
     getLaneLabel: (kind: string) => LANE_LABELS[kind] || kind,
   };

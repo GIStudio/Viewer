@@ -1,6 +1,6 @@
 import type { RecentLayout, ViewerManifest } from "./viewer-types";
 import { escapeHtml } from "./viewer-utils";
-import { loadRecentLayouts } from "./viewer-api";
+import { loadRecentLayouts, postApiJson } from "./viewer-api";
 
 export type PresetConfig = {
   id: string;
@@ -89,24 +89,10 @@ export function createViewerPresetsController(deps: ViewerPresetsControllerDeps)
     deps.closePresetsPanel();
 
     try {
-      const response = await fetch("./api/design/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preset: preset.id, config: preset.config }),
+      const result = await postApiJson<{ layout_path?: string; error?: string }>("/api/design/generate", {
+        preset: preset.id,
+        config: preset.config,
       });
-      const text = await response.text();
-      if (!text) {
-        throw new Error("Server returned empty response");
-      }
-      let result: { layout_path?: string; error?: string };
-      try {
-        result = JSON.parse(text) as { layout_path?: string; error?: string };
-      } catch {
-        throw new Error(`Invalid JSON: ${text.substring(0, 100)}`);
-      }
-      if (!response.ok) {
-        throw new Error(result.error ?? "Scene generation failed.");
-      }
       if (result.layout_path) {
         await deps.loadLayoutSelection(result.layout_path);
         const recent = await loadRecentLayouts();

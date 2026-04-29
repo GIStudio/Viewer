@@ -21,7 +21,7 @@ export async function loadManifest(manifestUrl: string, useCache: boolean = true
     return manifestCache.get(manifestUrl)!;
   }
 
-  const response = await fetch(manifestUrl);
+  const response = await fetch(resolveManifestUrl(manifestUrl));
   if (!response.ok) {
     throw new Error(`Failed to load manifest: ${response.status}`);
   }
@@ -46,31 +46,38 @@ export function clearManifestCache(): void {
 export async function loadRecentLayouts(limit: number = 20, useCache: boolean = true): Promise<RecentLayout[]> {
   if (useCache && recentLayoutsCache) return recentLayoutsCache;
 
-  // Try Vite dev server endpoint first, fall back to FastAPI /api/scenes/recent
-  let response = await fetch(`${API_BASE}/api/recent-layouts?limit=${limit}`);
-  if (response.status === 404) {
-    response = await fetch(`${API_BASE}/api/scenes/recent?limit=${limit}`);
+  const candidates = [
+    `/api/recent-layouts?limit=${limit}`,
+    `${API_BASE}/api/recent-layouts?limit=${limit}`,
+    `${API_BASE}/api/scenes/recent?limit=${limit}`,
+  ];
+  let lastStatus = 0;
+  let sawSuccessfulResponse = false;
+  let result: RecentLayout[] = [];
+  for (const url of candidates) {
+    let response: Response;
+    try {
+      response = await fetch(url);
+    } catch {
+      continue;
+    }
+    lastStatus = response.status;
+    if (!response.ok) {
+      continue;
+    }
+    sawSuccessfulResponse = true;
+    try {
+      result = mapRecentLayoutsPayload(await response.json());
+    } catch {
+      continue;
+    }
+    if (result.length > 0 || url.includes("/api/scenes/recent")) {
+      break;
+    }
   }
-  if (!response.ok) {
-    throw new Error(`Failed to load recent layouts: ${response.status}`);
+  if (!sawSuccessfulResponse) {
+    throw new Error(`Failed to load recent layouts: ${lastStatus}`);
   }
-
-  const data = await response.json();
-  const raw = Array.isArray(data) ? data : (data.results || data.items || []);
-
-  // Map FastAPI SceneRecord fields to RecentLayout if needed
-  const result: RecentLayout[] = raw.map((item: Record<string, unknown>) => ({
-    id: String(item.id ?? item.job_id ?? ""),
-    label: String(item.label ?? `${item.job_id ?? "scene"}`),
-    layout_path: String(item.layout_path ?? item.scene_layout_path ?? ""),
-    created_at: String(item.created_at ?? ""),
-    source: item.source as string | undefined,
-    scene_layout_path: item.scene_layout_path as string | undefined,
-    metrics: item.metrics as Record<string, number> | undefined,
-    preset_id: item.preset_id as string | undefined,
-    relative_path: item.relative_path as string | undefined,
-    updated_at: item.updated_at as string | undefined,
-  }));
 
   if (useCache) {
     recentLayoutsCache = result;
@@ -89,7 +96,7 @@ export function clearRecentLayoutsCache(): void {
  * Generic API JSON fetch.
  */
 export async function apiJson<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
+  const response = await fetch(resolveApiUrl(url), {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
@@ -134,6 +141,50 @@ export function parseQueryLayoutPath(): string | null {
   const search = new URLSearchParams(window.location.search);
   const layoutPath = search.get("layout") ?? "";
   return layoutPath.trim() || null;
+}
+
+function resolveManifestUrl(manifestUrl: string): string {
+  const value = manifestUrl.trim();
+  if (!value) {
+    return value;
+  }
+  if (/^https?:\/\//i.test(value) || value.startsWith("/api/") || value.startsWith("./") || value.startsWith("../")) {
+    return value;
+  }
+  if (value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.endsWith("scene_layout.json")) {
+    return `/api/layout?path=${encodeURIComponent(value)}`;
+  }
+  return value;
+}
+
+function resolveApiUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) {
+    return url;
+  }
+  if (url.startsWith("/api/")) {
+    return `${API_BASE}${url}`;
+  }
+  return url;
+}
+
+function mapRecentLayoutsPayload(data: unknown): RecentLayout[] {
+  const payload = data as { results?: unknown[]; items?: unknown[] } | unknown[];
+  const raw = Array.isArray(payload) ? payload : (payload.results || payload.items || []);
+  return raw
+    .map((item) => item as Record<string, unknown>)
+    .map((item) => ({
+      id: String(item.id ?? item.job_id ?? item.layout_path ?? item.scene_layout_path ?? ""),
+      label: String(item.label ?? item.relative_path ?? item.job_id ?? "scene"),
+      layout_path: String(item.layout_path ?? item.scene_layout_path ?? ""),
+      created_at: String(item.created_at ?? item.updated_at ?? ""),
+      source: item.source as string | undefined,
+      scene_layout_path: item.scene_layout_path as string | undefined,
+      metrics: item.metrics as Record<string, number> | undefined,
+      preset_id: item.preset_id as string | undefined,
+      relative_path: item.relative_path as string | undefined,
+      updated_at: item.updated_at as string | undefined,
+    }))
+    .filter((item) => item.layout_path);
 }
 
 /**

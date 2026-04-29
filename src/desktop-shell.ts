@@ -126,7 +126,7 @@ function renderSectionContent(contentHost: HTMLElement, content: string | HTMLEl
 export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopShell {
   const routeConfig = ROUTES[route];
   root.innerHTML = `
-    <div class="desktop-shell" data-route="${route}">
+    <div class="desktop-shell desktop-shell-left-auto-collapse desktop-shell-right-auto-collapse" data-route="${route}">
       <header class="desktop-shell-menu">
         <div class="desktop-shell-brand">
           <div class="desktop-shell-kicker">${routeConfig.kicker}</div>
@@ -168,6 +168,15 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
               <div class="desktop-shell-rail-kicker">Navigation</div>
               <div class="desktop-shell-rail-title">Left Sidebar</div>
             </div>
+            <button
+              class="desktop-shell-rail-pin"
+              type="button"
+              data-shell-left-pin
+              aria-pressed="false"
+              title="Pin left sidebar"
+            >
+              Pin
+            </button>
           </div>
           <div id="desktop-shell-left-rail" class="desktop-shell-rail-body"></div>
         </aside>
@@ -182,6 +191,15 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
               <div class="desktop-shell-rail-kicker">Inspector</div>
               <div class="desktop-shell-rail-title">Right Sidebar</div>
             </div>
+            <button
+              class="desktop-shell-rail-pin"
+              type="button"
+              data-shell-right-pin
+              aria-pressed="false"
+              title="Pin right sidebar"
+            >
+              Pin
+            </button>
           </div>
           <div class="desktop-shell-tab-list" id="desktop-shell-right-tabs"></div>
           <div id="desktop-shell-right-panels" class="desktop-shell-right-panels"></div>
@@ -419,6 +437,22 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
       }
       closeMenus();
     });
+  });
+
+  const leftPinButton = root.querySelector<HTMLButtonElement>("[data-shell-left-pin]");
+  leftPinButton?.addEventListener("click", () => {
+    const pinned = shellRoot.classList.toggle("desktop-shell-left-pinned");
+    leftPinButton.setAttribute("aria-pressed", pinned ? "true" : "false");
+    leftPinButton.textContent = pinned ? "Pinned" : "Pin";
+    leftPinButton.title = pinned ? "Unpin left sidebar" : "Pin left sidebar";
+  });
+
+  const rightPinButton = root.querySelector<HTMLButtonElement>("[data-shell-right-pin]");
+  rightPinButton?.addEventListener("click", () => {
+    const pinned = shellRoot.classList.toggle("desktop-shell-right-pinned");
+    rightPinButton.setAttribute("aria-pressed", pinned ? "true" : "false");
+    rightPinButton.textContent = pinned ? "Pinned" : "Pin";
+    rightPinButton.title = pinned ? "Unpin right sidebar" : "Pin right sidebar";
   });
 
   summaryToggle.addEventListener("click", () => {

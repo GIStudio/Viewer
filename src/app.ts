@@ -64,6 +64,7 @@ import {
   removeFrameAndAssetHelpers,
   updateAssetBboxHelpers,
 } from "./viewer-scene-helpers";
+import { createAssetMoveController } from "./viewer-asset-move-controller";
 import { createViewerPanelController, type ViewerPanelController } from "./viewer-panel-controller";
 import {
   sceneBoundsFromManifest,
@@ -385,6 +386,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
               <label class="viewer-toggle-row" for="asset-bbox-enabled">
                 <span>Asset BBoxes</span>
                 <input id="asset-bbox-enabled" type="checkbox" />
+              </label>
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-toggle-row" for="asset-move-enabled">
+                <span>Asset Move Mode</span>
+                <input id="asset-move-enabled" type="checkbox" />
               </label>
             </div>
             <div class="viewer-settings-section">
@@ -824,7 +831,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   const canvasHost = requireElement<HTMLElement>(root, "#viewer-canvas");
   const designWorkspaceEl = requireElement<HTMLElement>(root, "#viewer-design-workspace");
-  let g6StageGraph: ReturnType<typeof renderG6StageTree> | null = null;
   const statusEl = requireElement<HTMLElement>(root, "#viewer-status");
   const overlayEl = requireElement<HTMLElement>(root, "#viewer-overlay");
   const errorEl = requireElement<HTMLElement>(root, "#viewer-error");
@@ -858,6 +864,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const thirdPersonToggleEl = requireElement<HTMLInputElement>(root, "#third-person-enabled");
   const frameModeToggleEl = requireElement<HTMLInputElement>(root, "#frame-mode-enabled");
   const assetBboxToggleEl = requireElement<HTMLInputElement>(root, "#asset-bbox-enabled");
+  const assetMoveToggleEl = requireElement<HTMLInputElement>(root, "#asset-move-enabled");
   const laserToggleEl = requireElement<HTMLInputElement>(root, "#laser-pointer-enabled");
 
   const designToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-design-toggle");
@@ -1053,6 +1060,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let currentSceneBounds: SceneBounds | null = null;
   let currentLaserHitPoint: THREE.Vector3 | null = null;
   let currentLaserCopyText = "";
+  let lastLaserTargetKey = "";
   let flyAnimation: { startPos: THREE.Vector3; targetPos: THREE.Vector3; startTime: number; duration: number } | null = null;
   let resumeRoamAfterSettingsClose = false;
   let statusResetHandle: number | null = null;
@@ -1438,9 +1446,23 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     infoCardEl.hidden = false;
   }
 
+  const assetMoveController = createAssetMoveController({
+    scene,
+    camera,
+    renderer,
+    getCurrentRoot: () => currentRoot,
+    getManifest: () => currentManifest,
+    controlsAreLocked: () => controls.isLocked,
+    unlockControls: () => controls.unlock(),
+    setInfoCardContent,
+    setLaserCopyText: (text) => { currentLaserCopyText = text; },
+    flashStatus,
+    updateAssetBboxHelpers: () => updateAssetBboxHelpers(scene),
+  });
+
   async function copyCurrentLaserTargetDetails(): Promise<void> {
-    if (!laserToggleEl.checked) {
-      flashStatus("Laser pointer is off.");
+    if (!laserToggleEl.checked && !assetMoveController.isEnabled()) {
+      flashStatus("Laser pointer and asset move mode are off.");
       return;
     }
     const text = currentLaserCopyText.trim();
@@ -1557,6 +1579,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       laserBeam.visible = false;
       laserHitDot.visible = false;
       currentLaserHitPoint = null;
+      lastLaserTargetKey = "";
       clearInfoCard();
       return;
     }
@@ -1567,8 +1590,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     raycaster.set(origin, direction.normalize());
     raycaster.far = 220;
 
+    const floatingLaneTargets = scene.children.filter((child) => child.userData?.isFloatingLane);
     const intersections = raycaster
-      .intersectObject(currentRoot, true)
+      .intersectObjects([currentRoot, ...floatingLaneTargets], true)
       .filter((hit) => !(hit.object.userData && hit.object.userData.viewerHelper));
 
     const hit = intersections[0];
@@ -1582,6 +1606,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     if (!hit) {
       laserHitDot.visible = false;
       currentLaserHitPoint = null;
+      lastLaserTargetKey = "";
       clearInfoCard();
       return;
     }
@@ -1590,23 +1615,42 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     laserHitDot.visible = true;
     laserHitDot.position.copy(hit.point);
 
-    // Check if clicked on a floating lane
-    if (hit.object.userData.isFloatingLane && typeof hit.object.userData.bandIndex === "number") {
-      floatingLaneSystem.selectLane(hit.object.userData.bandIndex);
-      const bandKind = hit.object.userData.bandKind || "unknown";
-      const bandLabel = floatingLaneSystem.getLaneLabel(bandKind);
-      setInfoCardContent(`<div class="hit-descriptor"><strong>${bandLabel}</strong><br>Click again to deselect</div>`);
-      return;
+    // Check if clicked on a floating lane diagnostic overlay.
+    if (hit.object.userData.isFloatingLane) {
+      const overlayInstanceId = typeof hit.object.userData.instanceId === "string" ? hit.object.userData.instanceId : "";
+      if (overlayInstanceId) {
+        const targetKey = `floating-instance:${overlayInstanceId}`;
+        if (lastLaserTargetKey !== targetKey) {
+          floatingLaneSystem.selectInstance(overlayInstanceId);
+          setInfoCardContent(`<div class="hit-descriptor"><strong>${overlayInstanceId}</strong><br>Floating Lane orientation selected</div>`);
+          lastLaserTargetKey = targetKey;
+        }
+        return;
+      }
+      if (typeof hit.object.userData.bandIndex === "number") {
+        const targetKey = `floating-band:${hit.object.userData.bandIndex}`;
+        if (lastLaserTargetKey === targetKey) return;
+        floatingLaneSystem.selectLane(hit.object.userData.bandIndex);
+        const bandKind = hit.object.userData.bandKind || "unknown";
+        const bandLabel = floatingLaneSystem.getLaneLabel(bandKind);
+        setInfoCardContent(`<div class="hit-descriptor"><strong>${bandLabel}</strong><br>Click again to deselect</div>`);
+        lastLaserTargetKey = targetKey;
+        return;
+      }
     }
 
+    const targetKey = `scene:${hit.object.uuid}`;
+    if (lastLaserTargetKey === targetKey) return;
     const descriptor = resolveHitDescriptor(hit.object, hit.point.clone(), currentManifest ?? undefined);
     if (!descriptor) {
+      lastLaserTargetKey = "";
       clearInfoCard();
       return;
     }
     const content = buildHitDescriptorContent(descriptor, currentManifest ?? undefined);
     currentLaserCopyText = content.text;
     setInfoCardContent(content.html);
+    lastLaserTargetKey = targetKey;
   }
 
   async function loadScene(option: SceneOption): Promise<void> {
@@ -1777,12 +1821,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   function renderDesignStageTree(payload: SceneJobStatusPayload, currentStage: string, failed: boolean): void {
     const stageNodes: StageNode[] = buildDesignStageNodes(payload, currentStage, failed);
 
-    // Destroy previous G6 graph if exists
-    if (g6StageGraph) {
-      g6StageGraph.destroy();
-      g6StageGraph = null;
-    }
-
     // Create container for G6
     const containerId = "viewer-g6-stage-tree";
     let container = document.getElementById(containerId);
@@ -1805,7 +1843,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
 
     // Render G6 tree
-    g6StageGraph = renderG6StageTree(`#${containerId}`, stageNodes, (nodeId) => {
+    renderG6StageTree(`#${containerId}`, stageNodes, (nodeId) => {
       openDesignStageDiagnostic(nodeId);
     });
   }
@@ -1965,7 +2003,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   renderer.domElement.addEventListener(
     "click",
     () => {
-      if (!panelController.isOpen("settings") && !controls.isLocked) {
+      if (!assetMoveController.isEnabled() && !panelController.isOpen("settings") && !controls.isLocked) {
         controls.lock();
       }
     },
@@ -2160,8 +2198,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   designCloseEl.addEventListener("click", () => panelController.setOpen("design", false), { signal });
   designPresetEl.addEventListener("change", () => {
     const preset = selectedDesignPreset();
-    // Only auto-fill prompt if a real preset is selected (not custom)
-    if (preset && designPromptEl.value === "") {
+    if (preset) {
       designPromptEl.value = preset.prompt;
     }
   }, { signal });
@@ -2169,6 +2206,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   designBranchRunEl.addEventListener("click", () => void designController.runBranchGeneration(), { signal });
   designWorkspaceEl.addEventListener("click", (event) => {
     const target = event.target as Element;
+    if (target.closest("[data-design-workspace-close]")) {
+      hideDesignWorkspace();
+      return;
+    }
     const loadButton = target.closest<HTMLElement>("[data-branch-load]");
     const loadPath = loadButton?.dataset.branchLoad?.trim();
     if (loadPath) {
@@ -2384,6 +2425,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         laserBeam.visible = false;
         laserHitDot.visible = false;
         currentLaserHitPoint = null;
+        lastLaserTargetKey = "";
       }
     },
     { signal },
@@ -2395,6 +2437,28 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         createAssetBboxHelpers(scene, currentRoot, currentManifest);
       } else {
         removeAssetBboxHelpers(scene);
+      }
+    },
+    { signal },
+  );
+  assetMoveToggleEl.addEventListener(
+    "change",
+    () => {
+      assetMoveController.setEnabled(assetMoveToggleEl.checked);
+      if (assetMoveToggleEl.checked) {
+        assetBboxToggleEl.checked = true;
+        createAssetBboxHelpers(scene, currentRoot, currentManifest);
+        if (laserToggleEl.checked) {
+          laserToggleEl.checked = false;
+          crosshairEl.hidden = true;
+          laserBeam.visible = false;
+          laserHitDot.visible = false;
+          currentLaserHitPoint = null;
+          lastLaserTargetKey = "";
+        }
+        flashStatus("Asset move mode enabled. Drag assets in the 3D scene.");
+      } else {
+        flashStatus("Asset move mode disabled.");
       }
     },
     { signal },
@@ -2599,6 +2663,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
     clearGraphOverlay();
     floatingLaneSystem.clearOverlay();
+    assetMoveController.dispose();
     renderer.dispose();
     minimapRenderer.dispose();
   };

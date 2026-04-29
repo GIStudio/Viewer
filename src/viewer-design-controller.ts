@@ -260,9 +260,12 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
             <h2>Design Run</h2>
             <p>正在提交生成任务。</p>
           </div>
-          <div class="viewer-design-workspace-progress">
-            <strong>0%</strong>
-            <span>准备提交</span>
+          <div class="viewer-design-workspace-header-actions">
+            <button class="viewer-design-workspace-close" type="button" data-design-workspace-close aria-label="Close Design Run" title="Close Design Run">×</button>
+            <div class="viewer-design-workspace-progress">
+              <strong>0%</strong>
+              <span>准备提交</span>
+            </div>
           </div>
         </header>
         ${renderDesignImprovementSummary(preset, variants[0]!, prompt, graphTemplateId)}
@@ -312,7 +315,6 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       const recent = await loadRecentLayouts(50, false);
       deps.populateRecentLayoutOptions(recent, firstReady.layoutPath);
       renderGeneratedDesignSchemes(generatedSchemes);
-      deps.hideDesignWorkspace();
       deps.updateDesignStatus(
         `${generatedSchemes.filter((scheme) => scheme.status === "ready").length}/${variants.length} schemes generated.`,
         "success",
