@@ -2231,6 +2231,9 @@ function buildLaneElementInspectorMarkup(annotation: ReferenceAnnotation, select
         ${laneFactMarkup("Width", widthM !== undefined ? `${widthM.toFixed(2)}m` : selection.widthPx !== undefined ? `${selection.widthPx.toFixed(1)}px` : "")}
         ${laneFactMarkup("Junction", selection.junctionId)}
         ${laneFactMarkup("Patch", selection.patchId)}
+        ${laneFactMarkup("Patch Role", selection.patchRole)}
+        ${laneFactMarkup("Paired Connector", selection.pairedConnectorId)}
+        ${laneFactMarkup("Endpoint", selection.endpointRole)}
         ${laneFactMarkup("Connector", selection.connectorId)}
         ${laneFactMarkup("Link", selection.linkId)}
         ${laneFactMarkup("Quadrant", selection.quadrantId)}
@@ -3528,6 +3531,9 @@ function buildDerivedJunctionOverlayMarkup(
                   data-owner-id="${escapeHtml(overlay.junctionId)}"
                   data-junction-id="${escapeHtml(overlay.junctionId)}"
                   data-patch-id="${escapeHtml(strip.patch.patchId)}"
+                  data-patch-role="${escapeHtml(strip.patchRole ?? "connector")}"
+                  data-paired-connector-id="${escapeHtml(strip.pairedConnectorId ?? "")}"
+                  data-endpoint-role="${escapeHtml(strip.endpointRole ?? "")}"
                   data-strip-id="${escapeHtml(strip.stripId)}"
                   data-strip-kind="${escapeHtml(strip.stripKind)}"
                   data-width-px="${strip.widthPx.toFixed(3)}"
@@ -5270,6 +5276,9 @@ function laneHitFromTarget(target: EventTarget | null): LaneElementSelection | n
     patchId: element.dataset.patchId ?? element.dataset.turnPatchId,
     connectorId: element.dataset.connectorId,
     linkId: element.dataset.linkId || undefined,
+    patchRole: element.dataset.patchRole === "endpoint_fill" ? "endpoint_fill" : element.dataset.patchRole === "connector" ? "connector" : undefined,
+    pairedConnectorId: element.dataset.pairedConnectorId || undefined,
+    endpointRole: element.dataset.endpointRole === "from" ? "from" : element.dataset.endpointRole === "to" ? "to" : undefined,
     quadrantId: element.dataset.quadrantId,
     kernelId: element.dataset.kernelId || null,
     fromCenterlineId: element.dataset.fromCenterlineId,

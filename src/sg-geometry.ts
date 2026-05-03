@@ -1020,37 +1020,42 @@ function canBuildRoadPenConnectorCornerTs(arm: DerivedJunctionOverlayArm, nextAr
   return gapDot > -0.96 && gapDot < Math.cos(Math.PI / 12);
 }
 
-function roadPenConnectorDepthTs(rangeA: RoadPenSideStripRangeTs, rangeB: RoadPenSideStripRangeTs): number {
-  return clamp(Math.max(maxAbsOffsetTs(rangeA), maxAbsOffsetTs(rangeB)) * 1.5, 18, 42);
+const ROADPEN_CORNER_CHAMFER_DEPTH_M = 1.0;
+const ROADPEN_ENDPOINT_FILL_LATERAL_OVERLAP_M = 0.0;
+
+function filletMetricsFromDiagonalDepthTs(
+  deltaRadians: number,
+  diagonalDepthPx: number,
+): { radiusPx: number; tangentSetbackPx: number; chamferDepthPx: number } | null {
+  const depth = Math.max(diagonalDepthPx, 0.05);
+  const sinHalf = Math.sin(deltaRadians / 2);
+  const tanHalf = Math.tan(deltaRadians / 2);
+  if (sinHalf <= 1e-6 || tanHalf <= 1e-6) {
+    return null;
+  }
+  const denominator = (1 / sinHalf) - 1;
+  if (denominator <= 1e-6) {
+    return null;
+  }
+  const radiusPx = depth / denominator;
+  return {
+    radiusPx,
+    tangentSetbackPx: radiusPx / tanHalf,
+    chamferDepthPx: depth,
+  };
 }
 
-function roadPenWideConnectorDepthTs(arm: DerivedJunctionOverlayArm, nextArm: DerivedJunctionOverlayArm, ppm: number): number {
-  const ranges = [
-    outerReferenceRangeForZoneTs(arm, "left", ppm),
-    outerReferenceRangeForZoneTs(arm, "right", ppm),
-    outerReferenceRangeForZoneTs(nextArm, "left", ppm),
-    outerReferenceRangeForZoneTs(nextArm, "right", ppm),
-  ].filter((range): range is RoadPenSideStripRangeTs => Boolean(range));
-  const maxOffset = Math.max(arm.carriagewayWidthPx * 0.5, nextArm.carriagewayWidthPx * 0.5, ...ranges.map(maxAbsOffsetTs));
-  return clamp(maxOffset * 1.65, 36, 92);
-}
-
-function roadPenCompactConnectorEllTs(
-  arm: DerivedJunctionOverlayArm,
-  nextArm: DerivedJunctionOverlayArm,
-  referenceA: RoadPenSideStripRangeTs,
-  referenceB: RoadPenSideStripRangeTs,
-): number {
-  const u = scalePointTs(arm.tangent, -1);
-  const v = nextArm.tangent;
-  const delta = Math.acos(clamp(dotTs(u, v), -1, 1));
-  const maxOffset = Math.max(maxAbsOffsetTs(referenceA), maxAbsOffsetTs(referenceB));
-  const minRadius = maxOffset + 10 * 0.5;
-  const desiredRadius = Math.max(maxOffset * 2 * 2.2, 10);
-  const desiredEll = desiredRadius * Math.tan(delta / 2);
-  const mouthLimit = roadPenConnectorDepthTs(referenceA, referenceB);
-  const minEll = minRadius * Math.tan(delta / 2);
-  return clamp(desiredEll, Math.max(10 * 0.6, minEll), Math.max(mouthLimit, minEll));
+function offsetLineIntersectionTs(
+  anchor: AnnotationPoint,
+  u: AnnotationPoint,
+  v: AnnotationPoint,
+  qPx: number,
+): AnnotationPoint | null {
+  const normalIn = { x: -u.y, y: u.x };
+  const normalOut = { x: -v.y, y: v.x };
+  const pointA = addPointTs(anchor, scalePointTs(normalIn, qPx));
+  const pointB = addPointTs(anchor, scalePointTs(normalOut, qPx));
+  return lineIntersectionTs(pointA, u, pointB, v);
 }
 
 type RoadPenVirtualTurnTs = {
@@ -1058,18 +1063,23 @@ type RoadPenVirtualTurnTs = {
   v: AnnotationPoint;
   a: AnnotationPoint;
   b: AnnotationPoint;
+  corner: AnnotationPoint;
   delta: number;
   sigma: 1 | -1;
   radiusPx: number;
+  tangentSetbackPx: number;
+  chamferDepthPx: number;
+  effectiveChamferDepthPx: number;
+  radiusFloorPx: number;
 };
 
-function buildRoadPenVirtualLaneTurnTs(
+function buildRoadPenDiagonalDepthTurnTs(
   anchor: AnnotationPoint,
   arm: DerivedJunctionOverlayArm,
   nextArm: DerivedJunctionOverlayArm,
-  referenceA: RoadPenSideStripRangeTs,
-  referenceB: RoadPenSideStripRangeTs,
-  ellHintPx: number,
+  qPx: number,
+  chamferDepthPx: number,
+  minRadiusPx = 0,
 ): RoadPenVirtualTurnTs | null {
   const u = scalePointTs(arm.tangent, -1);
   const v = nextArm.tangent;
@@ -1078,31 +1088,65 @@ function buildRoadPenVirtualLaneTurnTs(
   if (delta <= Math.PI / 36 || Math.abs(cr) <= 1e-9) {
     return null;
   }
-  const maxOffset = Math.max(maxAbsOffsetTs(referenceA), maxAbsOffsetTs(referenceB));
-  const minRadius = maxOffset + 10 * 0.5;
-  const minEll = minRadius * Math.tan(delta / 2);
-  const ell = Math.max(ellHintPx, 10 * 0.6, minEll);
+  const metrics = filletMetricsFromDiagonalDepthTs(delta, chamferDepthPx);
+  const corner = offsetLineIntersectionTs(anchor, u, v, qPx);
+  if (!metrics || !corner) {
+    return null;
+  }
+  const radiusPx = Math.max(metrics.radiusPx, Math.max(minRadiusPx, 0));
+  const tangentSetbackPx = radiusPx / Math.tan(delta / 2);
+  const effectiveChamferDepthPx = radiusPx * ((1 / Math.sin(delta / 2)) - 1);
   return {
     u,
     v,
-    a: addPointTs(anchor, scalePointTs(arm.tangent, ell)),
-    b: addPointTs(anchor, scalePointTs(nextArm.tangent, ell)),
+    a: addPointTs(corner, scalePointTs(u, -tangentSetbackPx)),
+    b: addPointTs(corner, scalePointTs(v, tangentSetbackPx)),
+    corner,
     delta,
     sigma: cr >= 0 ? 1 : -1,
-    radiusPx: Math.max(ell / Math.max(Math.tan(delta / 2), 1e-9), 10),
+    radiusPx,
+    tangentSetbackPx,
+    chamferDepthPx: metrics.chamferDepthPx,
+    effectiveChamferDepthPx,
+    radiusFloorPx: Math.max(minRadiusPx, 0),
   };
 }
 
-function sampleRoadPenOffsetTurnCurveTs(turn: RoadPenVirtualTurnTs, qPx: number, samples = 18): AnnotationPoint[] {
+function sampleRoadPenDiagonalDepthTurnCurveTs(turn: RoadPenVirtualTurnTs, samples = 18): AnnotationPoint[] {
   const sampleCount = Math.max(4, Math.floor(samples));
-  const radiusQ = turn.radiusPx - turn.sigma * qPx;
+  const radiusPx = Math.max(turn.radiusPx, 1e-6);
+  const p0 = clonePoint(turn.a);
+  const p3 = clonePoint(turn.b);
+  const handle = (4 / 3) * radiusPx * Math.tan(turn.delta / 4);
+  const p1 = addPointTs(p0, scalePointTs(turn.u, handle));
+  const p2 = addPointTs(p3, scalePointTs(turn.v, -handle));
+  const points: AnnotationPoint[] = [];
+  for (let index = 0; index < sampleCount; index += 1) {
+    const t = sampleCount <= 1 ? 0 : index / (sampleCount - 1);
+    const mt = 1 - t;
+    points.push({
+      x: mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x,
+      y: mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y,
+    });
+  }
+  return points;
+}
+
+function sampleOffsetRoadPenDiagonalDepthTurnCurveTs(
+  turn: RoadPenVirtualTurnTs,
+  qPx: number,
+  samples = 18,
+): AnnotationPoint[] {
+  const sampleCount = Math.max(4, Math.floor(samples));
+  const radiusPx = Math.max(turn.radiusPx, 1e-6);
+  const radiusQ = radiusPx - turn.sigma * qPx;
   if (radiusQ <= 1e-6) {
     return [];
   }
-  const nIn = { x: -turn.u.y, y: turn.u.x };
-  const nOut = { x: -turn.v.y, y: turn.v.x };
-  const p0 = addPointTs(turn.a, scalePointTs(nIn, qPx));
-  const p3 = addPointTs(turn.b, scalePointTs(nOut, qPx));
+  const normalIn = { x: -turn.u.y, y: turn.u.x };
+  const normalOut = { x: -turn.v.y, y: turn.v.x };
+  const p0 = addPointTs(turn.a, scalePointTs(normalIn, qPx));
+  const p3 = addPointTs(turn.b, scalePointTs(normalOut, qPx));
   const handle = (4 / 3) * radiusQ * Math.tan(turn.delta / 4);
   const p1 = addPointTs(p0, scalePointTs(turn.u, handle));
   const p2 = addPointTs(p3, scalePointTs(turn.v, -handle));
@@ -1130,36 +1174,75 @@ function signedBoundsTs(range: RoadPenSideStripRangeTs): { qInner: number; qOute
 }
 
 function buildRoadPenConnectorPatchTs(
-  anchor: AnnotationPoint,
-  arm: DerivedJunctionOverlayArm,
   rangeA: RoadPenSideStripRangeTs,
-  nextArm: DerivedJunctionOverlayArm,
   rangeB: RoadPenSideStripRangeTs,
-  referenceA: RoadPenSideStripRangeTs,
-  referenceB: RoadPenSideStripRangeTs,
-  ellHintPx: number,
-): { ring: AnnotationPoint[]; centerLine: AnnotationPoint[]; innerLine: AnnotationPoint[]; outerLine: AnnotationPoint[]; widthPx: number } | null {
-  const turn = buildRoadPenVirtualLaneTurnTs(anchor, arm, nextArm, referenceA, referenceB, ellHintPx);
-  if (!turn) {
-    return null;
-  }
+  referenceTurn: RoadPenVirtualTurnTs,
+  referenceQPx: number,
+): {
+  ring: AnnotationPoint[];
+  centerLine: AnnotationPoint[];
+  innerLine: AnnotationPoint[];
+  outerLine: AnnotationPoint[];
+  fromEdge: [AnnotationPoint, AnnotationPoint];
+  toEdge: [AnnotationPoint, AnnotationPoint];
+  tangentSetbackPx: number;
+  chamferDepthPx: number;
+  widthPx: number;
+} | null {
   const a = signedBoundsTs(rangeA);
   const b = signedBoundsTs(rangeB);
   const outerQ = virtualLaneBoundaryQTs(a.qOuter, b.qInner);
   const innerQ = virtualLaneBoundaryQTs(a.qInner, b.qOuter);
   const centerQ = virtualLaneBoundaryQTs(rangeA.centerOffsetPx, rangeB.centerOffsetPx);
-  const outerCurve = sampleRoadPenOffsetTurnCurveTs(turn, outerQ, 18);
-  const innerCurve = sampleRoadPenOffsetTurnCurveTs(turn, innerQ, 18);
+  const outerCurve = sampleOffsetRoadPenDiagonalDepthTurnCurveTs(referenceTurn, outerQ - referenceQPx, 18);
+  const innerCurve = sampleOffsetRoadPenDiagonalDepthTurnCurveTs(referenceTurn, innerQ - referenceQPx, 18);
   if (outerCurve.length < 4 || innerCurve.length < 4) {
     return null;
   }
-  const centerLine = sampleRoadPenOffsetTurnCurveTs(turn, centerQ, 18);
+  const centerLine = sampleOffsetRoadPenDiagonalDepthTurnCurveTs(referenceTurn, centerQ - referenceQPx, 18);
   return {
     ring: dedupeRingPointsTs([...outerCurve, ...innerCurve.slice().reverse()], 0.05),
-    centerLine: centerLine.length >= 2 ? centerLine : [turn.a, turn.b],
+    centerLine: centerLine.length >= 2 ? centerLine : [referenceTurn.a, referenceTurn.b],
     innerLine: innerCurve.map((point) => clonePoint(point)),
     outerLine: outerCurve.map((point) => clonePoint(point)),
+    fromEdge: [clonePoint(outerCurve[0]), clonePoint(innerCurve[0])],
+    toEdge: [clonePoint(outerCurve[outerCurve.length - 1]), clonePoint(innerCurve[innerCurve.length - 1])],
+    tangentSetbackPx: referenceTurn.tangentSetbackPx,
+    chamferDepthPx: referenceTurn.chamferDepthPx,
     widthPx: Math.max(2, (Math.abs(rangeA.outerOffsetPx - rangeA.innerOffsetPx) + Math.abs(rangeB.outerOffsetPx - rangeB.innerOffsetPx)) * 0.5),
+  };
+}
+
+function buildRoadPenEndpointFillPatchTs(
+  edge: [AnnotationPoint, AnnotationPoint],
+  direction: AnnotationPoint,
+  fillLengthPx: number,
+  lateralOverlapPx: number,
+): { ring: AnnotationPoint[]; centerLine: AnnotationPoint[]; innerLine: AnnotationPoint[]; outerLine: AnnotationPoint[] } {
+  const [outer, inner] = edge;
+  const tangent = normalizeVector(direction) ?? { x: 1, y: 0 };
+  let startOuter = clonePoint(outer);
+  let startInner = clonePoint(inner);
+  if (lateralOverlapPx > 1e-6) {
+    const edgeWidthPx = Math.max(pointDistance(outer, inner), 1e-6);
+    const midpoint = midpointTs(outer, inner);
+    const edgeVector = subtractPointTs(inner, outer);
+    let widthAxis = { x: -tangent.y, y: tangent.x };
+    if (dotTs(edgeVector, widthAxis) < 0) {
+      widthAxis = scalePointTs(widthAxis, -1);
+    }
+    const halfWidthPx = edgeWidthPx * 0.5 + Math.max(lateralOverlapPx, 0);
+    startOuter = addPointTs(midpoint, scalePointTs(widthAxis, -halfWidthPx));
+    startInner = addPointTs(midpoint, scalePointTs(widthAxis, halfWidthPx));
+  }
+  const extension = scalePointTs(tangent, Math.max(fillLengthPx, 0.05));
+  const outerEnd = addPointTs(startOuter, extension);
+  const innerEnd = addPointTs(startInner, extension);
+  return {
+    ring: dedupeRingPointsTs([startOuter, outerEnd, innerEnd, startInner], 0.05),
+    centerLine: [midpointTs(startOuter, startInner), midpointTs(outerEnd, innerEnd)],
+    innerLine: [clonePoint(startInner), clonePoint(innerEnd)],
+    outerLine: [clonePoint(startOuter), clonePoint(outerEnd)],
   };
 }
 
@@ -1205,10 +1288,7 @@ function buildRoadPenStyleCrossCornerOverlayTs(
     if (!referenceA || !referenceB) {
       continue;
     }
-    const gapRadians = ccwGapRadiansTs(arm, nextArm);
-    const ellHintPx = gapRadians <= Math.PI * 0.5
-      ? roadPenCompactConnectorEllTs(arm, nextArm, referenceA, referenceB)
-      : roadPenWideConnectorDepthTs(arm, nextArm, ppm);
+    const chamferDepthPx = ROADPEN_CORNER_CHAMFER_DEPTH_M * Math.max(ppm, 0.0001);
     const quadrantId = `${junctionId}_quadrant_${String(armIndex + 1).padStart(2, "0")}`;
     const kernelId = `${quadrantId}_kernel`;
     let canonicalKernelPoints: AnnotationPoint[] | null = null;
@@ -1230,25 +1310,53 @@ function buildRoadPenStyleCrossCornerOverlayTs(
       },
     );
 
-    for (const spec of [
+    const cornerSpecs = [
       { kind: "nearroad_furnishing" as const, patchPrefix: "nearroad" },
       { kind: "clear_sidewalk" as const, patchPrefix: "sidewalk" },
       { kind: "frontage_reserve" as const, patchPrefix: "frontage" },
-    ]) {
+    ];
+    const cornerRanges = cornerSpecs.flatMap((spec) => {
       const rangeA = stripOffsetRangeForBranchZoneTs(arm, "left", spec.kind, ppm);
       const rangeB = stripOffsetRangeForBranchZoneTs(nextArm, "right", spec.kind, ppm);
+      return rangeA && rangeB ? [{ spec, rangeA, rangeB }] : [];
+    });
+    const quadrantQValues = cornerRanges.flatMap(({ rangeA, rangeB }) => {
+      const a = signedBoundsTs(rangeA);
+      const b = signedBoundsTs(rangeB);
+      return [
+        virtualLaneBoundaryQTs(a.qInner, b.qOuter),
+        virtualLaneBoundaryQTs(rangeA.centerOffsetPx, rangeB.centerOffsetPx),
+        virtualLaneBoundaryQTs(a.qOuter, b.qInner),
+      ];
+    });
+    if (quadrantQValues.length === 0) {
+      continue;
+    }
+    const minQ = Math.min(...quadrantQValues);
+    const maxQ = Math.max(...quadrantQValues);
+    const referenceQPx = (minQ + maxQ) * 0.5;
+    const maxRelativeQPx = Math.max(...quadrantQValues.map((value) => Math.abs(value - referenceQPx)));
+    const referenceTurn = buildRoadPenDiagonalDepthTurnTs(
+      anchor,
+      arm,
+      nextArm,
+      referenceQPx,
+      chamferDepthPx,
+      maxRelativeQPx + Math.max(chamferDepthPx, 0.5 * Math.max(ppm, 0.0001)),
+    );
+    if (!referenceTurn) {
+      continue;
+    }
+
+    for (const { spec, rangeA, rangeB } of cornerRanges) {
       if (!rangeA || !rangeB) {
         continue;
       }
       const patchGeometry = buildRoadPenConnectorPatchTs(
-        anchor,
-        arm,
         rangeA,
-        nextArm,
         rangeB,
-        referenceA,
-        referenceB,
-        ellHintPx,
+        referenceTurn,
+        referenceQPx,
       );
       if (!patchGeometry || patchGeometry.ring.length < 3) {
         continue;
@@ -1288,6 +1396,7 @@ function buildRoadPenStyleCrossCornerOverlayTs(
         stripKind: spec.kind,
         quadrantId,
         kernelId,
+        patchRole: "connector",
         widthPx: patchGeometry.widthPx,
         centerLine,
         innerLine: patchGeometry.innerLine.map((point) => clonePoint(point)),
@@ -1297,6 +1406,37 @@ function buildRoadPenStyleCrossCornerOverlayTs(
           points: patchGeometry.ring.map((point) => clonePoint(point)),
         },
       });
+      const endpointFillLengthPx = Math.max(patchGeometry.tangentSetbackPx, patchGeometry.chamferDepthPx * 2) + (0.25 * Math.max(ppm, 0.0001));
+      const endpointFillLateralOverlapPx = ROADPEN_ENDPOINT_FILL_LATERAL_OVERLAP_M * Math.max(ppm, 0.0001);
+      for (const endpoint of [
+        { role: "from" as const, edge: patchGeometry.fromEdge, direction: arm.tangent },
+        { role: "to" as const, edge: patchGeometry.toEdge, direction: nextArm.tangent },
+      ]) {
+        const fillGeometry = buildRoadPenEndpointFillPatchTs(
+          endpoint.edge,
+          endpoint.direction,
+          endpointFillLengthPx,
+          endpointFillLateralOverlapPx,
+        );
+        const fillStripId = `${stripId}_${endpoint.role}_fill`;
+        fusedCornerStrips.push({
+          stripId: fillStripId,
+          stripKind: spec.kind,
+          quadrantId,
+          kernelId,
+          patchRole: "endpoint_fill",
+          pairedConnectorId: stripId,
+          endpointRole: endpoint.role,
+          widthPx: patchGeometry.widthPx,
+          centerLine: fillGeometry.centerLine.map((point) => clonePoint(point)),
+          innerLine: fillGeometry.innerLine.map((point) => clonePoint(point)),
+          outerLine: fillGeometry.outerLine.map((point) => clonePoint(point)),
+          patch: {
+            patchId: fillStripId,
+            points: fillGeometry.ring.map((point) => clonePoint(point)),
+          },
+        });
+      }
       if (rangeA.stripId && rangeB.stripId) {
         cornerStripLinks.push({
           linkId: `${stripId}_link`,
@@ -2211,6 +2351,9 @@ export function buildQuadrantsFromFusedCornerStripsTs(
 ): JunctionQuadrantComposition[] {
   const quadrantsById = new Map<string, JunctionQuadrantComposition>();
   for (const strip of fusedCornerStrips) {
+    if (strip.patchRole === "endpoint_fill") {
+      continue;
+    }
     const quadrant = quadrantsById.get(strip.quadrantId) ?? {
       quadrantId: strip.quadrantId,
       armAId: "",

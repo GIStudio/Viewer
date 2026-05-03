@@ -418,6 +418,9 @@ export type DerivedJunctionOverlayFusedStrip = {
   stripKind: StripKind;
   quadrantId: string;
   kernelId: string | null;
+  patchRole?: "connector" | "endpoint_fill";
+  pairedConnectorId?: string;
+  endpointRole?: "from" | "to";
   widthPx: number;
   centerLine: AnnotationPoint[];
   innerLine: AnnotationPoint[];
@@ -514,6 +517,9 @@ export type LaneElementSelection = {
   patchId?: string;
   connectorId?: string;
   linkId?: string;
+  patchRole?: "connector" | "endpoint_fill";
+  pairedConnectorId?: string;
+  endpointRole?: "from" | "to";
   quadrantId?: string;
   kernelId?: string | null;
   fromCenterlineId?: string;
