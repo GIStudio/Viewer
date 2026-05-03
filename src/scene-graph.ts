@@ -43,12 +43,15 @@ import type {
   JunctionOverlayGuideLine,
   JunctionOverlayCornerKernel,
   DerivedJunctionOverlayConnectorLine,
+  DerivedJunctionOverlayFusedStrip,
   JunctionOverlayStripLinkEndpoint,
   JunctionOverlayStripLink,
   DerivedJunctionOverlay,
   DerivedJunctionOverlayArm,
   ClippedDisplaySegment,
   MetaurbanAssetBadge,
+  LaneElementKind,
+  LaneElementSelection,
   Tool,
   Selection,
   BuildingRegionResizeHandle,
@@ -175,6 +178,7 @@ import {
   sampleBezierPoints,
   stripDisplayPoint,
 } from "./sg-geometry";
+import { unionMergedSurfaceRings } from "./junction-surface-geometry";
 
 // Unified UI components
 import type { DesktopShell } from "./desktop-shell";
@@ -484,6 +488,39 @@ function stripPreviewFillColor(kind: StripKind): string {
       return "rgba(200, 175, 150, 0.20)";
     default:
       return "rgba(102, 102, 102, 0.12)";
+  }
+}
+
+function stripVisualSurfaceFillColor(kind: StripKind): string {
+  switch (kind) {
+    case "drive_lane":
+      return "rgb(56, 64, 75)";
+    case "bus_lane":
+      return "rgb(162, 70, 60)";
+    case "bike_lane":
+      return "rgb(60, 132, 88)";
+    case "parking_lane":
+      return "rgb(156, 126, 84)";
+    case "median":
+      return "rgb(110, 122, 95)";
+    case "nearroad_buffer":
+      return "rgb(152, 152, 152)";
+    case "nearroad_furnishing":
+      return "rgb(126, 101, 71)";
+    case "clear_sidewalk":
+      return "rgb(235, 224, 206)";
+    case "farfromroad_buffer":
+      return "rgb(169, 188, 202)";
+    case "frontage_reserve":
+      return "rgb(183, 212, 230)";
+    case "grass_belt":
+      return "rgb(100, 150, 80)";
+    case "shared_street_surface":
+      return "rgb(180, 160, 140)";
+    case "colored_pavement":
+      return "rgb(200, 175, 150)";
+    default:
+      return "rgb(102, 102, 102)";
   }
 }
 
@@ -1002,9 +1039,13 @@ function getSelectedFeature(annotation: ReferenceAnnotation, selection: Selectio
   | AnnotatedMarker
   | AnnotatedRoundabout
   | DerivedJunctionOverlay
+  | LaneElementSelection
   | null {
   if (!selection) {
     return null;
+  }
+  if (selection.kind === "lane_element") {
+    return selection;
   }
   if (selection.kind === "road_collection") {
     return null;
@@ -2122,6 +2163,108 @@ function buildJunctionInspectorMarkup(
   `;
 }
 
+function laneElementKindLabel(kind: LaneElementKind): string {
+  if (kind === "road_strip") {
+    return "Road Strip";
+  }
+  if (kind === "junction_turn_patch") {
+    return "Junction Turn Patch";
+  }
+  if (kind === "junction_connector") {
+    return "Junction Connector";
+  }
+  return "Junction Side Patch";
+}
+
+function laneFactMarkup(label: string, value: string | number | null | undefined): string {
+  const text = value === null || value === undefined || value === "" ? "—" : String(value);
+  return `
+    <div class="scene-fact-card">
+      <span class="scene-fact-label">${escapeHtml(label)}</span>
+      <strong>${escapeHtml(text)}</strong>
+    </div>
+  `;
+}
+
+function buildLaneElementInspectorMarkup(annotation: ReferenceAnnotation, selection: LaneElementSelection): string {
+  const centerline = selection.centerlineId
+    ? annotation.centerlines.find((item) => item.id === selection.centerlineId) ?? null
+    : null;
+  const strip = centerline && selection.stripId
+    ? centerline.cross_section_strips.find((item) => item.strip_id === selection.stripId) ?? null
+    : null;
+  const junctionOverlays = deriveJunctionOverlayGeometries(annotation);
+  const cornerFamilyTargets = selection.elementKind === "road_strip" && selection.centerlineId && selection.stripId
+    ? selectedStripCornerFamilyTargets(junctionOverlays, selection.centerlineId, selection.stripId)
+    : [];
+  const fromLabel = selection.fromCenterlineId && selection.fromStripId
+    ? `${selection.fromCenterlineId} · ${selection.fromStripId}`
+    : "";
+  const toLabel = selection.toCenterlineId && selection.toStripId
+    ? `${selection.toCenterlineId} · ${selection.toStripId}`
+    : "";
+  const stripKind = strip?.kind ?? selection.stripKind;
+  const stripZone = strip?.zone ?? selection.stripZone;
+  const stripDirection = strip?.direction ?? selection.stripDirection;
+  const widthM = strip?.width_m ?? selection.widthM;
+  const ownerLabel = `${selection.ownerKind} · ${selection.ownerId}`;
+  return `
+    <section class="annotation-lane-inspect-section">
+      <div class="annotation-cross-preview-header">
+        <div>
+          <h3>${escapeHtml(laneElementKindLabel(selection.elementKind))}</h3>
+          <div class="scene-micro-note">${escapeHtml(selection.id)}</div>
+        </div>
+        <div class="annotation-cross-preview-stats">
+          <span class="annotation-cross-preview-stat">read-only</span>
+          ${selection.pointsCount !== undefined ? `<span class="annotation-cross-preview-stat">${selection.pointsCount} pts</span>` : ""}
+        </div>
+      </div>
+      <div class="scene-inspector-grid">
+        ${laneFactMarkup("Owner", ownerLabel)}
+        ${laneFactMarkup("Element", laneElementKindLabel(selection.elementKind))}
+        ${laneFactMarkup("Centerline", selection.centerlineId)}
+        ${laneFactMarkup("Strip", selection.stripId)}
+        ${laneFactMarkup("Strip Kind", stripKind ? metaurbanStripLabel(stripKind) : "")}
+        ${laneFactMarkup("Zone", stripZone ? stripZoneSideLabel(stripZone) : "")}
+        ${laneFactMarkup("Direction", stripDirection ? stripDirectionChip({ direction: stripDirection } as AnnotatedCrossSectionStrip) : "")}
+        ${laneFactMarkup("Width", widthM !== undefined ? `${widthM.toFixed(2)}m` : selection.widthPx !== undefined ? `${selection.widthPx.toFixed(1)}px` : "")}
+        ${laneFactMarkup("Junction", selection.junctionId)}
+        ${laneFactMarkup("Patch", selection.patchId)}
+        ${laneFactMarkup("Connector", selection.connectorId)}
+        ${laneFactMarkup("Link", selection.linkId)}
+        ${laneFactMarkup("Quadrant", selection.quadrantId)}
+        ${laneFactMarkup("Kernel", selection.kernelId)}
+        ${laneFactMarkup("From", fromLabel)}
+        ${laneFactMarkup("To", toLabel)}
+        ${laneFactMarkup("Points", selection.pointsCount)}
+        <div class="scene-fact-card scene-form-field-wide">
+          <span class="scene-fact-label">Editing</span>
+          <strong>This lane element is diagnostic geometry. Select its owning road or junction to edit source data.</strong>
+        </div>
+      </div>
+      ${
+        cornerFamilyTargets.length > 0
+          ? `
+            <div class="annotation-corner-link-section">
+              <div class="annotation-corner-link-header">
+                <div>
+                  <strong>Corner Family</strong>
+                  <div class="scene-micro-note">${escapeHtml(selection.centerlineId ?? "")} · ${escapeHtml(selection.stripId ?? "")}</div>
+                </div>
+                <span class="annotation-cross-preview-stat">${cornerFamilyTargets.length} linked</span>
+              </div>
+              <div class="annotation-corner-link-list">
+                ${cornerFamilyTargets.map((target) => buildCornerConnectionCardMarkup(target)).join("")}
+              </div>
+            </div>
+          `
+          : ""
+      }
+    </section>
+  `;
+}
+
 function buildRoadCollectionInspectorMarkup(annotation: ReferenceAnnotation): string {
   const roads = annotation.centerlines;
   const ppm = Math.max(annotation.pixels_per_meter, 1e-6);
@@ -2214,6 +2357,9 @@ function buildInspectorMarkup(
 ): string {
   if (!selection) {
     return `<div class="scene-empty-note">选择一条中心线、路口、环岛、控制点或建筑区域后，可以在这里编辑属性。</div>`;
+  }
+  if (selection.kind === "lane_element") {
+    return buildLaneElementInspectorMarkup(annotation, selection);
   }
   if (selection.kind === "road_collection") {
     return buildRoadCollectionInspectorMarkup(annotation);
@@ -2555,6 +2701,168 @@ function stripClipPointForNeighbor(
   return selectClipPointForNeighbor(vertex, neighbor, candidates);
 }
 
+function isVehicleCenterConnectorKind(kind: StripKind): boolean {
+  return CENTER_STRIP_KINDS.has(kind) && kind !== "median";
+}
+
+function selectedLaneElement(selection: Selection): LaneElementSelection | null {
+  return selection?.kind === "lane_element" ? selection : null;
+}
+
+function laneEndpointKey(centerlineId: string | undefined, stripId: string | undefined): string | null {
+  return centerlineId && stripId ? stripKey(centerlineId, stripId) : null;
+}
+
+function laneSelectionEndpointKeys(selection: LaneElementSelection | null): Set<string> {
+  const keys = new Set<string>();
+  if (!selection) {
+    return keys;
+  }
+  const directKey = laneEndpointKey(selection.centerlineId, selection.stripId);
+  if (directKey) {
+    keys.add(directKey);
+  }
+  const fromKey = laneEndpointKey(selection.fromCenterlineId, selection.fromStripId);
+  if (fromKey) {
+    keys.add(fromKey);
+  }
+  const toKey = laneEndpointKey(selection.toCenterlineId, selection.toStripId);
+  if (toKey) {
+    keys.add(toKey);
+  }
+  return keys;
+}
+
+function laneElementRelatedStripKeys(
+  junctionOverlays: DerivedJunctionOverlay[],
+  selection: LaneElementSelection | null,
+): Set<string> {
+  const keys = laneSelectionEndpointKeys(selection);
+  if (!selection || selection.elementKind !== "road_strip" || !selection.centerlineId || !selection.stripId) {
+    return keys;
+  }
+  for (const target of selectedStripCornerFamilyTargets(junctionOverlays, selection.centerlineId, selection.stripId)) {
+    keys.add(stripKey(target.target.centerlineId, target.target.stripId));
+  }
+  return keys;
+}
+
+function laneElementMatches(selection: LaneElementSelection | null, elementKind: LaneElementKind, id: string): boolean {
+  return Boolean(selection && selection.elementKind === elementKind && selection.id === id);
+}
+
+function laneElementTouchesEndpoints(
+  selection: LaneElementSelection | null,
+  start: JunctionOverlayStripLinkEndpoint | undefined,
+  end: JunctionOverlayStripLinkEndpoint | undefined,
+): boolean {
+  if (!selection) {
+    return false;
+  }
+  const selectedKeys = laneSelectionEndpointKeys(selection);
+  for (const endpoint of [start, end]) {
+    const key = laneEndpointKey(endpoint?.centerlineId, endpoint?.stripId);
+    if (key && selectedKeys.has(key)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function laneSelectionClassName(isSelected: boolean, isRelated: boolean): string {
+  if (isSelected) {
+    return " annotation-lane-element-selected";
+  }
+  if (isRelated) {
+    return " annotation-lane-element-related";
+  }
+  return "";
+}
+
+function findConnectorLineLink(
+  overlay: DerivedJunctionOverlay,
+  line: DerivedJunctionOverlayConnectorLine,
+): JunctionOverlayStripLink | null {
+  if (line.linkId) {
+    const explicitLink = overlay.cornerStripLinks.find((link) => link.linkId === line.linkId) ?? null;
+    if (explicitLink) {
+      return explicitLink;
+    }
+  }
+  return overlay.cornerStripLinks.find(
+    (link) =>
+      link.quadrantId === line.quadrantId &&
+      link.kernelId === line.kernelId &&
+      link.stripKind === line.stripKind,
+  ) ?? null;
+}
+
+function findFusedStripLink(
+  overlay: DerivedJunctionOverlay,
+  strip: DerivedJunctionOverlayFusedStrip,
+): JunctionOverlayStripLink | null {
+  return overlay.cornerStripLinks.find(
+    (link) =>
+      link.quadrantId === strip.quadrantId &&
+      link.kernelId === strip.kernelId &&
+      link.stripKind === strip.stripKind,
+    ) ?? null;
+}
+
+function ringPathData(points: AnnotationPoint[]): string {
+  return `M ${points.map((point) => `${point.x},${point.y}`).join(" L ")} Z`;
+}
+
+function visualUnionPathData(rings: AnnotationPoint[][]): { d: string; fillRule: "evenodd" | "nonzero" } | null {
+  const validRings = rings.filter((ring) => ring.length >= 3);
+  if (validRings.length === 0) {
+    return null;
+  }
+  if (validRings.length === 1) {
+    return { d: ringPathData(validRings[0]), fillRule: "nonzero" };
+  }
+  try {
+    const geometry = unionMergedSurfaceRings(...validRings);
+    const segments: string[] = [];
+    for (const polygon of geometry) {
+      for (const ring of polygon) {
+        if (ring.length < 3) {
+          continue;
+        }
+        segments.push(`M ${ring.map(([x, y]) => `${x},${y}`).join(" L ")} Z`);
+      }
+    }
+    if (segments.length > 0) {
+      return { d: segments.join(" "), fillRule: "evenodd" };
+    }
+  } catch {
+    // Fall back to one compound path. It still avoids repeated translucent
+    // over-paint even if the boolean union rejects a diagnostic polygon.
+  }
+  return { d: validRings.map((ring) => ringPathData(ring)).join(" "), fillRule: "nonzero" };
+}
+
+function visualUnionSurfaceMarkup(
+  rings: AnnotationPoint[][],
+  className: string,
+  dataAttributes: string,
+  style = "",
+): string {
+  const path = visualUnionPathData(rings);
+  if (!path) {
+    return "";
+  }
+  return `
+    <path
+      class="${className}"
+      d="${path.d}"
+      fill-rule="${path.fillRule}"
+      ${style ? `style="${style}"` : ""}
+      ${dataAttributes}
+    />
+  `;
+}
+
 function baseCenterlineDisplaySegments(
   centerline: AnnotatedCenterline,
   junctionOverlays: DerivedJunctionOverlay[],
@@ -2681,6 +2989,7 @@ function buildCenterlineOverlayMarkup(
   selectedStripId: string | null,
   junctionOverlays: DerivedJunctionOverlay[],
   linkedStripKeys: Set<string>,
+  laneSelection: LaneElementSelection | null,
 ): string {
   const displaySegments = clippedCenterlineDisplaySegments(centerline, junctionOverlays, pixelsPerMeter);
   if (displaySegments.length === 0) {
@@ -2714,6 +3023,9 @@ function buildCenterlineOverlayMarkup(
         const stripOffset = offsets[strip.strip_id];
         const isStripSelected = selectedStripId === strip.strip_id;
         const isLinkedStrip = linkedStripKeys.has(`${centerline.id}:${strip.strip_id}`);
+        const laneElementId = `road_strip:${centerline.id}:${strip.strip_id}`;
+        const isLaneSelected = laneElementMatches(laneSelection, "road_strip", laneElementId);
+        const laneClassName = laneSelectionClassName(isLaneSelected, !isLaneSelected && isLinkedStrip);
         return clippedStripDisplaySegments(
           centerline,
           strip.strip_id,
@@ -2725,11 +3037,22 @@ function buildCenterlineOverlayMarkup(
             const offsetPolylinePoints = segment.points.map((point) => `${point.x},${point.y}`).join(" ");
             return `
               <polyline
-                class="annotation-cross-strip${isStripSelected ? " annotation-cross-strip-selected" : isLinkedStrip ? " annotation-cross-strip-linked" : ""}"
+                class="annotation-cross-strip${isStripSelected ? " annotation-cross-strip-selected" : isLinkedStrip ? " annotation-cross-strip-linked" : ""}${laneClassName}"
                 points="${offsetPolylinePoints}"
                 style="stroke: ${stripStrokeColor(strip.kind)}; stroke-width: ${Math.max(2, strip.width_m * pixelsPerMeter)}px; stroke-linecap: ${segment.clippedStart || segment.clippedEnd ? "butt" : "round"}"
                 data-feature-kind="centerline"
                 data-feature-id="${escapeHtml(centerline.id)}"
+                data-lane-element-kind="road_strip"
+                data-lane-element-id="${escapeHtml(laneElementId)}"
+                data-owner-kind="centerline"
+                data-owner-id="${escapeHtml(centerline.id)}"
+                data-centerline-id="${escapeHtml(centerline.id)}"
+                data-strip-id="${escapeHtml(strip.strip_id)}"
+                data-strip-kind="${escapeHtml(strip.kind)}"
+                data-strip-zone="${escapeHtml(strip.zone)}"
+                data-strip-direction="${escapeHtml(strip.direction)}"
+                data-width-m="${strip.width_m.toFixed(3)}"
+                data-points-count="${segment.points.length}"
               />
             `;
           })
@@ -3022,6 +3345,22 @@ function buildCrossPreviewMarkup(
   return fragments.join("");
 }
 
+function previewSplitCenterlinePointsAtSnap(centerline: AnnotatedCenterline, snap: BranchSnapTarget): AnnotationPoint[][] {
+  if (centerline.points.length < 2) {
+    return [];
+  }
+  const points = centerline.points.map((point) => clonePoint(point));
+  let splitIndex = points.findIndex((point) => pointDistance(point, snap.point) <= BRANCH_VERTEX_REUSE_TOLERANCE_PX);
+  if (splitIndex < 0) {
+    splitIndex = clamp(snap.segmentIndex + 1, 1, points.length - 1);
+    points.splice(splitIndex, 0, clonePoint(snap.point));
+  }
+  if (splitIndex <= 0 || splitIndex >= points.length - 1) {
+    return [points];
+  }
+  return [points.slice(0, splitIndex + 1), points.slice(splitIndex)];
+}
+
 function previewCenterlinesFromDrafts(
   annotation: ReferenceAnnotation,
   branchDraft: BranchDraft | null,
@@ -3043,13 +3382,27 @@ function previewCenterlinesFromDrafts(
       (pointDistance(crossDraft.anchor.point, crossDraft.negativeEndpoint) > 1 ||
         pointDistance(crossDraft.anchor.point, crossDraft.positiveEndpoint) > 1)
     ) {
-      previews.push(
-        cloneCenterlineForBranch(host, "__preview_cross__", [
-          crossDraft.negativeEndpoint,
-          crossDraft.anchor.point,
-          crossDraft.positiveEndpoint,
-        ]),
-      );
+      previewSplitCenterlinePointsAtSnap(host, crossDraft.anchor).forEach((points, index) => {
+        if (points.length >= 2) {
+          previews.push(cloneCenterlineForBranch(host, `__preview_cross_host_${index + 1}__`, points));
+        }
+      });
+      if (pointDistance(crossDraft.anchor.point, crossDraft.negativeEndpoint) > 1) {
+        previews.push(
+          cloneCenterlineForBranch(host, "__preview_cross_negative__", [
+            crossDraft.anchor.point,
+            crossDraft.negativeEndpoint,
+          ]),
+        );
+      }
+      if (pointDistance(crossDraft.anchor.point, crossDraft.positiveEndpoint) > 1) {
+        previews.push(
+          cloneCenterlineForBranch(host, "__preview_cross_positive__", [
+            crossDraft.anchor.point,
+            crossDraft.positiveEndpoint,
+          ]),
+        );
+      }
     }
   }
   return previews;
@@ -3071,14 +3424,15 @@ function buildDerivedJunctionOverlayMarkup(
   if (overlays.length === 0) {
     return "";
   }
-  const cornerConnectorClassName = (stripKind: StripKind): string => {
+  const laneSelection = selectedLaneElement(selection);
+  const cornerPatchClassName = (stripKind: StripKind): string => {
     if (stripKind === "clear_sidewalk") {
-      return "annotation-junction-sidewalk-connector";
+      return "annotation-junction-sidewalk-corner";
     }
     if (stripKind === "nearroad_furnishing") {
-      return "annotation-junction-nearroad-connector";
+      return "annotation-junction-nearroad-corner";
     }
-    return "annotation-junction-frontage-connector";
+    return "annotation-junction-frontage-corner";
   };
   return overlays
     .map((overlay) => {
@@ -3086,6 +3440,16 @@ function buildDerivedJunctionOverlayMarkup(
       const isSelected =
         (featureKind === "junction" && selection?.kind === "junction" && selection.id === overlay.junctionId) ||
         (featureKind === "derived_junction" && selection?.kind === "derived_junction" && selection.id === overlay.junctionId);
+      const endpointAttrs = (
+        start: JunctionOverlayStripLinkEndpoint | undefined,
+        end: JunctionOverlayStripLinkEndpoint | undefined,
+      ): string => [
+        start ? `data-from-centerline-id="${escapeHtml(start.centerlineId)}"` : "",
+        start ? `data-from-strip-id="${escapeHtml(start.stripId)}"` : "",
+        end ? `data-to-centerline-id="${escapeHtml(end.centerlineId)}"` : "",
+        end ? `data-to-strip-id="${escapeHtml(end.stripId)}"` : "",
+      ].filter(Boolean).join(" ");
+      const featureDataAttrs = `data-feature-kind="${featureKind}" data-feature-id="${escapeHtml(overlay.junctionId)}"`;
       const polygonMarkup = (patches: DerivedJunctionOverlayPatch[], className: string): string =>
         patches
           .map((patch) => {
@@ -3118,24 +3482,167 @@ function buildDerivedJunctionOverlayMarkup(
             `;
           })
           .join("");
+      const patchUnionMarkup = (
+        patches: DerivedJunctionOverlayPatch[],
+        className: string,
+        style = "",
+      ): string => {
+        if (patches.some((patch) => patch.cutoutPoints && patch.cutoutPoints.length >= 3)) {
+          return polygonMarkup(patches, className);
+        }
+        return visualUnionSurfaceMarkup(
+          patches.map((patch) => patch.points),
+          `annotation-junction-visual-surface ${className}${isSelected ? ` ${className}-selected` : ""}`,
+          featureDataAttrs,
+          style,
+        );
+      };
+      const visibleFusedCornerPatchMarkup = options.showJunctionConnectors && overlay.fusedCornerStrips.length > 0
+        ? (["frontage_reserve", "nearroad_furnishing", "clear_sidewalk"] as StripKind[])
+            .map((stripKind) =>
+              patchUnionMarkup(
+                overlay.fusedCornerStrips
+                  .filter((strip) => strip.stripKind === stripKind)
+                  .map((strip) => strip.patch),
+                cornerPatchClassName(stripKind),
+              ),
+            )
+            .join("")
+        : "";
+      const fusedCornerHitMarkup = options.showJunctionConnectors && overlay.fusedCornerStrips.length > 0
+        ? overlay.fusedCornerStrips
+            .map((strip) => {
+              const link = findFusedStripLink(overlay, strip);
+              const elementId = `junction_side_patch:${overlay.junctionId}:${strip.stripId}`;
+              const selected = laneElementMatches(laneSelection, "junction_side_patch", elementId);
+              const related = !selected && laneElementTouchesEndpoints(laneSelection, link?.start, link?.end);
+              return `
+                <polygon
+                  class="annotation-junction-lane-hit-area ${cornerPatchClassName(strip.stripKind)}${laneSelectionClassName(selected, related)}"
+                  points="${strip.patch.points.map((point) => `${point.x},${point.y}`).join(" ")}"
+                  data-feature-kind="${featureKind}"
+                  data-feature-id="${escapeHtml(overlay.junctionId)}"
+                  data-lane-element-kind="junction_side_patch"
+                  data-lane-element-id="${escapeHtml(elementId)}"
+                  data-owner-kind="${featureKind}"
+                  data-owner-id="${escapeHtml(overlay.junctionId)}"
+                  data-junction-id="${escapeHtml(overlay.junctionId)}"
+                  data-patch-id="${escapeHtml(strip.patch.patchId)}"
+                  data-strip-id="${escapeHtml(strip.stripId)}"
+                  data-strip-kind="${escapeHtml(strip.stripKind)}"
+                  data-width-px="${strip.widthPx.toFixed(3)}"
+                  data-quadrant-id="${escapeHtml(strip.quadrantId)}"
+                  data-kernel-id="${escapeHtml(strip.kernelId ?? "")}"
+                  data-link-id="${escapeHtml(link?.linkId ?? "")}"
+                  ${endpointAttrs(link?.start, link?.end)}
+                  data-points-count="${strip.patch.points.length}"
+                />
+              `;
+            })
+            .join("")
+        : "";
       const cornerConnectorMarkup = options.showJunctionConnectors
-        ? [
-            polygonMarkup(overlay.frontageCorners, "annotation-junction-frontage-corner"),
-            polygonMarkup(overlay.nearroadCorners, "annotation-junction-nearroad-corner"),
-            polygonMarkup(overlay.sidewalkCorners, "annotation-junction-sidewalk-corner"),
-          ].join("")
+        ? (visibleFusedCornerPatchMarkup
+          ? `${visibleFusedCornerPatchMarkup}${fusedCornerHitMarkup}`
+          : [
+            patchUnionMarkup(overlay.frontageCorners, "annotation-junction-frontage-corner"),
+            patchUnionMarkup(overlay.nearroadCorners, "annotation-junction-nearroad-corner"),
+            patchUnionMarkup(overlay.sidewalkCorners, "annotation-junction-sidewalk-corner"),
+          ].join(""))
+        : "";
+      const standaloneVehicleTurnPatches = options.showJunctionCore
+        ? overlay.vehicleTurnPatches.filter((patch) => patch.stripKind !== "drive_lane")
+        : overlay.vehicleTurnPatches;
+      const visibleVehicleTurnPatchMarkup = options.showJunctionConnectors
+        ? [...new Set(standaloneVehicleTurnPatches.map((patch) => patch.stripKind))]
+            .map((stripKind) =>
+              patchUnionMarkup(
+                standaloneVehicleTurnPatches.filter((patch) => patch.stripKind === stripKind),
+                "annotation-junction-turn-lane-patch",
+                `fill: ${stripVisualSurfaceFillColor(stripKind)}; stroke: ${stripStrokeColor(stripKind)}; stroke-width: 1px`,
+              ),
+            )
+            .join("")
+        : "";
+      const vehicleTurnPatchHitMarkup = options.showJunctionConnectors
+        ? overlay.vehicleTurnPatches
+            .map((patch) => {
+              const elementId = `junction_turn_patch:${overlay.junctionId}:${patch.patchId}`;
+              const start = {
+                centerlineId: patch.fromCenterlineId,
+                stripId: patch.fromStripId,
+                stripKind: patch.stripKind,
+                stripZone: "center" as const,
+              };
+              const end = {
+                centerlineId: patch.toCenterlineId,
+                stripId: patch.toStripId,
+                stripKind: patch.stripKind,
+                stripZone: "center" as const,
+              };
+              const selected = laneElementMatches(laneSelection, "junction_turn_patch", elementId);
+              const related = !selected && laneElementTouchesEndpoints(laneSelection, start, end);
+              return `
+                <polygon
+                  class="annotation-junction-lane-hit-area annotation-junction-turn-lane-patch${laneSelectionClassName(selected, related)}"
+                  points="${patch.points.map((point) => `${point.x},${point.y}`).join(" ")}"
+                  data-feature-kind="${featureKind}"
+                  data-feature-id="${escapeHtml(overlay.junctionId)}"
+                  data-lane-element-kind="junction_turn_patch"
+                  data-lane-element-id="${escapeHtml(elementId)}"
+                  data-owner-kind="${featureKind}"
+                  data-owner-id="${escapeHtml(overlay.junctionId)}"
+                  data-junction-id="${escapeHtml(overlay.junctionId)}"
+                  data-turn-patch-id="${escapeHtml(patch.patchId)}"
+                  data-patch-id="${escapeHtml(patch.patchId)}"
+                  data-strip-kind="${escapeHtml(patch.stripKind)}"
+                  data-width-px="${patch.strokeWidthPx.toFixed(3)}"
+                  data-quadrant-id="${escapeHtml(patch.quadrantId)}"
+                  data-kernel-id="${escapeHtml(patch.kernelId ?? "")}"
+                  ${endpointAttrs(start, end)}
+                  data-points-count="${patch.points.length}"
+                />
+              `;
+            })
+            .join("")
+        : "";
+      const connectorLineElementMarkup = (line: DerivedJunctionOverlayConnectorLine, className: string): string => {
+        const link = findConnectorLineLink(overlay, line);
+        const start = line.start ?? link?.start;
+        const end = line.end ?? link?.end;
+        const elementId = `junction_connector:${overlay.junctionId}:${line.connectorId}`;
+        const selected = laneElementMatches(laneSelection, "junction_connector", elementId);
+        const related = !selected && laneElementTouchesEndpoints(laneSelection, start, end);
+        return `
+          <polyline
+            class="${className}${laneSelectionClassName(selected, related)}"
+            points="${line.points.map((point) => `${point.x},${point.y}`).join(" ")}"
+            style="stroke: ${stripStrokeColor(line.stripKind)}; stroke-width: ${line.strokeWidthPx}px"
+            data-lane-element-kind="junction_connector"
+            data-lane-element-id="${escapeHtml(elementId)}"
+            data-owner-kind="${featureKind}"
+            data-owner-id="${escapeHtml(overlay.junctionId)}"
+            data-junction-id="${escapeHtml(overlay.junctionId)}"
+            data-connector-id="${escapeHtml(line.connectorId)}"
+            data-link-id="${escapeHtml(line.linkId ?? link?.linkId ?? "")}"
+            data-strip-kind="${escapeHtml(line.stripKind)}"
+            data-width-px="${line.strokeWidthPx.toFixed(3)}"
+            data-quadrant-id="${escapeHtml(line.quadrantId)}"
+            data-kernel-id="${escapeHtml(line.kernelId ?? "")}"
+            ${endpointAttrs(start, end)}
+            data-points-count="${line.points.length}"
+          />
+        `;
+      };
+      const vehicleConnectorMarkup = isSelected && options.showJunctionDebug
+        ? overlay.connectorCenterLines
+            .filter((line) => isVehicleCenterConnectorKind(line.stripKind))
+            .map((line) => connectorLineElementMarkup(line, "annotation-junction-vehicle-connector-line"))
+            .join("")
         : "";
       const connectorLineMarkup = isSelected && options.showJunctionDebug && overlay.kind === "t_junction"
         ? overlay.connectorCenterLines
-            .map(
-              (line) => `
-                <polyline
-                  class="annotation-junction-connector-line"
-                  points="${line.points.map((point) => `${point.x},${point.y}`).join(" ")}"
-                  style="stroke: ${stripStrokeColor(line.stripKind)}; stroke-width: ${line.strokeWidthPx}px"
-                />
-              `,
-            )
+            .map((line) => connectorLineElementMarkup(line, "annotation-junction-connector-line"))
             .join("")
         : "";
       const quadrantCornerKernelMarkup = isSelected && options.showJunctionDebug && overlay.kind === "cross_junction"
@@ -3257,6 +3764,22 @@ function buildDerivedJunctionOverlayMarkup(
             .join("")}
         `
         : "";
+      const carriagewayCoreRing = overlay.carriagewayCore.length > 0 ? overlay.carriagewayCore : overlay.core;
+      const carriagewayCoreMarkup = options.showJunctionCore
+        ? visualUnionSurfaceMarkup(
+          [
+            carriagewayCoreRing,
+            ...overlay.vehicleTurnPatches
+              .filter((patch) => patch.stripKind === "drive_lane")
+              .map((patch) => patch.points),
+          ],
+          `annotation-junction-visual-surface annotation-junction-core${isSelected ? " annotation-junction-core-selected" : ""}`,
+          featureDataAttrs,
+        )
+        : "";
+      const crosswalkMarkup = options.showJunctionCrosswalks
+        ? patchUnionMarkup(overlay.crosswalks, "annotation-junction-crosswalk")
+        : "";
       const coreBounds = overlay.core.reduce(
         (acc, point) => ({
           minX: Math.min(acc.minX, point.x),
@@ -3273,19 +3796,12 @@ function buildDerivedJunctionOverlayMarkup(
           ${connectorLineMarkup}
       ${quadrantCornerKernelMarkup}
           ${connectorDebugLabelMarkup}
-          ${
-            options.showJunctionCore
-              ? `
-          <polygon
-            class="annotation-junction-core${isSelected ? " annotation-junction-core-selected" : ""}"
-            points="${(overlay.carriagewayCore.length > 0 ? overlay.carriagewayCore : overlay.core).map((point) => `${point.x},${point.y}`).join(" ")}"
-            data-feature-kind="${featureKind}"
-            data-feature-id="${escapeHtml(overlay.junctionId)}"
-          />`
-              : ""
-          }
-          ${options.showJunctionCrosswalks ? polygonMarkup(overlay.crosswalks, "annotation-junction-crosswalk") : ""}
+          ${carriagewayCoreMarkup}
+          ${crosswalkMarkup}
           ${cornerConnectorMarkup}
+          ${visibleVehicleTurnPatchMarkup}
+          ${vehicleTurnPatchHitMarkup}
+          ${vehicleConnectorMarkup}
           ${boundaryMarkup}
           ${controlPointMarkup}
           ${
@@ -3336,7 +3852,16 @@ function buildOverlayMarkup(
     annotation,
     previewCenterlinesFromDrafts(annotation, branchDraft, crossDraft),
   );
+  const clipCenterlinesToJunctionSurfaces =
+    junctionOverlayOptions.showJunctionCore ||
+    junctionOverlayOptions.showJunctionConnectors ||
+    junctionOverlayOptions.showJunctionCrosswalks;
+  const centerlineJunctionOverlays = clipCenterlinesToJunctionSurfaces ? junctionOverlays : [];
+  const laneSelection = selectedLaneElement(selection);
   const linkedStripKeys = linkedCrossStripKeys(junctionOverlays, selection, selectedStripId);
+  for (const key of laneElementRelatedStripKeys(junctionOverlays, laneSelection)) {
+    linkedStripKeys.add(key);
+  }
 
   const centerlineMarkup = annotation.centerlines
     .map((centerline) => {
@@ -3351,8 +3876,9 @@ function buildOverlayMarkup(
         isSelected,
         selectedVertexIndex,
         isSelected ? selectedStripId : null,
-        junctionOverlays,
+        centerlineJunctionOverlays,
         linkedStripKeys,
+        laneSelection,
       );
     })
     .join("");
@@ -3564,22 +4090,8 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
   ]);
   shell.setLeftSections([
     {
-      id: "annotation-navigation",
-      title: "Plan / Road / Junction / Building / Zone",
-      subtitle: "Workflow map",
-      content: `
-        <div class="desktop-shell-chip-list">
-          <button class="desktop-shell-chip" type="button" data-shell-focus="plan">Plan</button>
-          <button class="desktop-shell-chip" type="button" data-shell-focus="road">Road</button>
-          <button class="desktop-shell-chip" type="button" data-shell-focus="junction">Junction</button>
-          <button class="desktop-shell-chip" type="button" data-shell-focus="building">Building</button>
-          <button class="desktop-shell-chip" type="button" data-shell-focus="zone">Zone</button>
-        </div>
-      `,
-    },
-    {
       id: "annotation-tools",
-      title: "Tool Modes",
+      title: "Annotation Tools",
       subtitle: "Select and author features",
       content: `
         <div class="scene-bottom-toolbar scene-bottom-toolbar-shell">
@@ -3838,8 +4350,8 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     graphResult: null as ConvertedGraphPayload | null,
     showOriginal: true,
     showOverlay: true,
-    showJunctionCore: false,
-    showJunctionConnectors: false,
+    showJunctionCore: true,
+    showJunctionConnectors: true,
     showJunctionOutlines: false,
     showJunctionCrosswalks: false,
     showJunctionBoundaries: false,
@@ -3937,6 +4449,11 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     if (statusMessage) {
       setStatus(statusEl, statusMessage, "success");
     }
+  }
+
+  function revealJunctionSurfaceLayers(): void {
+    state.showJunctionCore = true;
+    state.showJunctionConnectors = true;
   }
 
   function revokeCurrentObjectUrl(): void {
@@ -4703,35 +5220,99 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     return { x, y };
   }
 
-function hitFromTarget(target: EventTarget | null): Selection {
-    const element = target instanceof Element ? target.closest<HTMLElement>("[data-feature-kind][data-feature-id]") : null;
-    if (!element) {
-      return null;
-    }
-    const featureKind = element.dataset.featureKind;
-    const featureId = element.dataset.featureId;
-    if (!featureKind || !featureId) {
-      return null;
-    }
-    if (featureKind === "centerline") {
-      const rawVertexIndex = element.dataset.vertexIndex;
-      const selection: Extract<Selection, { kind: "centerline" }> = { kind: "centerline", id: featureId };
-      if (rawVertexIndex !== undefined) {
-        selection.vertexIndex = Math.max(0, Math.round(asNumber(rawVertexIndex, 0)));
-      }
-      return selection;
-    }
-    if (
-      featureKind === "junction" ||
-      featureKind === "roundabout" ||
-      featureKind === "control_point" ||
-      featureKind === "derived_junction" ||
-      featureKind === "building_region" ||
-      featureKind === "functional_zone"
-    ) {
-      return { kind: featureKind, id: featureId };
-    }
+function isLaneElementKind(value: string | undefined): value is LaneElementKind {
+  return value === "road_strip" || value === "junction_turn_patch" || value === "junction_connector" || value === "junction_side_patch";
+}
+
+function optionalDatasetNumber(value: string | undefined): number | undefined {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function laneHitFromTarget(target: EventTarget | null): LaneElementSelection | null {
+  const element = target instanceof Element ? target.closest<HTMLElement>("[data-lane-element-kind][data-lane-element-id]") : null;
+  if (!element) {
     return null;
+  }
+  const elementKind = element.dataset.laneElementKind;
+  const id = element.dataset.laneElementId;
+  const ownerKind = element.dataset.ownerKind;
+  const ownerId = element.dataset.ownerId;
+  if (!isLaneElementKind(elementKind) || !id || !ownerId) {
+    return null;
+  }
+  if (ownerKind !== "centerline" && ownerKind !== "junction" && ownerKind !== "derived_junction") {
+    return null;
+  }
+  const rawStripKind = element.dataset.stripKind;
+  const rawStripZone = element.dataset.stripZone;
+  const rawStripDirection = element.dataset.stripDirection;
+  const stripKind = rawStripKind && isStripKind(rawStripKind) ? rawStripKind : undefined;
+  const stripZone = rawStripZone && isStripZone(rawStripZone) ? rawStripZone : undefined;
+  const stripDirection = rawStripDirection && isStripDirection(rawStripDirection) ? rawStripDirection : undefined;
+  return {
+    kind: "lane_element",
+    id,
+    elementKind,
+    ownerKind,
+    ownerId,
+    centerlineId: element.dataset.centerlineId,
+    stripId: element.dataset.stripId,
+    stripKind,
+    stripZone,
+    stripDirection,
+    widthM: optionalDatasetNumber(element.dataset.widthM),
+    widthPx: optionalDatasetNumber(element.dataset.widthPx),
+    junctionId: element.dataset.junctionId,
+    patchId: element.dataset.patchId ?? element.dataset.turnPatchId,
+    connectorId: element.dataset.connectorId,
+    linkId: element.dataset.linkId || undefined,
+    quadrantId: element.dataset.quadrantId,
+    kernelId: element.dataset.kernelId || null,
+    fromCenterlineId: element.dataset.fromCenterlineId,
+    fromStripId: element.dataset.fromStripId,
+    toCenterlineId: element.dataset.toCenterlineId,
+    toStripId: element.dataset.toStripId,
+    pointsCount: optionalDatasetNumber(element.dataset.pointsCount),
+  };
+}
+
+function featureHitFromTarget(target: EventTarget | null): Selection {
+  const element = target instanceof Element ? target.closest<HTMLElement>("[data-feature-kind][data-feature-id]") : null;
+  if (!element) {
+    return null;
+  }
+  const featureKind = element.dataset.featureKind;
+  const featureId = element.dataset.featureId;
+  if (!featureKind || !featureId) {
+    return null;
+  }
+  if (featureKind === "centerline") {
+    const rawVertexIndex = element.dataset.vertexIndex;
+    const selection: Extract<Selection, { kind: "centerline" }> = { kind: "centerline", id: featureId };
+    if (rawVertexIndex !== undefined) {
+      selection.vertexIndex = Math.max(0, Math.round(asNumber(rawVertexIndex, 0)));
+    }
+    return selection;
+  }
+  if (
+    featureKind === "junction" ||
+    featureKind === "roundabout" ||
+    featureKind === "control_point" ||
+    featureKind === "derived_junction" ||
+    featureKind === "building_region" ||
+    featureKind === "functional_zone"
+  ) {
+    return { kind: featureKind, id: featureId };
+  }
+  return null;
+}
+
+function hitFromTarget(target: EventTarget | null): Selection {
+  return laneHitFromTarget(target) ?? featureHitFromTarget(target);
 }
 
 function buildingRegionHandleFromTarget(
@@ -4921,6 +5502,7 @@ function buildingRegionHandleFromTarget(
     state.selectedStripId = null;
     clearFurniturePlacement();
     clearCrossDraft();
+    revealJunctionSurfaceLayers();
     markAnnotationChanged(
       `Created standalone cross junction ${junctionId} with four ${STANDALONE_CROSS_ARM_LENGTH_M.toFixed(0)}m approach roads.`,
     );
@@ -4947,6 +5529,11 @@ function buildingRegionHandleFromTarget(
 
   function deleteSelection(): void {
     if (!state.selection) {
+      return;
+    }
+    if (state.selection.kind === "lane_element") {
+      setStatus(statusEl, "Lane elements are read-only derived/debug geometry. Select the owning road or junction to edit it.", "neutral");
+      renderAll();
       return;
     }
     if (state.selection.kind === "centerline") {
@@ -5052,6 +5639,22 @@ function buildingRegionHandleFromTarget(
         state.selection = null;
       }
       state.selectedStripId = null;
+      clearFurniturePlacement();
+      return;
+    }
+    if (state.selection.kind === "lane_element") {
+      const laneSelection = state.selection;
+      if (laneSelection.elementKind === "road_strip") {
+        const centerline = state.annotation.centerlines.find((item) => item.id === laneSelection.centerlineId) ?? null;
+        const stripId = laneSelection.stripId;
+        if (!centerline || !stripId || !centerline.cross_section_strips.some((strip) => strip.strip_id === stripId)) {
+          state.selection = null;
+          state.selectedStripId = null;
+          clearFurniturePlacement();
+          return;
+        }
+        state.selectedStripId = stripId;
+      }
       clearFurniturePlacement();
       return;
     }
@@ -5316,7 +5919,7 @@ function buildingRegionHandleFromTarget(
       setStatus(statusEl, "Could not resolve the host road for this cross anchor.", "error");
       return;
     }
-    const anchorPoint = insertSharedVertexAtSnap(host, snap);
+    const anchorPoint = clonePoint(snap.point);
     const axisNormal = crossAxisNormalAtSnap(host, snap);
     state.crossDraft = {
       anchor: { ...snap, point: { ...anchorPoint } },
@@ -5331,7 +5934,7 @@ function buildingRegionHandleFromTarget(
     state.selection = { kind: "centerline", id: host.id };
     state.selectedStripId = host.cross_section_strips[0]?.strip_id ?? null;
     clearFurniturePlacement();
-    markAnnotationChanged(`Locked cross center on ${host.id}. Move the mouse and click again to set the cross half-length.`);
+    setStatus(statusEl, `Locked cross center on ${host.id}. Move the mouse and click again to set the cross half-length.`, "neutral");
     renderAll();
   }
 
@@ -5515,6 +6118,7 @@ function buildingRegionHandleFromTarget(
     state.selectedStripId = null;
     clearFurniturePlacement();
     clearCrossDraft();
+    revealJunctionSurfaceLayers();
     markAnnotationChanged(`Created cross junction ${hostJunctionResult.junction.id} and auto-split the connected roads into detailed cross-sections.`);
     renderAll();
   }
@@ -6009,7 +6613,7 @@ function buildingRegionHandleFromTarget(
       if (!state.currentImageUrl) {
         return;
       }
-      const hit = hitFromTarget(event.target);
+      const hit = state.selectedTool === "adjust" ? featureHitFromTarget(event.target) : hitFromTarget(event.target);
       const point = imagePointFromPointer(event);
 
       if (state.selectedTool === "select") {
@@ -6019,7 +6623,9 @@ function buildingRegionHandleFromTarget(
           }
         }
         state.selection = hit;
-        if (hit?.kind !== "centerline") {
+        if (hit?.kind === "lane_element") {
+          state.selectedStripId = hit.stripId ?? hit.fromStripId ?? null;
+        } else if (hit?.kind !== "centerline") {
           state.selectedStripId = null;
         }
         state.drag = null;

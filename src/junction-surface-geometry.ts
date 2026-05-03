@@ -50,9 +50,9 @@ export type SurfaceMergePreview = {
   connectorRing: AnnotationPoint[];
 };
 
-const MIN_MERGE_CONNECTOR_WIDTH_M = 0.25;
-const MAX_MERGE_CONNECTOR_WIDTH_M = 0.85;
-const DEFAULT_MERGE_CONNECTOR_WIDTH_M = 0.5;
+const MIN_MERGE_CONNECTOR_WIDTH_M = 0.5;
+const MAX_MERGE_CONNECTOR_WIDTH_M = 8;
+const DEFAULT_MERGE_CONNECTOR_WIDTH_M = 3.5;
 
 function lerp(a: AnnotationPoint, b: AnnotationPoint, t: number): AnnotationPoint {
   return {
@@ -318,8 +318,7 @@ export function connectorWidthForSurfaces(
   if (laneWidths.length === 0) {
     return DEFAULT_MERGE_CONNECTOR_WIDTH_M;
   }
-  const baseWidth = Math.min(...laneWidths) * 0.18;
-  return clampNumber(baseWidth, MIN_MERGE_CONNECTOR_WIDTH_M, MAX_MERGE_CONNECTOR_WIDTH_M);
+  return clampNumber(Math.min(...laneWidths), MIN_MERGE_CONNECTOR_WIDTH_M, MAX_MERGE_CONNECTOR_WIDTH_M);
 }
 
 export function translateSurface(surface: SurfaceLike, dx: number, dy: number): void {
@@ -471,6 +470,161 @@ export function buildConnectorStrip(pointA: AnnotationPoint, pointB: AnnotationP
   ];
 }
 
+type SurfaceConnectorEnd = {
+  nodeId: string;
+  point: AnnotationPoint;
+  outwardTangent: AnnotationPoint;
+  widthM: number;
+};
+
+type SurfaceConnector = {
+  nearestPair: SurfaceNearestNodePair;
+  ring: AnnotationPoint[];
+};
+
+function midpoint(a: AnnotationPoint, b: AnnotationPoint): AnnotationPoint {
+  return lerp(a, b, 0.5);
+}
+
+function laneSurfaceConnectorEnds(surface: JunctionLaneSurface): SurfaceConnectorEnd[] {
+  if (surface.nodes.length < 4) {
+    return [];
+  }
+  const startCenter = midpoint(surface.nodes[0].point, surface.nodes[1].point);
+  const endCenter = midpoint(surface.nodes[2].point, surface.nodes[3].point);
+  const axisDelta = subtract(endCenter, startCenter);
+  if (length(axisDelta) <= 1e-6) {
+    return [];
+  }
+  const axis = normalize(axisDelta);
+  const widthM = clampNumber(surface.laneWidthM, MIN_MERGE_CONNECTOR_WIDTH_M, MAX_MERGE_CONNECTOR_WIDTH_M);
+  return [
+    {
+      nodeId: `${surface.surfaceId}_travel_start`,
+      point: startCenter,
+      outwardTangent: scale(axis, -1),
+      widthM,
+    },
+    {
+      nodeId: `${surface.surfaceId}_travel_end`,
+      point: endCenter,
+      outwardTangent: axis,
+      widthM,
+    },
+  ];
+}
+
+function sampleCubicBezier(
+  p0: AnnotationPoint,
+  p1: AnnotationPoint,
+  p2: AnnotationPoint,
+  p3: AnnotationPoint,
+  segments: number,
+): AnnotationPoint[] {
+  const steps = Math.max(8, Math.floor(segments));
+  const points: AnnotationPoint[] = [];
+  for (let index = 0; index <= steps; index += 1) {
+    const t = index / steps;
+    const mt = 1 - t;
+    points.push({
+      x: mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x,
+      y: mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y,
+    });
+  }
+  return points;
+}
+
+function ribbonAroundCenterline(
+  centerline: AnnotationPoint[],
+  startTangent: AnnotationPoint,
+  endTangent: AnnotationPoint,
+  widthM: number,
+): AnnotationPoint[] {
+  if (centerline.length < 2) {
+    return [];
+  }
+  const halfWidth = Math.max(widthM, MIN_MERGE_CONNECTOR_WIDTH_M) * 0.5;
+  const left: AnnotationPoint[] = [];
+  const right: AnnotationPoint[] = [];
+  for (let index = 0; index < centerline.length; index += 1) {
+    const point = centerline[index];
+    const tangent = index === 0
+      ? startTangent
+      : index === centerline.length - 1
+        ? endTangent
+        : normalize(subtract(centerline[index + 1], centerline[index - 1]));
+    const normal = perpendicular(normalize(tangent));
+    left.push(add(point, scale(normal, halfWidth)));
+    right.push(add(point, scale(normal, -halfWidth)));
+  }
+  return [...left, ...right.reverse()];
+}
+
+function buildCurvedConnectorStrip(
+  start: SurfaceConnectorEnd,
+  end: SurfaceConnectorEnd,
+  widthM: number,
+): AnnotationPoint[] {
+  const distance = length(subtract(end.point, start.point));
+  if (distance <= Math.max(1e-6, widthM * 0.25)) {
+    return [];
+  }
+  const safeWidth = clampNumber(widthM, MIN_MERGE_CONNECTOR_WIDTH_M, MAX_MERGE_CONNECTOR_WIDTH_M);
+  const startTangent = normalize(start.outwardTangent);
+  const endTangent = scale(normalize(end.outwardTangent), -1);
+  const overlap = Math.min(safeWidth * 0.28, distance * 0.2);
+  const p0 = add(start.point, scale(startTangent, -overlap));
+  const p3 = add(end.point, scale(endTangent, overlap));
+  const handle = clampNumber(distance * 0.48, safeWidth * 1.1, Math.max(safeWidth * 1.1, distance * 0.8));
+  const p1 = add(start.point, scale(startTangent, handle));
+  const p2 = add(end.point, scale(endTangent, -handle));
+  const segments = clampNumber(Math.ceil(distance / Math.max(safeWidth * 0.35, 0.75)), 10, 28);
+  return ribbonAroundCenterline(sampleCubicBezier(p0, p1, p2, p3, segments), startTangent, endTangent, safeWidth);
+}
+
+function buildLaneSurfaceConnector(
+  surfaceA: JunctionLaneSurface | JunctionMergedSurface,
+  surfaceB: JunctionLaneSurface | JunctionMergedSurface,
+  fallbackWidthM: number,
+): SurfaceConnector | null {
+  if (!("laneWidthM" in surfaceA) || !("laneWidthM" in surfaceB)) {
+    return null;
+  }
+  const endsA = laneSurfaceConnectorEnds(surfaceA);
+  const endsB = laneSurfaceConnectorEnds(surfaceB);
+  let best: { a: SurfaceConnectorEnd; b: SurfaceConnectorEnd; distance: number } | null = null;
+  for (const a of endsA) {
+    for (const b of endsB) {
+      const candidateDistance = length(subtract(a.point, b.point));
+      if (!best || candidateDistance < best.distance) {
+        best = { a, b, distance: candidateDistance };
+      }
+    }
+  }
+  if (!best) {
+    return null;
+  }
+  const connectorWidthM = clampNumber(
+    Math.min(best.a.widthM, best.b.widthM, fallbackWidthM),
+    MIN_MERGE_CONNECTOR_WIDTH_M,
+    MAX_MERGE_CONNECTOR_WIDTH_M,
+  );
+  const ring = buildCurvedConnectorStrip(best.a, best.b, connectorWidthM);
+  if (ring.length < 3) {
+    return null;
+  }
+  return {
+    nearestPair: {
+      nodeAId: best.a.nodeId,
+      nodeBId: best.b.nodeId,
+      pointA: clonePoint(best.a.point),
+      pointB: clonePoint(best.b.point),
+      distance: best.distance,
+    },
+    ring,
+  };
+}
+
 export function buildMergedSurfacePreview(
   selectedSurfaces: Array<JunctionLaneSurface | JunctionMergedSurface>,
 ): SurfaceMergePreview | null {
@@ -479,12 +633,21 @@ export function buildMergedSurfacePreview(
   }
 
   const [surfaceA, surfaceB] = selectedSurfaces;
+  const connectorWidthM = connectorWidthForSurfaces(selectedSurfaces);
+  const laneConnector = buildLaneSurfaceConnector(surfaceA, surfaceB, connectorWidthM);
+  if (laneConnector) {
+    return {
+      nearestPair: laneConnector.nearestPair,
+      connectorWidthM,
+      connectorRing: laneConnector.ring,
+    };
+  }
+
   const nearestPair = findNearestNodePair(surfaceA, surfaceB);
   if (!nearestPair) {
     return null;
   }
 
-  const connectorWidthM = connectorWidthForSurfaces(selectedSurfaces);
   return {
     nearestPair,
     connectorWidthM,

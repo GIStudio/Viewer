@@ -235,6 +235,38 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
     return "carriageway";
   }
 
+  function getNormalizedSurfaceFloatingKind(patch: Record<string, unknown>): string {
+    const role = String(patch.surface_role ?? "").toLowerCase();
+    if (role === "crossing" || role === "crosswalk") return "default";
+    if (role === "context_ground") return "frontage";
+    return role || "carriageway";
+  }
+
+  function isVehicleTurnLanePatch(patch: Record<string, unknown>): boolean {
+    const sr = String(patch.surface_role ?? "").toLowerCase();
+    const sk = String(patch.strip_kind ?? "").toLowerCase();
+    const stack = String(patch.stack_kind ?? "").toLowerCase();
+    return (
+      stack === "center"
+      || ["carriageway", "bike_lane", "bus_lane", "parking_lane"].includes(sr)
+      || ["drive_lane", "bike_lane", "bus_lane", "parking_lane"].includes(sk)
+    );
+  }
+
+  function hasCornerSurfacePatches(junction: Record<string, unknown>): boolean {
+    for (const key of ["sidewalk_corner_patches", "nearroad_corner_patches", "frontage_corner_patches"]) {
+      const patches = (junction[key] ?? []) as Array<Record<string, unknown>>;
+      if (patches.some(patch => ((patch.rings ?? []) as number[][][]).some(ring => ring.length >= 3))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function shouldRenderTurnLanePatch(patch: Record<string, unknown>, hasCornerSurface: boolean): boolean {
+    return isVehicleTurnLanePatch(patch) || !hasCornerSurface;
+  }
+
   function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
     ctx.beginPath();
     ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
@@ -473,6 +505,36 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
     }
 
     for (const j of jns) {
+      const normalizedPatches = (j.normalized_surface_patches ?? []) as Array<Record<string, unknown>>;
+      if (normalizedPatches.length > 0) {
+        for (const [pi, patch] of normalizedPatches.entries()) {
+          const kind = getNormalizedSurfaceFloatingKind(patch);
+          const color = getFloatingLaneColor(kind);
+          const yOffset = patch.is_overlay ? 0.018 : 0.006;
+          const opacityFactor = patch.is_overlay ? 0.46 : kind === "carriageway" ? 0.56 : 0.34;
+          for (const [ri, ring] of ((patch.rings ?? []) as number[][][]).entries()) {
+            if (ring.length < 3) continue;
+            const mesh = new THREE.Mesh(
+              new THREE.ShapeGeometry(buildPolygonShape(ring.map(toXY))),
+              new THREE.MeshBasicMaterial({ color, transparent: true, opacity: floatingLaneConfig.opacity! * opacityFactor, depthWrite: false, side: THREE.DoubleSide }),
+            );
+            mesh.rotation.x = -Math.PI / 2; mesh.position.set(0, h + yOffset, 0);
+            mesh.userData.isFloatingLane = true; mesh.userData.overlayType = `junction-normalized-${kind}`;
+            mesh.userData.surfaceId = patch.surface_id ?? `normalized_${pi}_${ri}`;
+            scene.add(mesh); floatingLaneObjects.push(mesh);
+
+            if (floatingLaneConfig.showEdgeLines) {
+              const pts: THREE.Vector3[] = ring.map(p => new THREE.Vector3(p[0], h + yOffset, p[1]));
+              pts.push(pts[0].clone());
+              const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: floatingLaneConfig.opacity! * 0.75 }));
+              line.userData.isFloatingLane = true;
+              scene.add(line); floatingLaneObjects.push(line);
+            }
+          }
+        }
+        continue;
+      }
+
       for (const ring of (j.carriageway_core_rings ?? []) as number[][][]) {
         if (ring.length < 3) continue;
         const mesh = new THREE.Mesh(
@@ -492,7 +554,38 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
         }
       }
 
+      for (const group of [
+        { patches: (j.frontage_corner_patches ?? []) as Array<Record<string, unknown>>, kind: "frontage", overlayType: "junction-frontage-corner" },
+        { patches: (j.nearroad_corner_patches ?? []) as Array<Record<string, unknown>>, kind: "furnishing", overlayType: "junction-nearroad-corner" },
+        { patches: (j.sidewalk_corner_patches ?? []) as Array<Record<string, unknown>>, kind: "sidewalk", overlayType: "junction-sidewalk-corner" },
+      ]) {
+        const color = getFloatingLaneColor(group.kind);
+        for (const [pi, patch] of group.patches.entries()) {
+          for (const [ri, ring] of ((patch.rings ?? []) as number[][][]).entries()) {
+            if (ring.length < 3) continue;
+            const mesh = new THREE.Mesh(
+              new THREE.ShapeGeometry(buildPolygonShape(ring.map(toXY))),
+              new THREE.MeshBasicMaterial({ color, transparent: true, opacity: floatingLaneConfig.opacity! * 0.34, depthWrite: false, side: THREE.DoubleSide }),
+            );
+            mesh.rotation.x = -Math.PI / 2; mesh.position.set(0, h + 0.008, 0);
+            mesh.userData.isFloatingLane = true; mesh.userData.overlayType = group.overlayType;
+            mesh.userData.surfaceId = patch.patch_id ?? `${group.overlayType}_${pi}_${ri}`;
+            scene.add(mesh); floatingLaneObjects.push(mesh);
+
+            if (floatingLaneConfig.showEdgeLines) {
+              const pts: THREE.Vector3[] = ring.map(p => new THREE.Vector3(p[0], h + 0.008, p[1]));
+              pts.push(pts[0].clone());
+              const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: floatingLaneConfig.opacity! * 0.7 }));
+              line.userData.isFloatingLane = true;
+              scene.add(line); floatingLaneObjects.push(line);
+            }
+          }
+        }
+      }
+
+      const hasCornerSurface = hasCornerSurfacePatches(j);
       for (const [pi, patch] of ((j.turn_lane_patches ?? []) as Array<Record<string, unknown>>).entries()) {
+        if (!shouldRenderTurnLanePatch(patch, hasCornerSurface)) continue;
         const color = getFloatingLaneColor(getTurnLaneFloatingKind(patch));
         for (const [ri, ring] of ((patch.rings ?? []) as number[][][]).entries()) {
           if (ring.length < 3) continue;

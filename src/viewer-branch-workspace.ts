@@ -1,6 +1,7 @@
 import type { BranchRunNode, BranchRunStatusPayload } from "./viewer-types";
 import { DEFAULT_GRAPH_TEMPLATE_ID } from "./viewer-types";
 import { clamp, escapeHtml } from "./viewer-utils";
+import { renderGenerationTracePanel, scenarioParameterEvidenceRows } from "./viewer-design-workspace";
 
 function formatDesignDetailKey(key: string): string {
   const labels: Record<string, string> = {
@@ -190,6 +191,7 @@ export function renderBranchNodeDetail(node: BranchRunNode | null): string {
         overall: evaluation.overall,
         error: node.error,
       }))}
+      ${renderGenerationTracePanel(node.trace, { embedded: true })}
       ${renderDiagnosticSection("LLM 候选与实际参数", `
         <p class="viewer-design-workspace-copy">${escapeHtml(node.llm_candidate_reasoning || "无 LLM reasoning。")}</p>
         ${renderDiagnosticKeyValues(asRecord(node.config_patch), 28)}
@@ -206,12 +208,31 @@ export function renderBranchNodeDetail(node: BranchRunNode | null): string {
         ["value", "LLM 值"],
         ["reason", "拦截原因"],
       ], "没有被拦截的修改。"))}
-      ${renderDiagnosticSection("RAG 证据", renderDiagnosticTable(asRecords(node.rag_evidence), [
-        ["chunk_id", "Chunk"],
-        ["section_title", "章节"],
-        ["score", "相关度"],
-        ["knowledge_source", "来源"],
-      ], "该节点没有直接 RAG 证据。"))}
+      ${(() => {
+        const structuredRows = scenarioParameterEvidenceRows(node.rag_evidence);
+        const structuredChunkIds = new Set(structuredRows.map((item) => String(item.chunk_id || "")));
+        const regularRows = asRecords(node.rag_evidence).filter((item) => (
+          String(item.knowledge_source || "") !== "scenario_parameters"
+          && !structuredChunkIds.has(String(item.chunk_id || ""))
+        ));
+        return `
+          ${renderDiagnosticSection("RAG 证据", renderDiagnosticTable(regularRows, [
+            ["chunk_id", "Chunk"],
+            ["section_title", "章节"],
+            ["score", "相关度"],
+            ["knowledge_source", "来源"],
+          ], "该节点没有普通 PDF/GraphRAG 证据。"))}
+          ${renderDiagnosticSection("结构化参数三元组", renderDiagnosticTable(structuredRows, [
+            ["scenario_label", "情景"],
+            ["parameter_name", "参数"],
+            ["normalized_value", "归一化值"],
+            ["raw_value", "原始值"],
+            ["source_doc", "来源"],
+            ["confidence", "置信度"],
+            ["chunk_id", "Chunk"],
+          ], "该节点没有结构化参数三元组。"))}
+        `;
+      })()}
     </div>
   `;
 }

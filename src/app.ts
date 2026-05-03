@@ -97,11 +97,18 @@ import {
 } from "./viewer-scene-options";
 import { createViewerSceneSelectionController } from "./viewer-scene-selection-controller";
 import {
+  completeLightingValues,
   DEFAULT_LIGHTING_STATE,
   LIGHTING_PRESET_LABELS,
   LIGHTING_PRESETS,
   type LightingState,
 } from "./viewer-lighting";
+import {
+  applyViewerLightingState,
+  createViewerLightingRig,
+  createViewerRenderPipeline,
+  fitViewerLightingRigToBounds,
+} from "./viewer-render-pipeline";
 import { createFloatingLaneSystem } from "./viewer-floating-lane";
 import { createHistoryPanelController } from "./viewer-history-panel";
 import {
@@ -951,9 +958,17 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.VSMShadowMap;
   renderer.setSize(canvasHost.clientWidth, canvasHost.clientHeight);
   canvasHost.appendChild(renderer.domElement);
+
+  const renderPipeline = createViewerRenderPipeline(
+    scene,
+    camera,
+    renderer,
+    canvasHost.clientWidth,
+    canvasHost.clientHeight,
+  );
 
   const canvasResizeObserver = new ResizeObserver(() => {
     resizeRenderer();
@@ -968,26 +983,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const minimapCamera = new THREE.OrthographicCamera(-20, 20, 20, -20, 0.1, 4000);
   minimapCamera.up.set(0, 0, -1);
 
-  const hemiLight = new THREE.HemisphereLight(0xfafcff, 0xd6d5d0, 0.75);
-  scene.add(hemiLight);
-
-  const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
-  keyLight.position.set(18, 30, 12);
-  keyLight.castShadow = true;
-  keyLight.shadow.mapSize.set(2048, 2048);
-  keyLight.shadow.camera.near = 0.5;
-  keyLight.shadow.camera.far = 220;
-  keyLight.shadow.camera.left = -90;
-  keyLight.shadow.camera.right = 90;
-  keyLight.shadow.camera.top = 90;
-  keyLight.shadow.camera.bottom = -90;
-  keyLight.shadow.bias = -0.0002;
-  keyLight.shadow.normalBias = 0.02;
-  scene.add(keyLight);
-
-  const fillLight = new THREE.DirectionalLight(0xdfe8ff, 0.45);
-  fillLight.position.set(-18, 18, -18);
-  scene.add(fillLight);
+  const lightingRig = createViewerLightingRig(scene);
 
   const controls = new PointerLockControls(camera, renderer.domElement);
   scene.add(camera);
@@ -1232,28 +1228,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   function applyLightingState(): void {
-    const warmthT = clamp((lightingState.warmth + 1) * 0.5, 0, 1);
-    const coolKey = new THREE.Color("#f5fbff");
-    const warmKey = new THREE.Color("#ffd8a8");
-    const coolFill = new THREE.Color("#e7f0ff");
-    const warmFill = new THREE.Color("#ffe9cd");
-    const coolSky = new THREE.Color("#f8fbff");
-    const warmSky = new THREE.Color("#fff1d9");
-    const keyColor = new THREE.Color().lerpColors(coolKey, warmKey, warmthT);
-    const fillColor = new THREE.Color().lerpColors(coolFill, warmFill, warmthT * 0.65);
-    const skyColor = new THREE.Color().lerpColors(coolSky, warmSky, warmthT * 0.55);
-
-    renderer.toneMappingExposure = lightingState.exposure;
-    keyLight.color.copy(keyColor);
-    fillLight.color.copy(fillColor);
-    hemiLight.color.copy(skyColor);
-    hemiLight.groundColor.set("#d5d0cb");
-
-    keyLight.intensity = lightingState.keyLightIntensity * (0.85 + lightingState.shadowStrength * 0.45);
-    fillLight.intensity = lightingState.fillLightIntensity * (1.0 - lightingState.shadowStrength * 0.25);
-    hemiLight.intensity = 0.35 + lightingState.fillLightIntensity * (0.42 - lightingState.shadowStrength * 0.12);
-    keyLight.shadow.radius = 2 + (1 - lightingState.shadowStrength) * 8;
-    keyLight.shadow.normalBias = 0.01 + (1 - lightingState.shadowStrength) * 0.03;
+    applyViewerLightingState({
+      scene,
+      renderer,
+      rig: lightingRig,
+      pipeline: renderPipeline,
+      state: lightingState,
+    });
   }
 
   function syncLightingUi(): void {
@@ -1366,6 +1347,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     renderer.setSize(width, height);
+    renderPipeline.setSize(width, height);
 
     const minimapWidth = Math.max(1, minimapHost.clientWidth);
     const minimapHeight = Math.max(1, minimapHost.clientHeight);
@@ -1699,22 +1681,27 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     currentSpawn = spawn.position;
     currentForward = spawn.forward;
     currentSceneBounds = sceneBoundsFromManifest(bbox, currentManifest);
+    fitViewerLightingRigToBounds(lightingRig, bbox);
     updateMinimapCamera(minimapCamera, currentSceneBounds, bbox);
     resetView();
-    const params = currentManifest?.lighting_params;
-    if (params) {
-      lightingState.preset = currentManifest?.lighting_preset || "custom";
-      lightingState.exposure = params.exposure as number;
-      lightingState.keyLightIntensity = params.keyLightIntensity as number;
-      lightingState.fillLightIntensity = params.fillLightIntensity as number;
-      lightingState.warmth = params.warmth as number;
-      lightingState.shadowStrength = params.shadowStrength as number;
-    } else {
-      const presetKey = currentManifest?.lighting_preset;
-      if (presetKey && LIGHTING_PRESETS[presetKey]) {
-        lightingState.preset = presetKey;
-        Object.assign(lightingState, LIGHTING_PRESETS[presetKey]);
-      }
+    const params = currentManifest?.lighting_params as Partial<LightingState> | undefined;
+    const presetKey = currentManifest?.lighting_preset;
+    const hasPostProcessParams = Boolean(
+      params
+      && (
+        "ambientOcclusion" in params
+        || "bloomStrength" in params
+        || "fogDensity" in params
+        || "sunElevation" in params
+        || "sunAzimuth" in params
+      ),
+    );
+    if (params && hasPostProcessParams) {
+      lightingState.preset = presetKey || "custom";
+      Object.assign(lightingState, completeLightingValues(params));
+    } else if (presetKey && LIGHTING_PRESETS[presetKey]) {
+      lightingState.preset = presetKey;
+      Object.assign(lightingState, completeLightingValues(LIGHTING_PRESETS[presetKey]));
     }
     syncLightingUi();
     setStatus(`Viewing ${option.label}`);
@@ -2227,6 +2214,18 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       closeDesignStageDiagnostic();
       return;
     }
+    const traceCitationButton = target.closest<HTMLElement>("[data-trace-citation]");
+    const traceChunkId = traceCitationButton?.dataset.traceCitation?.trim();
+    if (traceChunkId) {
+      const evidenceRow = [...designWorkspaceEl.querySelectorAll<HTMLElement>("[data-trace-evidence]")]
+        .find((item) => item.dataset.traceEvidence === traceChunkId);
+      if (evidenceRow) {
+        evidenceRow.scrollIntoView({ behavior: "smooth", block: "center" });
+        evidenceRow.classList.add("viewer-trace-evidence-highlight");
+        window.setTimeout(() => evidenceRow.classList.remove("viewer-trace-evidence-highlight"), 1800);
+      }
+      return;
+    }
     const detailButton = target.closest<HTMLButtonElement>("[data-design-stage-detail]");
     const stage = detailButton?.dataset.designStageDetail?.trim();
     if (stage) {
@@ -2608,7 +2607,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
     const didRenderCompare = compareMode.renderCompare3dFrame();
     if (!didRenderCompare) {
-      renderer.render(scene, camera);
+      renderPipeline.render(delta);
     }
 
     renderMinimap(
@@ -2659,6 +2658,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     clearGraphOverlay();
     floatingLaneSystem.clearOverlay();
     assetMoveController.dispose();
+    renderPipeline.dispose();
     renderer.dispose();
     minimapRenderer.dispose();
   };

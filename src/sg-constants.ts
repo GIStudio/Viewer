@@ -56,6 +56,10 @@ export const CENTER_STRIP_KINDS = new Set<StripKind>([
   "median",
 ]);
 export const CORNER_LINK_STRIP_KINDS = new Set<StripKind>([
+  "drive_lane",
+  "bus_lane",
+  "bike_lane",
+  "parking_lane",
   "nearroad_furnishing",
   "clear_sidewalk",
   "frontage_reserve",

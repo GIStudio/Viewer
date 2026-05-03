@@ -183,9 +183,12 @@ export type SceneJobStatusPayload = {
   finished_at?: string;
   error?: string;
   result?: SceneJobResult;
+  trace?: GenerationTrace;
 };
 
 export type SceneJobResult = {
+  compose_config?: Record<string, unknown>;
+  summary?: Record<string, unknown>;
   plan_id?: string;
   layout_path?: string;
   scene_layout_path?: string;
@@ -201,6 +204,85 @@ export type SceneJobOperation = string | {
   progress?: number;
   detail?: Record<string, unknown>;
   timestamp?: string;
+};
+
+export type KnowledgeSourceKey = "hybrid" | "pdf_rag" | "graph_rag" | "scenario_parameters";
+
+export type KnowledgeSourceStatus = {
+  key: KnowledgeSourceKey | string;
+  label: string;
+  available: boolean;
+  description?: string;
+  artifact_count?: number;
+  item_count?: number;
+  artifact_path?: string;
+  artifact_dir?: string;
+  source_path?: string;
+  fingerprint?: string;
+  error?: string;
+};
+
+export type RagEvidence = {
+  chunk_id: string;
+  doc_id?: string;
+  section_title?: string;
+  page_start?: number;
+  page_end?: number;
+  text?: string;
+  source_path?: string;
+  score?: number;
+  relevance_reason?: string;
+  knowledge_source?: KnowledgeSourceKey | string;
+  parameter_hints?: Record<string, string>;
+};
+
+export type GenerationTraceStageNode = {
+  id?: string;
+  stage?: string;
+  label?: string;
+  status?: string;
+  progress?: number;
+  timestamp?: string;
+  children?: Array<Record<string, unknown>>;
+};
+
+export type GenerationTrace = {
+  schema_version?: string;
+  job_id?: string;
+  run_id?: string;
+  node_id?: string;
+  status?: string;
+  created_at?: string;
+  started_at?: string;
+  finished_at?: string;
+  error?: string;
+  provenance?: {
+    rag_evidence?: RagEvidence[];
+    rag_queries?: string[];
+    citations_by_field?: Record<string, string[]>;
+    parameter_sources_by_field?: Record<string, string>;
+    knowledge_source?: KnowledgeSourceKey | string;
+    evidence_count?: number;
+  };
+  llm_recommendation?: {
+    normalized_scene_query?: string;
+    design_summary?: string;
+    config_patch?: Record<string, unknown>;
+    raw_fields?: string[];
+    defaulted_fields?: string[];
+    overridden_fields?: string[];
+    risk_notes?: string[];
+    derivation_status?: string;
+  };
+  process?: {
+    current_stage?: string;
+    progress?: number;
+    growth_tree_node?: Record<string, unknown>;
+    stage_tree?: GenerationTraceStageNode[];
+    operations?: SceneJobOperation[];
+  };
+  result?: Record<string, unknown>;
+  evaluation?: Record<string, unknown>;
 };
 
 export type DesignRunSnapshot = {
@@ -264,12 +346,13 @@ export type BranchRunNode = {
   status: string;
   score: number | null;
   scene_layout_path?: string;
-  evaluation?: Record<string, number>;
+  evaluation?: Record<string, unknown>;
+  trace?: GenerationTrace;
   config_patch?: Record<string, unknown>;
   llm_candidate_reasoning?: string;
   optimization_directives?: Array<Record<string, unknown>>;
   rejected_edits?: Array<Record<string, unknown>>;
-  rag_evidence?: Array<Record<string, unknown>>;
+  rag_evidence?: RagEvidence[];
   error?: string;
 };
 
@@ -319,25 +402,25 @@ export const DEFAULT_GRAPH_TEMPLATE_ID = "hkust_gz_gate";
 
 export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
   {
-    id: "pedestrian_friendly",
-    name: "步行友好",
-    nameEn: "Pedestrian Friendly",
-    description: "行人优先，安全舒适",
-    prompt: "步行安全，全龄友好的完整街道，安静、安全、舒适",
+    id: "balanced_complete",
+    name: "平衡街道",
+    nameEn: "Balanced",
+    description: "各类使用者平衡",
+    prompt: "各类使用者平衡的完整街道，行人、自行车、公交、机动车和谐共处",
     configPatch: {
-      design_rule_profile: "pedestrian_priority_v1",
+      design_rule_profile: "balanced_complete_street_v1",
       objective_profile: "balanced",
-      density: 0.5,
-      ped_demand_level: "high",
+      density: 0.6,
+      ped_demand_level: "medium",
       bike_demand_level: "medium",
       transit_demand_level: "medium",
-      vehicle_demand_level: "low",
+      vehicle_demand_level: "medium",
     },
   },
   {
     id: "commercial_vitality",
     name: "商业活力",
-    nameEn: "Commercial Vitality",
+    nameEn: "Commerce",
     description: "商业活跃，人流密集",
     prompt: "商业活跃的街道，商业设施密集，人流穿梭",
     configPatch: {
@@ -353,7 +436,7 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
   {
     id: "transit_priority",
     name: "公交优先",
-    nameEn: "Transit Priority",
+    nameEn: "Transit",
     description: "公交导向，换乘便利",
     prompt: "公交优先的街道，公交可达性高，换乘便利",
     configPatch: {
@@ -369,7 +452,7 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
   {
     id: "park_landscape",
     name: "公园景观",
-    nameEn: "Park Landscape",
+    nameEn: "Greening",
     description: "绿化为主，休闲舒适",
     prompt: "公园景观街道，绿化丰富，自然生态，休闲舒适",
     configPatch: {
@@ -380,38 +463,6 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
       bike_demand_level: "medium",
       transit_demand_level: "low",
       vehicle_demand_level: "low",
-    },
-  },
-  {
-    id: "quiet_residential",
-    name: "安静居住",
-    nameEn: "Quiet Residential",
-    description: "住宅区安静，绿树成荫",
-    prompt: "安静居住街道，绿树成荫，步行安全，适合全龄",
-    configPatch: {
-      design_rule_profile: "pedestrian_priority_v1",
-      objective_profile: "greening",
-      density: 0.35,
-      ped_demand_level: "high",
-      bike_demand_level: "medium",
-      transit_demand_level: "low",
-      vehicle_demand_level: "low",
-    },
-  },
-  {
-    id: "balanced_complete",
-    name: "平衡街道",
-    nameEn: "Balanced Complete",
-    description: "各类使用者平衡",
-    prompt: "各类使用者平衡的完整街道，行人、自行车、公交、机动车和谐共处",
-    configPatch: {
-      design_rule_profile: "balanced_complete_street_v1",
-      objective_profile: "balanced",
-      density: 0.6,
-      ped_demand_level: "medium",
-      bike_demand_level: "medium",
-      transit_demand_level: "medium",
-      vehicle_demand_level: "medium",
     },
   },
 ];

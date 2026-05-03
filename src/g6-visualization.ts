@@ -25,6 +25,8 @@ const STATUS_CONFIG: Record<StageStatus, { color: string; bg: string; icon: stri
 };
 
 let currentGraph: Graph | null = null;
+let currentContainerElement: HTMLElement | null = null;
+let currentClickHandler: ((evt: any) => void) | null = null;
 
 function destroyCurrentGraph(): void {
   if (!currentGraph) {
@@ -32,6 +34,8 @@ function destroyCurrentGraph(): void {
   }
   const graph = currentGraph;
   currentGraph = null;
+  currentContainerElement = null;
+  currentClickHandler = null;
   try {
     graph.destroy();
   } catch (error) {
@@ -58,9 +62,6 @@ export function renderStageTree(
   onNodeClick?: (nodeId: string) => void,
 ): Graph | null {
   try {
-    // Destroy previous graph
-    destroyCurrentGraph();
-
     const toGraphNode = (node: StageNode): any => ({
       id: node.id,
       label: node.nodeType === 'artifact'
@@ -98,10 +99,18 @@ export function renderStageTree(
       children: firstStage ? [firstStage] : [],
     };
 
+    const containerEl = resolveContainerElement(container);
+    if (!containerEl) {
+      destroyCurrentGraph();
+      return null;
+    }
+    if (currentGraph && currentContainerElement !== containerEl) {
+      destroyCurrentGraph();
+    }
+
     // Convert to graph data
     const data = treeToGraphData(treeData);
 
-    const containerEl = resolveContainerElement(container);
     const availableWidth = containerEl?.clientWidth || Math.min(760, Math.max(320, window.innerWidth - 96));
     const graphWidth = Math.max(320, Math.floor(availableWidth));
     const graphHeight = Math.min(
@@ -109,15 +118,21 @@ export function renderStageTree(
       Math.max(420, Math.floor(window.innerHeight * 0.68)),
     );
 
-    if (containerEl) {
-      containerEl.style.width = '100%';
-      containerEl.style.maxWidth = '100%';
-      containerEl.style.height = `${graphHeight}px`;
-      containerEl.style.maxHeight = '68vh';
-      containerEl.style.overflow = 'hidden';
+    containerEl.style.width = '100%';
+    containerEl.style.maxWidth = '100%';
+    containerEl.style.height = `${graphHeight}px`;
+    containerEl.style.maxHeight = '68vh';
+    containerEl.style.overflow = 'hidden';
+
+    if (currentGraph) {
+      currentGraph.setSize(graphWidth, graphHeight);
+      currentGraph.setData(data);
+      void currentGraph.render();
+      return currentGraph;
     }
 
     // Create G6 v5 Graph
+    currentContainerElement = containerEl;
     currentGraph = new Graph({
       container: typeof container === 'string' 
         ? (container.startsWith('#') ? container.substring(1) : container)
@@ -169,10 +184,10 @@ export function renderStageTree(
     });
 
     // Render
-    currentGraph.render();
+    void currentGraph.render();
 
     // Event handling
-    currentGraph.on('node:click', (evt: any) => {
+    currentClickHandler = (evt: any) => {
       const nodeId = evt.target?.id || evt.node?.id;
       if (nodeId && nodeId !== 'root' && onNodeClick) {
         const normalized = String(nodeId).startsWith('artifact:')
@@ -180,7 +195,8 @@ export function renderStageTree(
           : String(nodeId);
         onNodeClick(normalized);
       }
-    });
+    };
+    currentGraph.on('node:click', currentClickHandler);
 
     return currentGraph;
   } catch (error) {

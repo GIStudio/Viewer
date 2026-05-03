@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 4173 --strictPort",
+    "dev": "vite --host ${ROADGEN_VIEWER_HOST:-127.0.0.1} --port ${ROADGEN_VIEWER_PORT:-4173} --strictPort",
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit"
   },

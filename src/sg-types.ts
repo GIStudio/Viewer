@@ -387,6 +387,9 @@ export type DerivedJunctionOverlayConnectorLine = {
   stripKind: StripKind;
   quadrantId: string;
   kernelId: string | null;
+  linkId?: string;
+  start?: JunctionOverlayStripLinkEndpoint;
+  end?: JunctionOverlayStripLinkEndpoint;
   strokeWidthPx: number;
   points: AnnotationPoint[];
 };
@@ -422,6 +425,17 @@ export type DerivedJunctionOverlayFusedStrip = {
   patch: DerivedJunctionOverlayPatch;
 };
 
+export type DerivedJunctionOverlayVehicleTurnPatch = DerivedJunctionOverlayPatch & {
+  stripKind: StripKind;
+  quadrantId: string;
+  kernelId: string | null;
+  fromCenterlineId: string;
+  fromStripId: string;
+  toCenterlineId: string;
+  toStripId: string;
+  strokeWidthPx: number;
+};
+
 export type GenerationMode = "cross_strip_fusion_auto" | "cross_strip_fusion_manual" | "corner_connector_patch" | "viewer_local";
 
 export type DerivedJunctionOverlay = {
@@ -436,6 +450,7 @@ export type DerivedJunctionOverlay = {
   nearroadCorners: DerivedJunctionOverlayPatch[];
   frontageCorners: DerivedJunctionOverlayPatch[];
   fusedCornerStrips: DerivedJunctionOverlayFusedStrip[];
+  vehicleTurnPatches: DerivedJunctionOverlayVehicleTurnPatch[];
   approachBoundaries: DerivedJunctionOverlayBoundary[];
   anchor: AnnotationPoint;
   armCount: number;
@@ -480,6 +495,34 @@ export type MetaurbanAssetBadge = {
 
 export type Tool = "select" | "adjust" | "centerline" | "branch" | "cross" | "roundabout" | "control_point" | "building_region" | "functional_zone" | "tree" | "lamp" | "bench" | "trash" | "bus_stop" | "bollard" | "mailbox" | "hydrant" | "sign";
 
+export type LaneElementKind = "road_strip" | "junction_turn_patch" | "junction_connector" | "junction_side_patch";
+
+export type LaneElementSelection = {
+  kind: "lane_element";
+  id: string;
+  elementKind: LaneElementKind;
+  ownerKind: "centerline" | "junction" | "derived_junction";
+  ownerId: string;
+  centerlineId?: string;
+  stripId?: string;
+  stripKind?: StripKind;
+  stripZone?: StripZone;
+  stripDirection?: StripDirection;
+  widthM?: number;
+  widthPx?: number;
+  junctionId?: string;
+  patchId?: string;
+  connectorId?: string;
+  linkId?: string;
+  quadrantId?: string;
+  kernelId?: string | null;
+  fromCenterlineId?: string;
+  fromStripId?: string;
+  toCenterlineId?: string;
+  toStripId?: string;
+  pointsCount?: number;
+};
+
 export type Selection =
   | {
       kind: "centerline";
@@ -494,6 +537,7 @@ export type Selection =
       kind: "junction" | "roundabout" | "control_point" | "derived_junction" | "building_region" | "functional_zone";
       id: string;
     }
+  | LaneElementSelection
   | null;
 
 export type BuildingRegionResizeHandle = "nw" | "ne" | "se" | "sw";
@@ -582,6 +626,7 @@ export type OffsetPolylineSegment = {
 export type SideStripLayoutEntry = {
   stripId: string;
   kind: StripKind;
+  direction?: StripDirection;
   centerOffsetM: number;
   innerOffsetM: number;
   outerOffsetM: number;

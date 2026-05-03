@@ -42,10 +42,10 @@ import {
 } from "./junction-surface-geometry";
 import type { LaneSurfaceBindingSeed, SurfaceMergePreview } from "./junction-surface-geometry";
 import {
-  buildAnnularSectorBandGeometry,
+  buildCornerFilletRibbonGeometryTs,
   buildQuadrantsFromFusedCornerStripsTs,
+  cornerOffsetFilletKernelTs,
   pointOnBezier,
-  sampleTaperedArcPoints,
 } from "./sg-geometry";
 import type { DesktopShell } from "./desktop-shell";
 
@@ -1539,17 +1539,6 @@ function structuredStripOffsetRangeForZoneM(
   return null;
 }
 
-function pointOnBoundaryWithOffsetM(
-  boundaryCenter: AnnotationPoint,
-  normal: AnnotationPoint,
-  offsetM: number,
-): AnnotationPoint {
-  return {
-    x: boundaryCenter.x + normal.x * offsetM,
-    y: boundaryCenter.y + normal.y * offsetM,
-  };
-}
-
 function orderedOffsetsForCorner(
   boundaryCenter: AnnotationPoint,
   normal: AnnotationPoint,
@@ -1560,6 +1549,23 @@ function orderedOffsetsForCorner(
   const edgeOffsetM = (cornerCenter.x - boundaryCenter.x) * normal.x + (cornerCenter.y - boundaryCenter.y) * normal.y;
   const offsets = [innerOffsetM, outerOffsetM].sort((a, b) => Math.abs(a - edgeOffsetM) - Math.abs(b - edgeOffsetM));
   return { nearOffsetM: offsets[0], farOffsetM: offsets[1] };
+}
+
+function structuredCornerTurnRadiusM(state: EditorState, quadrant: StructuredQuadrantContext): number {
+  const widths: number[] = [];
+  for (const stripKind of STRUCTURED_CORNER_STRIP_KINDS) {
+    const rangeA = structuredStripOffsetRangeForZoneM(state, quadrant.armA, quadrant.zoneA, stripKind);
+    const rangeB = structuredStripOffsetRangeForZoneM(state, quadrant.armB, quadrant.zoneB, stripKind);
+    if (!rangeA || !rangeB) {
+      continue;
+    }
+    widths.push(Math.max((rangeA.widthM + rangeB.widthM) * 0.5, 0));
+  }
+  const splitA = armSplitDistanceM(state, quadrant.armA);
+  const splitB = armSplitDistanceM(state, quadrant.armB);
+  const preferredRadiusM = Math.max(2.8, Math.max(...widths, 0) * 1.35, 0.75 * 3.0);
+  const maxRadiusM = Math.max(Math.min(splitA, splitB) * 0.62, 1.0);
+  return Math.max(Math.min(preferredRadiusM, maxRadiusM), 0.5);
 }
 
 function normalizeStructuredArmAngle(angleDeg: number): number {
@@ -1617,6 +1623,19 @@ function buildStructuredFusedCornerStrips(state: EditorState): DerivedJunctionOv
   const fused: DerivedJunctionOverlayFusedStrip[] = [];
 
   for (const quadrant of buildStructuredQuadrantContexts(state)) {
+    const filletArmA = {
+      splitBoundaryCenter: quadrant.boundaryCenterA,
+      normal: quadrant.normalA,
+      tangent: armAxis(quadrant.armA),
+      splitDistancePx: armSplitDistanceM(state, quadrant.armA),
+    };
+    const filletArmB = {
+      splitBoundaryCenter: quadrant.boundaryCenterB,
+      normal: quadrant.normalB,
+      tangent: armAxis(quadrant.armB),
+      splitDistancePx: armSplitDistanceM(state, quadrant.armB),
+    };
+    const turnRadiusM = structuredCornerTurnRadiusM(state, quadrant);
     for (const stripKind of STRUCTURED_CORNER_STRIP_KINDS) {
       const rangeA = structuredStripOffsetRangeForZoneM(state, quadrant.armA, quadrant.zoneA, stripKind);
       const rangeB = structuredStripOffsetRangeForZoneM(state, quadrant.armB, quadrant.zoneB, stripKind);
@@ -1638,32 +1657,28 @@ function buildStructuredFusedCornerStrips(state: EditorState): DerivedJunctionOv
         rangeB.innerOffsetM,
         rangeB.outerOffsetM,
       );
-      const nearStart = pointOnBoundaryWithOffsetM(quadrant.boundaryCenterA, quadrant.normalA, offsetsA.nearOffsetM);
-      const farStart = pointOnBoundaryWithOffsetM(quadrant.boundaryCenterA, quadrant.normalA, offsetsA.farOffsetM);
-      const nearEnd = pointOnBoundaryWithOffsetM(quadrant.boundaryCenterB, quadrant.normalB, offsetsB.nearOffsetM);
-      const farEnd = pointOnBoundaryWithOffsetM(quadrant.boundaryCenterB, quadrant.normalB, offsetsB.farOffsetM);
-      const geometry = buildAnnularSectorBandGeometry(
-        quadrant.cornerCenter,
-        nearStart,
-        farStart,
-        nearEnd,
-        farEnd,
+      const geometry = buildCornerFilletRibbonGeometryTs(
+        filletArmA,
+        filletArmB,
+        offsetsA.nearOffsetM,
+        offsetsB.nearOffsetM,
+        offsetsA.farOffsetM,
+        offsetsB.farOffsetM,
+        turnRadiusM,
         0.75,
       );
-      if (geometry.ring.length < 3) {
+      const centerKernel = cornerOffsetFilletKernelTs(
+        filletArmA,
+        filletArmB,
+        (offsetsA.nearOffsetM + offsetsA.farOffsetM) * 0.5,
+        (offsetsB.nearOffsetM + offsetsB.farOffsetM) * 0.5,
+        turnRadiusM,
+        0.75,
+      );
+      if (!geometry || geometry.ring.length < 3 || !centerKernel) {
         continue;
       }
-      const centerPointA = pointOnBoundaryWithOffsetM(
-        quadrant.boundaryCenterA,
-        quadrant.normalA,
-        (offsetsA.nearOffsetM + offsetsA.farOffsetM) * 0.5,
-      );
-      const centerPointB = pointOnBoundaryWithOffsetM(
-        quadrant.boundaryCenterB,
-        quadrant.normalB,
-        (offsetsB.nearOffsetM + offsetsB.farOffsetM) * 0.5,
-      );
-      const centerLine = sampleTaperedArcPoints(quadrant.cornerCenter, centerPointA, centerPointB, 0.75);
+      const centerLine = centerKernel.sampledPoints;
 
       const prefix = stripKind === "nearroad_furnishing" ? "nearroad" : stripKind === "clear_sidewalk" ? "sidewalk" : "frontage";
       fused.push({

@@ -45,6 +45,7 @@ Key variables:
 | `VIEWER_ASSET_MANIFEST_PATH` | Path to the primary manifest (default: `<dir>/assets_manifest.jsonl`) |
 | `VIEWER_EXTRA_MANIFEST_DIRS` | `:` separated list of additional manifest directories |
 | `ROADGEN_VIEWER_ALLOWED_ROOTS` | Extra root directories the dev server may serve files from |
+| `ROADGEN_VIEWER_PORT` | Dev-server port override (default: `4173`) |
 
 ### Run
 
@@ -52,7 +53,7 @@ Key variables:
 npm run dev
 ```
 
-Then open [http://localhost:4173](http://localhost:4173) in your browser.
+Then open [http://localhost:4173](http://localhost:4173) in your browser. From the repo root, `make viewer-web` is preferred because it detects whether `4173` is already occupied by another project and automatically starts RoadGen3D Viewer on the next free port.
 
 ## Asset Manifest Format
 

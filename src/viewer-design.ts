@@ -36,6 +36,19 @@ let lastDesignRunSnapshot: {
 // Preset Selection
 // ============================================================================
 
+const COURSE_DELIVERY_CONFIG_PATCH: Record<string, unknown> = {
+  layout_solver: "hybrid_milp_v1",
+  program_generator: "heuristic_v1",
+  allow_solver_fallback: true,
+  asset_scale_mode: "canonical_v1",
+  asset_curation_mode: "scene_ready_first",
+  curated_street_assets_profile: "fixed_hq_v1",
+  scene_texture_mode: "topdown_tiles_v1",
+  topdown_render_mode: "design_tiles_v1",
+  render_preset: "axonometric_board_v1",
+  beauty_mode: "presentation_v1",
+};
+
 export function getSelectedPreset(presetId: string): DesignPreset | null {
   if (presetId === "__custom__") return null;
   return VIEWER_DESIGN_PRESETS.find((p) => p.id === presetId) ?? null;
@@ -48,6 +61,7 @@ export function configForDesignVariant(
   const density = Number(configPatch.density ?? 0.6);
   const roadWidth = Number(configPatch.road_width_m ?? 13.5);
   return {
+    ...COURSE_DELIVERY_CONFIG_PATCH,
     ...configPatch,
     density: Math.max(0.1, Math.min(1.5, density * variant.densityMod)),
     road_width_m: Math.max(5.0, Math.min(30.0, roadWidth * variant.widthMod)),
@@ -64,7 +78,7 @@ export async function submitDesignJob(
   graphTemplateId: string,
   variant: DesignSchemeVariant,
 ): Promise<SceneJobCreatePayload> {
-  const configPatch = preset ? configForDesignVariant(preset.configPatch, variant) : {};
+  const configPatch = configForDesignVariant(preset?.configPatch ?? {}, variant);
   
   return postApiJson<SceneJobCreatePayload>("/api/scene/jobs", {
     draft: {

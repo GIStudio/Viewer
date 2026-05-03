@@ -18,6 +18,8 @@ export type EvaluationResult = {
   safety: number | null;
   beauty: number | null;
   overall: number | null;
+  score_weights?: Record<string, number>;
+  score_formula?: string;
   evaluation: string;
   suggestions: string[];
   config_patch: Record<string, unknown>;
@@ -166,12 +168,17 @@ export function renderEvaluationResultHtml(
   const scoreColor = hasOverall ? metricColor(overallScore, 100) : "#94a3b8";
   const safetyStatus = llmStatusPresentation(result.llm_status?.safety);
   const beautyStatus = llmStatusPresentation(result.llm_status?.beauty);
+  const scoreFormula = result.score_formula || "overall = walkability 0.45 + safety 0.35 + beauty 0.20";
   return `
       <div class="viewer-evaluate-score">
         <div class="viewer-evaluate-score-ring" style="--score-color:${scoreColor};--score-percent:${scorePercent}">
           <span>${hasOverall ? scorePercent : "N/A"}</span>
         </div>
         <div class="viewer-evaluate-score-label">Visual Overall Score</div>
+      </div>
+      <div class="viewer-evaluate-section">
+        <div class="viewer-metrics-group-title">Unified Evaluation Formula</div>
+        <div class="viewer-evaluate-text">${escapeHtml(scoreFormula)}</div>
       </div>
       <div class="viewer-evaluate-score-grid">
         <div class="viewer-evaluate-score-card">

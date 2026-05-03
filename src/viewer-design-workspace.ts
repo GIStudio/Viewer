@@ -2,6 +2,7 @@ import type {
   DesignPreset,
   DesignSchemeVariant,
   GenerationStep,
+  GenerationTrace,
   SceneJobOperation,
   SceneJobStatusPayload,
 } from "./viewer-types";
@@ -198,6 +199,54 @@ function asRecords(value: unknown): Array<Record<string, unknown>> {
     : [];
 }
 
+export function scenarioParameterEvidenceRows(value: unknown): Array<Record<string, unknown>> {
+  return asRecords(value)
+    .filter(isScenarioParameterEvidence)
+    .map((item) => {
+      const triple = parseScenarioParameterTriple(item.text);
+      return {
+        scenario_label: triple.scenario_label || item.section_title || item.chunk_id,
+        parameter_name: triple.parameter_name,
+        normalized_value: formatTripleValue(triple.normalized_value, triple.unit),
+        raw_value: triple.raw_value,
+        source_doc: triple.source_doc || item.doc_id,
+        section: triple.section || item.section_title,
+        confidence: triple.confidence,
+        chunk_id: item.chunk_id,
+      };
+    });
+}
+
+function nonScenarioEvidenceRows(value: unknown): Array<Record<string, unknown>> {
+  return asRecords(value).filter((item) => !isScenarioParameterEvidence(item));
+}
+
+function isScenarioParameterEvidence(item: Record<string, unknown>): boolean {
+  return (
+    String(item.knowledge_source || "").trim() === "scenario_parameters"
+    || String(item.chunk_id || "").startsWith("scenario_parameters::")
+  );
+}
+
+function parseScenarioParameterTriple(text: unknown): Record<string, unknown> {
+  if (typeof text !== "string" || !text.trim()) return {};
+  try {
+    const payload = JSON.parse(text);
+    return payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function formatTripleValue(value: unknown, unit: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined || value === "") return "";
+  const suffix = String(unit ?? "").trim();
+  return suffix ? `${formatDesignDetailValue(value)} ${suffix}` : formatDesignDetailValue(value);
+}
+
 function renderDiagnosticKeyValues(record: Record<string, unknown>, limit = 24): string {
   const entries = Object.entries(record).filter(([, value]) => value !== undefined && value !== "");
   if (entries.length === 0) return `<div class="viewer-design-workspace-muted">暂无数据。</div>`;
@@ -242,6 +291,432 @@ function renderDiagnosticSection(title: string, body: string): string {
     <section class="viewer-design-diagnostic-section">
       <h4>${escapeHtml(title)}</h4>
       ${body}
+    </section>
+  `;
+}
+
+function renderScenarioParameterEvidenceTable(rows: Array<Record<string, unknown>>): string {
+  return renderDiagnosticTable(rows, [
+    ["scenario_label", "情景"],
+    ["parameter_name", "参数"],
+    ["normalized_value", "归一化值"],
+    ["raw_value", "原始值"],
+    ["source_doc", "来源"],
+    ["confidence", "置信度"],
+    ["chunk_id", "Chunk"],
+  ], "本次未返回结构化参数三元组。");
+}
+
+function groupEvidenceBySource(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const grouped = new Map<string, { knowledge_source: string; count: number; best_score: number; chunks: string[] }>();
+  for (const row of rows) {
+    const source = String(row.knowledge_source || "unknown");
+    const existing = grouped.get(source) ?? { knowledge_source: source, count: 0, best_score: 0, chunks: [] };
+    existing.count += 1;
+    existing.best_score = Math.max(existing.best_score, Number(row.score ?? 0));
+    existing.chunks.push(String(row.chunk_id || ""));
+    grouped.set(source, existing);
+  }
+  return [...grouped.values()].map((item) => ({
+    ...item,
+    best_score: item.best_score ? item.best_score.toFixed(3) : "",
+    chunks: item.chunks.filter(Boolean).slice(0, 6).join(", "),
+  }));
+}
+
+function renderTraceEvidenceTable(rows: Array<Record<string, unknown>>, emptyText: string): string {
+  if (rows.length === 0) return `<div class="viewer-design-workspace-muted">${escapeHtml(emptyText)}</div>`;
+  return `
+    <div class="viewer-design-diagnostic-table-wrap">
+      <table class="viewer-design-diagnostic-table">
+        <thead>
+          <tr>
+            <th>Chunk</th>
+            <th>章节</th>
+            <th>相关度</th>
+            <th>来源</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr data-trace-evidence="${escapeHtml(String(row.chunk_id || ""))}">
+              <td>${escapeHtml(formatDesignDetailValue(row.chunk_id))}</td>
+              <td>${escapeHtml(formatDesignDetailValue(row.section_title || row.section))}</td>
+              <td>${escapeHtml(formatDesignDetailValue(row.score))}</td>
+              <td>${escapeHtml(formatDesignDetailValue(row.knowledge_source))}</td>
+              <td>${escapeHtml(formatDesignDetailValue(row.relevance_reason || row.source_path))}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderTraceScenarioTable(rows: Array<Record<string, unknown>>): string {
+  if (rows.length === 0) return `<div class="viewer-design-workspace-muted">本次没有结构化参数三元组。</div>`;
+  return `
+    <div class="viewer-design-diagnostic-table-wrap">
+      <table class="viewer-design-diagnostic-table">
+        <thead>
+          <tr>
+            <th>情景</th>
+            <th>参数</th>
+            <th>归一化值</th>
+            <th>来源</th>
+            <th>置信度</th>
+            <th>Chunk</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr data-trace-evidence="${escapeHtml(String(row.chunk_id || ""))}">
+              <td>${escapeHtml(formatDesignDetailValue(row.scenario_label))}</td>
+              <td>${escapeHtml(formatDesignDetailValue(row.parameter_name))}</td>
+              <td>${escapeHtml(formatDesignDetailValue(row.normalized_value))}</td>
+              <td>${escapeHtml(formatDesignDetailValue(row.source_doc || row.section))}</td>
+              <td>${escapeHtml(formatDesignDetailValue(row.confidence))}</td>
+              <td>${escapeHtml(formatDesignDetailValue(row.chunk_id))}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderTraceCitationButtons(value: unknown): string {
+  const ids = Array.isArray(value) ? value.map(String) : (value ? [String(value)] : []);
+  if (ids.length === 0) return "none";
+  return ids.map((chunkId) => `
+    <button class="viewer-trace-citation" type="button" data-trace-citation="${escapeHtml(chunkId)}">
+      ${escapeHtml(chunkId)}
+    </button>
+  `).join("");
+}
+
+function renderTraceCitations(citations: Record<string, unknown>, sources: Record<string, unknown>): string {
+  const fields = new Set([...Object.keys(citations), ...Object.keys(sources)]);
+  const rows = [...fields].sort().map((field) => ({
+    field,
+    source: sources[field],
+    chunk_ids: citations[field],
+  }));
+  if (rows.length === 0) return `<div class="viewer-design-workspace-muted">暂无字段级引用。</div>`;
+  return `
+    <div class="viewer-design-diagnostic-table-wrap">
+      <table class="viewer-design-diagnostic-table">
+        <thead>
+          <tr><th>字段</th><th>来源类型</th><th>引用 Chunk</th></tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.field)}</td>
+              <td>${escapeHtml(formatDesignDetailValue(row.source))}</td>
+              <td>${renderTraceCitationButtons(row.chunk_ids)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderTraceProcess(trace: Record<string, unknown>): string {
+  const process = asRecord(trace.process);
+  const stageTree = asRecords(process.stage_tree);
+  const growthNode = asRecord(process.growth_tree_node);
+  return [
+    Object.keys(growthNode).length > 0
+      ? renderDiagnosticSection("生长树节点", renderDiagnosticKeyValues(growthNode))
+      : "",
+    renderDiagnosticSection("过程阶段树", renderDiagnosticTable(stageTree, [
+      ["stage", "阶段"],
+      ["label", "事件"],
+      ["status", "状态"],
+      ["progress", "进度"],
+      ["timestamp", "时间"],
+    ], "暂无过程阶段。")),
+  ].join("");
+}
+
+function renderTraceResultEvaluation(trace: Record<string, unknown>): string {
+  const result = asRecord(trace.result);
+  const evaluation = asRecord(trace.evaluation);
+  return [
+    renderDiagnosticSection("生成结果", renderDiagnosticKeyValues({
+      scene_layout_path: result.scene_layout_path,
+      scene_glb_path: result.scene_glb_path,
+      scene_ply_path: result.scene_ply_path,
+      preview_path: result.preview_path,
+      viewer_url: result.viewer_url,
+      artifact_dir: result.artifact_dir,
+      generation_trace_path: result.generation_trace_path,
+    })),
+    renderDiagnosticSection("自动评价", renderDiagnosticKeyValues({
+      status: evaluation.status,
+      overall: evaluation.overall,
+      walkability: evaluation.walkability,
+      safety: evaluation.safety,
+      beauty: evaluation.beauty,
+      evaluation: evaluation.evaluation,
+      suggestions: evaluation.suggestions,
+      error: evaluation.error,
+    })),
+  ].join("");
+}
+
+export function renderGenerationTracePanel(traceValue: unknown, options: { embedded?: boolean } = {}): string {
+  const trace = asRecord(traceValue);
+  const openTag = options.embedded
+    ? `<div class="viewer-generation-trace-panel">`
+    : `<section class="viewer-design-workspace-panel viewer-generation-trace-panel">`;
+  const closeTag = options.embedded ? `</div>` : `</section>`;
+  if (Object.keys(trace).length === 0) {
+    return `
+      ${openTag}
+        <div class="viewer-design-workspace-panel-title">Generation Trace</div>
+        <div class="viewer-design-workspace-muted">等待后端返回本次生成的 trace。</div>
+      ${closeTag}
+    `;
+  }
+  const typedTrace = trace as GenerationTrace;
+  const provenance = asRecord(typedTrace.provenance);
+  const llm = asRecord(typedTrace.llm_recommendation);
+  const evidenceRows = asRecords(provenance.rag_evidence);
+  const structuredRows = scenarioParameterEvidenceRows(evidenceRows);
+  const structuredIds = new Set(structuredRows.map((row) => String(row.chunk_id || "")));
+  const regularRows = evidenceRows.filter((row) => (
+    String(row.knowledge_source || "") !== "scenario_parameters"
+    && !structuredIds.has(String(row.chunk_id || ""))
+  ));
+  const configPatch = asRecord(llm.config_patch);
+  return `
+    ${openTag}
+      <div class="viewer-design-workspace-panel-title">Generation Trace</div>
+      ${renderDiagnosticSection("溯源总览", `
+        ${renderDiagnosticKeyValues({
+          trace_status: trace.status,
+          knowledge_source: provenance.knowledge_source,
+          evidence_count: provenance.evidence_count || evidenceRows.length,
+          rag_queries: provenance.rag_queries,
+          schema_version: trace.schema_version,
+        })}
+        ${renderDiagnosticTable(groupEvidenceBySource(evidenceRows), [
+          ["knowledge_source", "知识源"],
+          ["count", "数量"],
+          ["best_score", "最高相关度"],
+          ["chunks", "代表 Chunk"],
+        ], "暂无 RAG evidence。")}
+      `)}
+      ${renderDiagnosticSection("字段引用", renderTraceCitations(
+        asRecord(provenance.citations_by_field),
+        asRecord(provenance.parameter_sources_by_field),
+      ))}
+      ${renderDiagnosticSection("普通 RAG Evidence", renderTraceEvidenceTable(regularRows, "本次没有普通 PDF/GraphRAG 证据。"))}
+      ${renderDiagnosticSection("结构化参数三元组", renderTraceScenarioTable(structuredRows))}
+      ${renderDiagnosticSection("LLM 推荐结果", `
+        ${renderDiagnosticKeyValues({
+          normalized_scene_query: llm.normalized_scene_query,
+          design_summary: llm.design_summary,
+          derivation_status: llm.derivation_status,
+          raw_fields: llm.raw_fields,
+          defaulted_fields: llm.defaulted_fields,
+          overridden_fields: llm.overridden_fields,
+          risk_notes: llm.risk_notes,
+        })}
+        ${renderDiagnosticTable(Object.entries(configPatch).map(([key, value]) => ({ parameter: key, value })), [
+          ["parameter", "参数"],
+          ["value", "推荐值"],
+        ], "暂无 LLM config patch。")}
+      `)}
+      ${renderTraceProcess(trace)}
+      ${renderTraceResultEvaluation(trace)}
+    ${closeTag}
+  `;
+}
+
+function renderRagEvidenceDiagnosticSections(detail: Record<string, unknown>): string {
+  const citationsField = detail.citations_by_field || detail.citationsByField;
+  const citationsRecord = asRecord(citationsField);
+  const citationKeys = Object.keys(citationsRecord);
+  const totalCitations = citationKeys.reduce((sum, key) => {
+    const value = citationsRecord[key];
+    if (Array.isArray(value)) return sum + value.length;
+    if (typeof value === "string" && value) return sum + 1;
+    return sum;
+  }, 0);
+  const knowledgeSource = String(detail.knowledge_source || detail.knowledgeSource || "graph_rag");
+  const evidenceRows = asRecords(detail.rag_evidence || detail.ragEvidence);
+  const structuredRows = scenarioParameterEvidenceRows(evidenceRows);
+  const regularRows = nonScenarioEvidenceRows(evidenceRows);
+  const evidenceCount = Number(detail.evidence_count || detail.evidenceCount || evidenceRows.length || totalCitations);
+  const citationDetails = citationKeys.map((key) => {
+    const value = citationsRecord[key];
+    const count = Array.isArray(value) ? value.length : (value ? 1 : 0);
+    return `${key}: ${count} 条引用`;
+  }).join("\n");
+  const summary = renderDiagnosticKeyValues({
+    citations_count: totalCitations || undefined,
+    evidence_count: evidenceCount || undefined,
+    standard_rag_count: regularRows.length,
+    structured_triple_count: structuredRows.length,
+    knowledge_source: knowledgeSource,
+    status: evidenceCount > 0 ? "✅ RAG 检索成功" : "RAG 检索未返回结果或已禁用",
+    citation_details: citationDetails || undefined,
+  });
+  return [
+    renderDiagnosticSection("RAG 引用证据", `
+      ${summary}
+      ${renderDiagnosticTable(regularRows, [
+        ["chunk_id", "Chunk"],
+        ["section_title", "章节"],
+        ["score", "相关度"],
+        ["knowledge_source", "来源"],
+      ], "本次没有普通 PDF/GraphRAG 证据。")}
+    `),
+    renderDiagnosticSection("结构化参数三元组", renderScenarioParameterEvidenceTable(structuredRows)),
+  ].join("");
+}
+
+function firstPresent(...values: unknown[]): unknown {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") continue;
+    return value;
+  }
+  return undefined;
+}
+
+function fallbackText(value: unknown): string {
+  const text = String(value ?? "").trim();
+  return text || "no fallback";
+}
+
+function listText(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.map((item) => formatDesignDetailValue(item)).join(", ") : "none";
+  }
+  const text = String(value ?? "").trim();
+  return text || "none";
+}
+
+function scaleSummaryRows(value: unknown): Array<Record<string, unknown>> {
+  const summary = asRecord(value);
+  return Object.entries(summary)
+    .filter(([category, item]) => category !== "_diagnostics" && Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    .map(([category, item]) => ({
+      category,
+      ...asRecord(item),
+    }) as Record<string, unknown>)
+    .sort((a, b) => Number(b.count ?? 0) - Number(a.count ?? 0));
+}
+
+function renderCourseDeliverySummary(payload: SceneJobStatusPayload): string {
+  const result = asRecord(payload.result);
+  const summary = asRecord(result.summary);
+  const composeConfig = asRecord(result.compose_config);
+  const contextDetail = asRecord(latestOperationForStage(payload, "context_resolving")?.detail);
+  const configPatch = asRecord(firstPresent(
+    contextDetail.config_patch,
+    contextDetail.configPatch,
+    contextDetail.compose_config_patch,
+    contextDetail.composeConfigPatch,
+  ));
+  const layoutDetail = asRecord(latestOperationForStage(payload, "layout_generation")?.detail);
+  const layoutAlgorithm = asRecord(layoutDetail.algorithm);
+  const constraintDetail = asRecord(latestOperationForStage(payload, "constraint_solving")?.detail);
+  const solver = asRecord(constraintDetail.solver_summary);
+  const solverAlgorithm = asRecord(solver.algorithm);
+  const solverMetrics = asRecord(solver.metrics);
+  const slotPlanSummary = asRecord(solver.slot_plan_summary);
+  const compositionDetail = asRecord(latestOperationForStage(payload, "asset_composition")?.detail);
+  const placementProgress = asRecord(compositionDetail.placement_progress);
+  const assetScaleSummary = asRecord(summary.asset_scale_summary);
+  const assetScaleDiagnostics = asRecord(assetScaleSummary._diagnostics);
+  const scaleRows = scaleSummaryRows(assetScaleSummary);
+  const hasFinalSummary = Object.keys(summary).length > 0;
+
+  return `
+    <section class="viewer-design-workspace-panel">
+      <div class="viewer-design-workspace-panel-title">布局器设置与结果</div>
+      ${renderDiagnosticSection("课程主链路", renderDiagnosticKeyValues({
+        pipeline: "Viewer design -> graph_template -> hybrid_milp_v1 -> GLB + scene_layout.json -> screenshots -> unified evaluation",
+        final_summary: hasFinalSummary ? "ready" : "waiting",
+        layout_mode: firstPresent(summary.layout_mode, contextDetail.layout_mode, composeConfig.layout_mode, "graph_template"),
+        objective_profile: firstPresent(summary.objective_profile, configPatch.objective_profile, composeConfig.objective_profile),
+        design_rule_profile: firstPresent(summary.design_rule_profile, configPatch.design_rule_profile, composeConfig.design_rule_profile),
+        program_generator_requested: firstPresent(summary.program_generator_requested, layoutAlgorithm.program_generator_requested, configPatch.program_generator, composeConfig.program_generator),
+        program_generator_used: firstPresent(summary.program_generator_used, layoutAlgorithm.program_generator_used),
+        layout_solver_requested: firstPresent(summary.layout_solver_requested, summary.solver_backend_requested, solverAlgorithm.solver_backend_requested, configPatch.layout_solver, composeConfig.layout_solver),
+        layout_solver_used: firstPresent(summary.layout_solver_used, summary.solver_backend_used, solverAlgorithm.solver_backend_used),
+        allow_solver_fallback: firstPresent(configPatch.allow_solver_fallback, composeConfig.allow_solver_fallback, true),
+        solver_fallback_reason: fallbackText(firstPresent(summary.solver_fallback_reason, solverAlgorithm.fallback_reason)),
+      }))}
+      ${renderDiagnosticSection("求解质量", renderDiagnosticKeyValues({
+        rule_satisfaction_rate: firstPresent(summary.rule_satisfaction_rate, solverMetrics.rule_satisfaction_rate),
+        topology_validity: firstPresent(summary.topology_validity, solverMetrics.topology_validity),
+        cross_section_feasibility: firstPresent(summary.cross_section_feasibility, solverMetrics.cross_section_feasibility),
+        editability: firstPresent(summary.editability, solverMetrics.editability),
+        conflict_explainability: firstPresent(summary.conflict_explainability, solverMetrics.conflict_explainability),
+        band_solution_count: firstPresent(summary.band_solution_count, countArrayItems(solver.band_solutions)),
+        total_slots: firstPresent(slotPlanSummary.total_slots, placementProgress.total_slots),
+        placed_count: firstPresent(placementProgress.placed_count, summary.instance_count),
+        dropped_slots: firstPresent(summary.dropped_slots, placementProgress.dropped_slots),
+        dropped_slot_rate: summary.dropped_slot_rate,
+      }))}
+      ${renderDiagnosticSection(
+        "Band Solutions",
+        renderDiagnosticTable(asRecords(solver.band_solutions).slice(0, 12), [
+          ["band_name", "功能带"],
+          ["band_kind", "类型"],
+          ["side", "侧向"],
+          ["width_m", "宽度"],
+          ["slack_m", "余量"],
+          ["active_constraint_names", "约束"],
+        ], "等待 solver band_solutions。"),
+      )}
+      ${renderDiagnosticSection(
+        "Slot Plan 样例",
+        renderDiagnosticTable(asRecords(slotPlanSummary.sample_slots).slice(0, 10), [
+          ["slot_id", "Slot"],
+          ["category", "类别"],
+          ["theme_id", "主题"],
+          ["band_name", "功能带"],
+          ["side", "侧向"],
+          ["x_center_m", "x"],
+          ["z_center_m", "z"],
+          ["required", "Required"],
+        ], "等待 slot plan 样例。"),
+      )}
+      ${renderDiagnosticSection("视觉素材设置", renderDiagnosticKeyValues({
+        scene_texture_mode: firstPresent(summary.scene_texture_mode, configPatch.scene_texture_mode, composeConfig.scene_texture_mode),
+        scene_texture_pack: summary.scene_texture_pack,
+        scene_texture_fallback_used: summary.scene_texture_fallback_used,
+        scene_texture_missing_assets: listText(summary.scene_texture_missing_assets),
+        selected_ground_material_backend: summary.selected_ground_material_backend,
+        selected_ground_materials: summary.selected_ground_materials,
+        asset_curation_mode: firstPresent(summary.asset_curation_mode, configPatch.asset_curation_mode, composeConfig.asset_curation_mode),
+        curated_street_assets_profile: firstPresent(summary.curated_street_assets_profile, configPatch.curated_street_assets_profile, composeConfig.curated_street_assets_profile),
+      }))}
+      ${renderDiagnosticSection("资产尺度证据", `
+        ${renderDiagnosticKeyValues({
+          asset_scale_mode: firstPresent(summary.asset_scale_mode, configPatch.asset_scale_mode, composeConfig.asset_scale_mode),
+          building_asset_rejected_size_mismatch_count: assetScaleDiagnostics.building_asset_rejected_size_mismatch_count,
+          procedural_building_fallback_count: assetScaleDiagnostics.procedural_building_fallback_count,
+        })}
+        ${renderDiagnosticTable(scaleRows.slice(0, 14), [
+          ["category", "类别"],
+          ["count", "数量"],
+          ["median_scale", "中位缩放"],
+          ["min_scale", "最小"],
+          ["max_scale", "最大"],
+          ["fallback_count", "fallback"],
+          ["source_scale_rejected_count", "源尺度拒绝"],
+          ["scale_gate_failed_count", "尺度门失败"],
+        ], "最终 summary 写入后显示资产尺度统计。")}
+      `)}
     </section>
   `;
 }
@@ -421,37 +896,7 @@ function renderContextResolvingDiagnostic(detail: Record<string, unknown>): stri
       sidewalk_width_m: detail.sidewalk_width_m || detail.sidewalkWidthM,
     })),
     renderDiagnosticSection("配置补丁", renderDiagnosticKeyValues(asRecord(detail.config_patch || detail.configPatch || detail.compose_config_patch || detail.composeConfigPatch), 20)),
-    renderDiagnosticSection("RAG 引用证据", (() => {
-      const citationsField = detail.citations_by_field || detail.citationsByField;
-      const citationsRecord = asRecord(citationsField);
-      const citationKeys = Object.keys(citationsRecord);
-      const totalCitations = citationKeys.reduce((sum, key) => {
-        const value = citationsRecord[key];
-        if (Array.isArray(value)) return sum + value.length;
-        if (typeof value === "string" && value) return sum + 1;
-        return sum;
-      }, 0);
-      const knowledgeSource = String(detail.knowledge_source || detail.knowledgeSource || "graph_rag");
-      const evidenceCount = Number(detail.evidence_count || detail.evidenceCount || totalCitations);
-      if (evidenceCount === 0) {
-        return renderDiagnosticKeyValues({
-          citations_count: 0,
-          knowledge_source: knowledgeSource,
-          status: "RAG 检索未返回结果或已禁用",
-        });
-      }
-      const citationDetails = citationKeys.map((key) => {
-        const value = citationsRecord[key];
-        const count = Array.isArray(value) ? value.length : (value ? 1 : 0);
-        return `${key}: ${count} 条引用`;
-      }).join("\n");
-      return renderDiagnosticKeyValues({
-        citations_count: evidenceCount,
-        knowledge_source: knowledgeSource,
-        status: evidenceCount > 0 ? "✅ RAG 检索成功" : "❌ 无引用",
-        citation_details: citationDetails || "无详细引用",
-      });
-    })()),
+    renderRagEvidenceDiagnosticSections(detail),
   ].join("");
 }
 
@@ -712,22 +1157,28 @@ export function renderDesignStageCards(payload: SceneJobStatusPayload, currentSt
                 ? "active"
                 : "pending";
         const percent = typeof operation?.progress === "number" ? operation.progress : step.progress;
+        const compactMessage = operation?.message || step.detailHint;
         return `
-          <article class="viewer-design-stage-card" data-state="${state}">
-            <div class="viewer-design-stage-head">
-              <span>${escapeHtml(step.shortLabel)}</span>
-              <strong>${escapeHtml(step.label)}</strong>
-              <em>${Math.round(percent)}%</em>
+          <details class="viewer-design-stage-card" data-state="${state}">
+            <summary class="viewer-design-stage-summary">
+              <div class="viewer-design-stage-head">
+                <span>${escapeHtml(step.shortLabel)}</span>
+                <strong>${escapeHtml(step.label)}</strong>
+                <em>${Math.round(percent)}%</em>
+              </div>
+              <div class="viewer-design-stage-compact">${escapeHtml(compactMessage)}</div>
+            </summary>
+            <div class="viewer-design-stage-expanded">
+              <p>${escapeHtml(step.purpose)}</p>
+              <div class="viewer-design-stage-hint">${escapeHtml(compactMessage)}</div>
+              ${renderDesignDetailList(operation?.detail, state === "active" ? 8 : 3)}
+              ${isCoreDiagnosticStage(step.key) ? `
+                <button class="viewer-design-stage-detail-button" type="button" data-design-stage-detail="${escapeHtml(step.key)}">
+                  查看算法详情
+                </button>
+              ` : ""}
             </div>
-            <p>${escapeHtml(step.purpose)}</p>
-            <div class="viewer-design-stage-hint">${escapeHtml(operation?.message || step.detailHint)}</div>
-            ${renderDesignDetailList(operation?.detail, state === "active" ? 8 : 3)}
-            ${isCoreDiagnosticStage(step.key) ? `
-              <button class="viewer-design-stage-detail-button" type="button" data-design-stage-detail="${escapeHtml(step.key)}">
-                查看算法详情
-              </button>
-            ` : ""}
-          </article>
+          </details>
         `;
       }).join("")}
     </div>
@@ -770,6 +1221,8 @@ export function renderDesignWorkspaceHtml(
         </div>
         <div class="viewer-design-workspace-layout">
           ${renderDesignImprovementSummary(preset, variant, prompt, graphTemplateId)}
+          ${renderCourseDeliverySummary(payload)}
+          ${renderGenerationTracePanel(payload.trace)}
           <section class="viewer-design-workspace-panel">
             <div class="viewer-design-workspace-panel-title">场景生长树</div>
             <div id="viewer-g6-stage-tree"></div>
