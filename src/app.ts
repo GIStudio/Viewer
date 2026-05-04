@@ -222,6 +222,15 @@ function isEditableTarget(target: EventTarget | null): boolean {
     || target instanceof HTMLSelectElement;
 }
 
+function isRoamMovementKey(code: string): boolean {
+  return code === "KeyW"
+    || code === "KeyA"
+    || code === "KeyS"
+    || code === "KeyD"
+    || code === "ShiftLeft"
+    || code === "ShiftRight";
+}
+
 function createAvatarFigure(): THREE.Group {
   const avatar = new THREE.Group();
   avatar.name = "viewer_avatar";
@@ -1103,6 +1112,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     },
     settingsToggleEl,
     onSettingsOpen: () => {
+      resetMoveState();
       if (controls.isLocked) {
         resumeRoamAfterSettingsClose = true;
         controls.unlock();
@@ -1114,6 +1124,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       if (shouldRestoreRoam) {
         controls.lock();
       }
+      updateOverlay();
     },
     onDesignOpen: populateDesignPresets,
     onCompareOpen: populateCompareSelectors,
@@ -1406,7 +1417,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   function updateOverlay(): void {
-    overlayEl.hidden = controls.isLocked;
+    overlayEl.hidden = isRoamMovementActive();
   }
 
   function clearInfoCard(): void {
@@ -1462,6 +1473,23 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   function handleKey(event: KeyboardEvent, active: boolean): void {
+    const movementKey = isRoamMovementKey(event.code);
+    if (
+      movementKey
+      && active
+      && (isEditableTarget(event.target) || panelController.isAnyOpen())
+    ) {
+      resetMoveState();
+      return;
+    }
+    if (
+      movementKey
+      && active
+      && !controls.isLocked
+      && currentCameraMode !== "third_person"
+    ) {
+      return;
+    }
     if (
       active
       && !event.repeat
@@ -1534,6 +1562,25 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         return;
     }
     event.preventDefault();
+  }
+
+  function resetMoveState(): void {
+    moveState.forward = false;
+    moveState.backward = false;
+    moveState.left = false;
+    moveState.right = false;
+    moveState.sprint = false;
+  }
+
+  function isThirdPersonKeyboardRoamActive(): boolean {
+    return currentCameraMode === "third_person"
+      && !panelController.isAnyOpen()
+      && document.visibilityState === "visible"
+      && document.hasFocus();
+  }
+
+  function isRoamMovementActive(): boolean {
+    return controls.isLocked || isThirdPersonKeyboardRoamActive();
   }
 
   function configureSceneObjectShadows(rootObject: THREE.Object3D): void {
@@ -2407,6 +2454,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     () => {
       currentCameraMode = thirdPersonToggleEl.checked ? "third_person" : "first_person";
       syncCameraRig();
+      updateOverlay();
     },
     { signal },
   );
@@ -2527,11 +2575,25 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   );
 
   const handleControlsLock = () => updateOverlay();
-  const handleControlsUnlock = () => updateOverlay();
+  const handleControlsUnlock = () => {
+    resetMoveState();
+    updateOverlay();
+  };
   controls.addEventListener("lock", handleControlsLock);
   controls.addEventListener("unlock", handleControlsUnlock);
 
   window.addEventListener("resize", resizeRenderer, { signal });
+  window.addEventListener("blur", resetMoveState, { signal });
+  document.addEventListener(
+    "visibilitychange",
+    () => {
+      if (document.visibilityState !== "visible") {
+        resetMoveState();
+      }
+      updateOverlay();
+    },
+    { signal },
+  );
   window.addEventListener("keydown", (event) => handleKey(event, true), { signal });
   window.addEventListener("keyup", (event) => handleKey(event, false), { signal });
   layoutSelectEl.addEventListener(
@@ -2585,7 +2647,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       if (t >= 1) {
         flyAnimation = null;
       }
-    } else if (controls.isLocked) {
+    } else if (isRoamMovementActive()) {
       const moveSpeed = moveState.sprint ? 8.5 : 4.5;
       const forwardAxis = Number(moveState.forward) - Number(moveState.backward);
       const sideAxis = Number(moveState.right) - Number(moveState.left);
