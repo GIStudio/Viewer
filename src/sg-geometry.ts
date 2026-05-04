@@ -1246,6 +1246,24 @@ function buildRoadPenEndpointFillPatchTs(
   };
 }
 
+function buildRoadPenCarriagewayApronPatchTs(
+  anchor: AnnotationPoint,
+  arm: DerivedJunctionOverlayArm,
+  nextArm: DerivedJunctionOverlayArm,
+  roadEdgeCurve: AnnotationPoint[],
+): AnnotationPoint[] | null {
+  if (roadEdgeCurve.length < 2) {
+    return null;
+  }
+  const incomingBoundaryOrigin = addPointTs(anchor, scalePointTs(arm.normal, arm.carriagewayWidthPx * 0.5));
+  const outgoingBoundaryOrigin = addPointTs(anchor, scalePointTs(nextArm.normal, -nextArm.carriagewayWidthPx * 0.5));
+  const coreCorner = lineIntersectionTs(incomingBoundaryOrigin, arm.tangent, outgoingBoundaryOrigin, nextArm.tangent);
+  if (!coreCorner) {
+    return null;
+  }
+  return dedupeRingPointsTs([...roadEdgeCurve.map((point) => clonePoint(point)), coreCorner], 0.05);
+}
+
 function buildRoadPenStyleCrossCornerOverlayTs(
   junctionId: string,
   orderedArms: DerivedJunctionOverlayArm[],
@@ -1256,6 +1274,7 @@ function buildRoadPenStyleCrossCornerOverlayTs(
   quadrantCornerKernels: JunctionOverlayCornerKernel[];
   connectorCenterLines: DerivedJunctionOverlayConnectorLine[];
   cornerStripLinks: JunctionOverlayStripLink[];
+  vehicleTurnPatches: DerivedJunctionOverlayVehicleTurnPatch[];
   cornerFocusPoints: JunctionOverlayCornerFocus[];
   boundaryExtensionLines: JunctionOverlayGuideLine[];
   focusGuideLines: JunctionOverlayGuideLine[];
@@ -1264,6 +1283,7 @@ function buildRoadPenStyleCrossCornerOverlayTs(
   const quadrantCornerKernels: JunctionOverlayCornerKernel[] = [];
   const connectorCenterLines: DerivedJunctionOverlayConnectorLine[] = [];
   const cornerStripLinks: JunctionOverlayStripLink[] = [];
+  const vehicleTurnPatches: DerivedJunctionOverlayVehicleTurnPatch[] = [];
   const cornerFocusPoints: JunctionOverlayCornerFocus[] = [];
   const boundaryExtensionLines: JunctionOverlayGuideLine[] = [];
   const focusGuideLines: JunctionOverlayGuideLine[] = [];
@@ -1348,6 +1368,7 @@ function buildRoadPenStyleCrossCornerOverlayTs(
       continue;
     }
 
+    let apronCandidate: { priority: number; roadEdgeCurve: AnnotationPoint[] } | null = null;
     for (const { spec, rangeA, rangeB } of cornerRanges) {
       if (!rangeA || !rangeB) {
         continue;
@@ -1406,6 +1427,13 @@ function buildRoadPenStyleCrossCornerOverlayTs(
           points: patchGeometry.ring.map((point) => clonePoint(point)),
         },
       });
+      const apronPriority = spec.kind === "nearroad_furnishing" ? 0 : spec.kind === "clear_sidewalk" ? 1 : 2;
+      if (!apronCandidate || apronPriority < apronCandidate.priority) {
+        apronCandidate = {
+          priority: apronPriority,
+          roadEdgeCurve: patchGeometry.innerLine.map((point) => clonePoint(point)),
+        };
+      }
       const endpointFillLengthPx = Math.max(patchGeometry.tangentSetbackPx, patchGeometry.chamferDepthPx * 2) + (0.25 * Math.max(ppm, 0.0001));
       const endpointFillLateralOverlapPx = ROADPEN_ENDPOINT_FILL_LATERAL_OVERLAP_M * Math.max(ppm, 0.0001);
       for (const endpoint of [
@@ -1478,6 +1506,24 @@ function buildRoadPenStyleCrossCornerOverlayTs(
       }
     }
 
+    if (apronCandidate) {
+      const apronRing = buildRoadPenCarriagewayApronPatchTs(anchor, arm, nextArm, apronCandidate.roadEdgeCurve);
+      if (apronRing && apronRing.length >= 3) {
+        vehicleTurnPatches.push({
+          patchId: `${junctionId}_carriageway_apron_${String(armIndex + 1).padStart(2, "0")}`,
+          stripKind: "drive_lane",
+          quadrantId,
+          kernelId,
+          fromCenterlineId: arm.centerlineId,
+          fromStripId: "carriageway_apron",
+          toCenterlineId: nextArm.centerlineId,
+          toStripId: "carriageway_apron",
+          strokeWidthPx: Math.max(2, (arm.carriagewayWidthPx + nextArm.carriagewayWidthPx) * 0.5),
+          points: apronRing,
+        });
+      }
+    }
+
     const kernelPoints = canonicalKernelPoints ?? connectorCenterLines
       .filter((line) => line.quadrantId === quadrantId)[0]?.points
       ?? [];
@@ -1504,6 +1550,7 @@ function buildRoadPenStyleCrossCornerOverlayTs(
     quadrantCornerKernels,
     connectorCenterLines,
     cornerStripLinks,
+    vehicleTurnPatches,
     cornerFocusPoints,
     boundaryExtensionLines,
     focusGuideLines,
@@ -2078,6 +2125,7 @@ export function buildCrossCornerOverlayTs(
     if (roadPenStyle.fusedCornerStrips.length > 0) {
       connectorCenterLines.push(...roadPenStyle.connectorCenterLines);
       cornerStripLinks.push(...roadPenStyle.cornerStripLinks);
+      vehicleTurnPatches.push(...roadPenStyle.vehicleTurnPatches);
       appendStraightVehicleLaneConnectorsTs(
         junctionId,
         orderedArms,
