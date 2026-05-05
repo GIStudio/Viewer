@@ -1,4 +1,4 @@
-import type { BranchRunNode, BranchRunStatusPayload } from "./viewer-types";
+import type { BranchInfluenceRow, BranchRunNode, BranchRunStatusPayload, BranchScatterPoint } from "./viewer-types";
 import { DEFAULT_GRAPH_TEMPLATE_ID } from "./viewer-types";
 import { clamp, escapeHtml } from "./viewer-utils";
 import { renderGenerationTracePanel, scenarioParameterEvidenceRows } from "./viewer-design-workspace";
@@ -32,6 +32,41 @@ function asRecords(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
     ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
     : [];
+}
+
+const SCATTER_COLOR_FEATURES = [
+  ["", "Overall / Preset"],
+  ["scene.tree_count", "Tree count"],
+  ["scene.sidewalk_width_m", "Sidewalk width"],
+  ["scene.road_width_m", "Road width"],
+  ["input.density", "Input density"],
+  ["input.building_density", "Input building density"],
+  ["scene.rule_satisfaction_rate", "Rule satisfaction"],
+  ["derived.tree_count_per_100m", "Trees per 100m"],
+  ["derived.sidewalk_to_road_ratio", "Sidewalk / road"],
+] as const;
+
+function branchPointFeatureValue(point: BranchScatterPoint, feature: string): number | null {
+  const features = point.analysis_features ?? {};
+  const [group, key] = feature.split(".", 2);
+  const record = group === "input" ? features.input : group === "scene" ? features.scene : group === "derived" ? features.derived : undefined;
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function renderScatterColorControl(points: BranchScatterPoint[]): string {
+  const options = SCATTER_COLOR_FEATURES.filter(([feature]) => (
+    !feature || points.some((point) => branchPointFeatureValue(point, feature) !== null)
+  ));
+  if (options.length <= 1) return "";
+  return `
+    <label class="viewer-branch-color-control">
+      <span>Color by</span>
+      <select data-branch-color-by>
+        ${options.map(([feature, label]) => `<option value="${escapeHtml(feature)}">${escapeHtml(label)}</option>`).join("")}
+      </select>
+    </label>
+  `;
 }
 
 function renderDiagnosticKeyValues(record: Record<string, unknown>, limit = 24): string {
@@ -111,10 +146,77 @@ export function formatBranchScore(value: unknown): string {
   return `${Math.round(value)}`;
 }
 
+function formatInfluenceMetric(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "";
+  return `${Math.round(value * 100) / 100}`;
+}
+
+function formatInfluenceValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "";
+  if (Array.isArray(value)) return value.map((item) => formatInfluenceValue(item)).filter(Boolean).join(", ");
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function sortedInfluenceRows(rows: BranchInfluenceRow[]): BranchInfluenceRow[] {
+  return [...rows].sort((a, b) => (
+    Number(Boolean(b.active)) - Number(Boolean(a.active))
+    || Number(b.score ?? b.confidence ?? 0) - Number(a.score ?? a.confidence ?? 0)
+    || Number(a.rank ?? 0) - Number(b.rank ?? 0)
+    || String(a.label).localeCompare(String(b.label))
+  ));
+}
+
+function renderInfluenceColumn(rows: BranchInfluenceRow[], title: string, emptyText: string): string {
+  const sorted = sortedInfluenceRows(rows);
+  return `
+    <div class="viewer-branch-influence-column">
+      <h4>${escapeHtml(title)}</h4>
+      ${sorted.length === 0 ? `<div class="viewer-design-workspace-muted">${escapeHtml(emptyText)}</div>` : `
+        <div class="viewer-branch-influence-list">
+          ${sorted.slice(0, 18).map((row) => {
+            const metric = formatInfluenceMetric(row.score ?? row.confidence);
+            const value = formatInfluenceValue(row.value);
+            const oldValue = formatInfluenceValue(row.old_value);
+            const delta = oldValue && value && oldValue !== value ? `${oldValue} -> ${value}` : value;
+            return `
+              <article class="viewer-branch-influence-row" data-active="${row.active ? "true" : "false"}">
+                <div>
+                  <span>${escapeHtml(row.source_type || "source")}</span>
+                  ${metric ? `<em>${escapeHtml(metric)}</em>` : ""}
+                </div>
+                <strong>${escapeHtml(row.label || row.field || row.id)}</strong>
+                ${delta ? `<small>${escapeHtml(delta)}${row.unit ? ` ${escapeHtml(row.unit)}` : ""}</small>` : ""}
+                ${row.detail ? `<p>${escapeHtml(row.detail)}</p>` : ""}
+              </article>
+            `;
+          }).join("")}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+export function renderBranchInfluenceMatrix(node: BranchRunNode | null): string {
+  if (!node) return `<div class="viewer-design-workspace-muted">选择一个散点或分支节点查看激活来源。</div>`;
+  const rows = node.influence_rows ?? [];
+  const knowledge = rows.filter((row) => row.group === "knowledge");
+  const parameters = rows.filter((row) => row.group === "parameters");
+  const llm = rows.filter((row) => row.group === "llm_constraints");
+  return `
+    <div class="viewer-branch-influence-matrix">
+      ${renderInfluenceColumn(knowledge, "Knowledge / RAG", "该节点没有普通 RAG evidence。")}
+      ${renderInfluenceColumn(parameters, "Parameter Triples", "该节点没有结构化参数三元组。")}
+      ${renderInfluenceColumn(llm, "Search Changes & Constraints", "该节点没有搜索修改或约束记录。")}
+    </div>
+  `;
+}
+
 export function renderBranchTree(payload: BranchRunStatusPayload, selectedId: string | null): string {
   const nodes = branchNodes(payload);
   if (nodes.length === 0) return `<div class="viewer-design-workspace-muted">等待分支节点生成。</div>`;
   const bestId = payload.best_node_id ?? "";
+  const paretoIds = new Set(payload.pareto_front ?? []);
   return `
     <div class="viewer-branch-tree">
       ${nodes.map((node) => `
@@ -124,10 +226,11 @@ export function renderBranchTree(payload: BranchRunStatusPayload, selectedId: st
           data-depth="${escapeHtml(String(node.depth))}"
           data-status="${escapeHtml(node.status)}"
           data-selected="${node.node_id === selectedId ? "true" : "false"}"
+          data-pareto="${paretoIds.has(node.node_id) ? "true" : "false"}"
           type="button"
         >
           <span>D${node.depth} · #${node.rank}</span>
-          <strong>${escapeHtml(node.node_id)}${node.node_id === bestId ? " · Best" : ""}</strong>
+          <strong>${escapeHtml(node.node_id)}${node.node_id === bestId ? " · Best" : ""}${paretoIds.has(node.node_id) ? " · Pareto" : ""}</strong>
           <small>${escapeHtml(node.status)} · score ${escapeHtml(formatBranchScore(node.score))}</small>
         </button>
       `).join("")}
@@ -138,36 +241,34 @@ export function renderBranchTree(payload: BranchRunStatusPayload, selectedId: st
 export function renderBranchScatter(payload: BranchRunStatusPayload, selectedId: string | null): string {
   const points = payload.scatter_points ?? [];
   if (points.length === 0) {
-    return `<div class="viewer-design-workspace-muted">等待评价结果生成散点图。</div>`;
+    return `<div class="viewer-design-workspace-muted">等待评价结果生成三维散点图。</div>`;
   }
-  const plotWidth = 540;
-  const plotHeight = 320;
-  const padding = 34;
-  const scaleX = (value: number | null | undefined) => padding + (clamp(Number(value ?? 0), 0, 100) / 100) * (plotWidth - padding * 2);
-  const scaleY = (value: number | null | undefined) => plotHeight - padding - (clamp(Number(value ?? 0), 0, 100) / 100) * (plotHeight - padding * 2);
+  const completePoints = points.filter((point) => (
+    typeof (point.walkability ?? point.x) === "number"
+    && typeof (point.safety ?? point.y) === "number"
+    && typeof (point.beauty ?? point.z) === "number"
+  ));
+  const paretoCount = payload.pareto_front_size ?? completePoints.filter((point) => point.is_pareto_front).length;
+  const earlyStopText = payload.early_stop_triggered ? "early stopped" : "running frontier";
+  const retainedText = payload.retain_topk_artifacts
+    ? `${payload.retained_artifact_count ?? 0}/${payload.retain_topk_artifacts} assets kept`
+    : "";
   return `
     <div class="viewer-branch-scatter-wrap">
-      <svg class="viewer-branch-scatter" viewBox="0 0 ${plotWidth} ${plotHeight}" role="img" aria-label="Branch evaluation scatter plot">
-        <line x1="${padding}" y1="${plotHeight - padding}" x2="${plotWidth - padding}" y2="${plotHeight - padding}" />
-        <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${plotHeight - padding}" />
-        <text x="${plotWidth / 2}" y="${plotHeight - 7}">Walkability</text>
-        <text x="10" y="20">Overall</text>
-        ${points.map((point) => {
-          const radius = point.status === "succeeded" ? 7 + clamp(Number(point.overall ?? 50), 0, 100) / 28 : 6;
-          return `
-            <circle
-              class="viewer-branch-point"
-              data-branch-node="${escapeHtml(point.node_id)}"
-              data-status="${escapeHtml(point.status)}"
-              data-selected="${point.node_id === selectedId ? "true" : "false"}"
-              cx="${scaleX(point.x)}"
-              cy="${scaleY(point.y)}"
-              r="${radius}"
-            />
-            <text class="viewer-branch-point-label" x="${scaleX(point.x) + 9}" y="${scaleY(point.y) - 8}">D${point.depth}</text>
-          `;
-        }).join("")}
-      </svg>
+      <div class="viewer-branch-scatter-meta">
+        <span>${escapeHtml(payload.search_mode === "pareto" ? "Pareto surface" : "LLM branch")}</span>
+        <span>auto-scaled axes</span>
+        ${payload.score_with_rendered_views ? `<span>visual LLM scoring</span>` : ""}
+        <span>${escapeHtml(String(completePoints.length))} 3D points</span>
+        <span>${escapeHtml(String(paretoCount))} Pareto front</span>
+        ${retainedText ? `<span>${escapeHtml(retainedText)}</span>` : ""}
+        <span>${escapeHtml(String(payload.completed_samples ?? completePoints.length))}/${escapeHtml(String(payload.target_samples ?? points.length))} scored</span>
+        ${payload.early_stop_patience ? `<span>${escapeHtml(earlyStopText)} · patience ${escapeHtml(String(payload.early_stop_patience))}</span>` : ""}
+        <span>selected ${escapeHtml(selectedId || "best")}</span>
+        ${renderScatterColorControl(completePoints)}
+      </div>
+      <div class="viewer-branch-scatter" data-branch-score-scatter></div>
+      <div class="viewer-branch-score-tooltip" data-branch-score-tooltip hidden></div>
     </div>
   `;
 }
@@ -175,11 +276,22 @@ export function renderBranchScatter(payload: BranchRunStatusPayload, selectedId:
 export function renderBranchNodeDetail(node: BranchRunNode | null): string {
   if (!node) return `<div class="viewer-design-workspace-muted">选择一个分支节点查看细节。</div>`;
   const evaluation = asRecord(node.evaluation);
+  const llmStatus = asRecord(evaluation.llm_status);
+  const safetyLlm = asRecord(llmStatus.safety);
+  const beautyLlm = asRecord(llmStatus.beauty);
+  const fallback = asRecord(evaluation.branch_score_fallback);
+  const canRestoreArtifact = Boolean(
+    node.scene_layout_path
+    && (node.can_restore_artifact === true || (node.can_restore_artifact === undefined && node.scene_glb_path)),
+  );
+  const canLoadOrRebuildArtifact = Boolean(node.scene_layout_path);
+  const loadableLayoutPath = canLoadOrRebuildArtifact ? node.scene_layout_path || "" : "";
+  const loadButtonLabel = canRestoreArtifact ? "Load Scene" : "Rebuild + Load Scene";
   return `
     <div class="viewer-branch-detail">
       <div class="viewer-branch-detail-actions">
-        ${node.scene_layout_path ? `
-          <button class="viewer-design-stage-detail-button" type="button" data-branch-load="${escapeHtml(node.scene_layout_path)}">Load Scene</button>
+        ${canLoadOrRebuildArtifact ? `
+          <button class="viewer-design-stage-detail-button" type="button" data-branch-load="${escapeHtml(loadableLayoutPath)}">${escapeHtml(loadButtonLabel)}</button>
         ` : ""}
       </div>
       ${renderDiagnosticSection("评价结果", renderDiagnosticKeyValues({
@@ -189,11 +301,17 @@ export function renderBranchNodeDetail(node: BranchRunNode | null): string {
         safety: evaluation.safety,
         beauty: evaluation.beauty,
         overall: evaluation.overall,
+        safety_visual_llm: safetyLlm.available === true ? "available" : "not run / unavailable",
+        beauty_visual_llm: beautyLlm.available === true ? "available" : "not run / unavailable",
+        branch_score_fallback: Object.keys(fallback).length ? "structural proxy used for batch axes" : "not used",
+        artifacts_retained: node.artifacts_retained ? `yes · rank ${node.artifact_rank ?? ""}` : "no",
+        can_restore_artifact: node.can_restore_artifact ? "yes" : "no",
+        artifact_restore_mode: canRestoreArtifact ? "glb retained" : (node.scene_layout_path ? "layout rebuild" : "none"),
         error: node.error,
       }))}
       ${renderGenerationTracePanel(node.trace, { embedded: true })}
-      ${renderDiagnosticSection("LLM 候选与实际参数", `
-        <p class="viewer-design-workspace-copy">${escapeHtml(node.llm_candidate_reasoning || "无 LLM reasoning。")}</p>
+      ${renderDiagnosticSection("搜索候选与实际参数", `
+        <p class="viewer-design-workspace-copy">${escapeHtml(node.llm_candidate_reasoning || "无搜索候选说明。")}</p>
         ${renderDiagnosticKeyValues(asRecord(node.config_patch), 28)}
       `)}
       ${renderDiagnosticSection("Rule-Based 优化方向", renderDiagnosticTable(asRecords(node.optimization_directives), [
@@ -203,9 +321,9 @@ export function renderBranchNodeDetail(node: BranchRunNode | null): string {
         ["allowed_fields", "允许字段"],
         ["risk", "风险"],
       ], "该节点尚未生成优化方向。"))}
-      ${renderDiagnosticSection("LLM 修改拦截", renderDiagnosticTable(asRecords(node.rejected_edits), [
+      ${renderDiagnosticSection("搜索修改拦截", renderDiagnosticTable(asRecords(node.rejected_edits), [
         ["field", "字段"],
-        ["value", "LLM 值"],
+        ["value", "候选值"],
         ["reason", "拦截原因"],
       ], "没有被拦截的修改。"))}
       ${(() => {
@@ -243,13 +361,16 @@ export function renderBranchWorkspaceHtml(
   fallbackPrompt: string,
 ): string {
   const progress = Math.round(clamp(Number(payload.progress ?? 0), 0, 100));
+  const modeLabel = payload.search_mode === "pareto" ? "Pareto Search" : "Branch Run";
+  const title = payload.search_mode === "pareto" ? "Pareto Surface Trace" : "100 Sample Trace";
   return `
     <div class="viewer-design-workspace-shell">
       <header class="viewer-design-workspace-header">
         <div>
-          <span class="viewer-design-workspace-kicker">Branch Run · Top-${escapeHtml(String(payload.topk ?? 3))} · ${escapeHtml(payload.graph_template_id ?? DEFAULT_GRAPH_TEMPLATE_ID)}</span>
-          <h2>Design Evolution</h2>
+          <span class="viewer-design-workspace-kicker">${escapeHtml(modeLabel)} · Top-${escapeHtml(String(payload.topk ?? 3))} · ${escapeHtml(payload.graph_template_id ?? DEFAULT_GRAPH_TEMPLATE_ID)}</span>
+          <h2>${escapeHtml(title)}</h2>
           <p>${escapeHtml(payload.prompt ?? fallbackPrompt)}</p>
+          ${payload.early_stop_triggered ? `<p class="viewer-design-workspace-muted">${escapeHtml(payload.early_stop_reason || "Early stop triggered.")}</p>` : ""}
         </div>
         <div class="viewer-design-workspace-progress">
           <strong>${progress}%</strong>
@@ -265,10 +386,14 @@ export function renderBranchWorkspaceHtml(
           ${renderBranchTree(payload, selected?.node_id ?? null)}
         </section>
         <section class="viewer-design-workspace-panel">
-          <div class="viewer-design-workspace-panel-title">评价散点图</div>
+          <div class="viewer-design-workspace-panel-title">激活来源 / 搜索限制</div>
+          ${renderBranchInfluenceMatrix(selected)}
+        </section>
+        <section class="viewer-design-workspace-panel viewer-branch-score-panel">
+          <div class="viewer-design-workspace-panel-title">Pareto 曲面 / 三维评分</div>
           ${renderBranchScatter(payload, selected?.node_id ?? null)}
         </section>
-        <section class="viewer-design-workspace-panel">
+        <section class="viewer-design-workspace-panel viewer-branch-detail-panel">
           <div class="viewer-design-workspace-panel-title">节点详情</div>
           ${renderBranchNodeDetail(selected)}
         </section>

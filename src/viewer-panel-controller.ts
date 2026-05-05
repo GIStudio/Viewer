@@ -113,6 +113,7 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
 
     state[panel] = true;
     setDataset(panel, true);
+    deps.shell.setRightPinned(true);
     deps.shell.activateRightTab(panel);
     if (panel === "settings") {
       deps.onSettingsOpen();

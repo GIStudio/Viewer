@@ -5,6 +5,11 @@ A browser-based 3D street scene viewer and asset editor built with [Three.js](ht
 ## Features
 
 - **3D Scene Viewer** — load and inspect street scene GLB files with a free-camera orbit control
+- **Design Workspace** — generate street scenes from presets or custom prompts through the RoadGen3D API
+- **Branch / Pareto Trace** — run 100-sample branch searches, inspect 3D score scatter plots, and trace active RAG evidence, parameter triples, LLM patches, directives, and rejected edits
+- **Persistent Benchmark Explorer** — browse historical benchmark samples, filter by preset / batch / run, compare Pareto fronts, and reload retained artifacts
+- **Correlation Analysis** — analyze `input parameters / preset / patch` → `scene_layout.json` features → `walkability / safety / beauty / overall` with heatmaps, parameter scatter plots, categorical effects, and feature importance
+- **GLB Rebuild** — rebuild missing `scene.glb` files from retained `scene_layout.json` when the layout and referenced assets still exist
 - **Production Steps** — step through layered scene-build snapshots
 - **Asset Editor** — browse asset manifests (`.jsonl`), preview individual `.glb` models, and edit metadata:
   - Scale adjustment with live 3D preview
@@ -79,6 +84,9 @@ src/
   main.ts           Entry point
   app.ts            Top-level app shell and routing
   asset-editor.ts   Asset Editor panel (Three.js preview + manifest CRUD)
+  viewer-design-controller.ts  Design workspace, branch runs, benchmark explorer
+  viewer-branch-workspace.ts   Branch trace, influence matrix, score scatter shell
+  branch-score-scatter-3d.ts   Three.js Pareto / score scatter renderer
   scene-graph.ts    Scene graph tree view
   sg-*.ts           Scene graph utilities
   style.css         Global styles

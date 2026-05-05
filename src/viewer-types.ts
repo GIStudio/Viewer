@@ -21,6 +21,7 @@ export type ViewerManifest = {
   default_selection?: string;
   static_object_descriptions?: Record<string, StaticObjectDescription>;
   summary?: Record<string, unknown>;
+  visual_style?: Record<string, unknown>;
   final_scene: {
     glb_url: string;
     label: string;
@@ -312,6 +313,7 @@ export type DesignPreset = {
   nameEn: string;
   description: string;
   prompt: string;
+  color?: string;
   configPatch: Record<string, unknown>;
 };
 
@@ -331,11 +333,40 @@ export type BranchRunCreatePayload = {
   prompt: string;
   topk: number;
   rounds: number;
+  target_samples?: number;
+  search_mode?: "llm_branch" | "pareto" | string;
+  early_stop_patience?: number;
+  retain_topk_artifacts?: number;
+  score_with_rendered_views?: boolean;
   graph_template_id: string;
   knowledge_source: string;
   scene_context: Record<string, unknown>;
   generation_options: Record<string, unknown>;
+  preset_id?: string;
+  preset_config_patch?: Record<string, unknown>;
+  benchmark_id?: string;
+  batch_id?: string;
+  persist_to_benchmark?: boolean;
   evaluation_weights: Record<string, number>;
+};
+
+export type BranchInfluenceRow = {
+  id: string;
+  group: "knowledge" | "parameters" | "llm_constraints" | string;
+  source_type: "rag" | "parameter_triple" | "llm_patch" | "search_patch" | "directive" | "constraint" | string;
+  label: string;
+  detail?: string;
+  field?: string;
+  value?: unknown;
+  old_value?: unknown;
+  unit?: string;
+  score?: number | null;
+  confidence?: number | null;
+  active?: boolean;
+  chunk_id?: string;
+  source?: string;
+  knowledge_source?: string;
+  rank?: number;
 };
 
 export type BranchRunNode = {
@@ -346,6 +377,11 @@ export type BranchRunNode = {
   status: string;
   score: number | null;
   scene_layout_path?: string;
+  scene_glb_path?: string;
+  artifacts_retained?: boolean;
+  artifact_rank?: number | null;
+  artifact_paths?: string[];
+  can_restore_artifact?: boolean;
   evaluation?: Record<string, unknown>;
   trace?: GenerationTrace;
   config_patch?: Record<string, unknown>;
@@ -353,17 +389,42 @@ export type BranchRunNode = {
   optimization_directives?: Array<Record<string, unknown>>;
   rejected_edits?: Array<Record<string, unknown>>;
   rag_evidence?: RagEvidence[];
+  influence_rows?: BranchInfluenceRow[];
+  analysis_features?: BenchmarkAnalysisFeatures;
+  preset_id?: string;
+  preset_name?: string;
+  preset_color?: string;
   error?: string;
 };
 
 export type BranchScatterPoint = {
   node_id: string;
+  parent_id?: string | null;
   x: number | null;
   y: number | null;
+  z?: number | null;
   overall: number | null;
+  walkability?: number | null;
+  safety?: number | null;
+  beauty?: number | null;
+  delta_walkability?: number | null;
+  delta_safety?: number | null;
+  delta_beauty?: number | null;
+  delta_overall?: number | null;
+  is_pareto_front?: boolean;
+  pareto_rank?: number | null;
+  dominated_by_count?: number;
+  influence_summary?: Array<Pick<BranchInfluenceRow, "id" | "group" | "source_type" | "label" | "active">>;
   depth: number;
   rank: number;
   status: string;
+  label?: string;
+  preset_id?: string;
+  preset_name?: string;
+  preset_label?: string;
+  preset_color?: string;
+  sample_id?: string;
+  analysis_features?: BenchmarkAnalysisFeatures;
 };
 
 export type BranchRunStatusPayload = {
@@ -371,13 +432,196 @@ export type BranchRunStatusPayload = {
   status: string;
   stage?: string;
   progress?: number;
+  created_at?: string;
+  started_at?: string;
+  finished_at?: string;
   prompt?: string;
   topk?: number;
+  rounds?: number;
+  target_samples?: number | null;
+  search_mode?: "llm_branch" | "pareto" | string;
+  preset_id?: string;
+  preset_name?: string;
+  preset_color?: string;
+  preset_config_patch?: Record<string, unknown>;
+  benchmark_id?: string;
+  batch_id?: string;
+  persist_to_benchmark?: boolean;
+  early_stop_patience?: number | null;
+  early_stop_triggered?: boolean;
+  early_stop_reason?: string;
+  retain_topk_artifacts?: number | null;
+  score_with_rendered_views?: boolean;
+  retained_artifact_nodes?: string[];
+  retained_artifact_count?: number;
+  completed_samples?: number;
+  attempted_samples?: number;
   graph_template_id?: string;
   best_node_id?: string;
   frontier?: string[];
+  pareto_front?: string[];
+  pareto_front_size?: number;
   nodes?: BranchRunNode[];
   scatter_points?: BranchScatterPoint[];
+  error?: string;
+};
+
+export type BenchmarkSample = {
+  sample_id: string;
+  source?: string;
+  run_id?: string;
+  node_id?: string;
+  parent_id?: string;
+  benchmark_id?: string;
+  batch_id?: string;
+  preset_id: string;
+  preset_name?: string;
+  preset_label?: string;
+  preset_color?: string;
+  label?: string;
+  prompt?: string;
+  graph_template_id?: string;
+  knowledge_source?: string;
+  scene_layout_path?: string;
+  scene_glb_path?: string;
+  walkability: number | null;
+  safety: number | null;
+  beauty: number | null;
+  overall: number | null;
+  x?: number | null;
+  y?: number | null;
+  z?: number | null;
+  delta_walkability?: number | null;
+  delta_safety?: number | null;
+  delta_beauty?: number | null;
+  delta_overall?: number | null;
+  is_pareto_front?: boolean;
+  pareto_rank?: number | null;
+  dominated_by_count?: number;
+  depth?: number;
+  rank?: number;
+  status?: string;
+  influence_rows?: BranchInfluenceRow[];
+  config_patch?: Record<string, unknown>;
+  evaluation?: Record<string, unknown>;
+  artifacts_retained?: boolean;
+  artifact_rank?: number | null;
+  artifact_paths?: string[];
+  can_restore_artifact?: boolean;
+  analysis_features?: BenchmarkAnalysisFeatures;
+  created_at?: string;
+};
+
+export type BenchmarkAnalysisFeatures = {
+  input?: Record<string, unknown>;
+  scene?: Record<string, unknown>;
+  derived?: Record<string, unknown>;
+  layout_available?: boolean;
+  layout_error?: string;
+};
+
+export type BenchmarkAnalysisSample = {
+  sample_id: string;
+  run_id?: string;
+  node_id?: string;
+  parent_id?: string;
+  preset_id: string;
+  preset_name?: string;
+  preset_label?: string;
+  preset_color?: string;
+  label?: string;
+  scene_layout_path?: string;
+  input_features: Record<string, unknown>;
+  scene_features: Record<string, unknown>;
+  derived_features: Record<string, unknown>;
+  layout_available?: boolean;
+  layout_error?: string;
+  outcome: Record<"walkability" | "safety" | "beauty" | "overall", number | null>;
+  delta_outcome?: Record<"walkability" | "safety" | "beauty" | "overall", number | null>;
+  meta?: Record<string, unknown>;
+};
+
+export type BenchmarkCorrelationMode = "pooled" | "within_preset" | "preset_residual" | "delta";
+
+export type BenchmarkCorrelationRow = {
+  mode: BenchmarkCorrelationMode | string;
+  preset_id?: string | null;
+  feature: string;
+  outcome: "walkability" | "safety" | "beauty" | "overall" | string;
+  rho: number | null;
+  p_value?: number | null;
+  n: number;
+};
+
+export type BenchmarkCategoricalEffect = {
+  feature: string;
+  outcome: "walkability" | "safety" | "beauty" | "overall" | string;
+  test: string;
+  statistic?: number | null;
+  p_value?: number | null;
+  n: number;
+  category_count: number;
+  group_means?: Record<string, number>;
+};
+
+export type BenchmarkFeatureImportance = {
+  outcome: "walkability" | "safety" | "beauty" | "overall" | string;
+  feature: string;
+  importance: number | null;
+  std?: number | null;
+  rank: number;
+  n: number;
+  direction?: number | null;
+};
+
+export type BenchmarkAnalysisPayload = {
+  samples?: BenchmarkAnalysisSample[];
+  correlations?: BenchmarkCorrelationRow[];
+  categorical_effects?: BenchmarkCategoricalEffect[];
+  feature_importance?: BenchmarkFeatureImportance[];
+  summaries?: BenchmarkPresetSummary[];
+  total?: number;
+  updated_at?: string;
+  warnings?: string[];
+};
+
+export type BenchmarkPresetSummary = {
+  preset_id: string;
+  preset_name?: string;
+  preset_label?: string;
+  preset_color?: string;
+  sample_count: number;
+  centroid?: Record<string, number | null>;
+  ranges?: Record<string, { min: number | null; max: number | null }>;
+  top_overall?: number;
+  pareto_front_count?: number;
+  early_stop_count?: number;
+};
+
+export type BenchmarkSamplesPayload = {
+  items?: BenchmarkSample[];
+  summaries?: BenchmarkPresetSummary[];
+  total?: number;
+  updated_at?: string;
+};
+
+export type BenchmarkBatchStatusPayload = {
+  batch_id: string;
+  benchmark_id?: string;
+  status: string;
+  progress?: number;
+  current_preset_id?: string;
+  children?: Array<BenchmarkPresetSummary & {
+    run_id?: string;
+    status: string;
+    completed_samples?: number;
+    attempted_samples?: number;
+    early_stop_triggered?: boolean;
+    early_stop_reason?: string;
+    error?: string;
+  }>;
+  completed_presets?: number;
+  failed_presets?: number;
   error?: string;
 };
 
@@ -407,6 +651,7 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
     nameEn: "Balanced",
     description: "各类使用者平衡",
     prompt: "各类使用者平衡的完整街道，行人、自行车、公交、机动车和谐共处",
+    color: "#607D8B",
     configPatch: {
       design_rule_profile: "balanced_complete_street_v1",
       objective_profile: "balanced",
@@ -418,11 +663,29 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
     },
   },
   {
+    id: "pedestrian_friendly",
+    name: "步行友好",
+    nameEn: "Pedestrian Friendly",
+    description: "行人优先，安全舒适",
+    prompt: "步行安全，全龄友好的完整街道，安静、安全、舒适",
+    color: "#4CAF50",
+    configPatch: {
+      design_rule_profile: "pedestrian_priority_v1",
+      objective_profile: "balanced",
+      density: 0.5,
+      ped_demand_level: "high",
+      bike_demand_level: "medium",
+      transit_demand_level: "medium",
+      vehicle_demand_level: "low",
+    },
+  },
+  {
     id: "commercial_vitality",
     name: "商业活力",
     nameEn: "Commerce",
     description: "商业活跃，人流密集",
     prompt: "商业活跃的街道，商业设施密集，人流穿梭",
+    color: "#FF9800",
     configPatch: {
       design_rule_profile: "balanced_complete_street_v1",
       objective_profile: "commerce",
@@ -439,6 +702,7 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
     nameEn: "Transit",
     description: "公交导向，换乘便利",
     prompt: "公交优先的街道，公交可达性高，换乘便利",
+    color: "#2196F3",
     configPatch: {
       design_rule_profile: "transit_priority_v1",
       objective_profile: "transit",
@@ -455,11 +719,29 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
     nameEn: "Greening",
     description: "绿化为主，休闲舒适",
     prompt: "公园景观街道，绿化丰富，自然生态，休闲舒适",
+    color: "#8BC34A",
     configPatch: {
       design_rule_profile: "pedestrian_priority_v1",
       objective_profile: "greening",
       density: 0.25,
       ped_demand_level: "medium",
+      bike_demand_level: "medium",
+      transit_demand_level: "low",
+      vehicle_demand_level: "low",
+    },
+  },
+  {
+    id: "quiet_residential",
+    name: "安静居住",
+    nameEn: "Quiet Residential",
+    description: "住宅区安静，绿树成荫",
+    prompt: "安静居住街道，绿树成荫，步行安全，适合全龄",
+    color: "#9C27B0",
+    configPatch: {
+      design_rule_profile: "pedestrian_priority_v1",
+      objective_profile: "greening",
+      density: 0.35,
+      ped_demand_level: "high",
       bike_demand_level: "medium",
       transit_demand_level: "low",
       vehicle_demand_level: "low",

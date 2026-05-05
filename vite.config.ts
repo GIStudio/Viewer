@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline";
+import { performance } from "node:perf_hooks";
 import { URL, fileURLToPath } from "node:url";
 
 import { defineConfig, type Plugin } from "vite";
@@ -7,6 +9,12 @@ import { defineConfig, type Plugin } from "vite";
 const viewerRoot = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = path.resolve(viewerRoot, "..", "..");
 const RECENT_LAYOUT_LIMIT = 20;
+const RECENT_LAYOUT_INDEX_PATH = path.resolve(
+  repoRoot,
+  "artifacts",
+  "web_viewer_layouts",
+  ".recent_layouts.ndjson",
+);
 const ASSET_MANIFEST_PATH = path.resolve(repoRoot, "data", "real", "real_assets_manifest.jsonl");
 const ASSET_MANIFESTS_DIR = path.resolve(repoRoot, "data", "real");
 const EXTRA_ASSET_MANIFEST_DIRS = [
@@ -34,6 +42,34 @@ type StaticObjectDescription = {
 };
 
 let cachedAssetDescriptionIndex: Map<string, JsonRecord> | null = null;
+const RECENT_LAYOUT_DISCOVERY_CACHE_TTL_MS = 10_000;
+type RecentLayoutCacheEntry = {
+  layoutPath: string;
+  mtimeMs: number;
+};
+type RecentLayoutViewState = {
+  mtimeMs: number;
+  isViewable: boolean;
+  relativePath: string;
+  label: string;
+  updatedAt: string;
+};
+type RecentLayoutIndexRow = {
+  layout_path: string;
+  label: string;
+  relative_path: string;
+  updated_at: string;
+  mtime_ms: number;
+};
+type RecentLayoutCacheState = {
+  builtAtMs: number;
+  rootsSignature: string;
+  candidates: Array<RecentLayoutCacheEntry>;
+  discovered: number;
+  discoveryMs: number;
+  viewStateByPath: Map<string, RecentLayoutViewState>;
+};
+let recentLayoutCache: RecentLayoutCacheState | null = null;
 
 function allowedRoots(): string[] {
   const roots = [repoRoot];
@@ -128,39 +164,299 @@ function displayPathFor(filePath: string, roots: string[]): string {
   return path.basename(filePath);
 }
 
-function buildRecentLayoutsPayload(limit: number): { results: Array<Record<string, unknown>> } {
+function resolveLayoutReferencedPath(rawValue: unknown, layoutPath: string): string | null {
+  const text = String(rawValue ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  const candidate = path.isAbsolute(text)
+    ? text
+    : path.resolve(path.dirname(layoutPath), text);
+  return resolveAllowedPath(candidate);
+}
+
+function isViewableSceneLayout(layoutPath: string): boolean {
+  try {
+    const layoutPayload = JSON.parse(fs.readFileSync(layoutPath, "utf-8")) as JsonRecord;
+    const outputs = (layoutPayload.outputs ?? {}) as JsonRecord;
+    const finalScenePath = resolveLayoutReferencedPath(outputs.scene_glb, layoutPath);
+    return Boolean(finalScenePath && fs.existsSync(finalScenePath));
+  } catch {
+    return false;
+  }
+}
+
+function buildRecentLayoutRootsSignature(roots: string[]): string {
+  return roots.slice().sort().join("|");
+}
+
+function getRecentLayoutViewState(
+  layoutPath: string,
+  mtimeMs: number,
+  roots: string[],
+  cache: Map<string, RecentLayoutViewState>,
+): RecentLayoutViewState {
+  const cached = cache.get(layoutPath);
+  if (cached && cached.mtimeMs === mtimeMs) {
+    return cached;
+  }
+
+  const relativePath = displayPathFor(layoutPath, roots);
+  const label = `${path.basename(path.dirname(layoutPath))} · ${relativePath}`;
+  const updatedAt = new Date(mtimeMs).toISOString();
+  const isViewable = isViewableSceneLayout(layoutPath);
+
+  const viewState: RecentLayoutViewState = {
+    mtimeMs,
+    isViewable,
+    relativePath,
+    label,
+    updatedAt,
+  };
+  cache.set(layoutPath, viewState);
+  return viewState;
+}
+
+function persistRecentLayoutIndex(
+  cache: RecentLayoutCacheState,
+  roots: string[],
+): void {
+  try {
+    const rows: RecentLayoutIndexRow[] = [];
+    for (const { layoutPath, mtimeMs } of cache.candidates) {
+      const viewState = getRecentLayoutViewState(layoutPath, mtimeMs, roots, cache.viewStateByPath);
+      if (!viewState.isViewable) {
+        continue;
+      }
+      rows.push({
+        layout_path: layoutPath,
+        label: viewState.label,
+        relative_path: viewState.relativePath,
+        updated_at: viewState.updatedAt,
+        mtime_ms: mtimeMs,
+      });
+    }
+    fs.mkdirSync(path.dirname(RECENT_LAYOUT_INDEX_PATH), { recursive: true });
+    const tmpPath = `${RECENT_LAYOUT_INDEX_PATH}.tmp`;
+    fs.writeFileSync(
+      tmpPath,
+      rows.map((entry) => JSON.stringify(entry)).join("\n"),
+      "utf-8",
+    );
+    fs.renameSync(tmpPath, RECENT_LAYOUT_INDEX_PATH);
+  } catch (error) {
+    console.warn("[viewer-api-timing] recent-layout index persist failed:", error);
+  }
+}
+
+async function readRecentLayoutIndexRows(
+  limit: number,
+  offsetRows: number = 0,
+): Promise<{ rows: RecentLayoutIndexRow[]; checked: number }> {
+  if (!fs.existsSync(RECENT_LAYOUT_INDEX_PATH)) {
+    return { rows: [], checked: 0 };
+  }
+
+  const rows: RecentLayoutIndexRow[] = [];
+  let checked = 0;
+  let remainingOffset = Math.max(0, Math.trunc(offsetRows));
+  const stream = fs.createReadStream(RECENT_LAYOUT_INDEX_PATH, { encoding: "utf-8" });
+  const lines = createInterface({ input: stream });
+
+  try {
+    for await (const rawLine of lines) {
+      checked += 1;
+      const trimmed = rawLine.trim();
+      if (!trimmed) {
+        continue;
+      }
+      try {
+        const row = JSON.parse(trimmed) as RecentLayoutIndexRow;
+        if (!row?.layout_path || typeof row.layout_path !== "string") {
+          continue;
+        }
+        if (!row.layout_path.endsWith("scene_layout.json")) {
+          continue;
+        }
+        if (!fs.existsSync(row.layout_path)) {
+          continue;
+        }
+        if (remainingOffset > 0) {
+          remainingOffset -= 1;
+          continue;
+        }
+        rows.push({
+          layout_path: row.layout_path,
+          label: String(row.label || ""),
+          relative_path: String(row.relative_path || ""),
+          updated_at: String(row.updated_at || new Date(0).toISOString()),
+          mtime_ms: Number(row.mtime_ms ?? 0),
+        });
+      } catch {
+        continue;
+      }
+      if (rows.length >= limit) {
+        break;
+      }
+    }
+  } finally {
+    lines.close();
+    stream.close();
+  }
+
+  return { rows, checked };
+}
+
+function buildRecentLayoutCandidates(roots: string[]): {
+  candidates: Array<RecentLayoutCacheEntry>;
+  discovered: number;
+} {
+  const discoveryStart = performance.now();
+  const candidates = discoverSceneLayoutPaths(roots)
+    .filter((layoutPath) => {
+      const pathLower = layoutPath.toLowerCase();
+      return !pathLower.includes("real_assets")
+        && !pathLower.includes("real-assets")
+        && !pathLower.includes("_v2")
+        && !pathLower.includes("-v2")
+        && !pathLower.includes("/v2/");
+    })
+    .map((layoutPath) => {
+      try {
+        const stats = fs.statSync(layoutPath);
+        return {
+          layoutPath,
+          mtimeMs: Math.trunc(stats.mtimeMs),
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is { layoutPath: string; mtimeMs: number } => entry !== null)
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
+  const discovered = candidates.length;
+  console.info(
+    `[viewer-api-timing] recent-layouts discovery took ${(performance.now() - discoveryStart).toFixed(1)}ms ` +
+      `roots=${roots.length} discovered=${discovered}`,
+  );
+  return { candidates, discovered };
+}
+
+function getRecentLayoutCache(roots: string[], forceRefresh: boolean): RecentLayoutCacheState {
+  const now = performance.now();
+  const rootsSignature = buildRecentLayoutRootsSignature(roots);
+  if (!forceRefresh && !recentLayoutCache && fs.existsSync(RECENT_LAYOUT_INDEX_PATH)) {
+      return {
+        builtAtMs: now,
+        rootsSignature,
+        candidates: [],
+        discovered: 0,
+        discoveryMs: 0,
+        viewStateByPath: new Map(),
+      };
+  }
+  const needsRebuild =
+    !recentLayoutCache
+    || recentLayoutCache.rootsSignature !== rootsSignature
+    || forceRefresh
+    || (now - recentLayoutCache.builtAtMs) > RECENT_LAYOUT_DISCOVERY_CACHE_TTL_MS;
+
+  if (!needsRebuild) {
+    return recentLayoutCache;
+  }
+
+  const discovery = buildRecentLayoutCandidates(roots);
+  const nextCache: RecentLayoutCacheState = {
+    builtAtMs: now,
+    rootsSignature,
+    candidates: discovery.candidates,
+    discovered: discovery.discovered,
+    discoveryMs: Number((performance.now() - now).toFixed(1)),
+    viewStateByPath: recentLayoutCache ? recentLayoutCache.viewStateByPath : new Map(),
+  };
+
+  const validPaths = new Set(nextCache.candidates.map((entry) => entry.layoutPath));
+  for (const existing of Array.from(nextCache.viewStateByPath.keys())) {
+    if (!validPaths.has(existing)) {
+      nextCache.viewStateByPath.delete(existing);
+    }
+  }
+  persistRecentLayoutIndex(nextCache, roots);
+  recentLayoutCache = nextCache;
+  return recentLayoutCache;
+}
+
+async function buildRecentLayoutsPayload(
+  limit: number,
+  forceRefresh: boolean,
+  offsetRows: number = 0,
+): Promise<{ results: Array<Record<string, unknown>> }> {
+  const buildStart = performance.now();
   const roots = allowedRoots();
   const safeLimit = Math.max(1, Number.isFinite(limit) ? Math.trunc(limit) : RECENT_LAYOUT_LIMIT);
-  
-  // Filter out L0 quality layouts (real_assets and v2 assets are low quality)
-  const isHighQualityLayout = (layoutPath: string): boolean => {
-    const pathLower = layoutPath.toLowerCase();
-    // Exclude real_assets manifest based layouts (L0 quality)
-    if (pathLower.includes("real_assets") || pathLower.includes("real-assets")) {
-      return false;
+  const safeOffset = Math.max(0, Number.isFinite(offsetRows) ? Math.trunc(offsetRows) : 0);
+  let cache = getRecentLayoutCache(roots, forceRefresh);
+  let discoveredCount = cache.discovered;
+  let checkedCount = 0;
+  const results = [];
+
+  const indexSeen = new Set<string>();
+  if (!forceRefresh && fs.existsSync(RECENT_LAYOUT_INDEX_PATH)) {
+    const indexPayload = await readRecentLayoutIndexRows(safeLimit, safeOffset);
+    checkedCount = indexPayload.checked;
+    indexPayload.rows.forEach((entry) => {
+      indexSeen.add(entry.layout_path);
+      results.push({
+        layout_path: entry.layout_path,
+        label: entry.label,
+        relative_path: entry.relative_path,
+        updated_at: entry.updated_at,
+        mtime_ms: entry.mtime_ms,
+      });
+    });
+    if (results.length >= safeLimit) {
+      const buildMs = (performance.now() - buildStart).toFixed(1);
+      console.info(
+        `[viewer-api-timing] buildRecentLayoutsPayload limit=${safeLimit} roots=${roots.length} discovered=${discoveredCount} checked=${checkedCount} return=${results.length} elapsed=${buildMs}ms`,
+      );
+      return { results };
     }
-    // Exclude v2 asset layouts (L0 quality)
-    if (pathLower.includes("_v2") || pathLower.includes("-v2") || pathLower.includes("/v2/")) {
-      return false;
+
+    if (cache.candidates.length === 0 || cache.discovered <= 0) {
+      cache = getRecentLayoutCache(roots, true);
+      discoveredCount = cache.discovered;
     }
-    return true;
-  };
-  
-  const results = discoverSceneLayoutPaths(roots)
-    .filter(isHighQualityLayout)
-    .map((layoutPath) => {
-      const stats = fs.statSync(layoutPath);
-      const relativePath = displayPathFor(layoutPath, roots);
-      return {
-        layout_path: layoutPath,
-        label: `${path.basename(path.dirname(layoutPath))} · ${relativePath}`,
-        relative_path: relativePath,
-        updated_at: new Date(stats.mtimeMs).toISOString(),
-        mtime_ms: Math.trunc(stats.mtimeMs),
-      };
-    })
-    .sort((left, right) => Number(right.mtime_ms) - Number(left.mtime_ms))
-    .slice(0, safeLimit);
+  }
+
+  let candidateSkip = safeOffset;
+  for (const { layoutPath, mtimeMs } of cache.candidates) {
+    if (candidateSkip > 0) {
+      candidateSkip -= 1;
+      continue;
+    }
+    if (indexSeen.size > 0 && indexSeen.has(layoutPath)) {
+      continue;
+    }
+    checkedCount += 1;
+    const viewState = getRecentLayoutViewState(layoutPath, mtimeMs, roots, cache.viewStateByPath);
+    if (!viewState.isViewable) {
+      continue;
+    }
+    results.push({
+      layout_path: layoutPath,
+      label: viewState.label,
+      relative_path: viewState.relativePath,
+      updated_at: viewState.updatedAt,
+      mtime_ms: mtimeMs,
+    });
+    if (results.length >= safeLimit) {
+      break;
+    }
+  }
+  const buildMs = (performance.now() - buildStart).toFixed(1);
+  console.info(
+    `[viewer-api-timing] buildRecentLayoutsPayload limit=${safeLimit} roots=${roots.length} discovered=${discoveredCount} checked=${checkedCount} return=${results.length} elapsed=${buildMs}ms`,
+  );
   return { results };
 }
 
@@ -504,6 +800,24 @@ function textResponse(res: any, statusCode: number, message: string): void {
   res.end(message);
 }
 
+function withRequestTiming(res: any, requestLabel: string, requestStart: number) {
+  const startedAt = Number.isFinite(requestStart) ? requestStart : performance.now();
+  return {
+    sendJson(payload: Record<string, unknown>, statusCode: number, note = ""): void {
+      const elapsed = (performance.now() - startedAt).toFixed(1);
+      const suffix = note ? ` ${note}` : "";
+      console.info(`[viewer-api-timing] ${requestLabel} -> ${statusCode} ${elapsed}ms${suffix}`);
+      jsonResponse(res, statusCode, payload);
+    },
+    sendText(message: string, statusCode: number, note = ""): void {
+      const elapsed = (performance.now() - startedAt).toFixed(1);
+      const suffix = note ? ` ${note}` : "";
+      console.info(`[viewer-api-timing] ${requestLabel} -> ${statusCode} ${elapsed}ms${suffix}`);
+      textResponse(res, statusCode, message);
+    },
+  };
+}
+
 function contentTypeFor(filePath: string): string {
   const suffix = path.extname(filePath).toLowerCase();
   switch (suffix) {
@@ -549,6 +863,12 @@ function viewerApiPlugin(): Plugin {
         }
 
         const requestUrl = new URL(req.url, "http://127.0.0.1:4173");
+        const requestStart = performance.now();
+        const requestTimer = withRequestTiming(
+          res,
+          `${requestUrl.pathname}${requestUrl.search}`,
+          requestStart,
+        );
         const isLayoutRoute =
           requestUrl.pathname === "/api/layout" ||
           requestUrl.pathname === "/web-viewer/api/layout";
@@ -563,31 +883,41 @@ function viewerApiPlugin(): Plugin {
           : "/api";
 
         if (isLayoutRoute) {
+          const layoutHandlerStart = performance.now();
           const rawLayoutPath = requestUrl.searchParams.get("path");
           const layoutPath = resolveAllowedPath(rawLayoutPath);
           if (!layoutPath) {
-            jsonResponse(res, 403, { error: "Layout path must stay inside an allowed root." });
+            requestTimer.sendJson({ error: "Layout path must stay inside an allowed root." }, 403);
             return;
           }
           if (!fs.existsSync(layoutPath)) {
-            jsonResponse(res, 404, { error: `Layout file not found: ${layoutPath}` });
+            requestTimer.sendJson({ error: `Layout file not found: ${layoutPath}` }, 404);
             return;
           }
           try {
-            const layoutPayload = JSON.parse(fs.readFileSync(layoutPath, "utf-8"));
+            const layoutReadStart = performance.now();
+            const rawLayoutText = fs.readFileSync(layoutPath, "utf-8");
+            const layoutReadMs = (performance.now() - layoutReadStart).toFixed(1);
+            const parseStart = performance.now();
+            const layoutPayload = JSON.parse(rawLayoutText);
+            const layoutParseMs = (performance.now() - parseStart).toFixed(1);
             const outputs = layoutPayload.outputs ?? {};
-            const finalScenePath = resolveAllowedPath(String(outputs.scene_glb ?? ""));
+            const finalScenePath = resolveLayoutReferencedPath(outputs.scene_glb, layoutPath);
             if (!finalScenePath || !fs.existsSync(finalScenePath)) {
-              jsonResponse(res, 400, {
+              requestTimer.sendJson({
                 error: "scene_layout.json does not point to a valid final scene GLB.",
                 layout_path: layoutPath,
-              });
+              }, 400);
               return;
             }
+            const finalSceneCheckStart = performance.now();
+            const finalSceneStats = fs.statSync(finalScenePath);
+            const finalSceneCheckMs = (performance.now() - finalSceneCheckStart).toFixed(1);
+            const buildStepsStart = performance.now();
             const productionSteps = Array.isArray(layoutPayload.production_steps)
               ? layoutPayload.production_steps
                   .map((step: Record<string, any>) => {
-                    const glbPath = resolveAllowedPath(String(step.glb_path ?? ""));
+                    const glbPath = resolveLayoutReferencedPath(step.glb_path, layoutPath);
                     if (!glbPath || !fs.existsSync(glbPath)) {
                       return null;
                     }
@@ -599,6 +929,9 @@ function viewerApiPlugin(): Plugin {
                   })
                   .filter(Boolean)
               : [];
+            const buildStepsMs = (performance.now() - buildStepsStart).toFixed(1);
+
+            const buildPayloadStart = performance.now();
             const spawnPayload = buildSpawnPayload(layoutPayload);
             const sceneBounds = buildSceneBounds(layoutPayload);
             const instances = buildInstancePayloads(layoutPayload);
@@ -614,10 +947,12 @@ function viewerApiPlugin(): Plugin {
             const overlayLengthM = asNumber(layoutConfig.length_m, 0);
 
             const audioProfile = (summary?.audio_profile ?? null) as JsonRecord | null;
+            const buildPayloadMs = (performance.now() - buildPayloadStart).toFixed(1);
 
-            jsonResponse(res, 200, {
+            requestTimer.sendJson({
               layout_path: layoutPath,
               summary,
+              visual_style: (layoutPayload.visual_style ?? null) as JsonRecord | null,
               final_scene: {
                 label: "Final Scene",
                 glb_url: `${apiPrefix}/file?path=${encodeURIComponent(finalScenePath)}`,
@@ -640,41 +975,63 @@ function viewerApiPlugin(): Plugin {
               audio_profile: audioProfile,
               lighting_preset: String(outputs.lighting_preset ?? "bright_day"),
               lighting_params: (outputs.lighting_params ?? null) as JsonRecord | null,
-            });
+            }, 200,
+              `layoutRead=${layoutReadMs}ms parse=${layoutParseMs}ms buildSteps=${buildStepsMs}ms payload=${buildPayloadMs}ms finalScene=${finalSceneStats.size}bytes finalSceneLookup=${finalSceneCheckMs}ms total=${(
+                performance.now() - layoutHandlerStart
+              ).toFixed(1)}ms`);
             return;
           } catch (error) {
-            jsonResponse(res, 500, {
+            requestTimer.sendJson({
               error: error instanceof Error ? error.message : "Failed to parse scene layout.",
-            });
+            }, 500, `layout_total=${(
+              performance.now() - layoutHandlerStart
+            ).toFixed(1)}ms`);
             return;
           }
         }
 
         if (isRecentLayoutsRoute) {
           const requestedLimit = Number.parseInt(requestUrl.searchParams.get("limit") ?? "", 10);
-          jsonResponse(res, 200, buildRecentLayoutsPayload(requestedLimit));
+          const requestedOffset = Number.parseInt(requestUrl.searchParams.get("offset") ?? "0", 10);
+          const forceRefresh = requestUrl.searchParams.get("refresh") === "1"
+            || requestUrl.searchParams.get("refresh") === "true";
+          const limit = Number.isFinite(requestedLimit) ? requestedLimit : 20;
+          const offset = Number.isFinite(requestedOffset) ? Math.max(0, Math.trunc(requestedOffset)) : 0;
+          const payload = await buildRecentLayoutsPayload(limit, forceRefresh, offset);
+          const count = Array.isArray(payload.results) ? payload.results.length : 0;
+          requestTimer.sendJson(payload, 200, `results=${count}`);
           return;
         }
 
         if (isFileRoute) {
+          const fileRouteStart = performance.now();
           const rawFilePath = requestUrl.searchParams.get("path");
           const filePath = resolveAllowedPath(rawFilePath);
           if (!filePath) {
-            textResponse(res, 403, "Requested file must stay inside an allowed root.");
+            requestTimer.sendText("Requested file must stay inside an allowed root.", 403);
             return;
           }
           if (!fs.existsSync(filePath)) {
-            textResponse(res, 404, `File not found: ${filePath}`);
+            requestTimer.sendText(`File not found: ${filePath}`, 404);
             return;
           }
           const stats = fs.statSync(filePath);
           if (!stats.isFile()) {
-            textResponse(res, 400, `Not a regular file: ${filePath}`);
+            requestTimer.sendText(`Not a regular file: ${filePath}`, 400);
             return;
           }
+          res.on("finish", () => {
+            const transferMs = (performance.now() - fileRouteStart).toFixed(1);
+            console.info(
+              `[viewer-api-timing] ${requestUrl.pathname}${requestUrl.search} transfer complete size=${stats.size}bytes ${transferMs}ms`,
+            );
+          });
           res.statusCode = 200;
           res.setHeader("Content-Type", contentTypeFor(filePath));
           res.setHeader("Content-Length", String(stats.size));
+          console.info(
+            `[viewer-api-timing] ${requestUrl.pathname}${requestUrl.search} -> 200 start stream ${stats.size}bytes`,
+          );
           fs.createReadStream(filePath).pipe(res);
           return;
         }

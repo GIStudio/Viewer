@@ -11,25 +11,68 @@ const API_BASE = (import.meta.env.VITE_ROADGEN_API_BASE as string | undefined) |
 
 // Manifest cache
 const manifestCache = new Map<string, ViewerManifest>();
-let recentLayoutsCache: RecentLayout[] | null = null;
+const recentLayoutsCache = new Map<string, RecentLayout[]>();
 
 /**
  * Load manifest with caching.
  */
 export async function loadManifest(manifestUrl: string, useCache: boolean = true): Promise<ViewerManifest> {
+  const manifestStart = performance.now();
   if (useCache && manifestCache.has(manifestUrl)) {
-    return manifestCache.get(manifestUrl)!;
+    const cached = manifestCache.get(manifestUrl)!;
+    const cacheMs = (performance.now() - manifestStart).toFixed(1);
+    console.info(`[viewer-timing] loadManifest cache hit: ${manifestUrl} (${cacheMs} ms)`);
+    return cached;
   }
 
-  const response = await fetch(resolveManifestUrl(manifestUrl));
+  const fetchStart = performance.now();
+  let response = await fetch(resolveManifestUrl(manifestUrl));
+  const fetchMs = (performance.now() - fetchStart).toFixed(1);
+  console.info(
+    `[viewer-timing] loadManifest fetch: ${manifestUrl} -> ${response.status} (${fetchMs} ms)`,
+  );
+  let pendingErrorDetail = "";
   if (!response.ok) {
-    throw new Error(`Failed to load manifest: ${response.status}`);
+    const errorStart = performance.now();
+    let detail = await responseErrorDetail(response);
+    if (shouldAttemptLayoutGlbRebuild(manifestUrl, response.status, detail)) {
+      try {
+        const rebuildStart = performance.now();
+        await rebuildLayoutGlb(manifestUrl);
+        console.info(
+          `[viewer-timing] loadManifest rebuild-layout-glb: ${manifestUrl} (${(performance.now() - rebuildStart).toFixed(1)} ms)`,
+        );
+        const reFetchStart = performance.now();
+        response = await fetch(resolveManifestUrl(manifestUrl));
+        console.info(
+          `[viewer-timing] loadManifest fetch(retry): ${manifestUrl} -> ${response.status} (${(
+            performance.now() - reFetchStart
+          ).toFixed(1)} ms)`,
+        );
+        detail = response.ok ? "" : await responseErrorDetail(response);
+      } catch (error) {
+        const rebuildMessage = error instanceof Error ? error.message : String(error ?? "");
+        detail = [detail, `GLB rebuild failed: ${rebuildMessage}`].filter(Boolean).join("; ");
+      }
+    }
+    console.info(`[viewer-timing] loadManifest errorHandling: ${manifestUrl} (${(performance.now() - errorStart).toFixed(1)} ms)`);
+    pendingErrorDetail = detail;
+  }
+  if (!response.ok) {
+    console.info(`[viewer-timing] loadManifest failed: ${manifestUrl} (${(performance.now() - manifestStart).toFixed(1)} ms)`);
+    const detail = pendingErrorDetail || await responseErrorDetail(response);
+    const suffix = detail ? ` (${detail})` : "";
+    throw new Error(`Failed to load manifest: ${response.status}${suffix}`);
   }
 
+  const parseStart = performance.now();
   const manifest = await response.json() as ViewerManifest;
+  const parseMs = (performance.now() - parseStart).toFixed(1);
+  console.info(`[viewer-timing] loadManifest parse: ${manifestUrl} (${parseMs} ms)`);
   if (useCache) {
     manifestCache.set(manifestUrl, manifest);
   }
+  console.info(`[viewer-timing] loadManifest total: ${manifestUrl} (${(performance.now() - manifestStart).toFixed(1)} ms)`);
   return manifest;
 }
 
@@ -43,13 +86,25 @@ export function clearManifestCache(): void {
 /**
  * Load recent layouts with caching.
  */
-export async function loadRecentLayouts(limit: number = 20, useCache: boolean = true): Promise<RecentLayout[]> {
-  if (useCache && recentLayoutsCache) return recentLayoutsCache;
+export async function loadRecentLayouts(
+  limit: number = 20,
+  useCache: boolean = true,
+  offset: number = 0,
+): Promise<RecentLayout[]> {
+  const safeLimit = Math.max(1, Math.trunc(limit));
+  const safeOffset = Math.max(0, Math.trunc(offset));
+  const cacheKey = `${safeLimit}:${safeOffset}`;
+  if (useCache) {
+    const cached = recentLayoutsCache.get(cacheKey);
+    if (cached) return cached;
+  }
+  const refreshParam = useCache ? "" : "&refresh=1";
+  const offsetParam = safeOffset > 0 ? `&offset=${safeOffset}` : "";
 
   const candidates = [
-    `/api/recent-layouts?limit=${limit}`,
-    `${API_BASE}/api/recent-layouts?limit=${limit}`,
-    `${API_BASE}/api/scenes/recent?limit=${limit}`,
+    `/api/recent-layouts?limit=${safeLimit}${offsetParam}${refreshParam}`,
+    `${API_BASE}/api/recent-layouts?limit=${safeLimit}${offsetParam}${refreshParam}`,
+    `${API_BASE}/api/scenes/recent?limit=${safeLimit}`,
   ];
   let lastStatus = 0;
   let sawSuccessfulResponse = false;
@@ -80,7 +135,7 @@ export async function loadRecentLayouts(limit: number = 20, useCache: boolean = 
   }
 
   if (useCache) {
-    recentLayoutsCache = result;
+    recentLayoutsCache.set(cacheKey, result);
   }
   return result;
 }
@@ -89,7 +144,7 @@ export async function loadRecentLayouts(limit: number = 20, useCache: boolean = 
  * Clear recent layouts cache.
  */
 export function clearRecentLayoutsCache(): void {
-  recentLayoutsCache = null;
+  recentLayoutsCache.clear();
 }
 
 /**
@@ -115,6 +170,20 @@ export async function postApiJson<T>(url: string, body: Record<string, unknown>)
   return apiJson<T>(url, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+export interface RebuildLayoutGlbResponse {
+  layout_path: string;
+  scene_glb_path: string;
+  manifest_path: string;
+  rebuilt: boolean;
+}
+
+export async function rebuildLayoutGlb(layoutPath: string, force: boolean = false): Promise<RebuildLayoutGlbResponse> {
+  return postApiJson<RebuildLayoutGlbResponse>("/api/design/rebuild-layout-glb", {
+    layout_path: layoutPath,
+    force,
   });
 }
 
@@ -155,6 +224,32 @@ function resolveManifestUrl(manifestUrl: string): string {
     return `/api/layout?path=${encodeURIComponent(value)}`;
   }
   return value;
+}
+
+function isLocalLayoutPath(value: string): boolean {
+  const trimmed = value.trim();
+  return Boolean(trimmed)
+    && !/^https?:\/\//i.test(trimmed)
+    && (trimmed.startsWith("/") || /^[A-Za-z]:[\\/]/.test(trimmed) || trimmed.endsWith("scene_layout.json"));
+}
+
+function shouldAttemptLayoutGlbRebuild(manifestUrl: string, status: number, detail: string): boolean {
+  if (status !== 400 || !isLocalLayoutPath(manifestUrl)) {
+    return false;
+  }
+  const lower = detail.toLowerCase();
+  return lower.includes("scene_glb")
+    || lower.includes("final scene glb")
+    || lower.includes("valid final scene glb");
+}
+
+async function responseErrorDetail(response: Response): Promise<string> {
+  try {
+    const payload = await response.clone().json() as { detail?: unknown; error?: unknown };
+    return String(payload.detail ?? payload.error ?? "").trim();
+  } catch {
+    return "";
+  }
 }
 
 function resolveApiUrl(url: string): string {

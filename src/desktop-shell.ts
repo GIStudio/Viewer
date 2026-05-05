@@ -51,6 +51,7 @@ export interface DesktopShell {
   setLeftSections: (sections: ShellSection[]) => void;
   setRightTabs: (tabs: ShellTab[], activeId?: string | null) => void;
   activateRightTab: (id: string | null) => void;
+  setRightPinned: (pinned: boolean) => void;
   setBottomOpen: (open: boolean) => void;
   setStatusSummary: (message: string) => void;
   pushActivity: (message: string, tone?: "neutral" | "success" | "warning" | "error") => void;
@@ -304,6 +305,16 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
     summaryToggle.setAttribute("aria-expanded", open ? "true" : "false");
   }
 
+  function setRightPinned(pinned: boolean): void {
+    shellRoot.classList.toggle("desktop-shell-right-pinned", pinned);
+    const rightPinButton = root.querySelector<HTMLButtonElement>("[data-shell-right-pin]");
+    rightPinButton?.setAttribute("aria-pressed", pinned ? "true" : "false");
+    if (rightPinButton) {
+      rightPinButton.textContent = pinned ? "Pinned" : "Pin";
+      rightPinButton.title = pinned ? "Unpin right sidebar" : "Pin right sidebar";
+    }
+  }
+
   function activateRightTab(id: string | null): void {
     activeRightTab = id;
     rightTabButtons.querySelectorAll<HTMLButtonElement>("[data-shell-tab]").forEach((button) => {
@@ -449,10 +460,7 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
 
   const rightPinButton = root.querySelector<HTMLButtonElement>("[data-shell-right-pin]");
   rightPinButton?.addEventListener("click", () => {
-    const pinned = shellRoot.classList.toggle("desktop-shell-right-pinned");
-    rightPinButton.setAttribute("aria-pressed", pinned ? "true" : "false");
-    rightPinButton.textContent = pinned ? "Pinned" : "Pin";
-    rightPinButton.title = pinned ? "Unpin right sidebar" : "Pin right sidebar";
+    setRightPinned(!shellRoot.classList.contains("desktop-shell-right-pinned"));
   });
 
   summaryToggle.addEventListener("click", () => {
@@ -474,8 +482,20 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
     });
   });
 
+  const isMenuUiClick = (target: EventTarget | null): boolean => {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+    return target.closest("[data-shell-menu-toggle], [data-shell-menu], [data-shell-action], [data-shell-toggle]")
+      !== null;
+  };
+
   const handleDocumentClick = (event: MouseEvent) => {
-    if (!root.contains(event.target as Node)) {
+    const target = event.target;
+    if (!target) {
+      return;
+    }
+    if (!root.contains(target as Node) || !isMenuUiClick(target)) {
       closeMenus();
     }
   };
@@ -498,6 +518,7 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
     setLeftSections,
     setRightTabs,
     activateRightTab,
+    setRightPinned,
     setBottomOpen,
     setStatusSummary: (message: string) => {
       summaryText.textContent = message;

@@ -11,6 +11,25 @@ export type EvaluationCaptureDeps = {
   avatarEyeHeightM: number;
 };
 
+export type GalleryCaptureTarget = {
+  target_id: string;
+  kind?: string;
+  label?: string;
+  camera: [number, number, number] | number[];
+  target: [number, number, number] | number[];
+  priority?: number;
+  fov?: number;
+};
+
+export type GalleryCaptureResult = {
+  target_id: string;
+  kind: string;
+  label: string;
+  image_data_url: string;
+  width: number;
+  height: number;
+};
+
 function renderEvaluationCameraToDataUrl(
   deps: EvaluationCaptureDeps,
   renderCamera: THREE.Camera,
@@ -130,4 +149,63 @@ export async function captureEvaluationViews(
     },
   ];
   return views.every((view) => view.image_data_url.startsWith("data:image/")) ? views : [];
+}
+
+function finiteTriplet(value: unknown, fallback: [number, number, number]): [number, number, number] {
+  if (!Array.isArray(value) || value.length < 3) {
+    return fallback;
+  }
+  const x = Number(value[0]);
+  const y = Number(value[1]);
+  const z = Number(value[2]);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return fallback;
+  }
+  return [x, y, z];
+}
+
+function makeGalleryCamera(
+  target: GalleryCaptureTarget,
+  width: number,
+  height: number,
+): THREE.PerspectiveCamera {
+  const cameraPosition = finiteTriplet(target.camera, [0, 20, 20]);
+  const lookTarget = finiteTriplet(target.target, [0, 0, 0]);
+  const renderCamera = new THREE.PerspectiveCamera(
+    Number.isFinite(target.fov) ? Number(target.fov) : 58,
+    width / height,
+    0.05,
+    5000,
+  );
+  renderCamera.position.set(cameraPosition[0], cameraPosition[1], cameraPosition[2]);
+  renderCamera.lookAt(lookTarget[0], lookTarget[1], lookTarget[2]);
+  renderCamera.updateProjectionMatrix();
+  renderCamera.updateMatrixWorld(true);
+  return renderCamera;
+}
+
+export async function captureGalleryViews(
+  deps: EvaluationCaptureDeps,
+  targets: GalleryCaptureTarget[],
+  width = 1280,
+  height = 720,
+): Promise<GalleryCaptureResult[]> {
+  if (!deps.currentRoot) {
+    throw new Error("No scene loaded for gallery capture.");
+  }
+  const safeWidth = Math.max(64, Math.trunc(width));
+  const safeHeight = Math.max(64, Math.trunc(height));
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  return targets.map((target, index) => {
+    const targetId = String(target.target_id || `capture_${index + 1}`);
+    const renderCamera = makeGalleryCamera(target, safeWidth, safeHeight);
+    return {
+      target_id: targetId,
+      kind: String(target.kind || "view"),
+      label: String(target.label || targetId),
+      image_data_url: renderEvaluationCameraToDataUrl(deps, renderCamera, safeWidth, safeHeight),
+      width: safeWidth,
+      height: safeHeight,
+    };
+  });
 }

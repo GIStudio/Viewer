@@ -31,6 +31,7 @@ import type {
   SceneJobStatusPayload,
   DesignSchemeVariant,
   BranchRunStatusPayload,
+  BranchRunNode,
 } from "./viewer-types";
 import {
   VIEWER_DESIGN_PRESETS,
@@ -58,8 +59,10 @@ import {
   resolveInstanceIdFromName,
 } from "./viewer-hit-info";
 import {
+  createAnalysisOverlayHelpers,
   createAssetBboxHelpers,
   createFrameHelpers,
+  removeAnalysisOverlayHelpers,
   removeAssetBboxHelpers,
   removeFrameAndAssetHelpers,
   updateAssetBboxHelpers,
@@ -89,6 +92,7 @@ import {
   renderBranchWorkspaceHtml,
   selectedBranchNode as resolveSelectedBranchNode,
 } from "./viewer-branch-workspace";
+import { mountBranchScoreScatter3d } from "./branch-score-scatter-3d";
 import { createViewerDesignController } from "./viewer-design-controller";
 import {
   compactUiLabel,
@@ -109,6 +113,7 @@ import {
   createViewerRenderPipeline,
   fitViewerLightingRigToBounds,
 } from "./viewer-render-pipeline";
+import { applyAnalyticalDioramaFinish } from "./viewer-visual-style";
 import { createFloatingLaneSystem } from "./viewer-floating-lane";
 import { createHistoryPanelController } from "./viewer-history-panel";
 import {
@@ -119,7 +124,7 @@ import {
   requestUnifiedEvaluation,
   type RenderedEvaluationView,
 } from "./viewer-evaluation";
-import { captureEvaluationViews } from "./viewer-evaluation-capture";
+import { captureEvaluationViews, captureGalleryViews, type GalleryCaptureTarget } from "./viewer-evaluation-capture";
 import { createViewerPresetsController } from "./viewer-presets-controller";
 import type { DesktopShell } from "./desktop-shell";
 
@@ -137,6 +142,29 @@ type DesignRunSnapshot = {
   prompt: string;
   graphTemplateId: string;
 };
+
+type RoadGen3DCaptureGalleryRequest = {
+  layoutPath?: string;
+  glbUrl?: string;
+  targets?: GalleryCaptureTarget[];
+  width?: number;
+  height?: number;
+};
+
+declare global {
+  interface Window {
+    __roadgen3dCaptureGallery?: (request: RoadGen3DCaptureGalleryRequest) => Promise<{
+      views: Array<{
+        target_id: string;
+        kind: string;
+        label: string;
+        image_data_url: string;
+        width: number;
+        height: number;
+      }>;
+    }>;
+  }
+}
 
 // Constants moved to viewer-types.ts: DEFAULT_GRAPH_TEMPLATE_ID, VIEWER_DESIGN_PRESETS
 
@@ -161,6 +189,9 @@ const AVATAR_HEIGHT_M = 1.7;
 const AVATAR_EYE_HEIGHT_M = 1.62;
 const THIRD_PERSON_DISTANCE_M = 3.6;
 const THIRD_PERSON_VERTICAL_OFFSET_M = 1.1;
+const INITIAL_RECENT_LAYOUT_LIMIT = 1;
+const RECENT_LAYOUT_BACKGROUND_LIMIT = 20;
+const RECENT_LAYOUT_BACKGROUND_BATCH = 8;
 
 // createTextSprite moved to viewer-utils.ts
 
@@ -229,6 +260,12 @@ function isRoamMovementKey(code: string): boolean {
     || code === "KeyD"
     || code === "ShiftLeft"
     || code === "ShiftRight";
+}
+
+function isHeadlessCaptureRequest(): boolean {
+  const search = new URLSearchParams(window.location.search);
+  const value = search.get("capture") ?? "";
+  return value === "1" || value.toLowerCase() === "true";
 }
 
 function createAvatarFigure(): THREE.Group {
@@ -301,11 +338,15 @@ function mountViewer(shell: DesktopShell): Promise<() => void> {
 
 async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const root = shell.root;
-  shell.setHints([
-    "Click to capture mouse, then use WASD to move.",
-    "Shift accelerates movement, Esc unlocks the cursor, and R resets the roam state.",
-    "Use Tools in the top menu or the right tabs for Evaluate, Compare, History, Presets, and Scene Overlay.",
-  ]);
+  const captureMode = isHeadlessCaptureRequest();
+  document.body.classList.toggle("roadgen-capture-mode", captureMode);
+  shell.setHints(captureMode
+    ? ["Headless capture mode is ready for scripted camera renders."]
+    : [
+        "Click to capture mouse, then use WASD to move.",
+        "Shift accelerates movement, Esc unlocks the cursor, and R resets the roam state.",
+        "Use Tools in the top menu or the right tabs for Evaluate, Compare, History, Presets, and Scene Overlay.",
+      ]);
   shell.setLeftSections([
     {
       id: "viewer-recent-layouts",
@@ -387,52 +428,44 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
               <input id="lighting-shadow" class="viewer-range" type="range" min="0" max="1" step="0.05" />
             </div>
             <div class="viewer-settings-section viewer-settings-section-divider">
-              <label class="viewer-toggle-row" for="third-person-enabled">
-                <span>Third Person Camera</span>
-                <input id="third-person-enabled" type="checkbox" />
-              </label>
+              <button id="third-person-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="third-person-enabled" aria-pressed="false">Third Person Camera</button>
+              <input id="third-person-enabled" class="viewer-toggle-input" type="checkbox" />
             </div>
             <div class="viewer-settings-section">
-              <label class="viewer-toggle-row" for="frame-mode-enabled">
-                <span>Frame Mode (Show Boundaries)</span>
-                <input id="frame-mode-enabled" type="checkbox" />
-              </label>
+              <button id="frame-mode-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="frame-mode-enabled" aria-pressed="false">Frame Mode (Show Boundaries)</button>
+              <input id="frame-mode-enabled" class="viewer-toggle-input" type="checkbox" />
             </div>
             <div class="viewer-settings-section">
-              <label class="viewer-toggle-row" for="asset-bbox-enabled">
-                <span>Asset BBoxes</span>
-                <input id="asset-bbox-enabled" type="checkbox" />
-              </label>
+              <button id="asset-bbox-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="asset-bbox-enabled" aria-pressed="false">Asset BBoxes</button>
+              <input id="asset-bbox-enabled" class="viewer-toggle-input" type="checkbox" />
             </div>
             <div class="viewer-settings-section">
-              <label class="viewer-toggle-row" for="asset-move-enabled">
-                <span>Asset Move Mode</span>
-                <input id="asset-move-enabled" type="checkbox" />
-              </label>
+              <button id="asset-move-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="asset-move-enabled" aria-pressed="false">Asset Move Mode</button>
+              <input id="asset-move-enabled" class="viewer-toggle-input" type="checkbox" />
             </div>
             <div class="viewer-settings-section">
-              <label class="viewer-toggle-row" for="laser-pointer-enabled">
-                <span>Laser Pointer</span>
-                <input id="laser-pointer-enabled" type="checkbox" />
-              </label>
+              <button id="laser-pointer-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="laser-pointer-enabled" aria-pressed="false">Laser Pointer</button>
+              <input id="laser-pointer-enabled" class="viewer-toggle-input" type="checkbox" />
             </div>
             <div class="viewer-settings-section">
-              <label class="viewer-toggle-row" for="graph-overlay-enabled">
-                <span>Graph Overlay</span>
-                <input id="graph-overlay-enabled" type="checkbox" />
-              </label>
+              <button id="graph-overlay-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="graph-overlay-enabled" aria-pressed="false">Graph Overlay</button>
+              <input id="graph-overlay-enabled" class="viewer-toggle-input" type="checkbox" />
             </div>
             <div class="viewer-settings-section">
-              <label class="viewer-toggle-row" for="layout-overlay-enabled">
-                <span>Scene Overlay</span>
-                <input id="layout-overlay-enabled" type="checkbox" />
-              </label>
+              <button id="layout-overlay-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="layout-overlay-enabled" aria-pressed="false">Scene Overlay</button>
+              <input id="layout-overlay-enabled" class="viewer-toggle-input" type="checkbox" />
             </div>
             <div class="viewer-settings-section">
-              <label class="viewer-toggle-row" for="audio-enabled">
-                <span>Ambient Audio</span>
-                <input id="audio-enabled" type="checkbox" />
-              </label>
+              <button id="analysis-overlay-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="analysis-overlay-enabled" aria-pressed="false">Analysis Overlay</button>
+              <input id="analysis-overlay-enabled" class="viewer-toggle-input" type="checkbox" />
+            </div>
+            <div class="viewer-settings-section">
+              <button id="diorama-finish-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="diorama-finish-enabled" aria-pressed="false">Diorama Finish</button>
+              <input id="diorama-finish-enabled" class="viewer-toggle-input" type="checkbox" />
+            </div>
+            <div class="viewer-settings-section">
+              <button id="audio-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="audio-enabled" aria-pressed="false">Ambient Audio</button>
+              <input id="audio-enabled" class="viewer-toggle-input" type="checkbox" />
             </div>
           </aside>
         `,
@@ -445,7 +478,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
             <div class="viewer-slide-panel-header">
               <div>
                 <div class="viewer-slide-panel-title">Design Assistant</div>
-                <div class="viewer-slide-panel-subtitle">Generate a scene and load it directly in Viewer</div>
+                <div class="viewer-slide-panel-subtitle">Generate scenes, trace RAG / triples / search patches, and compare Pareto scores</div>
               </div>
               <button id="viewer-design-review-run" class="viewer-design-review-run" type="button" disabled title="重新展开最近一次场景生成步骤">Review Run</button>
               <button id="viewer-design-close" class="viewer-settings-close" type="button" aria-label="Close design assistant">x</button>
@@ -476,11 +509,16 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                 <button class="viewer-help-icon" type="button" data-help="design-template" title="了解图模板">?</button>
               </label>
               <input id="viewer-design-template" class="viewer-design-input" type="text" value="${DEFAULT_GRAPH_TEMPLATE_ID}" />
+              <div class="viewer-design-trace-hint">
+                Pareto Trace 使用当前 Prompt 和 Graph Template，按传统参数搜索采样最多 100 组；连续 20 组未改进时早停。每轮只保留评分前 10 个 GLB/渲染视图，非前 10 重资产会在评分后删除。
+              </div>
               <div id="viewer-design-status" class="viewer-design-status">Ready to generate.</div>
               <div id="viewer-design-result" class="viewer-design-result"></div>
             </div>
             <div class="viewer-slide-panel-footer">
-              <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Branch Run</button>
+              <button id="viewer-design-benchmark" class="viewer-nav-button viewer-nav-button-secondary" type="button">Benchmark</button>
+              <button id="viewer-design-branch-history" class="viewer-nav-button viewer-nav-button-secondary" type="button">Runs</button>
+              <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Pareto Trace</button>
               <button id="viewer-design-generate" class="viewer-nav-button" type="button">Generate & Load</button>
             </div>
           </aside>
@@ -891,6 +929,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const designPromptEl = requireElement<HTMLTextAreaElement>(root, "#viewer-design-prompt");
   const designCountEl = requireElement<HTMLSelectElement>(root, "#viewer-design-count");
   const designTemplateEl = requireElement<HTMLInputElement>(root, "#viewer-design-template");
+  const designBenchmarkEl = requireElement<HTMLButtonElement>(root, "#viewer-design-benchmark");
+  const designBranchHistoryEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-history");
   const designBranchRunEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-run");
   const designGenerateEl = requireElement<HTMLButtonElement>(root, "#viewer-design-generate");
   const designStatusEl = requireElement<HTMLElement>(root, "#viewer-design-status");
@@ -934,10 +974,76 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const graphOverlayToggleEl = requireElement<HTMLInputElement>(root, "#graph-overlay-enabled");
 
   const layoutOverlayToggleEl = requireElement<HTMLInputElement>(root, "#layout-overlay-enabled");
+  const analysisOverlayToggleEl = requireElement<HTMLInputElement>(root, "#analysis-overlay-enabled");
+  const dioramaFinishToggleEl = requireElement<HTMLInputElement>(root, "#diorama-finish-enabled");
   const audioToggleEl = requireElement<HTMLInputElement>(root, "#audio-enabled");
 
+  const toggleButtonsByInput = new Map<HTMLInputElement, HTMLButtonElement>();
+  const settingToggleButtons = Array.from(root.querySelectorAll<HTMLButtonElement>(".viewer-toggle-button"));
+  const displaySettingToggleButtons = settingToggleButtons.filter((button) => button.dataset.toggleInput);
+
+  const syncToggleButtonState = (inputEl: HTMLInputElement): void => {
+    const buttonEl = toggleButtonsByInput.get(inputEl);
+    if (!buttonEl) {
+      return;
+    }
+    const isChecked = inputEl.checked;
+    buttonEl.classList.toggle("viewer-toggle-button-active", isChecked);
+    buttonEl.setAttribute("aria-pressed", String(isChecked));
+  };
+
+  const setToggleInput = (
+    inputEl: HTMLInputElement,
+    checked: boolean,
+    options: { emitChange?: boolean } = {},
+  ): void => {
+    const shouldEmitChange = options.emitChange ?? false;
+    if (inputEl.checked !== checked) {
+      inputEl.checked = checked;
+    }
+    syncToggleButtonState(inputEl);
+    if (shouldEmitChange) {
+      inputEl.dispatchEvent(new Event("change"));
+    }
+  };
+
+  for (const buttonEl of displaySettingToggleButtons) {
+    const inputId = buttonEl.dataset.toggleInput;
+    if (!inputId) {
+      continue;
+    }
+    const inputEl = root.querySelector<HTMLInputElement>(`#${CSS.escape(inputId)}`);
+    if (!inputEl) {
+      continue;
+    }
+    toggleButtonsByInput.set(inputEl, buttonEl);
+    buttonEl.addEventListener("click", () => {
+      setToggleInput(inputEl, !inputEl.checked, { emitChange: true });
+    });
+  }
+  for (const inputEl of toggleButtonsByInput.keys()) {
+    syncToggleButtonState(inputEl);
+  }
+
+  function manifestDefaultsToDioramaFinish(manifest: ViewerManifest | null): boolean {
+    if (!manifest) {
+      return false;
+    }
+    const visualStyle = manifest.visual_style ?? null;
+    if (visualStyle && Object.keys(visualStyle).length > 0) {
+      return true;
+    }
+    const summary = manifest.summary ?? {};
+    return Boolean(
+      "visual_style_preset" in summary
+      || "scene_texture_pack" in summary
+      || "style_preset" in summary
+      || "building_generation_mode" in summary
+    );
+  }
+
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#f7f6f3");
+  scene.background = new THREE.Color("#f4f6f2");
 
   const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 2000);
   const audioManager = new AudioManager(camera, scene);
@@ -969,6 +1075,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.VSMShadowMap;
   renderer.setSize(canvasHost.clientWidth, canvasHost.clientHeight);
+  renderer.domElement.tabIndex = 0;
   canvasHost.appendChild(renderer.domElement);
 
   const renderPipeline = createViewerRenderPipeline(
@@ -1136,7 +1243,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         graphOverlayActive = false;
       }
       if (layoutOverlayToggleEl.checked) {
-        layoutOverlayToggleEl.checked = false;
+        setToggleInput(layoutOverlayToggleEl, false);
         floatingLaneSystem.config.enabled = false;
         floatingLaneSystem.clearOverlay();
       }
@@ -1153,19 +1260,20 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     },
     setCurrentManifest: (manifest) => {
       currentManifest = manifest;
+      setToggleInput(dioramaFinishToggleEl, manifestDefaultsToDioramaFinish(manifest));
     },
     loadScene,
     afterLayoutLoaded: () => {
       updateMetricsPanel();
       if (graphOverlayActive) {
-        graphOverlayToggleEl.checked = false;
+        setToggleInput(graphOverlayToggleEl, false);
         graphOverlayActive = false;
         clearGraphOverlay();
         currentCameraMode = thirdPersonToggleEl.checked ? "third_person" : "first_person";
         syncCameraRig();
       }
       if (layoutOverlayToggleEl.checked) {
-        layoutOverlayToggleEl.checked = false;
+        setToggleInput(layoutOverlayToggleEl, false);
         floatingLaneSystem.config.enabled = false;
         floatingLaneSystem.clearOverlay();
       }
@@ -1178,6 +1286,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     designTemplateEl,
     designCountEl,
     designGenerateEl,
+    designBenchmarkEl,
+    designBranchHistoryEl,
     designBranchRunEl,
     designReviewRunEl,
     designResultEl,
@@ -1236,6 +1346,37 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       shell.setStatusSummary(restoreText);
       statusResetHandle = null;
     }, durationMs);
+  }
+
+  function isMissingSceneLayoutError(error: unknown): boolean {
+    const message = (error instanceof Error ? error.message : String(error ?? "")).toLowerCase();
+    return message.includes("failed to load manifest") && message.includes("404")
+      || message.includes("not found")
+      || message.includes("does not exist")
+      || message.includes("不存在");
+  }
+
+  async function loadBranchLayoutSelection(
+    layoutPath: string,
+    successMessage: string,
+  ): Promise<void> {
+    try {
+      await sceneSelectionController.loadLayoutSelection(layoutPath);
+      const recent = await loadRecentLayouts(50, false);
+      populateRecentLayoutOptions(recent, layoutPath);
+      flashStatus(successMessage);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load layout.";
+      setError(errorEl, message);
+      setStatus("Scene layout failed");
+      if (!isMissingSceneLayoutError(error)) {
+        return;
+      }
+
+      const fallbackMessage = `Scene manifest missing for ${layoutPath}. It may have been deleted temporarily.`;
+      setError(errorEl, `${fallbackMessage} If scene_layout.json is still present, Viewer will attempt to rebuild the GLB from that layout; otherwise generate a new run explicitly.`);
+    }
   }
 
   function applyLightingState(): void {
@@ -1417,7 +1558,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   function updateOverlay(): void {
-    overlayEl.hidden = isRoamMovementActive();
+    const shouldShow = !isRoamMovementActive();
+    overlayEl.hidden = !shouldShow;
+    overlayEl.style.display = shouldShow ? "" : "none";
+    overlayEl.setAttribute("aria-hidden", shouldShow ? "false" : "true");
   }
 
   function clearInfoCard(): void {
@@ -1485,7 +1629,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     if (
       movementKey
       && active
-      && !controls.isLocked
+      && !isPointerLookActive()
       && currentCameraMode !== "third_person"
     ) {
       return;
@@ -1579,8 +1723,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       && document.hasFocus();
   }
 
+  function isPointerLookActive(): boolean {
+    return controls.isLocked || document.pointerLockElement === renderer.domElement;
+  }
+
   function isRoamMovementActive(): boolean {
-    return controls.isLocked || isThirdPersonKeyboardRoamActive();
+    return isPointerLookActive() || isThirdPersonKeyboardRoamActive();
   }
 
   function configureSceneObjectShadows(rootObject: THREE.Object3D): void {
@@ -1683,6 +1831,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   async function loadScene(option: SceneOption): Promise<void> {
+    const loadStart = performance.now();
     clearError(errorEl);
     setStatus(`Loading ${option.label}…`);
     if (controls.isLocked) {
@@ -1694,6 +1843,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       disposeObject(currentRoot);
       currentRoot = null;
     }
+    removeAnalysisOverlayHelpers(scene);
     removeFrameAndAssetHelpers(scene);
 
     applyAudioProfile();
@@ -1703,19 +1853,36 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     laserHitDot.visible = false;
     laserBeam.visible = false;
 
+    const gltfLoadStart = performance.now();
     const gltf = await loader.loadAsync(option.glbUrl);
+    const gltfLoadMs = (performance.now() - gltfLoadStart).toFixed(1);
+    console.info(`[viewer-timing] loadScene.glTF (${option.label}): ${gltfLoadMs} ms`);
+
     currentRoot = gltf.scene;
+    const shadowStart = performance.now();
     configureSceneObjectShadows(currentRoot);
+    const shadowMs = (performance.now() - shadowStart).toFixed(1);
+    console.info(`[viewer-timing] loadScene.shadows (${option.label}): ${shadowMs} ms`);
+    if (dioramaFinishToggleEl.checked) {
+      applyAnalyticalDioramaFinish(currentRoot, currentManifest ?? undefined);
+    }
     scene.add(currentRoot);
 
-    if (frameModeToggleEl.checked && currentRoot) {
+    const auxStart = performance.now();
+    if (!captureMode && frameModeToggleEl.checked && currentRoot) {
       createFrameHelpers(scene, currentRoot);
     }
 
-    if (assetBboxToggleEl.checked && currentRoot) {
+    if (!captureMode && assetBboxToggleEl.checked && currentRoot) {
       createAssetBboxHelpers(scene, currentRoot, currentManifest);
     }
+    if (!captureMode) {
+      refreshAnalysisOverlayForSelectedBranch();
+    }
+    const auxMs = (performance.now() - auxStart).toFixed(1);
+    console.info(`[viewer-timing] loadScene.aux (${option.label}): ${auxMs} ms`);
 
+    const boundsStart = performance.now();
     const bbox = new THREE.Box3().setFromObject(currentRoot);
     const spawnCenter = new THREE.Vector3();
     bbox.getCenter(spawnCenter);
@@ -1728,6 +1895,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     currentSpawn = spawn.position;
     currentForward = spawn.forward;
     currentSceneBounds = sceneBoundsFromManifest(bbox, currentManifest);
+    const boundsMs = (performance.now() - boundsStart).toFixed(1);
+    console.info(`[viewer-timing] loadScene.bounds (${option.label}): ${boundsMs} ms`);
     fitViewerLightingRigToBounds(lightingRig, bbox);
     updateMinimapCamera(minimapCamera, currentSceneBounds, bbox);
     resetView();
@@ -1752,10 +1921,51 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
     syncLightingUi();
     setStatus(`Viewing ${option.label}`);
+    console.info(`[viewer-timing] loadScene.total (${option.label}): ${(performance.now() - loadStart).toFixed(1)} ms`);
 
     // 清除 manifest 缓存，确保 History Analysis 重新加载最新数据
     clearManifestCache();
   }
+
+  window.__roadgen3dCaptureGallery = async (request: RoadGen3DCaptureGalleryRequest) => {
+    const targets = Array.isArray(request?.targets) ? request.targets : [];
+    if (targets.length === 0) {
+      return { views: [] };
+    }
+    const width = Math.max(64, Math.trunc(Number(request?.width) || 1280));
+    const height = Math.max(64, Math.trunc(Number(request?.height) || 720));
+    if (request?.layoutPath) {
+      const manifest = await loadManifest(request.layoutPath, false);
+      currentManifest = manifest;
+      currentLayoutPath = manifest.layout_path || request.layoutPath;
+      await loadScene({
+        key: "capture_scene",
+        label: "Capture Scene",
+        glbUrl: manifest.final_scene.glb_url,
+      });
+    } else if (request?.glbUrl) {
+      await loadScene({
+        key: "capture_scene",
+        label: "Capture Scene",
+        glbUrl: request.glbUrl,
+      });
+    }
+    const views = await captureGalleryViews(
+      {
+        scene,
+        renderer,
+        cameraForwardHorizontal,
+        currentRoot,
+        currentSpawn,
+        currentForward,
+        avatarEyeHeightM: AVATAR_EYE_HEIGHT_M,
+      },
+      targets,
+      width,
+      height,
+    );
+    return { views };
+  };
 
   function populateRecentLayoutOptions(layouts: RecentLayout[], selectedPath: string): void {
     recentLayoutsByPath.clear();
@@ -1782,6 +1992,76 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       const selectedLayout = recentLayoutsByPath.get(selectedPath);
       layoutSelectEl.title = selectedLayout?.label ?? makeDirectLayoutLabel(selectedPath);
     }
+  }
+
+  function recentLayoutDirectOptionExists(layoutPath: string): boolean {
+    return Array.from(layoutSelectEl.options).some((option) => option.value === layoutPath);
+  }
+
+  function appendRecentLayoutOptions(layouts: RecentLayout[], selectedPath: string): void {
+    for (const layout of layouts) {
+      if (recentLayoutsByPath.has(layout.layout_path)) {
+        continue;
+      }
+      recentLayoutsByPath.set(layout.layout_path, layout);
+      const optionEl = document.createElement("option");
+      optionEl.value = layout.layout_path;
+      optionEl.textContent = compactUiLabel(layout.label);
+      optionEl.title = layout.label;
+      layoutSelectEl.appendChild(optionEl);
+    }
+    if (selectedPath) {
+      const selectedLayout = recentLayoutsByPath.get(selectedPath);
+      if (selectedLayout) {
+        layoutSelectEl.value = selectedPath;
+        layoutSelectEl.title = selectedLayout.label;
+      } else if (!recentLayoutDirectOptionExists(selectedPath)) {
+        const directOption = document.createElement("option");
+        const directLabel = makeDirectLayoutLabel(selectedPath);
+        directOption.value = selectedPath;
+        directOption.textContent = compactUiLabel(directLabel);
+        directOption.title = directLabel;
+        layoutSelectEl.appendChild(directOption);
+        layoutSelectEl.value = selectedPath;
+        layoutSelectEl.title = directLabel;
+      } else {
+        layoutSelectEl.title = makeDirectLayoutLabel(selectedPath);
+      }
+    }
+    layoutSelectEl.disabled = layoutSelectEl.options.length === 0;
+  }
+
+  function scheduleRecentLayoutHydration(selectedPath: string, initialLoaded: number): void {
+    const startOffset = Math.max(0, Math.min(initialLoaded, RECENT_LAYOUT_BACKGROUND_LIMIT));
+    void (async () => {
+      try {
+        if (startOffset >= RECENT_LAYOUT_BACKGROUND_LIMIT) {
+          return;
+        }
+        let nextOffset = startOffset;
+        while (!destroyed && nextOffset < RECENT_LAYOUT_BACKGROUND_LIMIT) {
+          const batch = Math.min(RECENT_LAYOUT_BACKGROUND_BATCH, RECENT_LAYOUT_BACKGROUND_LIMIT - nextOffset);
+          const pageLayouts = await loadRecentLayouts(batch, false, nextOffset);
+          if (destroyed) {
+            return;
+          }
+          if (pageLayouts.length === 0) {
+            return;
+          }
+          appendRecentLayoutOptions(pageLayouts, selectedPath);
+          if (panelController && panelController.isOpen("compare")) {
+            populateCompareSelectors();
+          }
+          nextOffset += pageLayouts.length;
+          if (pageLayouts.length < batch) {
+            return;
+          }
+          await new Promise<void>((resolve) => setTimeout(resolve, 120));
+        }
+      } catch (error) {
+        console.warn("Failed to hydrate full recent-layouts list:", error);
+      }
+    })();
   }
 
   function populateDesignPresets(): void {
@@ -1922,10 +2202,53 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     designWorkspaceEl.hidden = false;
     minimapEl.hidden = true;
     designWorkspaceEl.innerHTML = renderBranchWorkspaceHtml(payload, selected, designPromptEl.value.trim());
+    revealAnalysisOverlayForSelectedBranch();
+    requestAnimationFrame(() => {
+      mountBranchScoreScatter3d(designWorkspaceEl, payload, selected?.node_id ?? null, (nodeId) => {
+        selectedBranchNodeId = nodeId;
+        renderBranchWorkspace(payload);
+      });
+    });
   }
 
   function renderBranchRunResults(payload: BranchRunStatusPayload): void {
     designResultEl.innerHTML = renderBranchRunResultsHtml(payload);
+  }
+
+  function selectedBranchNodeForAnalysisOverlay(): BranchRunNode | null {
+    if (!lastBranchRunSnapshot) return null;
+    return resolveSelectedBranchNode(lastBranchRunSnapshot, selectedBranchNodeId) ?? null;
+  }
+
+  function branchNodeHasAnalysisOverlayFeatures(node: BranchRunNode | null): boolean {
+    if (!node) return false;
+    if ((node.influence_rows ?? []).some((row) => row.active)) return true;
+    const analysisFeatures = node.analysis_features as Record<string, unknown> | undefined;
+    return Boolean(analysisFeatures && Object.keys(analysisFeatures).length > 0);
+  }
+
+  function refreshAnalysisOverlayForSelectedBranch(options: { flash?: boolean } = {}): number {
+    removeAnalysisOverlayHelpers(scene);
+    if (!analysisOverlayToggleEl.checked || !currentRoot || !currentManifest) return 0;
+    const selectedNode = selectedBranchNodeForAnalysisOverlay();
+    if (!branchNodeHasAnalysisOverlayFeatures(selectedNode)) return 0;
+    const highlightCount = createAnalysisOverlayHelpers(scene, currentRoot, currentManifest, selectedNode);
+    if (options.flash && highlightCount > 0) {
+      flashStatus(`Analysis overlay highlighted ${highlightCount} active feature${highlightCount === 1 ? "" : "s"}.`);
+    }
+    return highlightCount;
+  }
+
+  function revealAnalysisOverlayForSelectedBranch(): void {
+    const selectedNode = selectedBranchNodeForAnalysisOverlay();
+    if (!branchNodeHasAnalysisOverlayFeatures(selectedNode)) {
+      refreshAnalysisOverlayForSelectedBranch();
+      return;
+    }
+    if (!analysisOverlayToggleEl.checked) {
+      setToggleInput(analysisOverlayToggleEl, true);
+    }
+    refreshAnalysisOverlayForSelectedBranch();
   }
 
 
@@ -1970,7 +2293,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         setStatus("Visual evaluation unavailable; requesting walkability only.");
       }
 
-      const result = await requestUnifiedEvaluation(currentLayoutPath, renderedViews);
+      const manifestSummary = (currentManifest?.summary || {}) as Record<string, unknown>;
+      const result = await requestUnifiedEvaluation(currentLayoutPath, renderedViews, {
+        presetId: String(manifestSummary.preset_id || manifestSummary.benchmark_preset_id || selectedDesignPreset()?.id || "custom"),
+        persistToBenchmark: true,
+      });
       const evalResult = enforceVisualEvaluationAvailability(result);
       evaluateContentEl.innerHTML = renderEvaluationResultHtml(evalResult, renderedViews);
       flashStatus(
@@ -2029,15 +2356,14 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     metricsHost.innerHTML = renderMetricsPanel(summary as Record<string, unknown>);
   }
 
-  renderer.domElement.addEventListener(
-    "click",
-    () => {
-      if (!assetMoveController.isEnabled() && !panelController.isOpen("settings") && !controls.isLocked) {
-        controls.lock();
-      }
-    },
-    { signal },
-  );
+  const requestPointerLock = (): void => {
+    if (!assetMoveController.isEnabled() && !panelController.isOpen("settings") && !isPointerLookActive()) {
+      renderer.domElement.focus();
+      controls.lock();
+    }
+  };
+  renderer.domElement.addEventListener("click", requestPointerLock, { signal });
+  overlayEl.addEventListener("click", requestPointerLock, { signal });
 
   sceneGraphLinkEl.addEventListener(
     "click",
@@ -2232,6 +2558,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
   }, { signal });
   designGenerateEl.addEventListener("click", () => void designController.runDesignGeneration(), { signal });
+  designBenchmarkEl.addEventListener("click", () => void designController.loadBenchmarkExplorer(), { signal });
+  designBranchHistoryEl.addEventListener("click", () => void designController.loadBranchRunHistory(), { signal });
   designBranchRunEl.addEventListener("click", () => void designController.runBranchGeneration(), { signal });
   designWorkspaceEl.addEventListener("click", (event) => {
     const target = event.target as Element;
@@ -2243,10 +2571,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const loadPath = loadButton?.dataset.branchLoad?.trim();
     if (loadPath) {
       void (async () => {
-        await sceneSelectionController.loadLayoutSelection(loadPath);
-        const recent = await loadRecentLayouts(50, false);
-        populateRecentLayoutOptions(recent, loadPath);
-        flashStatus("Branch node scene loaded.");
+        await loadBranchLayoutSelection(loadPath, "Branch node scene loaded.");
       })();
       return;
     }
@@ -2291,10 +2616,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const layoutPath = button?.dataset.layoutPath?.trim();
     if (!layoutPath) return;
     void (async () => {
-      await sceneSelectionController.loadLayoutSelection(layoutPath);
-      const recent = await loadRecentLayouts(50, false);
-      populateRecentLayoutOptions(recent, layoutPath);
-      flashStatus("Selected generated scheme loaded.");
+      await loadBranchLayoutSelection(layoutPath, "Selected generated scheme loaded.");
     })();
   }, { signal });
 
@@ -2488,10 +2810,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     () => {
       assetMoveController.setEnabled(assetMoveToggleEl.checked);
       if (assetMoveToggleEl.checked) {
-        assetBboxToggleEl.checked = true;
+        setToggleInput(assetBboxToggleEl, true);
         createAssetBboxHelpers(scene, currentRoot, currentManifest);
         if (laserToggleEl.checked) {
-          laserToggleEl.checked = false;
+          setToggleInput(laserToggleEl, false);
           crosshairEl.hidden = true;
           laserBeam.visible = false;
           laserHitDot.visible = false;
@@ -2501,6 +2823,28 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         flashStatus("Asset move mode enabled. Drag assets in the 3D scene.");
       } else {
         flashStatus("Asset move mode disabled.");
+      }
+    },
+    { signal },
+  );
+  dioramaFinishToggleEl.addEventListener(
+    "change",
+    async () => {
+      const currentOption = sceneSelectionController.selectedSceneOption();
+      if (currentOption && currentRoot) {
+        await loadScene(currentOption);
+      }
+    },
+    { signal },
+  );
+  analysisOverlayToggleEl.addEventListener(
+    "change",
+    () => {
+      const highlighted = refreshAnalysisOverlayForSelectedBranch({ flash: analysisOverlayToggleEl.checked });
+      if (!analysisOverlayToggleEl.checked) {
+        flashStatus("Analysis overlay disabled.");
+      } else if (highlighted === 0) {
+        flashStatus("Analysis overlay ready. Select a Pareto point or branch node with active features.");
       }
     },
     { signal },
@@ -2574,13 +2918,19 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     { signal },
   );
 
-  const handleControlsLock = () => updateOverlay();
+  const handleControlsLock = () => {
+    renderer.domElement.focus();
+    updateOverlay();
+  };
   const handleControlsUnlock = () => {
     resetMoveState();
     updateOverlay();
   };
+  const handlePointerLockChange = () => updateOverlay();
   controls.addEventListener("lock", handleControlsLock);
   controls.addEventListener("unlock", handleControlsUnlock);
+  document.addEventListener("pointerlockchange", handlePointerLockChange, { signal });
+  document.addEventListener("pointerlockerror", handlePointerLockChange, { signal });
 
   window.addEventListener("resize", resizeRenderer, { signal });
   window.addEventListener("blur", resetMoveState, { signal });
@@ -2594,8 +2944,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     },
     { signal },
   );
-  window.addEventListener("keydown", (event) => handleKey(event, true), { signal });
-  window.addEventListener("keyup", (event) => handleKey(event, false), { signal });
+  document.addEventListener("keydown", (event) => handleKey(event, true), { capture: true, signal });
+  document.addEventListener("keyup", (event) => handleKey(event, false), { capture: true, signal });
   layoutSelectEl.addEventListener(
     "change",
     async () => {
@@ -2687,19 +3037,72 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
   try {
     syncLightingUi();
-    const requestedLayoutPath = parseQueryLayoutPath();
-    const recentLayouts = await loadRecentLayouts();
-    const initialLayoutPath = requestedLayoutPath ?? recentLayouts[0]?.layout_path ?? "";
-    if (!initialLayoutPath) {
-      throw new Error(
-        "No recent scene layouts were found. Generate a scene first or open the viewer with ?layout=/abs/path/to/scene_layout.json.",
-      );
-    }
-    populateRecentLayoutOptions(recentLayouts, initialLayoutPath);
     resizeRenderer();
-    await sceneSelectionController.loadLayoutSelection(initialLayoutPath);
-    animate();
-    updateOverlay();
+    if (captureMode) {
+      setStatus("Capture API ready");
+    } else {
+      const requestedLayoutPath = parseQueryLayoutPath();
+      let recentLayouts: RecentLayout[] = [];
+      let initialLayoutCandidates = requestedLayoutPath ? [requestedLayoutPath] : [];
+
+      if (!requestedLayoutPath) {
+        recentLayouts = await loadRecentLayouts(INITIAL_RECENT_LAYOUT_LIMIT);
+        initialLayoutCandidates = recentLayouts.map((item) => item.layout_path);
+      }
+
+      if (initialLayoutCandidates.length === 0) {
+        throw new Error(
+          "No recent scene layouts were found. Generate a scene first or open the viewer with ?layout=/abs/path/to/scene_layout.json.",
+        );
+      }
+
+      let initialLayoutPath = initialLayoutCandidates[0];
+      let lastLayoutError = "";
+      for (const candidate of initialLayoutCandidates) {
+        try {
+          populateRecentLayoutOptions(recentLayouts, candidate);
+          await sceneSelectionController.loadLayoutSelection(candidate);
+          initialLayoutPath = candidate;
+          lastLayoutError = "";
+          break;
+        } catch (error) {
+          lastLayoutError = error instanceof Error ? error.message : "Failed to load scene layout.";
+          console.warn(`Skipping unavailable scene layout ${candidate}:`, error);
+        }
+      }
+
+      // If user passed ?layout=... and it failed, fallback to latest recent layouts.
+      if (requestedLayoutPath && lastLayoutError) {
+        recentLayouts = await loadRecentLayouts(RECENT_LAYOUT_BACKGROUND_LIMIT, false);
+        const fallbackCandidates = recentLayouts
+          .map((item) => item.layout_path)
+          .filter((item) => item !== requestedLayoutPath);
+        for (const candidate of fallbackCandidates) {
+          try {
+            populateRecentLayoutOptions(recentLayouts, candidate);
+            await sceneSelectionController.loadLayoutSelection(candidate);
+            initialLayoutPath = candidate;
+            lastLayoutError = "";
+            break;
+          } catch (error) {
+            lastLayoutError = error instanceof Error ? error.message : "Failed to load scene layout.";
+            console.warn(`Skipping fallback scene layout ${candidate}:`, error);
+          }
+        }
+      }
+
+      if (lastLayoutError) {
+        throw new Error(`No viewable scene layouts were found. Last error: ${lastLayoutError}`);
+      }
+      animate();
+      updateOverlay();
+      if (initialLayoutPath) {
+        const initialLoaded = recentLayouts.some((item) => item.layout_path === initialLayoutPath)
+          ? recentLayouts.length
+          : 0;
+        scheduleRecentLayoutHydration(initialLayoutPath, initialLoaded);
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to initialize viewer.";
     setError(errorEl, message);
@@ -2708,6 +3111,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   return () => {
     destroyed = true;
+    if (window.__roadgen3dCaptureGallery) {
+      delete window.__roadgen3dCaptureGallery;
+    }
+    if (captureMode) {
+      document.body.classList.remove("roadgen-capture-mode");
+    }
     if (animationFrameId) {
       cancelAnimationFrame(animationFrameId);
     }

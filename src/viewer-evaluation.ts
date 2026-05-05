@@ -128,6 +128,7 @@ export function enforceVisualEvaluationAvailability(result: EvaluationResult): E
 export async function requestUnifiedEvaluation(
   layoutPath: string,
   renderedViews: RenderedEvaluationView[],
+  options: { presetId?: string | null; persistToBenchmark?: boolean } = {},
 ): Promise<EvaluationResult> {
   const response = await fetch(`${API_BASE}/api/design/evaluate/unified`, {
     method: "POST",
@@ -135,6 +136,8 @@ export async function requestUnifiedEvaluation(
     body: JSON.stringify({
       layout_path: layoutPath,
       rendered_views: renderedViews,
+      preset_id: options.presetId || undefined,
+      persist_to_benchmark: Boolean(options.persistToBenchmark),
     }),
   });
 

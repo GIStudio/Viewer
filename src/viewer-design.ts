@@ -44,6 +44,7 @@ const COURSE_DELIVERY_CONFIG_PATCH: Record<string, unknown> = {
   asset_curation_mode: "scene_ready_first",
   curated_street_assets_profile: "fixed_hq_v1",
   scene_texture_mode: "topdown_tiles_v1",
+  style_preset: "analytical_diorama_v1",
   topdown_render_mode: "design_tiles_v1",
   render_preset: "axonometric_board_v1",
   beauty_mode: "presentation_v1",

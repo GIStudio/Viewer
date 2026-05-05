@@ -16,6 +16,18 @@ export type LightingState = LightingPresetValues & {
 };
 
 export const LIGHTING_PRESETS: Record<string, LightingPresetValues> = {
+  analytical_diorama: {
+    exposure: 1.12,
+    keyLightIntensity: 1.28,
+    fillLightIntensity: 0.72,
+    warmth: 0.04,
+    shadowStrength: 0.48,
+    ambientOcclusion: 0.62,
+    bloomStrength: 0.018,
+    fogDensity: 0.0012,
+    sunElevation: 58,
+    sunAzimuth: 136,
+  },
   cinematic_day: {
     exposure: 1.34,
     keyLightIntensity: 1.75,
@@ -91,6 +103,7 @@ export const LIGHTING_PRESETS: Record<string, LightingPresetValues> = {
 };
 
 export const LIGHTING_PRESET_LABELS: Record<string, string> = {
+  analytical_diorama: "Analytical Diorama",
   cinematic_day: "Cinematic Day",
   neutral_studio: "Neutral Studio",
   bright_day: "Bright Day",
@@ -101,25 +114,25 @@ export const LIGHTING_PRESET_LABELS: Record<string, string> = {
 };
 
 export const DEFAULT_LIGHTING_STATE: LightingState = {
-  preset: "cinematic_day",
-  ...LIGHTING_PRESETS.cinematic_day,
+  preset: "analytical_diorama",
+  ...LIGHTING_PRESETS.analytical_diorama,
 };
 
 export function completeLightingValues(values: Partial<LightingPresetValues>): LightingPresetValues {
   const merged = {
-    ...LIGHTING_PRESETS.cinematic_day,
+    ...LIGHTING_PRESETS.analytical_diorama,
     ...values,
   };
   return {
-    exposure: Number.isFinite(merged.exposure) ? merged.exposure : LIGHTING_PRESETS.cinematic_day.exposure,
-    keyLightIntensity: Number.isFinite(merged.keyLightIntensity) ? merged.keyLightIntensity : LIGHTING_PRESETS.cinematic_day.keyLightIntensity,
-    fillLightIntensity: Number.isFinite(merged.fillLightIntensity) ? merged.fillLightIntensity : LIGHTING_PRESETS.cinematic_day.fillLightIntensity,
-    warmth: Number.isFinite(merged.warmth) ? merged.warmth : LIGHTING_PRESETS.cinematic_day.warmth,
-    shadowStrength: Number.isFinite(merged.shadowStrength) ? merged.shadowStrength : LIGHTING_PRESETS.cinematic_day.shadowStrength,
-    ambientOcclusion: Number.isFinite(merged.ambientOcclusion) ? merged.ambientOcclusion : LIGHTING_PRESETS.cinematic_day.ambientOcclusion,
-    bloomStrength: Number.isFinite(merged.bloomStrength) ? merged.bloomStrength : LIGHTING_PRESETS.cinematic_day.bloomStrength,
-    fogDensity: Number.isFinite(merged.fogDensity) ? merged.fogDensity : LIGHTING_PRESETS.cinematic_day.fogDensity,
-    sunElevation: Number.isFinite(merged.sunElevation) ? merged.sunElevation : LIGHTING_PRESETS.cinematic_day.sunElevation,
-    sunAzimuth: Number.isFinite(merged.sunAzimuth) ? merged.sunAzimuth : LIGHTING_PRESETS.cinematic_day.sunAzimuth,
+    exposure: Number.isFinite(merged.exposure) ? merged.exposure : LIGHTING_PRESETS.analytical_diorama.exposure,
+    keyLightIntensity: Number.isFinite(merged.keyLightIntensity) ? merged.keyLightIntensity : LIGHTING_PRESETS.analytical_diorama.keyLightIntensity,
+    fillLightIntensity: Number.isFinite(merged.fillLightIntensity) ? merged.fillLightIntensity : LIGHTING_PRESETS.analytical_diorama.fillLightIntensity,
+    warmth: Number.isFinite(merged.warmth) ? merged.warmth : LIGHTING_PRESETS.analytical_diorama.warmth,
+    shadowStrength: Number.isFinite(merged.shadowStrength) ? merged.shadowStrength : LIGHTING_PRESETS.analytical_diorama.shadowStrength,
+    ambientOcclusion: Number.isFinite(merged.ambientOcclusion) ? merged.ambientOcclusion : LIGHTING_PRESETS.analytical_diorama.ambientOcclusion,
+    bloomStrength: Number.isFinite(merged.bloomStrength) ? merged.bloomStrength : LIGHTING_PRESETS.analytical_diorama.bloomStrength,
+    fogDensity: Number.isFinite(merged.fogDensity) ? merged.fogDensity : LIGHTING_PRESETS.analytical_diorama.fogDensity,
+    sunElevation: Number.isFinite(merged.sunElevation) ? merged.sunElevation : LIGHTING_PRESETS.analytical_diorama.sunElevation,
+    sunAzimuth: Number.isFinite(merged.sunAzimuth) ? merged.sunAzimuth : LIGHTING_PRESETS.analytical_diorama.sunAzimuth,
   };
 }
