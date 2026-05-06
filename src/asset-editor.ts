@@ -25,6 +25,9 @@ type AssetRecord = {
   scene_eligible?: boolean;
   quality_notes?: string[];
   tags?: string[];
+  style_tags?: string[];
+  curation_notes?: string;
+  scene_exclusion_reason?: string;
   face_count?: number;
   vertex_count?: number;
   // Scale and orientation fields
@@ -67,6 +70,8 @@ type AssetEditorState = {
   sceneChildren: SceneChildInfo[];
   selectionMode: boolean;
   selectedMeshes: Set<THREE.Mesh>;
+  originAutoAlignEnabled: boolean;
+  dragMoveMode: boolean;
   // Pagination state
   totalAssets: number;
   loadedOffset: number;
@@ -75,8 +80,8 @@ type AssetEditorState = {
   // Scale and orientation state
   yawValue: number;
   frontDirection: string;
-  modelDimensions: { width?: number; height?: number; depth?: number } | null;
-  originalDimensions: { width: number; height: number; depth: number } | null;
+  modelDimensions: DimensionRecord | null;
+  originalDimensions: DimensionRecord | null;
 };
 
 /* ── Helpers ───────────────────────────────────────────────────────── */
@@ -85,6 +90,38 @@ function qs<T extends HTMLElement>(parent: ParentNode, sel: string): T {
   const el = parent.querySelector<T>(sel);
   if (!el) throw new Error(`Required element not found: ${sel}`);
   return el;
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(/[,\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function parseTagInput(value: string): string[] {
+  return Array.from(new Set(asStringArray(value)));
+}
+
+function formatTagInput(value: unknown): string {
+  return asStringArray(value).join(", ");
 }
 
 function shortId(assetId: string): string {
@@ -110,6 +147,458 @@ function tierColor(tier: number | undefined): string {
   if (tier >= 3) return "#2563eb";
   if (tier >= 2) return "#d97706";
   return "#dc2626";
+}
+
+const DIMENSION_STORE_DECIMALS = 4;
+const DIMENSION_DISPLAY_DECIMALS = 2;
+const DIMENSION_DUP_KEY_DECIMALS = 4;
+const DEFAULT_SCALE_BAR_LENGTH = 5;
+const DEFAULT_SCALE_BAR_TICK_INTERVAL = 0.5;
+const SCALE_BAR_SMALL_MAX = 5; // 0.5m tick
+const SCALE_BAR_MEDIUM_MAX = 30; // 1m tick
+const DIMENSION_AUTOSAVE_DELAY_MS = 800;
+const CURATION_AUTOSAVE_DELAY_MS = 800;
+const ORIGIN_AUTO_FIX_EPSILON_M = 0.01;
+
+type DimensionRecord = {
+  width: number;
+  height: number;
+  depth: number;
+};
+
+function formatDimension(
+  value: number | null | undefined,
+  decimals: number = DIMENSION_DISPLAY_DECIMALS,
+): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "0.00";
+  return roundTo(value, decimals).toFixed(decimals);
+}
+
+function getRangeSourceLabel(profileMeta: Pick<CategoryDimensionValidation, "source" | "sampleCount">): string {
+  if (profileMeta.source === "static") return "模板范围";
+  if (profileMeta.source === "inferred") {
+    return `自动推断（${profileMeta.sampleCount} 条样本）`;
+  }
+  return "默认范围（已使用通用规则）";
+}
+
+function getViolationDirectionLabel(direction: "too-small" | "too-large"): string {
+  return direction === "too-small" ? "偏小" : "偏大";
+}
+
+type DimensionAxisRange = {
+  min: number;
+  max: number;
+};
+
+type CategoryDimensionProfile = {
+  name: string;
+  width: DimensionAxisRange;
+  height: DimensionAxisRange;
+  depth: DimensionAxisRange;
+};
+
+type CategoryDimensionRule = {
+  keys: string[];
+  profile: CategoryDimensionProfile;
+};
+
+type CategoryDimensionViolation = {
+  axis: "width" | "height" | "depth";
+  axisLabel: "W" | "H" | "D";
+  direction: "too-small" | "too-large";
+  value: number;
+  expectedMin: number;
+  expectedMax: number;
+};
+
+type CategoryDimensionValidation = {
+  profile: CategoryDimensionProfile;
+  violations: CategoryDimensionViolation[];
+  suggestedScale: number;
+  isWithinRange: boolean;
+  feasible: boolean;
+  source: "static" | "inferred" | "default";
+  sampleCount: number;
+};
+
+const CATEGORY_DIMENSION_RULES: CategoryDimensionRule[] = [
+  {
+    keys: ["tree", "vegetation", "plant"],
+    profile: {
+      name: "Tree",
+      width: { min: 0.2, max: 12 },
+      height: { min: 1, max: 25 },
+      depth: { min: 0.2, max: 12 },
+    },
+  },
+  {
+    keys: ["lamp", "light", "streetlight"],
+    profile: {
+      name: "Lamp",
+      width: { min: 0.05, max: 8 },
+      height: { min: 0.4, max: 18 },
+      depth: { min: 0.05, max: 8 },
+    },
+  },
+  {
+    keys: ["bench", "seat", "chair"],
+    profile: {
+      name: "Bench/Seat",
+      width: { min: 0.3, max: 8 },
+      height: { min: 0.25, max: 2 },
+      depth: { min: 0.4, max: 6 },
+    },
+  },
+  {
+    keys: ["sign", "traffic"],
+    profile: {
+      name: "Sign",
+      width: { min: 0.3, max: 25 },
+      height: { min: 0.2, max: 10 },
+      depth: { min: 0.05, max: 6 },
+    },
+  },
+  {
+    keys: ["car", "vehicle", "truck", "bus", "van", "vanity"],
+    profile: {
+      name: "Vehicle",
+      width: { min: 0.8, max: 12 },
+      height: { min: 1, max: 4 },
+      depth: { min: 1.5, max: 16 },
+    },
+  },
+  {
+    keys: ["building", "house", "office", "tower", "wall"],
+    profile: {
+      name: "Building",
+      width: { min: 1, max: 200 },
+      height: { min: 1, max: 250 },
+      depth: { min: 1, max: 200 },
+    },
+  },
+];
+
+const DEFAULT_CATEGORY_DIMENSION_PROFILE: CategoryDimensionProfile = {
+  name: "General",
+  width: { min: 0.1, max: 100 },
+  height: { min: 0.1, max: 100 },
+  depth: { min: 0.1, max: 100 },
+};
+
+type CategoryDimensionInferenceRecord = {
+  width: number[];
+  height: number[];
+  depth: number[];
+};
+
+const MIN_CATEGORY_SAMPLES_FOR_INFERENCE = 3;
+
+const inferredCategoryProfiles = new Map<string, CategoryDimensionProfile>();
+const inferredCategoryProfileCounts = new Map<string, number>();
+
+const inferAxisRange = (values: number[], minPercent = 0.1, maxPercent = 0.9): DimensionAxisRange | null => {
+  if (values.length < 2) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const n = sorted.length;
+  const valueAt = (p: number) => {
+    const index = Math.min(Math.max(p * (n - 1), 0), n - 1);
+    const lo = Math.floor(index);
+    const hi = Math.min(lo + 1, n - 1);
+    const ratio = index - lo;
+    return sorted[lo] * (1 - ratio) + sorted[hi] * ratio;
+  };
+  const min = valueAt(minPercent);
+  const max = valueAt(maxPercent);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= 0 || min <= 0) return null;
+  return {
+    min: Math.max(0.01, roundTo(min * 0.8, 3)),
+    max: roundTo(max * 1.2, 3),
+  };
+};
+
+const inferCategoryProfileName = (category: string): string => {
+  const normalized = (category ?? "").trim();
+  if (!normalized) return "Unknown";
+  return normalized
+    .split(/[^a-z0-9]+/i)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join("-") || "Unknown";
+};
+
+function rebuildCategoryProfiles(assets: AssetRecord[]) {
+  const grouped = new Map<string, CategoryDimensionInferenceRecord>();
+  for (const asset of assets) {
+    const dims = getAssetDimensions(asset);
+    const cat = normalizeCategory(asset.category);
+    if (!dims || !cat) continue;
+    const rec = grouped.get(cat) ?? { width: [], height: [], depth: [] };
+    rec.width.push(dims.width);
+    rec.height.push(dims.height);
+    rec.depth.push(dims.depth);
+    grouped.set(cat, rec);
+  }
+
+  inferredCategoryProfiles.clear();
+  inferredCategoryProfileCounts.clear();
+  for (const [cat, rec] of grouped) {
+    if (rec.width.length < MIN_CATEGORY_SAMPLES_FOR_INFERENCE) continue;
+
+    const width = inferAxisRange(rec.width);
+    const height = inferAxisRange(rec.height);
+    const depth = inferAxisRange(rec.depth);
+    if (!width || !height || !depth) continue;
+    inferredCategoryProfiles.set(cat, {
+      name: inferCategoryProfileName(cat),
+      width,
+      height,
+      depth,
+    });
+    inferredCategoryProfileCounts.set(cat, rec.width.length);
+  }
+}
+
+function getCategoryProfileMeta(category?: string): {
+  profile: CategoryDimensionProfile;
+  source: CategoryDimensionValidation["source"];
+  sampleCount: number;
+} {
+  const categoryKey = normalizeCategory(category);
+  const compactCategoryKey = normalizeCategoryToken(category);
+  for (const rule of CATEGORY_DIMENSION_RULES) {
+    for (const key of rule.keys) {
+      const compactRuleKey = key.replace(/\s+/g, "");
+      if (categoryKey.includes(key) || compactCategoryKey.includes(compactRuleKey)) {
+        return { profile: rule.profile, source: "static", sampleCount: Number.MAX_SAFE_INTEGER };
+      }
+    }
+  }
+  if (categoryKey && inferredCategoryProfiles.has(categoryKey)) {
+    return {
+      profile: inferredCategoryProfiles.get(categoryKey)!,
+      source: "inferred",
+      sampleCount: inferredCategoryProfileCounts.get(categoryKey) ?? 0,
+    };
+  }
+  if (compactCategoryKey) {
+    for (const [profileKey, profile] of inferredCategoryProfiles) {
+      if (compactCategoryKey.includes(profileKey.replace(/\s+/g, ""))) {
+        return {
+          profile,
+          source: "inferred",
+          sampleCount: inferredCategoryProfileCounts.get(profileKey) ?? 0,
+        };
+      }
+    }
+  }
+  return { profile: DEFAULT_CATEGORY_DIMENSION_PROFILE, source: "default", sampleCount: 0 };
+}
+
+function getCategoryDimensionProfile(category?: string): CategoryDimensionProfile {
+  return getCategoryProfileMeta(category).profile;
+}
+
+function roundTo(value: number, decimals: number): number {
+  return Number(value.toFixed(decimals));
+}
+
+function getObjectBoundingBox(target: THREE.Object3D): THREE.Box3 {
+  return new THREE.Box3().setFromObject(target);
+}
+
+function getDimensionsFromObject(target: THREE.Object3D): DimensionRecord | null {
+  const box = getObjectBoundingBox(target);
+  if (box.isEmpty()) return null;
+  const size = box.getSize(new THREE.Vector3());
+  if (!Number.isFinite(size.x) || !Number.isFinite(size.y) || !Number.isFinite(size.z)) {
+    return null;
+  }
+  return {
+    width: roundTo(size.x, DIMENSION_STORE_DECIMALS),
+    height: roundTo(size.y, DIMENSION_STORE_DECIMALS),
+    depth: roundTo(size.z, DIMENSION_STORE_DECIMALS),
+  };
+}
+
+function getAssetDimensions(asset?: AssetRecord | null): DimensionRecord | null {
+  if (!asset?.dimensions_m) return null;
+  const { width, height, depth } = asset.dimensions_m;
+  if (
+    typeof width !== "number" || !Number.isFinite(width)
+    || typeof height !== "number" || !Number.isFinite(height)
+    || typeof depth !== "number" || !Number.isFinite(depth)
+  ) {
+    return null;
+  }
+  return {
+    width,
+    height,
+    depth,
+  };
+}
+
+function normalizeCategory(category?: string): string {
+  return (category ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+}
+
+function normalizeCategoryToken(category?: string): string {
+  return normalizeCategory(category).replace(/\s+/g, "");
+}
+
+function validateCategoryDimension(
+  dims: DimensionRecord | null,
+  category?: string,
+): CategoryDimensionValidation {
+  const profileMeta = getCategoryProfileMeta(category);
+  const profile = profileMeta.profile;
+  if (!dims) {
+    return {
+      profile,
+      violations: [],
+      suggestedScale: 1,
+      isWithinRange: false,
+      feasible: false,
+      source: profileMeta.source,
+      sampleCount: profileMeta.sampleCount,
+    };
+  }
+
+  const violations: CategoryDimensionViolation[] = [];
+  const axisMap: Array<{ axis: "width" | "height" | "depth"; label: "W" | "H" | "D"; value: number; range: DimensionAxisRange }> = [
+    { axis: "width", label: "W", value: dims.width, range: profile.width },
+    { axis: "height", label: "H", value: dims.height, range: profile.height },
+    { axis: "depth", label: "D", value: dims.depth, range: profile.depth },
+  ];
+
+  let minScale = 1;
+  let maxScale = Number.POSITIVE_INFINITY;
+  for (const item of axisMap) {
+    if (!Number.isFinite(item.value) || item.value <= 0) continue;
+    if (item.value < item.range.min) {
+      violations.push({
+        axis: item.axis,
+        axisLabel: item.label,
+        direction: "too-small",
+        value: item.value,
+        expectedMin: item.range.min,
+        expectedMax: item.range.max,
+      });
+      minScale = Math.max(minScale, item.range.min / item.value);
+    } else if (item.value > item.range.max) {
+      violations.push({
+        axis: item.axis,
+        axisLabel: item.label,
+        direction: "too-large",
+        value: item.value,
+        expectedMin: item.range.min,
+        expectedMax: item.range.max,
+      });
+      maxScale = Math.min(maxScale, item.range.max / item.value);
+    }
+  }
+
+  const hasViolation = violations.length > 0;
+  const withinRange = !hasViolation;
+  const feasible = minScale <= maxScale;
+  let suggestedScale = 1;
+  if (hasViolation) {
+    if (feasible) {
+      if (minScale > 1) {
+        suggestedScale = minScale;
+      } else if (maxScale < 1) {
+        suggestedScale = maxScale;
+      }
+    } else {
+      suggestedScale = Number.isFinite(maxScale)
+        ? Math.sqrt(minScale * maxScale)
+        : minScale;
+    }
+  }
+
+  return {
+    profile,
+    violations,
+    suggestedScale: Number.isFinite(suggestedScale) ? roundTo(suggestedScale, 4) : 1,
+    isWithinRange: withinRange,
+    feasible,
+    source: profileMeta.source,
+    sampleCount: profileMeta.sampleCount,
+  };
+}
+
+function formatCategoryRangeLine(profile: CategoryDimensionProfile): string {
+  return `W ${formatDimension(profile.width.min)}-${formatDimension(profile.width.max)} · H ${formatDimension(profile.height.min)}-${formatDimension(profile.height.max)} · D ${formatDimension(profile.depth.min)}-${formatDimension(profile.depth.max)} m`;
+}
+
+type ScaleBarConfig = {
+  length: number;
+  tickInterval: number;
+  majorTickInterval: number;
+};
+
+function roundToStep(value: number, step: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(step) || step <= 0) return step > 0 ? step : 0;
+  const safeStep = Math.round(step * 1e6) / 1e6;
+  return Math.max(step, Math.ceil((value - 1e-9) / safeStep) * safeStep);
+}
+
+function makeScaleBarConfig(maxDimension: number): ScaleBarConfig {
+  const dim = Number.isFinite(maxDimension) ? maxDimension : 0;
+  if (dim <= SCALE_BAR_SMALL_MAX) {
+    const length = Math.max(1, roundToStep(dim, 0.5));
+    return {
+      length,
+      tickInterval: 0.5,
+      majorTickInterval: 0.5,
+    };
+  }
+  if (dim <= SCALE_BAR_MEDIUM_MAX) {
+    return {
+      length: Math.max(1, roundToStep(dim, 1)),
+      tickInterval: 1,
+      majorTickInterval: 1,
+    };
+  }
+  return {
+    length: roundToStep(dim, 5),
+    tickInterval: 5,
+    majorTickInterval: 5,
+  };
+}
+
+function formatScaleLabel(value: number): string {
+  if (!Number.isFinite(value)) return "0m";
+  if (value % 1 === 0) return `${value}m`;
+  return `${roundTo(value, 1)}m`;
+}
+
+function disposeScaleBar(group: THREE.Group) {
+  group.traverse((obj) => {
+    const line = obj as THREE.Line;
+    if ((line as THREE.Line).isLine) {
+      if (line.geometry) line.geometry.dispose();
+      const material = line.material as THREE.Material | THREE.Material[];
+      if (Array.isArray(material)) material.forEach((m) => m.dispose());
+      else material?.dispose?.();
+    }
+    if (obj instanceof CSS2DObject) {
+      obj.element.remove();
+    }
+  });
+}
+
+function replaceScaleBar(scene: THREE.Scene, current: THREE.Group, config?: ScaleBarConfig): THREE.Group {
+  disposeScaleBar(current);
+  if (current.parent) {
+    current.parent.remove(current);
+  }
+  const targetConfig = config ?? {
+    length: DEFAULT_SCALE_BAR_LENGTH,
+    tickInterval: DEFAULT_SCALE_BAR_TICK_INTERVAL,
+    majorTickInterval: DEFAULT_SCALE_BAR_TICK_INTERVAL,
+  };
+  return createScaleBar(scene, targetConfig);
 }
 
 /* ── API ───────────────────────────────────────────────────────────── */
@@ -179,6 +668,42 @@ async function deleteAssetRecord(
   }
 }
 
+async function createAssetRecords(
+  manifestName: string,
+  assets: Array<{ asset_id: string; record: AssetRecord; glb_base64: string }>,
+): Promise<AssetRecord[]> {
+  const res = await fetch("/api/asset-manifest/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ manifest_name: manifestName, assets }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error ?? `Create failed: ${res.status}`);
+  }
+  const data = await res.json();
+  return (data.assets ?? []) as AssetRecord[];
+}
+
+async function saveNormalizedAssetMesh(
+  manifestName: string,
+  assetId: string,
+  glbBase64: string,
+  updates: Record<string, unknown>,
+): Promise<AssetRecord> {
+  const res = await fetch("/api/asset-manifest/normalize-mesh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ manifest_name: manifestName, asset_id: assetId, glb_base64: glbBase64, updates }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error ?? `Normalize failed: ${res.status}`);
+  }
+  const data = await res.json();
+  return data.asset as AssetRecord;
+}
+
 /* ── Three.js Preview ──────────────────────────────────────────────── */
 
 type PreviewContext = {
@@ -218,76 +743,117 @@ type SelectionHelper = {
 
 /* ── Scale Bar Helper ──────────────────────────────────────────────── */
 
-function createScaleBar(scene: THREE.Scene): THREE.Group {
+function createScaleBar(scene: THREE.Scene, config: ScaleBarConfig): THREE.Group {
   const group = new THREE.Group();
   group.name = "scaleBar";
 
-  const length = 5; // 5 meters
-  const tickInterval = 1; // 1 meter ticks
+  const length = config.length;
+  const tickInterval = config.tickInterval;
+  const majorTickInterval = config.majorTickInterval;
   const tickHeight = 0.1;
   const majorTickHeight = 0.2;
+  const majorEvery = Math.max(1, Math.round(majorTickInterval / tickInterval));
+  const totalTicks = Math.max(0, Math.round(length / tickInterval));
+  const yBase = 0.01;
+  const baseline = new THREE.Vector3(0, yBase, 0);
 
-  // Main line along X-axis
-  const mainLineGeometry = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0.01, 0),
-    new THREE.Vector3(length, 0.01, 0),
-  ]);
-  const mainLineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
-  const mainLine = new THREE.Line(mainLineGeometry, mainLineMaterial);
-  group.add(mainLine);
+  const axisDefs: Array<{
+    key: "x" | "y" | "z";
+    color: number;
+    dir: THREE.Vector3;
+    tickDir: THREE.Vector3;
+    label: string;
+    labelOffset: THREE.Vector3;
+    tickLabelOffset: THREE.Vector3;
+  }> = [
+    {
+      key: "x",
+      color: 0xff5555,
+      dir: new THREE.Vector3(1, 0, 0),
+      tickDir: new THREE.Vector3(0, 0, -1),
+      label: "X",
+      labelOffset: new THREE.Vector3(0.25, 0, -0.18),
+      tickLabelOffset: new THREE.Vector3(0, 0, -0.15),
+    },
+    {
+      key: "y",
+      color: 0x55ff55,
+      dir: new THREE.Vector3(0, 1, 0),
+      tickDir: new THREE.Vector3(-1, 0, 0),
+      label: "Y",
+      labelOffset: new THREE.Vector3(-0.22, 0.18, 0.08),
+      tickLabelOffset: new THREE.Vector3(-0.15, 0, 0),
+    },
+    {
+      key: "z",
+      color: 0x55aaff,
+      dir: new THREE.Vector3(0, 0, 1),
+      tickDir: new THREE.Vector3(0, 1, 0),
+      label: "Z",
+      labelOffset: new THREE.Vector3(0, 0.28, 0.15),
+      tickLabelOffset: new THREE.Vector3(0, 0.15, 0),
+    },
+  ];
 
-  // Create tick marks and labels
-  for (let i = 0; i <= length; i += tickInterval) {
-    const isMajor = i % 1 === 0;
-    const height = isMajor ? majorTickHeight : tickHeight;
+  const addRulerLabel = (text: string, position: THREE.Vector3, color = "#ffffff") => {
+    const labelDiv = document.createElement("div");
+    labelDiv.className = "ae-ruler-label";
+    labelDiv.textContent = text;
+    labelDiv.style.cssText = `
+      color: ${color};
+      font-family: "SF Mono", "Roboto Mono", monospace;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 2px 4px;
+      border-radius: 3px;
+      white-space: nowrap;
+    `;
+    const label = new CSS2DObject(labelDiv);
+    label.position.copy(position);
+    group.add(label);
+  };
 
-    // Tick mark
-    const tickGeometry = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(i, 0.01, 0),
-      new THREE.Vector3(i, 0.01, -height),
-    ]);
-    const tickMaterial = new THREE.LineBasicMaterial({ color: 0xffffff });
-    const tick = new THREE.Line(tickGeometry, tickMaterial);
-    group.add(tick);
+  const addAxis = (axis: (typeof axisDefs)[number]) => {
+    const axisEnd = baseline.clone().add(axis.dir.clone().multiplyScalar(length));
+    const axisLineGeometry = new THREE.BufferGeometry().setFromPoints([baseline, axisEnd]);
+    const axisLineMaterial = new THREE.LineBasicMaterial({ color: axis.color, linewidth: 2 });
+    const axisLine = new THREE.Line(axisLineGeometry, axisLineMaterial);
+    group.add(axisLine);
 
-    // Label for major ticks
-    if (isMajor && i > 0) {
-      const labelDiv = document.createElement("div");
-      labelDiv.className = "ae-ruler-label";
-      labelDiv.textContent = `${i}m`;
-      labelDiv.style.cssText = `
-        color: #ffffff;
-        font-family: "SF Mono", "Roboto Mono", monospace;
-        font-size: 11px;
-        font-weight: 600;
-        background: rgba(0, 0, 0, 0.6);
-        padding: 2px 4px;
-        border-radius: 3px;
-        white-space: nowrap;
-      `;
-      const label = new CSS2DObject(labelDiv);
-      label.position.set(i, 0.01, -height - 0.15);
-      group.add(label);
+    for (let i = 0; i <= totalTicks; i += 1) {
+      const axisValue = roundTo(i * tickInterval, 2);
+      const isMajor = i % majorEvery === 0;
+      const height = isMajor ? majorTickHeight : tickHeight;
+      const value = Math.min(length, axisValue);
+      const position = baseline.clone().add(axis.dir.clone().multiplyScalar(value));
+
+      const tickStart = position.clone();
+      const tickEnd = tickStart.clone().add(axis.tickDir.clone().multiplyScalar(height));
+      const tickGeometry = new THREE.BufferGeometry().setFromPoints([tickStart, tickEnd]);
+      const tickMaterial = new THREE.LineBasicMaterial({ color: axis.color });
+      const tick = new THREE.Line(tickGeometry, tickMaterial);
+      group.add(tick);
+
+      if (isMajor && value > 0) {
+        addRulerLabel(
+          formatScaleLabel(value),
+          position.clone().add(axis.tickLabelOffset).add(axis.tickDir.clone().multiplyScalar(height)),
+          `rgb(${(axis.color >> 16) & 255}, ${(axis.color >> 8) & 255}, ${axis.color & 255})`,
+        );
+      }
     }
-  }
 
-  // Origin label
-  const originLabelDiv = document.createElement("div");
-  originLabelDiv.className = "ae-ruler-label";
-  originLabelDiv.textContent = "0";
-  originLabelDiv.style.cssText = `
-    color: #ffffff;
-    font-family: "SF Mono", "Roboto Mono", monospace;
-    font-size: 10px;
-    font-weight: 600;
-    background: rgba(0, 0, 0, 0.6);
-    padding: 2px 4px;
-    border-radius: 3px;
-    white-space: nowrap;
-  `;
-  const originLabel = new CSS2DObject(originLabelDiv);
-  originLabel.position.set(0, 0.01, -majorTickHeight - 0.15);
-  group.add(originLabel);
+    addRulerLabel(
+      axis.label,
+      axisEnd.clone().add(axis.labelOffset),
+      `rgb(${(axis.color >> 16) & 255}, ${(axis.color >> 8) & 255}, ${axis.color & 255})`,
+    );
+  };
+
+  axisDefs.forEach(addAxis);
+
+  addRulerLabel("0", baseline.clone().add(new THREE.Vector3(0, 0, -majorTickHeight - 0.15)), "#ffffff");
 
   scene.add(group);
   return group;
@@ -334,7 +900,11 @@ function createPreviewScene(container: HTMLElement): PreviewContext {
   container.appendChild(labelRenderer.domElement);
 
   // Scale bar
-  const scaleBarGroup = createScaleBar(scene);
+  const scaleBarGroup = createScaleBar(scene, {
+    length: DEFAULT_SCALE_BAR_LENGTH,
+    tickInterval: DEFAULT_SCALE_BAR_TICK_INTERVAL,
+    majorTickInterval: DEFAULT_SCALE_BAR_TICK_INTERVAL,
+  });
 
   // Front direction arrow (initially hidden)
   const frontArrow = new THREE.ArrowHelper(
@@ -424,7 +994,7 @@ function loadModelIntoPreview(
         ctx.scene.add(model);
 
         // Center model
-        const box = new THREE.Box3().setFromObject(model);
+        const box = getObjectBoundingBox(model);
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
         model.position.sub(center);
@@ -458,8 +1028,7 @@ function analyzeChildren(model: THREE.Group): SceneChildInfo[] {
       const vCount = geom.attributes.position ? geom.attributes.position.count : 0;
       const fCount = geom.index ? geom.index.count / 3 : vCount / 3;
 
-      const box = new THREE.Box3().setFromObject(mesh);
-      const size = box.getSize(new THREE.Vector3());
+      const size = getDimensionsFromObject(mesh) ?? { width: 0, height: 0, depth: 0 };
 
       const info: SceneChildInfo = {
         name: mesh.name || `unnamed_${children.length}`,
@@ -467,14 +1036,14 @@ function analyzeChildren(model: THREE.Group): SceneChildInfo[] {
         vertexCount: vCount,
         faceCount: Math.round(fCount),
         uuid: mesh.uuid,
-        bbox: { w: +size.x.toFixed(4), h: +size.y.toFixed(4), d: +size.z.toFixed(4) },
+        bbox: { w: size.width, h: size.height, d: size.depth },
         isDuplicate: false,
         duplicateGroup: -1,
       };
       children.push(info);
 
       // Duplicate key: vertex count + rounded bbox
-      const key = `${vCount}|${size.x.toFixed(3)}|${size.y.toFixed(3)}|${size.z.toFixed(3)}`;
+      const key = `${vCount}|${size.width.toFixed(DIMENSION_DUP_KEY_DECIMALS)}|${size.height.toFixed(DIMENSION_DUP_KEY_DECIMALS)}|${size.depth.toFixed(DIMENSION_DUP_KEY_DECIMALS)}`;
       if (!meshGroups.has(key)) meshGroups.set(key, []);
       meshGroups.get(key)!.push(children.length - 1);
     }
@@ -515,7 +1084,7 @@ function toggleBbox(ctx: PreviewContext, show: boolean) {
   if (!ctx.currentModel) return;
   if (show) {
     if (ctx.bboxHelper) ctx.scene.remove(ctx.bboxHelper);
-    const box = new THREE.Box3().setFromObject(ctx.currentModel);
+    const box = getObjectBoundingBox(ctx.currentModel);
     ctx.bboxHelper = new THREE.Box3Helper(box, 0x00ff88);
     ctx.scene.add(ctx.bboxHelper);
   } else {
@@ -528,7 +1097,7 @@ function toggleBbox(ctx: PreviewContext, show: boolean) {
 
 function zoomToFit(ctx: PreviewContext) {
   if (!ctx.currentModel) return;
-  const box = new THREE.Box3().setFromObject(ctx.currentModel);
+  const box = getObjectBoundingBox(ctx.currentModel);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
@@ -572,15 +1141,29 @@ function updateFrontArrow(ctx: PreviewContext, frontDirection: string, yawDeg: n
   ctx.frontArrow.visible = true;
 }
 
-function getModelDimensions(ctx: PreviewContext): { width: number; height: number; depth: number } | null {
+function getModelDimensions(ctx: PreviewContext): DimensionRecord | null {
   if (!ctx.currentModel) return null;
-  const box = new THREE.Box3().setFromObject(ctx.currentModel);
-  const size = box.getSize(new THREE.Vector3());
-  return {
-    width: +size.x.toFixed(3),
-    height: +size.y.toFixed(3),
-    depth: +size.z.toFixed(3),
-  };
+  return getDimensionsFromObject(ctx.currentModel);
+}
+
+function getBottomCenterOffset(target: THREE.Object3D): THREE.Vector3 | null {
+  const box = getObjectBoundingBox(target);
+  if (box.isEmpty()) return null;
+  const bottomCenter = new THREE.Vector3(
+    (box.min.x + box.max.x) / 2,
+    box.min.y,
+    (box.min.z + box.max.z) / 2,
+  );
+  return bottomCenter;
+}
+
+function needsBottomCenterOriginFix(offset: THREE.Vector3 | null): offset is THREE.Vector3 {
+  return Boolean(offset && offset.length() > ORIGIN_AUTO_FIX_EPSILON_M);
+}
+
+function alignBottomCenterToOrigin(target: THREE.Object3D, offset: THREE.Vector3): void {
+  target.position.sub(offset);
+  target.updateMatrixWorld(true);
 }
 
 function exportGlb(scene: THREE.Object3D): Promise<ArrayBuffer> {
@@ -607,6 +1190,509 @@ function triggerDownload(data: ArrayBuffer, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function arrayBufferToBase64(data: ArrayBuffer): string {
+  const bytes = new Uint8Array(data);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function collectModelMeshes(model: THREE.Object3D): THREE.Mesh[] {
+  const meshes: THREE.Mesh[] = [];
+  model.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh) {
+      meshes.push(child as THREE.Mesh);
+    }
+  });
+  return meshes;
+}
+
+function splitMergedMeshByConnectivity(
+  mesh: THREE.Mesh,
+  originalMaterials?: Map<THREE.Mesh, THREE.Material | THREE.Material[]>,
+): THREE.Mesh[] {
+  mesh.updateWorldMatrix(true, false);
+  const geometry = mesh.geometry;
+  const position = geometry.attributes.position;
+  if (!position || position.count < 6) return [mesh];
+
+  const index = geometry.index;
+  const triangleCount = Math.floor((index ? index.count : position.count) / 3);
+  if (triangleCount <= 1 || triangleCount > 250_000) return [mesh];
+
+  const parents = Array.from({ length: triangleCount }, (_, triangleIndex) => triangleIndex);
+  const firstTriangleByVertex = new Map<string, number>();
+  const find = (triangleIndex: number): number => {
+    while (parents[triangleIndex] !== triangleIndex) {
+      parents[triangleIndex] = parents[parents[triangleIndex]];
+      triangleIndex = parents[triangleIndex];
+    }
+    return triangleIndex;
+  };
+  const union = (a: number, b: number) => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) parents[rootB] = rootA;
+  };
+  const sourceVertexIndex = (triangleIndex: number, corner: number): number => (
+    index ? index.getX(triangleIndex * 3 + corner) : triangleIndex * 3 + corner
+  );
+  const sourceMaterialIndexByTriangle = Array.from({ length: triangleCount }, () => 0);
+  for (const group of geometry.groups) {
+    const firstTriangle = Math.floor(group.start / 3);
+    const lastTriangle = Math.ceil((group.start + group.count) / 3);
+    for (let triangleIndex = firstTriangle; triangleIndex < lastTriangle && triangleIndex < triangleCount; triangleIndex += 1) {
+      sourceMaterialIndexByTriangle[triangleIndex] = group.materialIndex ?? 0;
+    }
+  }
+  const vertexKey = (vertexIndex: number): string => (
+    `${position.getX(vertexIndex).toFixed(5)},${position.getY(vertexIndex).toFixed(5)},${position.getZ(vertexIndex).toFixed(5)}`
+  );
+
+  for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += 1) {
+    for (let corner = 0; corner < 3; corner += 1) {
+      const key = vertexKey(sourceVertexIndex(triangleIndex, corner));
+      const firstTriangle = firstTriangleByVertex.get(key);
+      if (firstTriangle === undefined) {
+        firstTriangleByVertex.set(key, triangleIndex);
+      } else {
+        union(triangleIndex, firstTriangle);
+      }
+    }
+  }
+
+  const trianglesByComponent = new Map<number, number[]>();
+  for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += 1) {
+    const root = find(triangleIndex);
+    const triangles = trianglesByComponent.get(root) ?? [];
+    triangles.push(triangleIndex);
+    trianglesByComponent.set(root, triangles);
+  }
+  if (trianglesByComponent.size <= 1) return [mesh];
+
+  const attributesToCopy = ["position", "normal", "uv", "uv2", "color"].filter((name) => Boolean(geometry.attributes[name]));
+  const components: THREE.Mesh[] = [];
+  let componentIndex = 1;
+
+  for (const triangles of trianglesByComponent.values()) {
+    if (triangles.length === 0) continue;
+    const componentGeometry = new THREE.BufferGeometry();
+    for (const attributeName of attributesToCopy) {
+      const source = geometry.attributes[attributeName] as THREE.BufferAttribute;
+      const values: number[] = [];
+      for (const triangleIndex of triangles) {
+        for (let corner = 0; corner < 3; corner += 1) {
+          const vertexIndex = sourceVertexIndex(triangleIndex, corner);
+          for (let item = 0; item < source.itemSize; item += 1) {
+            values.push(source.getComponent(vertexIndex, item));
+          }
+        }
+      }
+      componentGeometry.setAttribute(
+        attributeName,
+        new THREE.Float32BufferAttribute(values, source.itemSize),
+      );
+    }
+    if (!componentGeometry.attributes.normal) {
+      componentGeometry.computeVertexNormals();
+    }
+    if (Array.isArray(mesh.material)) {
+      let groupStart = 0;
+      let activeMaterialIndex = sourceMaterialIndexByTriangle[triangles[0]] ?? 0;
+      for (let localTriangleIndex = 1; localTriangleIndex < triangles.length; localTriangleIndex += 1) {
+        const materialIndex = sourceMaterialIndexByTriangle[triangles[localTriangleIndex]] ?? 0;
+        if (materialIndex !== activeMaterialIndex) {
+          componentGeometry.addGroup(groupStart, localTriangleIndex * 3 - groupStart, activeMaterialIndex);
+          groupStart = localTriangleIndex * 3;
+          activeMaterialIndex = materialIndex;
+        }
+      }
+      componentGeometry.addGroup(groupStart, triangles.length * 3 - groupStart, activeMaterialIndex);
+    }
+
+    const component = new THREE.Mesh(componentGeometry, originalMaterials?.get(mesh) ?? mesh.material);
+    component.name = `${mesh.name || "component"}_${componentIndex}`;
+    component.matrix.copy(mesh.matrixWorld);
+    component.matrix.decompose(component.position, component.quaternion, component.scale);
+    component.updateMatrixWorld(true);
+    components.push(component);
+    componentIndex += 1;
+  }
+
+  return components.length > 1 ? components : [mesh];
+}
+
+function collectAutoSplitUnits(
+  model: THREE.Object3D,
+  originalMaterials?: Map<THREE.Mesh, THREE.Material | THREE.Material[]>,
+): THREE.Mesh[] {
+  const meshes = collectModelMeshes(model);
+  if (meshes.length !== 1) return meshes;
+  return splitMergedMeshByConnectivity(meshes[0], originalMaterials);
+}
+
+function meshWorldBox(mesh: THREE.Mesh): THREE.Box3 {
+  mesh.updateWorldMatrix(true, false);
+  return new THREE.Box3().setFromObject(mesh);
+}
+
+function footprintGap(a: THREE.Box3, b: THREE.Box3): number {
+  const gapX = Math.max(0, Math.max(b.min.x - a.max.x, a.min.x - b.max.x));
+  const gapZ = Math.max(0, Math.max(b.min.z - a.max.z, a.min.z - b.max.z));
+  return Math.hypot(gapX, gapZ);
+}
+
+function clusterMeshesByFootprint(meshes: THREE.Mesh[]): THREE.Mesh[][] {
+  if (meshes.length <= 1) return meshes.map((mesh) => [mesh]);
+
+  const entries = meshes.map((mesh) => {
+    const box = meshWorldBox(mesh);
+    const footprint = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
+    return { mesh, box, footprint };
+  });
+  const sortedFootprints = entries
+    .map((entry) => entry.footprint)
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b);
+  const medianFootprint = sortedFootprints[Math.floor(sortedFootprints.length / 2)] ?? 1;
+  const globalBox = new THREE.Box3();
+  entries.forEach((entry) => globalBox.union(entry.box));
+  const globalFootprint = Math.max(globalBox.max.x - globalBox.min.x, globalBox.max.z - globalBox.min.z);
+  const mergeGap = Math.max(0.25, medianFootprint * 0.35, globalFootprint * 0.02);
+  const parents = entries.map((_, index) => index);
+
+  const find = (index: number): number => {
+    while (parents[index] !== index) {
+      parents[index] = parents[parents[index]];
+      index = parents[index];
+    }
+    return index;
+  };
+  const union = (a: number, b: number) => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) parents[rootB] = rootA;
+  };
+
+  for (let i = 0; i < entries.length; i += 1) {
+    for (let j = i + 1; j < entries.length; j += 1) {
+      if (footprintGap(entries[i].box, entries[j].box) <= mergeGap) {
+        union(i, j);
+      }
+    }
+  }
+
+  const clusters = new Map<number, THREE.Mesh[]>();
+  entries.forEach((entry, index) => {
+    const root = find(index);
+    const cluster = clusters.get(root) ?? [];
+    cluster.push(entry.mesh);
+    clusters.set(root, cluster);
+  });
+
+  return Array.from(clusters.values()).sort((a, b) => {
+    const aCenter = new THREE.Box3().setFromObject(a[0]).getCenter(new THREE.Vector3());
+    const bCenter = new THREE.Box3().setFromObject(b[0]).getCenter(new THREE.Vector3());
+    return aCenter.x - bCenter.x || aCenter.z - bCenter.z;
+  });
+}
+
+function cloneTextureForGlbExport(texture: THREE.Texture): THREE.Texture {
+  const image = texture.image as CanvasImageSource | { width?: number; height?: number } | undefined;
+  const width = Number((image as { width?: number } | undefined)?.width ?? 0);
+  const height = Number((image as { height?: number } | undefined)?.height ?? 0);
+  if (!image || width <= 0 || height <= 0) {
+    return texture.clone();
+  }
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return texture.clone();
+    ctx.drawImage(image as CanvasImageSource, 0, 0, width, height);
+
+    const cloned = new THREE.CanvasTexture(canvas);
+    cloned.name = texture.name;
+    cloned.mapping = texture.mapping;
+    cloned.channel = texture.channel;
+    cloned.wrapS = texture.wrapS;
+    cloned.wrapT = texture.wrapT;
+    cloned.magFilter = texture.magFilter;
+    cloned.minFilter = texture.minFilter;
+    cloned.anisotropy = texture.anisotropy;
+    cloned.format = texture.format;
+    cloned.type = texture.type;
+    cloned.colorSpace = texture.colorSpace;
+    cloned.flipY = texture.flipY;
+    cloned.generateMipmaps = texture.generateMipmaps;
+    cloned.premultiplyAlpha = texture.premultiplyAlpha;
+    cloned.unpackAlignment = texture.unpackAlignment;
+    cloned.offset.copy(texture.offset);
+    cloned.repeat.copy(texture.repeat);
+    cloned.center.copy(texture.center);
+    cloned.rotation = texture.rotation;
+    cloned.matrix.copy(texture.matrix);
+    cloned.matrixAutoUpdate = texture.matrixAutoUpdate;
+    cloned.userData = { ...texture.userData };
+    cloned.needsUpdate = true;
+    return cloned;
+  } catch {
+    return texture.clone();
+  }
+}
+
+function makeMaterialExportable(material: THREE.Material): THREE.Material {
+  const cloned = material.clone();
+  const textureSlots = [
+    "map",
+    "normalMap",
+    "roughnessMap",
+    "metalnessMap",
+    "emissiveMap",
+    "aoMap",
+    "alphaMap",
+    "bumpMap",
+    "displacementMap",
+    "lightMap",
+    "specularMap",
+    "envMap",
+  ];
+  const record = cloned as unknown as Record<string, unknown>;
+  for (const slot of textureSlots) {
+    const value = record[slot];
+    if (value instanceof THREE.Texture) {
+      record[slot] = cloneTextureForGlbExport(value);
+    }
+  }
+  cloned.needsUpdate = true;
+  return cloned;
+}
+
+function cloneExportMaterial(material: THREE.Material | THREE.Material[]): THREE.Material | THREE.Material[] {
+  return Array.isArray(material)
+    ? material.map((item) => makeMaterialExportable(item))
+    : makeMaterialExportable(material);
+}
+
+function cloneObjectForGlbExport(
+  target: THREE.Object3D,
+  originalMaterials?: Map<THREE.Mesh, THREE.Material | THREE.Material[]>,
+): THREE.Object3D {
+  const cloned = target.clone(true);
+  const sourceMeshes = collectModelMeshes(target);
+  const clonedMeshes = collectModelMeshes(cloned);
+  for (let i = 0; i < clonedMeshes.length; i += 1) {
+    const sourceMesh = sourceMeshes[i];
+    const clonedMesh = clonedMeshes[i];
+    if (!sourceMesh || !clonedMesh) continue;
+    clonedMesh.material = cloneExportMaterial(originalMaterials?.get(sourceMesh) ?? sourceMesh.material);
+  }
+  return cloned;
+}
+
+function buildClusterExport(
+  meshes: THREE.Mesh[],
+  originalMaterials?: Map<THREE.Mesh, THREE.Material | THREE.Material[]>,
+): {
+  scene: THREE.Scene;
+  group: THREE.Group;
+  dimensions: DimensionRecord | null;
+  faceCount: number;
+  vertexCount: number;
+} {
+  const scene = new THREE.Scene();
+  const group = new THREE.Group();
+  const clusterBox = new THREE.Box3();
+  let faceCount = 0;
+  let vertexCount = 0;
+
+  for (const mesh of meshes) {
+    const box = meshWorldBox(mesh);
+    clusterBox.union(box);
+    const position = mesh.geometry.attributes.position;
+    const vertices = position ? position.count : 0;
+    vertexCount += vertices;
+    faceCount += Math.round(mesh.geometry.index ? mesh.geometry.index.count / 3 : vertices / 3);
+  }
+
+  const center = clusterBox.getCenter(new THREE.Vector3());
+  for (const mesh of meshes) {
+    mesh.updateWorldMatrix(true, false);
+    const clone = mesh.clone(false);
+    clone.geometry = mesh.geometry.clone();
+    clone.material = cloneExportMaterial(originalMaterials?.get(mesh) ?? mesh.material);
+    clone.matrix.copy(mesh.matrixWorld);
+    clone.matrix.decompose(clone.position, clone.quaternion, clone.scale);
+    clone.position.sub(center);
+    group.add(clone);
+  }
+
+  scene.add(group);
+  return {
+    scene,
+    group,
+    dimensions: getDimensionsFromObject(group),
+    faceCount,
+    vertexCount,
+  };
+}
+
+function makeUniqueSubAssetId(parentId: string, startIndex: number, existingIds: Set<string>): string {
+  let index = startIndex;
+  let assetId = `${parentId}-sub-${index}`;
+  while (existingIds.has(assetId)) {
+    index += 1;
+    assetId = `${parentId}-sub-${index}`;
+  }
+  return assetId;
+}
+
+function makeUniqueAssetId(baseId: string, existingIds: Set<string>): string {
+  let assetId = baseId;
+  let index = 2;
+  while (existingIds.has(assetId)) {
+    assetId = `${baseId}-${index}`;
+    index += 1;
+  }
+  return assetId;
+}
+
+function buildSubAssetRecord(
+  parent: AssetRecord,
+  assetId: string,
+  subIndex: number,
+  dimensions: DimensionRecord | null,
+  faceCount: number,
+  vertexCount: number,
+): AssetRecord {
+  return {
+    ...parent,
+    asset_id: assetId,
+    mesh_path: "",
+    latent_path: undefined,
+    split: `sub-${subIndex}`,
+    source: parent.source ?? "asset_editor_split",
+    text_desc: `${parent.text_desc ?? parent.category ?? "asset"} (auto split sub ${subIndex})`,
+    scale: 1,
+    yaw_deg: 0,
+    dimensions_m: dimensions ?? undefined,
+    face_count: faceCount,
+    mesh_face_count: faceCount,
+    quality_metrics: {
+      ...(parent.quality_metrics ?? {}),
+      face_count: faceCount,
+      vertex_count: vertexCount,
+    },
+    parent_asset_id: parent.asset_id,
+  };
+}
+
+function sphereCandidateScore(mesh: THREE.Mesh): number {
+  const box = meshWorldBox(mesh);
+  const size = box.getSize(new THREE.Vector3());
+  const dims = [size.x, size.y, size.z].filter((value) => Number.isFinite(value) && value > 0);
+  if (dims.length !== 3) return Number.POSITIVE_INFINITY;
+  const minDim = Math.min(...dims);
+  const maxDim = Math.max(...dims);
+  const ratioPenalty = maxDim / minDim - 1;
+  if (ratioPenalty > 0.35) return Number.POSITIVE_INFINITY;
+  const position = mesh.geometry.attributes.position;
+  const vertexBonus = position ? Math.min(0.2, position.count / 50000) : 0;
+  return ratioPenalty - vertexBonus - maxDim * 0.001;
+}
+
+function pickSkySphereCandidate(meshes: THREE.Mesh[]): THREE.Mesh | null {
+  const candidates = meshes
+    .map((mesh) => ({ mesh, score: sphereCandidateScore(mesh) }))
+    .filter((item) => Number.isFinite(item.score))
+    .sort((a, b) => a.score - b.score);
+  return candidates[0]?.mesh ?? null;
+}
+
+function createProceduralSkyDomeExport(): {
+  scene: THREE.Scene;
+  dimensions: DimensionRecord;
+  faceCount: number;
+  vertexCount: number;
+} {
+  const radius = 100;
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 512;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, "#7fb7ff");
+    gradient.addColorStop(0.45, "#cfe9ff");
+    gradient.addColorStop(1, "#fff1d2");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+
+  const geometry = new THREE.SphereGeometry(radius, 64, 32);
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+  const dome = new THREE.Mesh(geometry, material);
+  dome.name = "procedural_sky_dome";
+
+  const scene = new THREE.Scene();
+  scene.add(dome);
+  return {
+    scene,
+    dimensions: { width: radius * 2, height: radius * 2, depth: radius * 2 },
+    faceCount: geometry.index ? Math.round(geometry.index.count / 3) : 0,
+    vertexCount: geometry.attributes.position?.count ?? 0,
+  };
+}
+
+function buildSkyDomeRecord(
+  parent: AssetRecord,
+  assetId: string,
+  dimensions: DimensionRecord | null,
+  faceCount: number,
+  vertexCount: number,
+  mode: "extracted" | "procedural",
+): AssetRecord {
+  return {
+    ...parent,
+    asset_id: assetId,
+    category: "sky_dome",
+    mesh_path: "",
+    latent_path: undefined,
+    source: mode === "extracted" ? "asset_editor_sky_dome_extract" : "asset_editor_sky_dome_procedural",
+    split: mode === "extracted" ? "sky-dome" : undefined,
+    text_desc: mode === "extracted"
+      ? `${parent.text_desc ?? parent.category ?? "asset"} (extracted sky dome)`
+      : "Procedural gradient sky dome generated in Asset Editor",
+    tags: Array.from(new Set([...(parent.tags ?? []), "sky", "sky_dome", mode])),
+    scene_eligible: true,
+    scale: 1,
+    yaw_deg: 0,
+    dimensions_m: dimensions ?? undefined,
+    face_count: faceCount,
+    mesh_face_count: faceCount,
+    quality_metrics: {
+      ...(parent.quality_metrics ?? {}),
+      face_count: faceCount,
+      vertex_count: vertexCount,
+    },
+    origin_alignment: "center",
+    parent_asset_id: parent.asset_id,
+  };
+}
+
 /* ── Selection Box (Rectangle Selection) ──────────────────────────── */
 
 function createSelectionHelper(container: HTMLElement): SelectionHelper {
@@ -628,7 +1714,7 @@ function createSelectionHelper(container: HTMLElement): SelectionHelper {
     pointTopLeft: new THREE.Vector2(),
     pointBottomRight: new THREE.Vector2(),
     isDown: false,
-    enabled: true,
+    enabled: false,
   };
 }
 
@@ -673,7 +1759,7 @@ function getMeshesInSelectionArea(
     const mesh = child as THREE.Mesh;
 
     // Get mesh bounding box center in screen space
-    const box = new THREE.Box3().setFromObject(mesh);
+    const box = getObjectBoundingBox(mesh);
     const center = box.getCenter(new THREE.Vector3());
     center.project(ctx.camera);
 
@@ -771,6 +1857,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     sceneChildren: [],
     selectionMode: false,
     selectedMeshes: new Set(),
+    originAutoAlignEnabled: localStorage.getItem("roadgen3d.assetEditor.originAutoAlign") === "true",
+    dragMoveMode: false,
     totalAssets: 0,
     loadedOffset: 0,
     hasMoreAssets: false,
@@ -885,6 +1973,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
             </div>
             <span class="ae-actions-sep"></span>
             <button id="ae-remove-dups-btn" class="ae-action-btn ae-btn-warning" disabled>Remove Duplicates</button>
+            <button id="ae-auto-split-records-btn" class="ae-action-btn ae-btn-secondary" disabled>Auto Split Records</button>
+            <button id="ae-extract-sky-btn" class="ae-action-btn ae-btn-secondary" disabled>Extract Sky Dome</button>
             <button id="ae-split-btn" class="ae-action-btn ae-btn-secondary" disabled>Split Selected</button>
           </div>
         `,
@@ -942,6 +2032,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   const scaleInput = qs<HTMLInputElement>(root, "#ae-scale-input");
   const exportBtn = qs<HTMLButtonElement>(root, "#ae-export-btn");
   const removeDupsBtn = qs<HTMLButtonElement>(root, "#ae-remove-dups-btn");
+  const autoSplitRecordsBtn = qs<HTMLButtonElement>(root, "#ae-auto-split-records-btn");
+  const extractSkyBtn = qs<HTMLButtonElement>(root, "#ae-extract-sky-btn");
   const splitBtn = qs<HTMLButtonElement>(root, "#ae-split-btn");
   const modeSolid = qs<HTMLButtonElement>(root, "#ae-mode-solid");
   const modeWire = qs<HTMLButtonElement>(root, "#ae-mode-wire");
@@ -1008,6 +2100,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       state.loadedOffset = response.offset + response.assets.length;
       state.hasMoreAssets = response.hasMore;
       
+      rebuildCategoryProfiles(state.assets);
       updateCategoryFilter();
       applyFilters();
       updateLoadMoreSection();
@@ -1040,6 +2133,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       state.loadedOffset += response.assets.length;
       state.hasMoreAssets = response.hasMore;
       
+      rebuildCategoryProfiles(state.assets);
       updateCategoryFilter();
       applyFilters();
       updateLoadMoreSection();
@@ -1056,9 +2150,9 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   function updateCategoryFilter() {
     const cats = new Set<string>();
     for (const a of state.assets) {
-      if (a.category) cats.add(a.category);
+      cats.add(a.category || "unknown");
     }
-    categoryFilter.innerHTML = '<option value="">All Categories</option>';
+    categoryFilter.innerHTML = `<option value="">All Categories (${cats.size})</option>`;
     for (const cat of Array.from(cats).sort()) {
       const opt = document.createElement("option");
       opt.value = cat;
@@ -1074,11 +2168,21 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     const tier = state.qualityTierFilter;
 
     state.filteredAssets = state.assets.filter((a) => {
+      const aCat = a.category || "unknown";
       if (q) {
-        const text = `${a.asset_id} ${a.category} ${a.text_desc ?? ""} ${(a.tags ?? []).join(" ")}`.toLowerCase();
+        const text = [
+          a.asset_id,
+          a.category,
+          a.text_desc ?? "",
+          ...(a.tags ?? []),
+          ...(a.style_tags ?? []),
+          ...(a.theme_tags ?? []),
+          a.curation_notes ?? "",
+          a.scene_exclusion_reason ?? "",
+        ].join(" ").toLowerCase();
         if (!text.includes(q)) return false;
       }
-      if (cat && a.category !== cat) return false;
+      if (cat && aCat !== cat) return false;
       if (tier && String(a.quality_tier) !== tier) return false;
       return true;
     });
@@ -1105,9 +2209,14 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     
     // Show loaded count vs total count
     const loadedText = state.totalAssets > state.assets.length
-      ? `${state.assets.length.toLocaleString()} loaded of ${state.totalAssets.toLocaleString()} total`
-      : `${state.assets.length.toLocaleString()}`;
-    galleryStats.textContent = `${state.filteredAssets.length} shown · ${loadedText} assets`;
+      ? `${state.assets.length.toLocaleString()} / ${state.totalAssets.toLocaleString()}（已加载）`
+      : `${state.assets.length.toLocaleString()}（全部）`;
+    const catCount = state.assets.reduce((acc, a) => {
+      acc.add(a.category || "unknown");
+      return acc;
+    }, new Set<string>()).size;
+    const catSuffix = state.totalAssets > state.assets.length ? "（部分加载）" : "（完整加载）";
+    galleryStats.textContent = `${state.filteredAssets.length} 个展示 / ${loadedText} 资产 / ${catCount} 类别 ${catSuffix}`;
 
     for (const asset of state.filteredAssets) {
       const card = document.createElement("div");
@@ -1149,6 +2258,12 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   async function selectAsset(assetId: string) {
     state.selectedAssetId = assetId;
     state.selectedObjects.clear();
+    if (previewCtx) {
+      clearMeshSelection();
+    } else {
+      state.selectedMeshes.clear();
+    }
+    updateDeleteButtonState();
     state.sceneChildren = [];
 
     // Load existing scale, yaw, and front direction from asset record
@@ -1156,7 +2271,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     state.scaleValue = asset?.scale ?? 1;
     state.yawValue = asset?.yaw_deg ?? 0;
     state.frontDirection = asset?.canonical_front ?? "+Z";
-    state.modelDimensions = asset?.dimensions_m ?? null;
+    state.modelDimensions = getAssetDimensions(asset);
 
     scaleInput.value = String(state.scaleValue);
     yawInput.value = String(state.yawValue);
@@ -1176,6 +2291,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
 
     // Render info
     renderInfoPanel(asset);
+    refreshDimensionValidationPanel(getAssetDimensions(asset));
 
     // Init Three.js preview if needed
     if (!previewCtx) {
@@ -1188,6 +2304,11 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       const glbUrl = `/api/file?path=${encodeURIComponent(meshPath)}`;
       try {
         const { children } = await loadModelIntoPreview(previewCtx, glbUrl);
+        if (state.originAutoAlignEnabled) {
+          await autoFixAssetOriginIfNeeded(previewCtx, asset);
+        } else {
+          updateOriginAlignmentPanel();
+        }
         state.sceneChildren = children;
         renderObjectList();
         updateActionButtons();
@@ -1201,23 +2322,16 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
             height: dims.height,
             depth: dims.depth,
           };
-          // Apply saved scale to preview
-          if (state.scaleValue !== 1) {
-            applyScale(previewCtx, state.scaleValue);
-          }
-          // Compute actual scene dimensions (native × scale)
-          state.modelDimensions = {
-            width: +(dims.width * state.scaleValue).toFixed(4),
-            height: +(dims.height * state.scaleValue).toFixed(4),
-            depth: +(dims.depth * state.scaleValue).toFixed(4),
-          };
-          updateDimensionsDisplay(state.modelDimensions);
-          syncSliderToScale(state.scaleValue);
+        if (state.scaleValue !== 1) {
+          applyScale(previewCtx, state.scaleValue);
+        }
+          refreshModelDimensionsFromScene(previewCtx);
         }
 
         // Apply existing yaw from asset record
         if (state.yawValue !== 0) {
           applyYaw(previewCtx, state.yawValue);
+          refreshModelDimensionsFromScene(previewCtx);
         }
 
         // Show front arrow with saved direction
@@ -1236,26 +2350,476 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   }
 
   /* ── Dimensions display ──────────────────────────────────────────── */
-  function updateDimensionsDisplay(dims: { width?: number; height?: number; depth?: number } | null) {
+  function updateDimensionsDisplay(dims: DimensionRecord | null) {
     const wInput = document.getElementById("ae-dim-w") as HTMLInputElement | null;
     const hInput = document.getElementById("ae-dim-h") as HTMLInputElement | null;
     const dInput = document.getElementById("ae-dim-d") as HTMLInputElement | null;
     const slider = document.getElementById("ae-dims-slider") as HTMLInputElement | null;
     if (!dims) return;
-    if (wInput) { wInput.value = (dims.width ?? 0).toFixed(2); wInput.disabled = false; }
-    if (hInput) { hInput.value = (dims.height ?? 0).toFixed(2); hInput.disabled = false; }
-    if (dInput) { dInput.value = (dims.depth ?? 0).toFixed(2); dInput.disabled = false; }
+    if (wInput) { wInput.value = formatDimension(dims.width); wInput.disabled = false; }
+    if (hInput) { hInput.value = formatDimension(dims.height); hInput.disabled = false; }
+    if (dInput) { dInput.value = formatDimension(dims.depth); dInput.disabled = false; }
     if (slider) slider.disabled = false;
+  }
+
+  function getActiveAsset(): AssetRecord | null {
+    return state.assets.find((asset) => asset.asset_id === state.selectedAssetId) ?? null;
+  }
+
+  function formatOriginVector(offset: THREE.Vector3 | null): string {
+    if (!offset) return "等待模型加载后检测。";
+    return `X ${formatDimension(offset.x)}m · Y ${formatDimension(offset.y)}m · Z ${formatDimension(offset.z)}m`;
+  }
+
+  function getOriginStatusText(offset: THREE.Vector3 | null): string {
+    if (!offset) return "尚未检测资产底部中心。";
+    if (needsBottomCenterOriginFix(offset)) {
+      return "底部中心未对准场景原点，可能导致悬浮或水平偏移。";
+    }
+    return "底部中心已对准场景原点。";
+  }
+
+  function updateOriginAlignmentPanel() {
+    const offset = previewCtx?.currentModel ? getBottomCenterOffset(previewCtx.currentModel) : null;
+    const needsFix = needsBottomCenterOriginFix(offset);
+    const status = document.getElementById("ae-origin-status");
+    const offsetText = document.getElementById("ae-origin-offset");
+    const autoToggle = document.getElementById("ae-origin-auto-align") as HTMLInputElement | null;
+    const alignBtn = document.getElementById("ae-align-origin-btn") as HTMLButtonElement | null;
+    const dragBtn = document.getElementById("ae-drag-move-toggle") as HTMLButtonElement | null;
+
+    if (status) {
+      status.textContent = getOriginStatusText(offset);
+      status.className = `ae-dim-range-status ${needsFix ? "warn" : "ok"}`;
+    }
+    if (offsetText) {
+      offsetText.textContent = `Bottom center: ${formatOriginVector(offset)}`;
+    }
+    if (autoToggle) {
+      autoToggle.checked = state.originAutoAlignEnabled;
+    }
+    if (alignBtn) {
+      alignBtn.disabled = !previewCtx?.currentModel || !state.selectedAssetId || !needsFix;
+    }
+    if (dragBtn) {
+      dragBtn.textContent = state.dragMoveMode ? "Drag Move: On" : "Drag Move: Off";
+      dragBtn.classList.toggle("active", state.dragMoveMode);
+    }
+  }
+
+  async function saveCurrentModelOrigin(
+    ctx: PreviewContext,
+    asset: AssetRecord,
+    updates: Record<string, unknown>,
+    toastMessage: string,
+    bakeCurrentScale: boolean = false,
+  ): Promise<AssetRecord> {
+    if (!ctx.currentModel || !state.manifestName) return asset;
+    if (bakeCurrentScale) {
+      clearDimensionAutosaveTimer();
+      pendingDimensionAutosave = null;
+      dimensionAutosaveVersion += 1;
+      if (dimensionAutosaveInFlight) {
+        await new Promise<void>((resolve) => {
+          const startedAt = performance.now();
+          const waitUntilIdle = () => {
+            if (!dimensionAutosaveInFlight || performance.now() - startedAt > 2000) {
+              resolve();
+              return;
+            }
+            window.setTimeout(waitUntilIdle, 50);
+          };
+          waitUntilIdle();
+        });
+      }
+    }
+    const dims = getModelDimensions(ctx);
+    const currentOffset = getBottomCenterOffset(ctx.currentModel);
+    const glbData = await exportGlb(cloneObjectForGlbExport(ctx.currentModel, ctx.originalMaterials));
+    const normalizedAsset = await saveNormalizedAssetMesh(
+      state.manifestName,
+      asset.asset_id,
+      arrayBufferToBase64(glbData),
+      {
+        dimensions_m: dims ?? undefined,
+        origin_alignment: "bottom-center",
+        origin_bottom_center_current_m: currentOffset
+          ? {
+              x: roundTo(currentOffset.x, DIMENSION_STORE_DECIMALS),
+              y: roundTo(currentOffset.y, DIMENSION_STORE_DECIMALS),
+              z: roundTo(currentOffset.z, DIMENSION_STORE_DECIMALS),
+            }
+          : undefined,
+        origin_saved_at: new Date().toISOString(),
+        ...updates,
+        ...(bakeCurrentScale
+          ? {
+              scale: 1,
+              origin_baked_scale: state.scaleValue,
+            }
+          : {}),
+      },
+    );
+
+    Object.assign(asset, normalizedAsset);
+    if (bakeCurrentScale) {
+      state.scaleValue = 1;
+      scaleInput.value = "1.0000";
+      syncSliderToScale(1);
+    }
+    if (dims) {
+      state.modelDimensions = dims;
+      state.originalDimensions = { ...dims };
+    }
+    renderInfoPanel(asset);
+    refreshDimensionValidationPanel(dims);
+    updateOriginAlignmentPanel();
+    showToast(root, toastMessage);
+    return asset;
+  }
+
+  async function autoFixAssetOriginIfNeeded(
+    ctx: PreviewContext,
+    asset: AssetRecord,
+    bakeCurrentScale: boolean = false,
+  ): Promise<boolean> {
+    if (!ctx.currentModel || !state.manifestName) return false;
+    const offset = getBottomCenterOffset(ctx.currentModel);
+    if (!needsBottomCenterOriginFix(offset)) return false;
+
+    alignBottomCenterToOrigin(ctx.currentModel, offset);
+    await saveCurrentModelOrigin(
+      ctx,
+      asset,
+      {
+        origin_bottom_center_before_m: {
+          x: roundTo(offset.x, DIMENSION_STORE_DECIMALS),
+          y: roundTo(offset.y, DIMENSION_STORE_DECIMALS),
+          z: roundTo(offset.z, DIMENSION_STORE_DECIMALS),
+        },
+        origin_fix_m: {
+          x: roundTo(-offset.x, DIMENSION_STORE_DECIMALS),
+          y: roundTo(-offset.y, DIMENSION_STORE_DECIMALS),
+          z: roundTo(-offset.z, DIMENSION_STORE_DECIMALS),
+        },
+        origin_fixed_at: new Date().toISOString(),
+        origin_fix_mode: "auto-align",
+      },
+      "已自动修复资产原点并保存",
+      bakeCurrentScale,
+    );
+    return true;
+  }
+
+  type DimensionAutosaveSnapshot = {
+    version: number;
+    manifestName: string;
+    assetId: string;
+    scale: number;
+    dimensions: DimensionRecord;
+  };
+
+  let dimensionAutosaveTimer: number | null = null;
+  let dimensionAutosaveVersion = 0;
+  let dimensionAutosaveInFlight = false;
+  let pendingDimensionAutosave: DimensionAutosaveSnapshot | null = null;
+  type CurationAutosaveSnapshot = {
+    version: number;
+    manifestName: string;
+    assetId: string;
+    updates: Record<string, unknown>;
+  };
+
+  let curationAutosaveTimer: number | null = null;
+  let curationAutosaveVersion = 0;
+  let curationAutosaveInFlight = false;
+  let pendingCurationAutosave: CurationAutosaveSnapshot | null = null;
+
+  function clearDimensionAutosaveTimer() {
+    if (dimensionAutosaveTimer !== null) {
+      window.clearTimeout(dimensionAutosaveTimer);
+      dimensionAutosaveTimer = null;
+    }
+  }
+
+  function queueDimensionAutosaveRetry() {
+    clearDimensionAutosaveTimer();
+    dimensionAutosaveTimer = window.setTimeout(() => {
+      dimensionAutosaveTimer = null;
+      void flushDimensionAutosave();
+    }, DIMENSION_AUTOSAVE_DELAY_MS);
+  }
+
+  function scheduleDimensionAutosave() {
+    if (destroyed || !state.selectedAssetId || !state.modelDimensions) return;
+    const manifestName = manifestSelect.value;
+    if (!manifestName) return;
+
+    pendingDimensionAutosave = {
+      version: ++dimensionAutosaveVersion,
+      manifestName,
+      assetId: state.selectedAssetId,
+      scale: state.scaleValue,
+      dimensions: {
+        width: state.modelDimensions.width,
+        height: state.modelDimensions.height,
+        depth: state.modelDimensions.depth,
+      },
+    };
+
+    queueDimensionAutosaveRetry();
+  }
+
+  async function flushDimensionAutosave() {
+    if (destroyed || !pendingDimensionAutosave) return;
+    if (dimensionAutosaveInFlight) {
+      queueDimensionAutosaveRetry();
+      return;
+    }
+
+    const snapshot = pendingDimensionAutosave;
+    pendingDimensionAutosave = null;
+    dimensionAutosaveInFlight = true;
+
+    try {
+      await saveAssetMetadata(snapshot.manifestName, snapshot.assetId, {
+        scale: snapshot.scale,
+        dimensions_m: snapshot.dimensions,
+      });
+
+      if (!destroyed && snapshot.version === dimensionAutosaveVersion) {
+        const asset = state.assets.find((item) => item.asset_id === snapshot.assetId);
+        if (asset) {
+          asset.scale = snapshot.scale;
+          asset.dimensions_m = { ...snapshot.dimensions };
+        }
+        renderGallery();
+        showToast(root, "尺寸已自动保存");
+      }
+    } catch (err) {
+      if (!destroyed) {
+        showToast(root, `尺寸自动保存失败: ${err}`, "error");
+      }
+    } finally {
+      dimensionAutosaveInFlight = false;
+      if (!destroyed && pendingDimensionAutosave && dimensionAutosaveTimer === null) {
+        queueDimensionAutosaveRetry();
+      }
+    }
+  }
+
+  function clearCurationAutosaveTimer() {
+    if (curationAutosaveTimer !== null) {
+      window.clearTimeout(curationAutosaveTimer);
+      curationAutosaveTimer = null;
+    }
+  }
+
+  function setCurationSaveStatus(message: string, mode: "idle" | "saving" | "saved" | "error" = "idle") {
+    const statusEl = root.querySelector<HTMLElement>("#ae-curation-save-status");
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.dataset.status = mode;
+  }
+
+  function collectCurationUpdatesFromPanel(): Record<string, unknown> | null {
+    const tierEl = root.querySelector<HTMLSelectElement>("#ae-edit-tier");
+    const eligibleEl = root.querySelector<HTMLInputElement>("#ae-edit-eligible");
+    const tagsEl = root.querySelector<HTMLInputElement>("#ae-edit-tags");
+    const styleTagsEl = root.querySelector<HTMLInputElement>("#ae-edit-style-tags");
+    const themeTagsEl = root.querySelector<HTMLInputElement>("#ae-edit-theme-tags");
+    const reasonEl = root.querySelector<HTMLTextAreaElement>("#ae-edit-exclusion-reason");
+    const notesEl = root.querySelector<HTMLTextAreaElement>("#ae-edit-curation-notes");
+    if (!tierEl || !eligibleEl || !tagsEl || !styleTagsEl || !themeTagsEl || !reasonEl || !notesEl) {
+      return null;
+    }
+
+    const updates: Record<string, unknown> = {
+      scene_eligible: eligibleEl.checked,
+      tags: parseTagInput(tagsEl.value),
+      style_tags: parseTagInput(styleTagsEl.value),
+      theme_tags: parseTagInput(themeTagsEl.value),
+      curation_notes: notesEl.value.trim(),
+      scene_exclusion_reason: eligibleEl.checked ? "" : reasonEl.value.trim(),
+    };
+    const tierVal = tierEl.value ? parseInt(tierEl.value, 10) : undefined;
+    if (tierVal !== undefined && Number.isFinite(tierVal)) {
+      updates.quality_tier = tierVal;
+    }
+    return updates;
+  }
+
+  function applyCurationUpdatesToAsset(asset: AssetRecord, updates: Record<string, unknown>) {
+    if ("quality_tier" in updates) asset.quality_tier = updates.quality_tier as number;
+    asset.scene_eligible = Boolean(updates.scene_eligible);
+    asset.tags = updates.tags as string[];
+    asset.style_tags = updates.style_tags as string[];
+    asset.theme_tags = updates.theme_tags as string[];
+    asset.curation_notes = String(updates.curation_notes ?? "");
+    asset.scene_exclusion_reason = String(updates.scene_exclusion_reason ?? "");
+  }
+
+  function queueCurationAutosaveRetry() {
+    clearCurationAutosaveTimer();
+    curationAutosaveTimer = window.setTimeout(() => {
+      curationAutosaveTimer = null;
+      void flushCurationAutosave();
+    }, CURATION_AUTOSAVE_DELAY_MS);
+  }
+
+  function scheduleCurationAutosave() {
+    if (destroyed || !state.selectedAssetId || !state.manifestName) return;
+    const updates = collectCurationUpdatesFromPanel();
+    if (!updates) return;
+
+    const asset = state.assets.find((item) => item.asset_id === state.selectedAssetId);
+    if (asset) applyCurationUpdatesToAsset(asset, updates);
+
+    pendingCurationAutosave = {
+      version: ++curationAutosaveVersion,
+      manifestName: state.manifestName,
+      assetId: state.selectedAssetId,
+      updates,
+    };
+    setCurationSaveStatus("停止输入 800ms 后自动保存...", "saving");
+    queueCurationAutosaveRetry();
+  }
+
+  async function flushCurationAutosave() {
+    if (destroyed || !pendingCurationAutosave) return;
+    if (curationAutosaveInFlight) {
+      queueCurationAutosaveRetry();
+      return;
+    }
+
+    const snapshot = pendingCurationAutosave;
+    pendingCurationAutosave = null;
+    curationAutosaveInFlight = true;
+
+    try {
+      await saveAssetMetadata(snapshot.manifestName, snapshot.assetId, snapshot.updates);
+      const asset = state.assets.find((item) => item.asset_id === snapshot.assetId);
+      if (asset) applyCurationUpdatesToAsset(asset, snapshot.updates);
+      if (!destroyed && snapshot.version === curationAutosaveVersion) {
+        renderGallery();
+        setCurationSaveStatus("审核信息已自动保存", "saved");
+      }
+    } catch (err) {
+      if (!destroyed) {
+        setCurationSaveStatus(`自动保存失败: ${err}`, "error");
+        showToast(root, `审核信息自动保存失败: ${err}`, "error");
+      }
+    } finally {
+      curationAutosaveInFlight = false;
+      if (!destroyed && pendingCurationAutosave && curationAutosaveTimer === null) {
+        queueCurationAutosaveRetry();
+      }
+    }
+  }
+
+  function getAssetDimensions(asset?: AssetRecord | null): DimensionRecord | null {
+    if (!asset?.dimensions_m) return null;
+    const { width, height, depth } = asset.dimensions_m;
+    if (
+      typeof width !== "number" || !Number.isFinite(width)
+      || typeof height !== "number" || !Number.isFinite(height)
+      || typeof depth !== "number" || !Number.isFinite(depth)
+    ) {
+      return null;
+    }
+    return {
+      width,
+      height,
+      depth,
+    };
+  }
+
+  function getDimensionValidationStatusText(validation: CategoryDimensionValidation): string {
+    const rangeSource = getRangeSourceLabel(validation);
+    if (!validation.feasible && validation.violations.length > 0) {
+      return `当前尺寸无法同时满足全部轴向约束，已按最接近范围进行修正（${rangeSource}）。`;
+    }
+    if (validation.violations.length === 0) return `当前尺寸在预期范围内（${rangeSource}）。`;
+    return validation.violations
+      .map((violation) => {
+        const unit = getViolationDirectionLabel(violation.direction);
+        return `${violation.axisLabel} 轴 ${formatDimension(violation.value)}m ${unit}（目标 ${formatDimension(violation.expectedMin)}-${formatDimension(violation.expectedMax)}m）`;
+      })
+      .join("；");
+  }
+
+  function refreshDimensionValidationPanel(dims: DimensionRecord | null) {
+    const rangeText = document.getElementById("ae-dim-range-text");
+    const statusText = document.getElementById("ae-dim-range-status");
+    const hintText = document.getElementById("ae-dim-range-hint");
+    const autoBtn = document.getElementById("ae-auto-range-btn") as HTMLButtonElement | null;
+
+    const asset = getActiveAsset();
+    const validation = validateCategoryDimension(dims, asset?.category);
+    if (rangeText) rangeText.textContent = formatCategoryRangeLine(validation.profile);
+
+    const hasDims = Boolean(dims);
+    const needsFix = validation.violations.length > 0;
+
+    if (statusText) {
+      statusText.textContent = hasDims
+        ? getDimensionValidationStatusText(validation)
+        : "尚未获取当前尺寸样本。";
+      statusText.className = "ae-dim-range-status " + (validation.violations.length === 0 ? "ok" : "warn");
+    }
+    if (hintText) {
+      if (!hasDims) {
+        hintText.textContent = "等待模型加载完成后计算建议。";
+      } else if (needsFix && validation.suggestedScale > 0) {
+        hintText.textContent = `建议缩放: ${formatDimension(validation.suggestedScale)}x`;
+      } else if (validation.violations.length === 0) {
+        hintText.textContent = "当前已符合范围";
+      } else if (!Number.isFinite(validation.suggestedScale)) {
+        hintText.textContent = "无法自动计算安全缩放";
+      } else {
+        hintText.textContent = "-";
+      }
+    }
+    if (autoBtn) {
+      autoBtn.disabled = !dims || validation.violations.length === 0;
+      autoBtn.textContent = needsFix
+        ? `一键修正 (${formatDimension(Math.max(0.0001, validation.suggestedScale)).replace(/\.?0+$/, "")}x)`
+        : "当前符合范围";
+    }
+  }
+
+  function refreshScaleBarFromDimensions(ctx: PreviewContext, dims: DimensionRecord | null) {
+    const maxDimension = dims ? Math.max(dims.width, dims.height, dims.depth) : 0;
+    const config = makeScaleBarConfig(maxDimension);
+    if (ctx.scaleBarGroup) {
+      ctx.scaleBarGroup = replaceScaleBar(ctx.scene, ctx.scaleBarGroup, config);
+    } else {
+      ctx.scaleBarGroup = createScaleBar(ctx.scene, config);
+    }
+  }
+
+  function refreshModelDimensionsFromScene(ctx: PreviewContext) {
+    const dims = getModelDimensions(ctx);
+    if (!dims) return;
+    state.modelDimensions = dims;
+    updateDimensionsDisplay(dims);
+    syncSliderToScale(state.scaleValue);
+    refreshScaleBarFromDimensions(ctx, dims);
+    refreshDimensionValidationPanel(dims);
+    updateOriginAlignmentPanel();
   }
 
   /* ── Info panel ────────────────────────────────────────────────── */
   function renderInfoPanel(asset: AssetRecord) {
     const fCount = asset.face_count ?? asset.mesh_face_count ?? 0;
     const vCount = asset.vertex_count ?? asset.quality_metrics?.vertex_count ?? 0;
-    const dims = asset.dimensions_m ?? state.modelDimensions;
-    const dimsText = dims
-      ? `${(dims.width ?? 0).toFixed(2)} × ${(dims.height ?? 0).toFixed(2)} × ${(dims.depth ?? 0).toFixed(2)}`
-      : "—";
+    const dims = getAssetDimensions(asset) ?? state.modelDimensions;
+    const validation = validateCategoryDimension(dims, asset.category);
+    const validationText = dims ? getDimensionValidationStatusText(validation) : "尚未获取当前尺寸样本。";
+    const originOffset = previewCtx?.currentModel ? getBottomCenterOffset(previewCtx.currentModel) : null;
+    const originNeedsFix = needsBottomCenterOriginFix(originOffset);
+    updateEligibleToolbar(asset);
+    setCurationSaveStatus("修改后会自动保存到元数据", "idle");
 
     infoGrid.innerHTML = `
       <div class="ae-info-row ae-info-label">Asset ID</div>
@@ -1263,6 +2827,9 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
 
       <div class="ae-info-row ae-info-label">Category</div>
       <div class="ae-info-row ae-info-value">${asset.category ?? "-"}</div>
+
+      <div class="ae-info-row ae-info-label">范围档位</div>
+      <div class="ae-info-row ae-info-value">${validation.profile.name} · ${getRangeSourceLabel(validation)}</div>
 
       <div class="ae-info-row ae-info-label">Source</div>
       <div class="ae-info-row ae-info-value">${asset.source ?? "-"}</div>
@@ -1276,18 +2843,18 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       <div class="ae-info-row ae-info-label">Dimensions (m)</div>
       <div class="ae-info-row ae-info-value">
         <div class="ae-dims-scaler" id="ae-dims-scaler">
-          <div class="ae-dims-inputs">
+              <div class="ae-dims-inputs">
             <label class="ae-dims-field">
               <span class="ae-dims-field-label">W</span>
-              <input type="number" id="ae-dim-w" class="ae-dims-input" step="0.01" min="0.01" value="${(dims?.width ?? 0).toFixed(2)}" ${dims ? "" : "disabled"} />
+              <input type="number" id="ae-dim-w" class="ae-dims-input" step="0.01" min="0.01" value="${formatDimension(dims?.width)}" ${dims ? "" : "disabled"} />
             </label>
             <label class="ae-dims-field">
               <span class="ae-dims-field-label">H</span>
-              <input type="number" id="ae-dim-h" class="ae-dims-input" step="0.01" min="0.01" value="${(dims?.height ?? 0).toFixed(2)}" ${dims ? "" : "disabled"} />
+              <input type="number" id="ae-dim-h" class="ae-dims-input" step="0.01" min="0.01" value="${formatDimension(dims?.height)}" ${dims ? "" : "disabled"} />
             </label>
             <label class="ae-dims-field">
               <span class="ae-dims-field-label">D</span>
-              <input type="number" id="ae-dim-d" class="ae-dims-input" step="0.01" min="0.01" value="${(dims?.depth ?? 0).toFixed(2)}" ${dims ? "" : "disabled"} />
+              <input type="number" id="ae-dim-d" class="ae-dims-input" step="0.01" min="0.01" value="${formatDimension(dims?.depth)}" ${dims ? "" : "disabled"} />
             </label>
           </div>
           <div class="ae-dims-slider-row">
@@ -1298,31 +2865,184 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
         </div>
       </div>
 
+      <div class="ae-info-row ae-info-label">类别尺寸范围</div>
+      <div class="ae-info-row ae-info-value">
+        <div id="ae-dim-range-text">${formatCategoryRangeLine(validation.profile)}</div>
+        <div id="ae-dim-range-status" class="ae-dim-range-status ${validation.violations.length === 0 ? "ok" : "warn"}">${validationText}</div>
+        <div id="ae-dim-range-hint" class="ae-dim-range-hint">${dims ? (validation.violations.length > 0 ? `建议缩放: ${formatDimension(validation.suggestedScale)}x` : "当前已符合范围") : "等待模型加载完成后计算建议。"}</div>
+        <button id="ae-auto-range-btn" class="ae-action-btn ${validation.violations.length === 0 ? "ae-btn-secondary" : "ae-btn-warning"}" type="button" ${dims ? (validation.violations.length > 0 ? "" : "disabled") : "disabled"}>${validation.violations.length > 0 ? `一键修正 (${formatDimension(validation.suggestedScale)}x)` : "当前符合范围"}</button>
+      </div>
+
+      <div class="ae-info-row ae-info-label">Origin Alignment</div>
+      <div class="ae-info-row ae-info-value">
+        <div id="ae-origin-status" class="ae-dim-range-status ${originNeedsFix ? "warn" : "ok"}">${getOriginStatusText(originOffset)}</div>
+        <div id="ae-origin-offset" class="ae-dim-range-hint">Bottom center: ${formatOriginVector(originOffset)}</div>
+        <label class="ae-dims-field" style="margin-top:8px;">
+          <input id="ae-origin-auto-align" type="checkbox" ${state.originAutoAlignEnabled ? "checked" : ""} />
+          <span class="ae-dims-field-label">Auto align on load</span>
+        </label>
+        <div class="ae-actions-bar" style="margin-top:8px;">
+          <button id="ae-align-origin-btn" class="ae-action-btn ${originNeedsFix ? "ae-btn-warning" : "ae-btn-secondary"}" type="button" ${originNeedsFix ? "" : "disabled"}>Align & Save Now</button>
+          <button id="ae-drag-move-toggle" class="ae-action-btn ae-btn-secondary ${state.dragMoveMode ? "active" : ""}" type="button">${state.dragMoveMode ? "Drag Move: On" : "Drag Move: Off"}</button>
+        </div>
+        <div class="ae-dim-range-hint">Drag Move 开启后，在预览区点击拖动物体；松开鼠标会保存当前坐标。</div>
+      </div>
+
+      <div class="ae-info-row ae-info-label">已加载样本</div>
+      <div class="ae-info-row ae-info-value">${validation.sampleCount > 0 ? `${validation.sampleCount} 条（当前分类）` : "无匹配样本，使用通用规则"}</div>
+
       <div class="ae-info-row ae-info-label">Mesh Path</div>
       <div class="ae-info-row ae-info-value ae-mono ae-path">${asset.mesh_path ?? "-"}</div>
 
       <div class="ae-info-row ae-info-label">Description</div>
       <div class="ae-info-row ae-info-value ae-desc">${asset.text_desc ?? "-"}</div>
 
-      <div class="ae-info-row ae-info-label">Quality Tier</div>
+      <div class="ae-info-row ae-info-label">入库审核</div>
       <div class="ae-info-row ae-info-value">
-        <select id="ae-edit-tier" class="ae-edit-select">
-          <option value="">--</option>
-          ${[1, 2, 3, 4, 5].map((t) => `<option value="${t}" ${asset.quality_tier === t ? "selected" : ""}>Tier ${t}</option>`).join("")}
-        </select>
-      </div>
+        <div class="ae-curation-panel">
+          <label class="ae-dims-field" style="margin-top:8px;">
+            <span class="ae-dims-field-label">Quality Tier</span>
+            <select id="ae-edit-tier" class="ae-edit-select">
+              <option value="">--</option>
+              ${[1, 2, 3, 4, 5].map((t) => `<option value="${t}" ${asset.quality_tier === t ? "selected" : ""}>Tier ${t}</option>`).join("")}
+            </select>
+          </label>
 
-      <div class="ae-info-row ae-info-label">Scene Eligible</div>
-      <div class="ae-info-row ae-info-value">
-        <input id="ae-edit-eligible" type="checkbox" ${asset.scene_eligible ? "checked" : ""} />
-      </div>
+          <label class="ae-dims-field" style="margin-top:8px;">
+            <span class="ae-dims-field-label">统一 Tags</span>
+            <input id="ae-edit-tags" type="text" class="ae-edit-input" placeholder="tree, road_edge, low_poly" value="${escapeHtml(formatTagInput(asset.tags))}" />
+          </label>
 
-      <div class="ae-info-row ae-info-label">Tags</div>
-      <div class="ae-info-row ae-info-value">
-        <input id="ae-edit-tags" type="text" class="ae-edit-input" value="${(asset.tags ?? []).join(", ")}" />
+          <label class="ae-dims-field" style="margin-top:8px;">
+            <span class="ae-dims-field-label">Style Tags</span>
+            <input id="ae-edit-style-tags" type="text" class="ae-edit-input" placeholder="realistic, clean, damaged" value="${escapeHtml(formatTagInput(asset.style_tags))}" />
+          </label>
+
+          <label class="ae-dims-field" style="margin-top:8px;">
+            <span class="ae-dims-field-label">Theme Tags</span>
+            <input id="ae-edit-theme-tags" type="text" class="ae-edit-input" placeholder="urban, park, industrial" value="${escapeHtml(formatTagInput(asset.theme_tags))}" />
+          </label>
+
+          <label class="ae-dims-field" style="margin-top:8px;">
+            <span class="ae-dims-field-label">不适合原因</span>
+            <textarea id="ae-edit-exclusion-reason" class="ae-edit-input" rows="2" placeholder="例如：灰模、偏移严重、组合资产未拆分、尺度不可信">${escapeHtml(String(asset.scene_exclusion_reason ?? ""))}</textarea>
+          </label>
+
+          <label class="ae-dims-field" style="margin-top:8px;">
+            <span class="ae-dims-field-label">审核备注</span>
+            <textarea id="ae-edit-curation-notes" class="ae-edit-input" rows="2" placeholder="补充说明，可写后续处理建议">${escapeHtml(String(asset.curation_notes ?? ""))}</textarea>
+          </label>
+        </div>
       </div>
     `;
   }
+
+  const eligibleToolbarLabel = document.createElement("label");
+  eligibleToolbarLabel.id = "ae-toolbar-eligible-label";
+  eligibleToolbarLabel.className = "ae-action-btn ae-btn-secondary";
+  eligibleToolbarLabel.style.display = "inline-flex";
+  eligibleToolbarLabel.style.alignItems = "center";
+  eligibleToolbarLabel.style.gap = "6px";
+  eligibleToolbarLabel.style.cursor = "pointer";
+  eligibleToolbarLabel.title = "控制当前资产是否进入生成候选池";
+  eligibleToolbarLabel.innerHTML = `
+    <input id="ae-edit-eligible" type="checkbox" disabled style="margin:0;" />
+    <span>可参与生成</span>
+  `;
+  const eligibleToolbarStatus = document.createElement("span");
+  eligibleToolbarStatus.id = "ae-curation-save-status";
+  eligibleToolbarStatus.className = "ae-dim-range-hint";
+  eligibleToolbarStatus.dataset.status = "idle";
+  eligibleToolbarStatus.textContent = "自动保存元数据";
+  eligibleToolbarStatus.style.whiteSpace = "nowrap";
+  eligibleToolbarStatus.style.alignSelf = "center";
+  zoomFitBtn.insertAdjacentElement("afterend", eligibleToolbarStatus);
+  zoomFitBtn.insertAdjacentElement("afterend", eligibleToolbarLabel);
+
+  function updateEligibleToolbar(asset?: AssetRecord | null) {
+    const checkbox = root.querySelector<HTMLInputElement>("#ae-edit-eligible");
+    const label = root.querySelector<HTMLElement>("#ae-toolbar-eligible-label");
+    if (!checkbox || !label) return;
+    const enabled = Boolean(asset);
+    checkbox.disabled = !enabled;
+    checkbox.checked = Boolean(asset?.scene_eligible);
+    label.classList.toggle("active", Boolean(asset?.scene_eligible));
+    label.style.opacity = enabled ? "1" : "0.55";
+  }
+
+  const curationAutosaveFieldIds = new Set([
+    "ae-edit-tier",
+    "ae-edit-eligible",
+    "ae-edit-tags",
+    "ae-edit-style-tags",
+    "ae-edit-theme-tags",
+    "ae-edit-exclusion-reason",
+    "ae-edit-curation-notes",
+  ]);
+
+  function isCurationAutosaveField(target: EventTarget | null): boolean {
+    return target instanceof HTMLElement && curationAutosaveFieldIds.has(target.id);
+  }
+
+  root.addEventListener("input", (event) => {
+    if (!isCurationAutosaveField(event.target)) return;
+    scheduleCurationAutosave();
+  });
+
+  root.addEventListener("change", (event) => {
+    if (!isCurationAutosaveField(event.target)) return;
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.id === "ae-edit-eligible" && target.checked) {
+      const reasonEl = root.querySelector<HTMLTextAreaElement>("#ae-edit-exclusion-reason");
+      if (reasonEl) reasonEl.value = "";
+    }
+    if (target instanceof HTMLInputElement && target.id === "ae-edit-eligible") {
+      const label = root.querySelector<HTMLElement>("#ae-toolbar-eligible-label");
+      if (label) label.classList.toggle("active", target.checked);
+    }
+    scheduleCurationAutosave();
+  });
+
+  root.addEventListener("change", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (!(target instanceof HTMLInputElement) || target.id !== "ae-origin-auto-align") return;
+    state.originAutoAlignEnabled = target.checked;
+    localStorage.setItem("roadgen3d.assetEditor.originAutoAlign", String(state.originAutoAlignEnabled));
+    updateOriginAlignmentPanel();
+    if (state.originAutoAlignEnabled && previewCtx) {
+      const asset = getActiveAsset();
+      if (asset) {
+        void autoFixAssetOriginIfNeeded(previewCtx, asset).catch((err) => {
+          showToast(root, `自动对齐失败: ${err}`, "error");
+        });
+      }
+    }
+  });
+
+  root.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+
+    const alignBtn = target.closest<HTMLButtonElement>("#ae-align-origin-btn");
+    if (alignBtn) {
+      const asset = getActiveAsset();
+      if (!previewCtx || !asset) return;
+      alignBtn.disabled = true;
+      alignBtn.textContent = "Aligning...";
+      void autoFixAssetOriginIfNeeded(previewCtx, asset, true)
+        .catch((err) => showToast(root, `对齐保存失败: ${err}`, "error"))
+        .finally(() => {
+          alignBtn.textContent = "Align & Save Now";
+          updateOriginAlignmentPanel();
+        });
+      return;
+    }
+
+    const dragBtn = target.closest<HTMLButtonElement>("#ae-drag-move-toggle");
+    if (dragBtn) {
+      setDragMoveMode(!state.dragMoveMode);
+    }
+  });
 
   /* ── Object list ───────────────────────────────────────────────── */
   function renderObjectList() {
@@ -1367,8 +3087,10 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   /* ── Action buttons state ──────────────────────────────────────── */
   function updateActionButtons() {
     const hasDups = state.sceneChildren.some((c) => c.isDuplicate);
-    const hasSelection = state.selectedObjects.size > 0;
+    const hasSelection = state.selectedObjects.size > 0 || state.selectedMeshes.size > 0;
     removeDupsBtn.disabled = !hasDups;
+    autoSplitRecordsBtn.disabled = !state.selectedAssetId || state.sceneChildren.length < 1;
+    extractSkyBtn.disabled = !state.selectedAssetId || state.sceneChildren.length < 1;
     splitBtn.disabled = !hasSelection;
   }
 
@@ -1401,6 +3123,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   /* ── Selection Box (Rectangle Selection) ───────────────────────── */
   function updateDeleteButtonState() {
     deleteSelectedBtn.disabled = state.selectedMeshes.size === 0;
+    updateActionButtons();
   }
 
   function clearMeshSelection() {
@@ -1417,6 +3140,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
 
     const canvas = previewCtx.renderer.domElement;
     const helper = previewCtx.selectionHelper;
+    if (helper.enabled) return;
+    helper.enabled = true;
 
     canvas.addEventListener("pointerdown", (e) => {
       if (!state.selectionMode || e.button !== 0) return;
@@ -1473,7 +3198,109 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     });
   }
 
+  let dragMoveEventsBound = false;
+  let dragMoving = false;
+  let dragMoved = false;
+  const dragRaycaster = new THREE.Raycaster();
+  const dragPointer = new THREE.Vector2();
+  const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const dragStartPoint = new THREE.Vector3();
+  const dragStartPosition = new THREE.Vector3();
+
+  function getDragGroundPoint(event: PointerEvent, out: THREE.Vector3): boolean {
+    if (!previewCtx) return false;
+    const rect = previewCtx.renderer.domElement.getBoundingClientRect();
+    dragPointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    dragPointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    dragRaycaster.setFromCamera(dragPointer, previewCtx.camera);
+    return Boolean(dragRaycaster.ray.intersectPlane(dragPlane, out));
+  }
+
+  function setupDragMoveEvents() {
+    if (!previewCtx || dragMoveEventsBound) return;
+    dragMoveEventsBound = true;
+    const canvas = previewCtx.renderer.domElement;
+
+    canvas.addEventListener("pointerdown", (event) => {
+      if (!state.dragMoveMode || state.selectionMode || !previewCtx?.currentModel || event.button !== 0) return;
+      if (!getDragGroundPoint(event, dragStartPoint)) return;
+      dragMoving = true;
+      dragMoved = false;
+      dragStartPosition.copy(previewCtx.currentModel.position);
+      canvas.setPointerCapture(event.pointerId);
+      canvas.style.cursor = "grabbing";
+      event.preventDefault();
+    });
+
+    canvas.addEventListener("pointermove", (event) => {
+      if (!dragMoving || !state.dragMoveMode || !previewCtx?.currentModel) return;
+      const currentPoint = new THREE.Vector3();
+      if (!getDragGroundPoint(event, currentPoint)) return;
+      const delta = currentPoint.sub(dragStartPoint);
+      previewCtx.currentModel.position.set(
+        dragStartPosition.x + delta.x,
+        dragStartPosition.y,
+        dragStartPosition.z + delta.z,
+      );
+      previewCtx.currentModel.updateMatrixWorld(true);
+      dragMoved = dragMoved || Math.abs(delta.x) > 0.001 || Math.abs(delta.z) > 0.001;
+      updateOriginAlignmentPanel();
+      event.preventDefault();
+    });
+
+    const finishDrag = (event: PointerEvent) => {
+      if (!dragMoving) return;
+      dragMoving = false;
+      if (state.dragMoveMode) canvas.style.cursor = "grab";
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId);
+      }
+      if (dragMoved && previewCtx?.currentModel) {
+        const asset = getActiveAsset();
+        if (asset) {
+          void saveCurrentModelOrigin(
+            previewCtx,
+            asset,
+            {
+              origin_fix_mode: "manual-drag",
+              origin_manual_drag_saved_at: new Date().toISOString(),
+            },
+            "手动移动已保存",
+            true,
+          ).catch((err) => showToast(root, `手动移动保存失败: ${err}`, "error"));
+        }
+      }
+    };
+
+    canvas.addEventListener("pointerup", finishDrag);
+    canvas.addEventListener("pointercancel", finishDrag);
+  }
+
+  function setDragMoveMode(enabled: boolean) {
+    state.dragMoveMode = enabled;
+    if (enabled) {
+      state.selectionMode = false;
+      toggleSelectBtn.classList.remove("active");
+      if (previewCtx?.selectionHelper?.isDown) {
+        hideSelectionBox(previewCtx.selectionHelper);
+      }
+      if (previewCtx) {
+        previewCtx.controls.enabled = false;
+        previewCtx.renderer.domElement.style.cursor = "grab";
+        setupDragMoveEvents();
+      }
+      showToast(root, "Drag Move: 点击并拖动物体，松开后自动保存");
+    } else if (previewCtx) {
+      previewCtx.controls.enabled = !state.selectionMode;
+      previewCtx.renderer.domElement.style.cursor = state.selectionMode ? "crosshair" : "";
+    }
+    updateOriginAlignmentPanel();
+  }
+
   toggleSelectBtn.addEventListener("click", () => {
+    if (!state.selectionMode && state.dragMoveMode) {
+      setDragMoveMode(false);
+    }
     state.selectionMode = !state.selectionMode;
     toggleSelectBtn.classList.toggle("active", state.selectionMode);
 
@@ -1507,6 +3334,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       state.sceneChildren = analyzeChildren(previewCtx.currentModel);
       renderObjectList();
       updateActionButtons();
+      refreshModelDimensionsFromScene(previewCtx);
     }
 
     showToast(root, `Deleted ${deletedCount} object(s)`);
@@ -1564,37 +3392,34 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     if (sliderVal) sliderVal.textContent = `${scale.toFixed(4)}x`;
   }
 
+  function clampScaleValue(scale: number): number {
+    if (!Number.isFinite(scale)) return 1;
+    return Math.max(0.01, Math.min(100, scale));
+  }
+
+  function applyAbsoluteScale(scale: number) {
+    const targetScale = clampScaleValue(scale);
+    state.scaleValue = targetScale;
+    scaleInput.value = targetScale.toFixed(4);
+    if (previewCtx) {
+      applyScale(previewCtx, targetScale);
+      refreshModelDimensionsFromScene(previewCtx);
+    } else {
+      syncSliderToScale(targetScale);
+    }
+    scheduleDimensionAutosave();
+  }
+
   scaleInput.addEventListener("input", () => {
     const val = parseFloat(scaleInput.value);
     if (isNaN(val) || val <= 0) return;
-    state.scaleValue = val;
-    if (previewCtx) applyScale(previewCtx, val);
-    if (state.originalDimensions) {
-      state.modelDimensions = {
-        width: state.originalDimensions.width * val,
-        height: state.originalDimensions.height * val,
-        depth: state.originalDimensions.depth * val,
-      };
-      updateDimensionsDisplay(state.modelDimensions);
-    }
-    syncSliderToScale(val);
+    applyAbsoluteScale(val);
   });
 
   /* ── Proportional dimension scaling (live preview) ─────────────── */
   function applyProportionalScale(ratio: number) {
     if (!state.originalDimensions) return;
-    const orig = state.originalDimensions;
-    const newDims = {
-      width: +(orig.width * ratio).toFixed(4),
-      height: +(orig.height * ratio).toFixed(4),
-      depth: +(orig.depth * ratio).toFixed(4),
-    };
-    state.modelDimensions = newDims;
-    state.scaleValue = ratio;
-    scaleInput.value = ratio.toFixed(4);
-    updateDimensionsDisplay(newDims);
-    if (previewCtx) applyScale(previewCtx, ratio);
-    syncSliderToScale(ratio);
+    applyAbsoluteScale(ratio);
   }
 
   function handleDimInputChange(changedAxis: "w" | "h" | "d") {
@@ -1632,6 +3457,33 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     }
   });
 
+  root.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    if (target.id !== "ae-auto-range-btn") return;
+    const activeAsset = getActiveAsset();
+    if (!activeAsset) return;
+    if (!previewCtx?.currentModel) {
+      showToast(root, "No model loaded for auto-fix");
+      return;
+    }
+
+    const dims = state.modelDimensions;
+    const validation = validateCategoryDimension(dims, activeAsset.category);
+    if (!dims || validation.violations.length === 0) {
+      showToast(root, "当前尺寸已在规则范围内");
+      return;
+    }
+    if (!Number.isFinite(validation.suggestedScale) || validation.suggestedScale <= 0) {
+      showToast(root, "无法自动计算安全缩放值");
+      return;
+    }
+
+    applyAbsoluteScale(validation.suggestedScale);
+    showToast(root, validation.feasible
+      ? `已按 ${formatDimension(validation.suggestedScale)}x 自动修正到范围`
+      : `已按最接近范围的比例 ${formatDimension(validation.suggestedScale)}x 修正（范围冲突，将取妥协）`);
+  });
+
   /* ── Yaw → live preview ───────────────────────────────────────── */
   yawInput.addEventListener("input", () => {
     const val = parseFloat(yawInput.value);
@@ -1641,6 +3493,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     if (previewCtx) {
       applyYaw(previewCtx, normalizedYaw);
       updateFrontArrow(previewCtx, state.frontDirection, normalizedYaw);
+      refreshModelDimensionsFromScene(previewCtx);
     }
   });
 
@@ -1656,7 +3509,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   exportBtn.addEventListener("click", async () => {
     if (!previewCtx?.currentModel) return;
     try {
-      const cloned = previewCtx.currentModel.clone();
+      const cloned = cloneObjectForGlbExport(previewCtx.currentModel, previewCtx.originalMaterials);
       const data = await exportGlb(cloned);
       const asset = state.assets.find((a) => a.asset_id === state.selectedAssetId);
       const name = asset?.asset_id ?? "exported";
@@ -1671,16 +3524,10 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   saveBtn.addEventListener("click", async () => {
     if (!state.selectedAssetId || !state.manifestName) return;
 
-    const tierEl = root.querySelector<HTMLSelectElement>("#ae-edit-tier");
-    const eligibleEl = root.querySelector<HTMLInputElement>("#ae-edit-eligible");
-    const tagsEl = root.querySelector<HTMLInputElement>("#ae-edit-tags");
-    if (!tierEl || !eligibleEl || !tagsEl) return;
+    const curationUpdates = collectCurationUpdatesFromPanel();
+    if (!curationUpdates) return;
 
-    const updates: Record<string, unknown> = {};
-    const tierVal = tierEl.value ? parseInt(tierEl.value, 10) : undefined;
-    if (tierVal !== undefined) updates.quality_tier = tierVal;
-    updates.scene_eligible = eligibleEl.checked;
-    updates.tags = tagsEl.value.split(",").map((t) => t.trim()).filter(Boolean);
+    const updates: Record<string, unknown> = { ...curationUpdates };
     updates.scale = state.scaleValue;
     updates.yaw_deg = state.yawValue;
     if (state.frontDirection !== "+Z") {
@@ -1698,9 +3545,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       await saveAssetMetadata(state.manifestName, state.selectedAssetId, updates);
       const asset = state.assets.find((a) => a.asset_id === state.selectedAssetId);
       if (asset) {
-        if (tierVal !== undefined) asset.quality_tier = tierVal;
-        asset.scene_eligible = eligibleEl.checked;
-        asset.tags = updates.tags as string[];
+        applyCurationUpdatesToAsset(asset, curationUpdates);
         asset.scale = state.scaleValue;
         asset.yaw_deg = state.yawValue;
         if (updates.canonical_front) asset.canonical_front = updates.canonical_front as string;
@@ -1755,45 +3600,186 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       state.sceneChildren = analyzeChildren(previewCtx.currentModel);
       renderObjectList();
       updateActionButtons();
+      refreshModelDimensionsFromScene(previewCtx);
     }
     showToast(root, `Removed ${removedCount} duplicate mesh(es)`);
   });
 
+  /* ── Auto split into manifest records ──────────────────────────── */
+  autoSplitRecordsBtn.addEventListener("click", async () => {
+    if (!previewCtx?.currentModel || !state.selectedAssetId || !state.manifestName) return;
+    const parentAsset = getActiveAsset();
+    if (!parentAsset) return;
+
+    const splitUnits = collectAutoSplitUnits(previewCtx.currentModel, previewCtx.originalMaterials);
+    const clusters = clusterMeshesByFootprint(splitUnits).filter((cluster) => cluster.length > 0);
+    if (clusters.length <= 1) {
+      showToast(root, "未检测到可拆分的独立子对象", "error");
+      return;
+    }
+
+    const existingIds = new Set(state.assets.map((asset) => asset.asset_id));
+    const payload: Array<{ asset_id: string; record: AssetRecord; glb_base64: string }> = [];
+    autoSplitRecordsBtn.disabled = true;
+    autoSplitRecordsBtn.textContent = "Splitting...";
+
+    try {
+      let subIndex = 1;
+      for (const cluster of clusters) {
+        const assetId = makeUniqueSubAssetId(parentAsset.asset_id, subIndex, existingIds);
+        existingIds.add(assetId);
+        const exported = buildClusterExport(cluster, previewCtx.originalMaterials);
+        const glbData = await exportGlb(exported.scene);
+        payload.push({
+          asset_id: assetId,
+          record: buildSubAssetRecord(
+            parentAsset,
+            assetId,
+            subIndex,
+            exported.dimensions,
+            exported.faceCount,
+            exported.vertexCount,
+          ),
+          glb_base64: arrayBufferToBase64(glbData),
+        });
+        subIndex += 1;
+      }
+
+      const createdAssets = await createAssetRecords(state.manifestName, payload);
+      state.assets.unshift(...createdAssets);
+      state.totalAssets += createdAssets.length;
+      rebuildCategoryProfiles(state.assets);
+      applyFilters();
+      showToast(root, `已拆分并新增 ${createdAssets.length} 个子资产记录`);
+    } catch (err) {
+      showToast(root, `自动拆分失败: ${err}`, "error");
+    } finally {
+      autoSplitRecordsBtn.textContent = "Auto Split Records";
+      updateActionButtons();
+    }
+  });
+
+  /* ── Extract or create sky dome ────────────────────────────────── */
+  extractSkyBtn.addEventListener("click", async () => {
+    if (!previewCtx?.currentModel || !state.selectedAssetId || !state.manifestName) return;
+    const parentAsset = getActiveAsset();
+    if (!parentAsset) return;
+
+    extractSkyBtn.disabled = true;
+    extractSkyBtn.textContent = "Creating Sky...";
+
+    try {
+      const existingIds = new Set(state.assets.map((asset) => asset.asset_id));
+      const assetId = makeUniqueAssetId(`${parentAsset.asset_id}-sky-dome`, existingIds);
+      const splitUnits = collectAutoSplitUnits(previewCtx.currentModel, previewCtx.originalMaterials);
+      const sphere = pickSkySphereCandidate(splitUnits);
+      let mode: "extracted" | "procedural" = "procedural";
+      let glbData: ArrayBuffer;
+      let dimensions: DimensionRecord | null;
+      let faceCount: number;
+      let vertexCount: number;
+
+      if (sphere) {
+        const exported = buildClusterExport([sphere], previewCtx.originalMaterials);
+        glbData = await exportGlb(exported.scene);
+        dimensions = exported.dimensions;
+        faceCount = exported.faceCount;
+        vertexCount = exported.vertexCount;
+        mode = "extracted";
+      } else {
+        const exported = createProceduralSkyDomeExport();
+        glbData = await exportGlb(exported.scene);
+        dimensions = exported.dimensions;
+        faceCount = exported.faceCount;
+        vertexCount = exported.vertexCount;
+      }
+
+      const createdAssets = await createAssetRecords(state.manifestName, [{
+        asset_id: assetId,
+        record: buildSkyDomeRecord(parentAsset, assetId, dimensions, faceCount, vertexCount, mode),
+        glb_base64: arrayBufferToBase64(glbData),
+      }]);
+
+      state.assets.unshift(...createdAssets);
+      state.totalAssets += createdAssets.length;
+      rebuildCategoryProfiles(state.assets);
+      applyFilters();
+      showToast(root, mode === "extracted"
+        ? "已提取天空球并创建 sky_dome 记录"
+        : "未找到圆球，已生成程序化 sky_dome 记录");
+    } catch (err) {
+      showToast(root, `天空球创建失败: ${err}`, "error");
+    } finally {
+      extractSkyBtn.textContent = "Extract Sky Dome";
+      updateActionButtons();
+    }
+  });
+
   /* ── Split selected ────────────────────────────────────────────── */
   splitBtn.addEventListener("click", async () => {
-    if (!previewCtx?.currentModel || state.selectedObjects.size === 0) return;
+    if (!previewCtx?.currentModel || !state.selectedAssetId || !state.manifestName) return;
+    const ctx = previewCtx;
+    const currentModel = ctx.currentModel!;
+    const parentAsset = getActiveAsset();
+    if (!parentAsset) return;
 
-    const meshes: THREE.Mesh[] = [];
-    previewCtx.currentModel.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) meshes.push(child as THREE.Mesh);
-    });
-
-    const selectedMeshes = meshes.filter((m) => state.selectedObjects.has(m.uuid));
+    const allMeshes = collectModelMeshes(currentModel);
+    const selectedByObjectList = allMeshes.filter((mesh) => state.selectedObjects.has(mesh.uuid));
+    const selectedMeshes = Array.from(new Set([...Array.from(state.selectedMeshes), ...selectedByObjectList]));
     if (selectedMeshes.length === 0) {
       showToast(root, "No valid meshes selected", "error");
       return;
     }
 
-    let exported = 0;
-    for (const mesh of selectedMeshes) {
-      try {
-        const newScene = new THREE.Scene();
-        const cloned = mesh.clone();
-        // Reset position to origin relative to bbox center
-        const box = new THREE.Box3().setFromObject(mesh);
-        const center = box.getCenter(new THREE.Vector3());
-        cloned.position.copy(mesh.position).sub(center);
-        newScene.add(cloned);
-
-        const data = await exportGlb(newScene);
-        const name = mesh.name || `mesh_${exported}`;
-        triggerDownload(data, `${name}.glb`);
-        exported++;
-      } catch (err) {
-        showToast(root, `Failed to split ${mesh.name}: ${err}`, "error");
-      }
+    const splitUnits = selectedMeshes.flatMap((mesh) => splitMergedMeshByConnectivity(mesh, ctx.originalMaterials));
+    const clusters = clusterMeshesByFootprint(splitUnits).filter((cluster) => cluster.length > 0);
+    if (clusters.length === 0) {
+      showToast(root, "No split clusters found", "error");
+      return;
     }
-    showToast(root, `Exported ${exported} mesh(es) as separate GLB files`);
+
+    const existingIds = new Set(state.assets.map((asset) => asset.asset_id));
+    const payload: Array<{ asset_id: string; record: AssetRecord; glb_base64: string }> = [];
+    splitBtn.disabled = true;
+    splitBtn.textContent = "Creating...";
+
+    try {
+      let subIndex = 1;
+      for (const cluster of clusters) {
+        const assetId = makeUniqueSubAssetId(parentAsset.asset_id, subIndex, existingIds);
+        existingIds.add(assetId);
+        const exported = buildClusterExport(cluster, ctx.originalMaterials);
+        const glbData = await exportGlb(exported.scene);
+        payload.push({
+          asset_id: assetId,
+          record: buildSubAssetRecord(
+            parentAsset,
+            assetId,
+            subIndex,
+            exported.dimensions,
+            exported.faceCount,
+            exported.vertexCount,
+          ),
+          glb_base64: arrayBufferToBase64(glbData),
+        });
+        subIndex += 1;
+      }
+
+      const createdAssets = await createAssetRecords(state.manifestName, payload);
+      state.assets.unshift(...createdAssets);
+      state.totalAssets += createdAssets.length;
+      rebuildCategoryProfiles(state.assets);
+      applyFilters();
+      clearMeshSelection();
+      state.selectedObjects.clear();
+      renderObjectList();
+      showToast(root, `已从选中对象新增 ${createdAssets.length} 个子资产记录`);
+    } catch (err) {
+      showToast(root, `拆分选中失败: ${err}`, "error");
+    } finally {
+      splitBtn.textContent = "Split Selected";
+      updateActionButtons();
+    }
   });
 
   /* ── Init ──────────────────────────────────────────────────────── */
@@ -1802,8 +3788,18 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   /* ── Teardown ──────────────────────────────────────────────────── */
   return () => {
     destroyed = true;
+    clearDimensionAutosaveTimer();
+    clearCurationAutosaveTimer();
+    pendingDimensionAutosave = null;
+    pendingCurationAutosave = null;
     if (previewCtx) {
       cancelAnimationFrame(previewCtx.animId);
+      if (previewCtx.scaleBarGroup) {
+        disposeScaleBar(previewCtx.scaleBarGroup);
+        previewCtx.scaleBarGroup = null;
+      }
+      previewCtx.labelRenderer.domElement.remove();
+      previewCtx.renderer.domElement.remove();
       previewCtx.renderer.dispose();
       previewCtx.controls.dispose();
       previewCtx.originalMaterials.clear();

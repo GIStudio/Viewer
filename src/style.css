@@ -4436,6 +4436,30 @@ body.roadgen-capture-mode .desktop-shell-center-stage {
   font-weight: 600;
 }
 
+.ae-dim-range-status {
+  font-size: 0.77rem;
+  margin-top: 0.35rem;
+  line-height: 1.35;
+}
+
+.ae-dim-range-status.ok {
+  color: #15803d;
+}
+
+.ae-dim-range-status.warn {
+  color: #b45309;
+}
+
+.ae-dim-range-hint {
+  font-size: 0.73rem;
+  color: var(--color-text-secondary);
+  margin-top: 0.28rem;
+}
+
+#ae-auto-range-btn {
+  margin-top: 0.42rem;
+}
+
 .ae-scale-label {
   font-size: 0.78rem;
   font-weight: 600;

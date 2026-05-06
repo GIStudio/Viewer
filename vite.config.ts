@@ -17,6 +17,8 @@ const RECENT_LAYOUT_INDEX_PATH = path.resolve(
 );
 const ASSET_MANIFEST_PATH = path.resolve(repoRoot, "data", "real", "real_assets_manifest.jsonl");
 const ASSET_MANIFESTS_DIR = path.resolve(repoRoot, "data", "real");
+const SPLIT_ASSET_MESH_DIR = path.resolve(ASSET_MANIFESTS_DIR, "split_meshes");
+const NORMALIZED_ASSET_MESH_DIR = path.resolve(ASSET_MANIFESTS_DIR, "normalized_meshes");
 const EXTRA_ASSET_MANIFEST_DIRS = [
   path.resolve(repoRoot, "data", "street_furniture"),
   path.resolve(repoRoot, "assets", "building"),
@@ -113,6 +115,55 @@ function resolveAllowedPath(rawPath: string | null): string | null {
     }
   }
   return null;
+}
+
+function resolveManifestAssetPath(rawPath: string | null | undefined, manifestPath: string): string {
+  if (!rawPath || typeof rawPath !== "string") {
+    return String(rawPath ?? "");
+  }
+  const trimmed = rawPath.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (path.isAbsolute(trimmed) || /^[A-Za-z]:[\\/]/.test(trimmed)) {
+    return path.resolve(trimmed);
+  }
+
+  const manifestDir = path.dirname(path.resolve(manifestPath));
+  return path.resolve(manifestDir, trimmed);
+}
+
+function normalizeManifestRecordPaths(record: JsonRecord, manifestPath: string): JsonRecord {
+  if (typeof record.mesh_path === "string" && record.mesh_path.trim()) {
+    record.mesh_path = resolveManifestAssetPath(record.mesh_path, manifestPath);
+  }
+  return record;
+}
+
+function resolveAssetManifestPath(manifestName: string): string | null {
+  if (!manifestName) {
+    return null;
+  }
+
+  if (manifestName.includes("/")) {
+    const [prefix, fileName] = manifestName.split("/", 2);
+    const extraDir = EXTRA_ASSET_MANIFEST_DIRS.find((dir) => path.basename(dir) === prefix);
+    if (!extraDir) {
+      return null;
+    }
+    const candidate = path.join(extraDir, fileName);
+    const relative = path.relative(extraDir, candidate);
+    return !relative.startsWith("..") && !path.isAbsolute(relative) ? candidate : null;
+  }
+
+  const candidate = path.resolve(ASSET_MANIFESTS_DIR, manifestName);
+  const relative = path.relative(ASSET_MANIFESTS_DIR, candidate);
+  return !relative.startsWith("..") && !path.isAbsolute(relative) ? candidate : null;
+}
+
+function safeAssetFileStem(assetId: string): string {
+  return assetId.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 160) || "asset";
 }
 
 function discoverSceneLayoutPaths(roots: string[]): string[] {
@@ -1052,6 +1103,12 @@ function viewerApiPlugin(): Plugin {
         const isAssetManifestSaveRoute =
           requestUrl.pathname === "/api/asset-manifest/save" ||
           requestUrl.pathname === "/web-viewer/api/asset-manifest/save";
+        const isAssetManifestCreateRoute =
+          requestUrl.pathname === "/api/asset-manifest/create" ||
+          requestUrl.pathname === "/web-viewer/api/asset-manifest/create";
+        const isAssetManifestNormalizeRoute =
+          requestUrl.pathname === "/api/asset-manifest/normalize-mesh" ||
+          requestUrl.pathname === "/web-viewer/api/asset-manifest/normalize-mesh";
 
         if (isAssetManifestsRoute) {
           const manifests: Array<{ name: string; label: string; count: number }> = [];
@@ -1136,27 +1193,26 @@ function viewerApiPlugin(): Plugin {
           const offset = Math.max(0, parseInt(requestUrl.searchParams.get("offset") ?? "0", 10) || 0);
           const limit = Math.min(500, Math.max(1, parseInt(requestUrl.searchParams.get("limit") ?? "100", 10) || 100));
           
-          const lines = fs.readFileSync(manifestPath, "utf-8").split(/\r?\n/);
-          let totalCount = 0;
+          const recordLines = fs.readFileSync(manifestPath, "utf-8")
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+          const order = requestUrl.searchParams.get("order") ?? "latest";
+          const orderedLines = order === "file" ? recordLines : recordLines.slice().reverse();
+          const totalCount = recordLines.length;
           const assets: JsonRecord[] = [];
-          let currentLine = 0;
+          const pageLines = orderedLines.slice(offset, offset + limit);
           
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            
-            // Count total valid entries
-            totalCount++;
-            
-            // Only parse entries within the requested range
-            if (currentLine >= offset && assets.length < limit) {
-              try {
-                assets.push(JSON.parse(trimmed) as JsonRecord);
-              } catch {
-                // Skip invalid JSON
-              }
+          for (const line of pageLines) {
+            try {
+              const record = normalizeManifestRecordPaths(
+                JSON.parse(line) as JsonRecord,
+                manifestPath,
+              );
+              assets.push(record);
+            } catch {
+              // Skip invalid JSON
             }
-            currentLine++;
           }
           
           jsonResponse(res, 200, { 
@@ -1250,6 +1306,183 @@ function viewerApiPlugin(): Plugin {
           fs.writeFileSync(manifestPath, newLines.join("\n"), "utf-8");
           cachedAssetDescriptionIndex = null;
           jsonResponse(res, 200, { ok: true });
+          return;
+        }
+
+        if (isAssetManifestCreateRoute) {
+          if (req.method !== "POST") {
+            jsonResponse(res, 405, { error: "Method not allowed. Use POST." });
+            return;
+          }
+          const body = await readRequestBody(req);
+          let parsed: {
+            manifest_name?: string;
+            assets?: Array<{ asset_id?: string; record?: JsonRecord; glb_base64?: string }>;
+          };
+          try {
+            parsed = JSON.parse(body) as typeof parsed;
+          } catch {
+            jsonResponse(res, 400, { error: "Invalid JSON body." });
+            return;
+          }
+
+          const manifestName = parsed.manifest_name ?? "";
+          const manifestPath = resolveAssetManifestPath(manifestName);
+          if (!manifestPath) {
+            jsonResponse(res, 403, { error: "Invalid manifest name." });
+            return;
+          }
+          if (!fs.existsSync(manifestPath)) {
+            jsonResponse(res, 404, { error: `Manifest not found: ${manifestName}` });
+            return;
+          }
+          if (!Array.isArray(parsed.assets) || parsed.assets.length === 0) {
+            jsonResponse(res, 400, { error: "Missing assets." });
+            return;
+          }
+
+          const rawLines = fs.readFileSync(manifestPath, "utf-8").split(/\r?\n/);
+          const existingIds = new Set<string>();
+          for (const line of rawLines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const record = JSON.parse(trimmed) as JsonRecord;
+              const id = String(record.asset_id ?? "");
+              if (id) existingIds.add(id);
+            } catch {
+              // Ignore malformed legacy rows while preserving the file below.
+            }
+          }
+
+          fs.mkdirSync(SPLIT_ASSET_MESH_DIR, { recursive: true });
+          const createdRecords: JsonRecord[] = [];
+          for (const item of parsed.assets) {
+            const assetId = String(item.asset_id ?? item.record?.asset_id ?? "").trim();
+            const glbBase64 = String(item.glb_base64 ?? "");
+            if (!assetId || !item.record || !glbBase64) {
+              jsonResponse(res, 400, { error: "Each asset must include asset_id, record, and glb_base64." });
+              return;
+            }
+            if (existingIds.has(assetId)) {
+              jsonResponse(res, 409, { error: `Asset already exists: ${assetId}` });
+              return;
+            }
+
+            const glbBuffer = Buffer.from(glbBase64, "base64");
+            if (glbBuffer.length === 0) {
+              jsonResponse(res, 400, { error: `Empty GLB payload for ${assetId}` });
+              return;
+            }
+
+            const meshPath = path.join(SPLIT_ASSET_MESH_DIR, `${safeAssetFileStem(assetId)}.glb`);
+            fs.writeFileSync(meshPath, glbBuffer);
+            const record = {
+              ...item.record,
+              asset_id: assetId,
+              mesh_path: meshPath,
+            };
+            createdRecords.push(record);
+            existingIds.add(assetId);
+          }
+
+          const existingText = fs.readFileSync(manifestPath, "utf-8").trimEnd();
+          const appendedText = createdRecords.map((record) => JSON.stringify(record)).join("\n");
+          fs.writeFileSync(manifestPath, `${existingText ? `${existingText}\n` : ""}${appendedText}\n`, "utf-8");
+          cachedAssetDescriptionIndex = null;
+          jsonResponse(res, 200, {
+            ok: true,
+            assets: createdRecords.map((record) => normalizeManifestRecordPaths({ ...record }, manifestPath)),
+          });
+          return;
+        }
+
+        if (isAssetManifestNormalizeRoute) {
+          if (req.method !== "POST") {
+            jsonResponse(res, 405, { error: "Method not allowed. Use POST." });
+            return;
+          }
+          const body = await readRequestBody(req);
+          let parsed: {
+            manifest_name?: string;
+            asset_id?: string;
+            glb_base64?: string;
+            updates?: JsonRecord;
+          };
+          try {
+            parsed = JSON.parse(body) as typeof parsed;
+          } catch {
+            jsonResponse(res, 400, { error: "Invalid JSON body." });
+            return;
+          }
+
+          const manifestName = parsed.manifest_name ?? "";
+          const assetId = String(parsed.asset_id ?? "").trim();
+          const glbBase64 = String(parsed.glb_base64 ?? "");
+          if (!manifestName || !assetId || !glbBase64) {
+            jsonResponse(res, 400, { error: "Missing manifest_name, asset_id, or glb_base64." });
+            return;
+          }
+
+          const manifestPath = resolveAssetManifestPath(manifestName);
+          if (!manifestPath) {
+            jsonResponse(res, 403, { error: "Invalid manifest name." });
+            return;
+          }
+          if (!fs.existsSync(manifestPath)) {
+            jsonResponse(res, 404, { error: `Manifest not found: ${manifestName}` });
+            return;
+          }
+
+          fs.mkdirSync(NORMALIZED_ASSET_MESH_DIR, { recursive: true });
+          const meshPath = path.join(NORMALIZED_ASSET_MESH_DIR, `${safeAssetFileStem(assetId)}.glb`);
+          const glbBuffer = Buffer.from(glbBase64, "base64");
+          if (glbBuffer.length === 0) {
+            jsonResponse(res, 400, { error: "Empty GLB payload." });
+            return;
+          }
+          fs.writeFileSync(meshPath, glbBuffer);
+
+          const rawLines = fs.readFileSync(manifestPath, "utf-8").split(/\r?\n/);
+          const newLines: string[] = [];
+          let found = false;
+          let normalizedRecord: JsonRecord | null = null;
+          for (const line of rawLines) {
+            const trimmed = line.trim();
+            if (!trimmed) {
+              newLines.push(line);
+              continue;
+            }
+            try {
+              const record = JSON.parse(trimmed) as JsonRecord;
+              if (String(record.asset_id ?? "") === assetId) {
+                normalizedRecord = {
+                  ...record,
+                  ...(parsed.updates ?? {}),
+                  asset_id: assetId,
+                  mesh_path: meshPath,
+                };
+                newLines.push(JSON.stringify(normalizedRecord));
+                found = true;
+              } else {
+                newLines.push(trimmed);
+              }
+            } catch {
+              newLines.push(line);
+            }
+          }
+
+          if (!found || !normalizedRecord) {
+            jsonResponse(res, 404, { error: `Asset not found: ${assetId}` });
+            return;
+          }
+
+          fs.writeFileSync(manifestPath, newLines.join("\n"), "utf-8");
+          cachedAssetDescriptionIndex = null;
+          jsonResponse(res, 200, {
+            ok: true,
+            asset: normalizeManifestRecordPaths({ ...normalizedRecord }, manifestPath),
+          });
           return;
         }
 
