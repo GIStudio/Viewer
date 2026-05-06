@@ -13,20 +13,29 @@ const API_BASE = (import.meta.env.VITE_ROADGEN_API_BASE as string | undefined) |
 const manifestCache = new Map<string, ViewerManifest>();
 const recentLayoutsCache = new Map<string, RecentLayout[]>();
 
+export type LoadManifestOptions = {
+  sceneGlbPath?: string;
+};
+
 /**
  * Load manifest with caching.
  */
-export async function loadManifest(manifestUrl: string, useCache: boolean = true): Promise<ViewerManifest> {
+export async function loadManifest(
+  manifestUrl: string,
+  useCache: boolean = true,
+  options: LoadManifestOptions = {},
+): Promise<ViewerManifest> {
   const manifestStart = performance.now();
-  if (useCache && manifestCache.has(manifestUrl)) {
-    const cached = manifestCache.get(manifestUrl)!;
+  const cacheKey = manifestCacheKey(manifestUrl, options);
+  if (useCache && manifestCache.has(cacheKey)) {
+    const cached = manifestCache.get(cacheKey)!;
     const cacheMs = (performance.now() - manifestStart).toFixed(1);
     console.info(`[viewer-timing] loadManifest cache hit: ${manifestUrl} (${cacheMs} ms)`);
     return cached;
   }
 
   const fetchStart = performance.now();
-  let response = await fetch(resolveManifestUrl(manifestUrl));
+  let response = await fetch(resolveManifestUrl(manifestUrl, options));
   const fetchMs = (performance.now() - fetchStart).toFixed(1);
   console.info(
     `[viewer-timing] loadManifest fetch: ${manifestUrl} -> ${response.status} (${fetchMs} ms)`,
@@ -43,7 +52,7 @@ export async function loadManifest(manifestUrl: string, useCache: boolean = true
           `[viewer-timing] loadManifest rebuild-layout-glb: ${manifestUrl} (${(performance.now() - rebuildStart).toFixed(1)} ms)`,
         );
         const reFetchStart = performance.now();
-        response = await fetch(resolveManifestUrl(manifestUrl));
+        response = await fetch(resolveManifestUrl(manifestUrl, options));
         console.info(
           `[viewer-timing] loadManifest fetch(retry): ${manifestUrl} -> ${response.status} (${(
             performance.now() - reFetchStart
@@ -70,7 +79,7 @@ export async function loadManifest(manifestUrl: string, useCache: boolean = true
   const parseMs = (performance.now() - parseStart).toFixed(1);
   console.info(`[viewer-timing] loadManifest parse: ${manifestUrl} (${parseMs} ms)`);
   if (useCache) {
-    manifestCache.set(manifestUrl, manifest);
+    manifestCache.set(cacheKey, manifest);
   }
   console.info(`[viewer-timing] loadManifest total: ${manifestUrl} (${(performance.now() - manifestStart).toFixed(1)} ms)`);
   return manifest;
@@ -212,7 +221,12 @@ export function parseQueryLayoutPath(): string | null {
   return layoutPath.trim() || null;
 }
 
-function resolveManifestUrl(manifestUrl: string): string {
+function manifestCacheKey(manifestUrl: string, options: LoadManifestOptions): string {
+  const sceneGlbPath = options.sceneGlbPath?.trim() ?? "";
+  return sceneGlbPath ? `${manifestUrl}::scene_glb=${sceneGlbPath}` : manifestUrl;
+}
+
+function resolveManifestUrl(manifestUrl: string, options: LoadManifestOptions = {}): string {
   const value = manifestUrl.trim();
   if (!value) {
     return value;
@@ -221,7 +235,12 @@ function resolveManifestUrl(manifestUrl: string): string {
     return value;
   }
   if (value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.endsWith("scene_layout.json")) {
-    return `/api/layout?path=${encodeURIComponent(value)}`;
+    const params = new URLSearchParams({ path: value });
+    const sceneGlbPath = options.sceneGlbPath?.trim();
+    if (sceneGlbPath) {
+      params.set("scene_glb_path", sceneGlbPath);
+    }
+    return `/api/layout?${params.toString()}`;
   }
   return value;
 }

@@ -34,6 +34,13 @@ function asRecords(value: unknown): Array<Record<string, unknown>> {
     : [];
 }
 
+function restorableGlbPath(node: BranchRunNode): string {
+  const explicit = String(node.scene_glb_path || "").trim();
+  if (explicit) return explicit;
+  const artifact = (node.artifact_paths || []).find((item) => String(item || "").trim().toLowerCase().endsWith(".glb"));
+  return artifact ? String(artifact).trim() : "";
+}
+
 const SCATTER_COLOR_FEATURES = [
   ["", "Overall / Preset"],
   ["scene.tree_count", "Tree count"],
@@ -280,9 +287,10 @@ export function renderBranchNodeDetail(node: BranchRunNode | null): string {
   const safetyLlm = asRecord(llmStatus.safety);
   const beautyLlm = asRecord(llmStatus.beauty);
   const fallback = asRecord(evaluation.branch_score_fallback);
+  const sceneGlbPath = restorableGlbPath(node);
   const canRestoreArtifact = Boolean(
     node.scene_layout_path
-    && (node.can_restore_artifact === true || (node.can_restore_artifact === undefined && node.scene_glb_path)),
+    && (node.can_restore_artifact === true || (node.can_restore_artifact === undefined && sceneGlbPath) || sceneGlbPath),
   );
   const canLoadOrRebuildArtifact = Boolean(node.scene_layout_path);
   const loadableLayoutPath = canLoadOrRebuildArtifact ? node.scene_layout_path || "" : "";
@@ -291,7 +299,7 @@ export function renderBranchNodeDetail(node: BranchRunNode | null): string {
     <div class="viewer-branch-detail">
       <div class="viewer-branch-detail-actions">
         ${canLoadOrRebuildArtifact ? `
-          <button class="viewer-design-stage-detail-button" type="button" data-branch-load="${escapeHtml(loadableLayoutPath)}">${escapeHtml(loadButtonLabel)}</button>
+          <button class="viewer-design-stage-detail-button" type="button" data-branch-load="${escapeHtml(loadableLayoutPath)}" data-branch-glb="${escapeHtml(sceneGlbPath)}">${escapeHtml(loadButtonLabel)}</button>
         ` : ""}
       </div>
       ${renderDiagnosticSection("评价结果", renderDiagnosticKeyValues({
@@ -307,6 +315,7 @@ export function renderBranchNodeDetail(node: BranchRunNode | null): string {
         artifacts_retained: node.artifacts_retained ? `yes · rank ${node.artifact_rank ?? ""}` : "no",
         can_restore_artifact: node.can_restore_artifact ? "yes" : "no",
         artifact_restore_mode: canRestoreArtifact ? "glb retained" : (node.scene_layout_path ? "layout rebuild" : "none"),
+        retained_glb_path: sceneGlbPath,
         error: node.error,
       }))}
       ${renderGenerationTracePanel(node.trace, { embedded: true })}
@@ -372,9 +381,12 @@ export function renderBranchWorkspaceHtml(
           <p>${escapeHtml(payload.prompt ?? fallbackPrompt)}</p>
           ${payload.early_stop_triggered ? `<p class="viewer-design-workspace-muted">${escapeHtml(payload.early_stop_reason || "Early stop triggered.")}</p>` : ""}
         </div>
-        <div class="viewer-design-workspace-progress">
-          <strong>${progress}%</strong>
-          <span>${escapeHtml(payload.stage || payload.status)}</span>
+        <div class="viewer-design-workspace-header-actions">
+          <button class="viewer-design-workspace-close" type="button" data-design-workspace-close aria-label="Close Pareto Trace" title="Close Pareto Trace">×</button>
+          <div class="viewer-design-workspace-progress">
+            <strong>${progress}%</strong>
+            <span>${escapeHtml(payload.stage || payload.status)}</span>
+          </div>
         </div>
       </header>
       <div class="viewer-design-workspace-progressbar" aria-label="Branch run progress">
@@ -410,7 +422,7 @@ export function renderBranchRunResultsHtml(payload: BranchRunStatusPayload): str
   return `
     <div class="viewer-design-schemes">
       ${readyNodes.map((node) => `
-        <button class="viewer-design-scheme" type="button" data-layout-path="${escapeHtml(node.scene_layout_path || "")}">
+        <button class="viewer-design-scheme" type="button" data-layout-path="${escapeHtml(node.scene_layout_path || "")}" data-scene-glb="${escapeHtml(restorableGlbPath(node))}">
           <span>
             <strong>D${node.depth} · #${node.rank} · ${escapeHtml(node.node_id)}</strong>
             <small>score ${escapeHtml(formatBranchScore(node.score))} · ${escapeHtml(node.scene_layout_path || "")}</small>

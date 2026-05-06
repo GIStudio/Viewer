@@ -902,11 +902,16 @@ function viewerApiPlugin(): Plugin {
             const layoutPayload = JSON.parse(rawLayoutText);
             const layoutParseMs = (performance.now() - parseStart).toFixed(1);
             const outputs = layoutPayload.outputs ?? {};
-            const finalScenePath = resolveLayoutReferencedPath(outputs.scene_glb, layoutPath);
+            const overrideScenePath = resolveAllowedPath(requestUrl.searchParams.get("scene_glb_path"));
+            const referencedScenePath = resolveLayoutReferencedPath(outputs.scene_glb, layoutPath);
+            const finalScenePath = (overrideScenePath && fs.existsSync(overrideScenePath))
+              ? overrideScenePath
+              : referencedScenePath;
             if (!finalScenePath || !fs.existsSync(finalScenePath)) {
               requestTimer.sendJson({
                 error: "scene_layout.json does not point to a valid final scene GLB.",
                 layout_path: layoutPath,
+                scene_glb_path: overrideScenePath ?? "",
               }, 400);
               return;
             }

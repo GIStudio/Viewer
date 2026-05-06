@@ -1,9 +1,9 @@
 import type { SceneOption, ViewerManifest } from "./viewer-types";
-import { loadManifest, updateQueryLayout } from "./viewer-api";
+import { loadManifest, updateQueryLayout, type LoadManifestOptions } from "./viewer-api";
 import { compactUiLabel, makeSceneOptions } from "./viewer-scene-options";
 
 export type ViewerSceneSelectionController = {
-  loadLayoutSelection: (layoutPath: string) => Promise<void>;
+  loadLayoutSelection: (layoutPath: string, options?: LoadManifestOptions) => Promise<void>;
   populateSceneOptions: (manifest: ViewerManifest) => SceneOption[];
   selectedSceneOption: () => SceneOption | undefined;
   sceneOptionByKey: (key: string) => SceneOption | undefined;
@@ -44,11 +44,11 @@ export function createViewerSceneSelectionController(
     return options;
   }
 
-  async function loadLayoutSelection(layoutPath: string): Promise<void> {
+  async function loadLayoutSelection(layoutPath: string, manifestOptions: LoadManifestOptions = {}): Promise<void> {
     deps.clearError(deps.errorEl);
     deps.setStatus("Loading scene set…");
     deps.setCurrentLayoutPath(layoutPath);
-    const manifest = await loadManifest(layoutPath);
+    const manifest = await loadManifest(layoutPath, true, manifestOptions);
     deps.setCurrentManifest(manifest);
     const options = populateSceneOptions(manifest);
     if (options.length === 0) {

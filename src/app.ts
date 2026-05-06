@@ -516,10 +516,28 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
               <div id="viewer-design-result" class="viewer-design-result"></div>
             </div>
             <div class="viewer-slide-panel-footer">
-              <button id="viewer-design-benchmark" class="viewer-nav-button viewer-nav-button-secondary" type="button">Benchmark</button>
-              <button id="viewer-design-branch-history" class="viewer-nav-button viewer-nav-button-secondary" type="button">Runs</button>
-              <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Pareto Trace</button>
-              <button id="viewer-design-generate" class="viewer-nav-button" type="button">Generate & Load</button>
+              <div class="viewer-design-action-sections" aria-label="Design assistant actions">
+                <section class="viewer-design-action-section viewer-design-action-section-primary" aria-labelledby="viewer-design-generate-actions-title">
+                  <div class="viewer-design-action-heading">
+                    <span id="viewer-design-generate-actions-title">Generate 新建结果</span>
+                    <small>提交新的场景或 Pareto 搜索任务</small>
+                  </div>
+                  <div class="viewer-design-action-row">
+                    <button id="viewer-design-generate" class="viewer-nav-button" type="button">Generate & Load</button>
+                    <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Pareto Trace</button>
+                  </div>
+                </section>
+                <section class="viewer-design-action-section" aria-labelledby="viewer-design-history-actions-title">
+                  <div class="viewer-design-action-heading">
+                    <span id="viewer-design-history-actions-title">Load Previous 历史结果</span>
+                    <small>读取已经保存的 Benchmark 与运行记录</small>
+                  </div>
+                  <div class="viewer-design-action-row">
+                    <button id="viewer-design-benchmark" class="viewer-nav-button viewer-nav-button-secondary" type="button">Benchmark Store</button>
+                    <button id="viewer-design-branch-history" class="viewer-nav-button viewer-nav-button-secondary" type="button">Run History</button>
+                  </div>
+                </section>
+              </div>
             </div>
           </aside>
         `,
@@ -1359,12 +1377,17 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   async function loadBranchLayoutSelection(
     layoutPath: string,
     successMessage: string,
+    sceneGlbPath: string = "",
   ): Promise<void> {
     try {
-      await sceneSelectionController.loadLayoutSelection(layoutPath);
+      await sceneSelectionController.loadLayoutSelection(
+        layoutPath,
+        sceneGlbPath ? { sceneGlbPath } : {},
+      );
       const recent = await loadRecentLayouts(50, false);
       populateRecentLayoutOptions(recent, layoutPath);
       flashStatus(successMessage);
+      hideDesignWorkspace();
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load layout.";
@@ -2570,8 +2593,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const loadButton = target.closest<HTMLElement>("[data-branch-load]");
     const loadPath = loadButton?.dataset.branchLoad?.trim();
     if (loadPath) {
+      const sceneGlbPath = loadButton?.dataset.branchGlb?.trim() || "";
       void (async () => {
-        await loadBranchLayoutSelection(loadPath, "Branch node scene loaded.");
+        await loadBranchLayoutSelection(loadPath, "Branch node scene loaded.", sceneGlbPath);
       })();
       return;
     }
@@ -2615,8 +2639,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const button = target.closest<HTMLButtonElement>("[data-layout-path]");
     const layoutPath = button?.dataset.layoutPath?.trim();
     if (!layoutPath) return;
+    const sceneGlbPath = button?.dataset.sceneGlb?.trim() || "";
     void (async () => {
-      await loadBranchLayoutSelection(layoutPath, "Selected generated scheme loaded.");
+      await loadBranchLayoutSelection(layoutPath, "Selected generated scheme loaded.", sceneGlbPath);
     })();
   }, { signal });
 

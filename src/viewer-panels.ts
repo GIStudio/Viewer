@@ -82,8 +82,18 @@ export function createDesignPanelHtml(): string {
         <div id="viewer-design-result" class="viewer-design-result"></div>
       </div>
       <div class="viewer-slide-panel-footer">
-        <button id="viewer-design-generate" class="viewer-nav-button" type="button">Generate & Load</button>
-        <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Branch Run</button>
+        <div class="viewer-design-action-sections" aria-label="Design assistant actions">
+          <section class="viewer-design-action-section viewer-design-action-section-primary" aria-labelledby="viewer-design-generate-actions-title">
+            <div class="viewer-design-action-heading">
+              <span id="viewer-design-generate-actions-title">Generate 新建结果</span>
+              <small>提交新的场景或 Pareto 搜索任务</small>
+            </div>
+            <div class="viewer-design-action-row">
+              <button id="viewer-design-generate" class="viewer-nav-button" type="button">Generate & Load</button>
+              <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Pareto Trace</button>
+            </div>
+          </section>
+        </div>
       </div>
     </aside>
   `;
