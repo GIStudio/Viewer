@@ -17,6 +17,7 @@ import {
   GENERATION_STEPS,
   DESIGN_SCHEME_VARIANTS,
   VIEWER_DESIGN_PRESETS,
+  ScenarioDesign,
 } from "./viewer-types";
 
 // ============================================================================
@@ -69,6 +70,30 @@ export function configForDesignVariant(
   };
 }
 
+export function effectiveDesignPrompt(
+  preset: DesignPreset | null,
+  prompt: string,
+  scenario: ScenarioDesign | null = null,
+): string {
+  const userPrompt = prompt.trim();
+  if (!scenario) {
+    return userPrompt || (preset?.prompt ?? "");
+  }
+  const scenarioBrief = String(
+    scenario.query
+    || scenario.intent_zh
+    || scenario.title_zh
+    || scenario.scenario_id
+    || "",
+  ).trim();
+  const presetPrompt = String(preset?.prompt ?? "").trim();
+  const userPromptIsPresetDefault = Boolean(presetPrompt && userPrompt === presetPrompt);
+  if (!userPrompt || userPromptIsPresetDefault || userPrompt === scenarioBrief) {
+    return scenarioBrief || userPrompt;
+  }
+  return `${scenarioBrief}\n\nAdditional user note:\n${userPrompt}`;
+}
+
 // ============================================================================
 // Job Submission
 // ============================================================================
@@ -78,15 +103,25 @@ export async function submitDesignJob(
   prompt: string,
   graphTemplateId: string,
   variant: DesignSchemeVariant,
+  scenario: ScenarioDesign | null = null,
 ): Promise<SceneJobCreatePayload> {
-  const configPatch = configForDesignVariant(preset?.configPatch ?? {}, variant);
+  if (scenario?.enabled === false) {
+    throw new Error(scenario.excluded_reason_zh || "This scenario design is excluded from generation.");
+  }
+  const scenarioPatch = scenario?.compose_config_patch ?? {};
+  const configPatch = configForDesignVariant({
+    ...(preset?.configPatch ?? {}),
+    ...scenarioPatch,
+  }, variant);
+  const scenarioId = scenario?.scenario_id || "";
+  const normalizedPrompt = effectiveDesignPrompt(preset, prompt, scenario);
   
   return postApiJson<SceneJobCreatePayload>("/api/scene/jobs", {
     draft: {
-      normalized_scene_query: prompt,
+      normalized_scene_query: normalizedPrompt,
       compose_config_patch: configPatch,
       citations_by_field: {},
-      design_summary: prompt,
+      design_summary: normalizedPrompt,
       risk_notes: [],
       parameter_sources_by_field: {},
     },
@@ -96,11 +131,16 @@ export async function submitDesignJob(
       city_name_en: null,
       reference_plan_id: null,
       graph_template_id: graphTemplateId,
+      scenario_id: scenarioId || null,
     },
     patch_overrides: {},
     generation_options: {
       preset_id: preset?.id ?? "custom",
       random_seed: variant.seed,
+      ...(scenarioId ? {
+        scenario_id: scenarioId,
+        scenario_compose_patch_applied: true,
+      } : {}),
     },
   });
 }

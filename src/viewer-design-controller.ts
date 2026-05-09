@@ -14,6 +14,7 @@ import type {
   RecentLayout,
   SceneJobResult,
   SceneJobStatusPayload,
+  ScenarioDesign,
 } from "./viewer-types";
 import {
   DEFAULT_GRAPH_TEMPLATE_ID,
@@ -23,7 +24,7 @@ import {
   VIEWER_DESIGN_PRESETS,
 } from "./viewer-types";
 import { apiJson, clearManifestCache, clearRecentLayoutsCache, loadRecentLayouts, postApiJson } from "./viewer-api";
-import { describeDesignJobProgress, submitDesignJob } from "./viewer-design";
+import { describeDesignJobProgress, effectiveDesignPrompt, submitDesignJob } from "./viewer-design";
 import {
   DESIGN_GENERATION_STEPS,
   getStepIndex,
@@ -79,6 +80,7 @@ export type ViewerDesignControllerDeps = {
   minimapEl: HTMLElement;
   errorEl: HTMLElement;
   getSelectedDesignPreset: () => DesignPreset | null;
+  getSelectedScenarioDesign: () => ScenarioDesign | null;
   hasLastDesignRunSnapshot: () => boolean;
   setSelectedBranchNodeId: (nodeId: string | null) => void;
   setStatus: (message: string) => void;
@@ -932,7 +934,9 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
   async function runDesignGeneration(): Promise<void> {
     if (designIsGenerating) return;
     const preset = deps.getSelectedDesignPreset();
+    const scenario = deps.getSelectedScenarioDesign();
     const prompt = deps.designPromptEl.value.trim() || (preset?.prompt ?? "");
+    const effectivePrompt = effectiveDesignPrompt(preset, prompt, scenario);
     const graphTemplateId = deps.designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
     const variants = deps.designCountEl.value === "3" ? DESIGN_SCHEME_VARIANTS : [DESIGN_SCHEME_VARIANTS[0]];
     const generatedSchemes: GeneratedDesignScheme[] = [];
@@ -944,11 +948,12 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     deps.designWorkspaceEl.hidden = false;
     deps.minimapEl.hidden = true;
     const presetLabel = preset ? `${preset.nameEn} / ${preset.name}` : "Custom / LLM-Driven";
+    const scenarioLabel = scenario ? (scenario.title_zh || scenario.scenario_id) : "Base Template";
     deps.designWorkspaceEl.innerHTML = `
       <div class="viewer-design-workspace-shell">
         <header class="viewer-design-workspace-header">
           <div>
-            <span class="viewer-design-workspace-kicker">${escapeHtml(presetLabel)} · ${escapeHtml(graphTemplateId)}</span>
+            <span class="viewer-design-workspace-kicker">${escapeHtml(presetLabel)} · ${escapeHtml(graphTemplateId)} · ${escapeHtml(scenarioLabel)}</span>
             <h2>Design Run</h2>
             <p>正在提交生成任务。</p>
           </div>
@@ -960,18 +965,18 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
             </div>
           </div>
         </header>
-        ${renderDesignImprovementSummary(preset, variants[0]!, prompt, graphTemplateId)}
+        ${renderDesignImprovementSummary(preset, variants[0]!, effectivePrompt, graphTemplateId)}
       </div>
     `;
     deps.setStatus("Submitting design generation job...");
 
     try {
       for (const variant of variants) {
-        deps.updateDesignStatus(`Submitting ${variant.name}...`);
+        deps.updateDesignStatus(`Submitting ${variant.name} · ${scenarioLabel}...`);
         try {
-          const createPayload = await submitDesignJob(preset, prompt, graphTemplateId, variant);
-          deps.updateDesignStatus(`${variant.name}: job ${createPayload.job_id} submitted.`);
-          const result = await waitForDesignJob(createPayload.job_id, preset, variant, prompt, graphTemplateId);
+          const createPayload = await submitDesignJob(preset, prompt, graphTemplateId, variant, scenario);
+          deps.updateDesignStatus(`${variant.name}: job ${createPayload.job_id} submitted${scenario ? ` with ${scenario.scenario_id}` : ""}.`);
+          const result = await waitForDesignJob(createPayload.job_id, preset, variant, effectivePrompt, graphTemplateId);
           if (!result.scene_layout_path) {
             throw new Error("Generation finished without a scene_layout_path.");
           }
@@ -1011,7 +1016,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
         `${generatedSchemes.filter((scheme) => scheme.status === "ready").length}/${variants.length} schemes generated.`,
         "success",
       );
-      deps.flashStatus(`${firstReady.name} loaded in Viewer.`);
+      deps.flashStatus(`${firstReady.name} loaded in Viewer${scenario ? ` · ${scenario.scenario_id}` : ""}.`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Design generation failed.";
       deps.updateDesignStatus(message, "error");

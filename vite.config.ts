@@ -166,6 +166,118 @@ function safeAssetFileStem(assetId: string): string {
   return assetId.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 160) || "asset";
 }
 
+function splitIsoRunStamp(): string {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function splitRecordListField(record: JsonRecord, key: string): string[] {
+  const value = record[key];
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
+}
+
+function splitAppendUnique(values: string[], ...extraValues: string[]): string[] {
+  const seen = new Set(values);
+  const result = [...values];
+  for (const value of extraValues) {
+    if (value && !seen.has(value)) {
+      result.push(value);
+      seen.add(value);
+    }
+  }
+  return result;
+}
+
+function splitUniqueAssetId(baseId: string, existingIds: Set<string>): string {
+  let candidate = baseId;
+  let suffix = 2;
+  while (existingIds.has(candidate)) {
+    candidate = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+  existingIds.add(candidate);
+  return candidate;
+}
+
+function writeSplitPlaceholderLatent(latentPath: string, assetId: string, parentAssetId: string, method: string): void {
+  fs.writeFileSync(
+    latentPath,
+    JSON.stringify(
+      {
+        placeholder: true,
+        asset_id: assetId,
+        parent_asset_id: parentAssetId,
+        created_by: `asset_splitter_${method}`,
+        created_at: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
+}
+
+function buildBackendSplitChildRecord(
+  parent: JsonRecord,
+  parentMeshPath: string,
+  outputDir: string,
+  glbPath: string,
+  cluster: JsonRecord,
+  index: number,
+  existingIds: Set<string>,
+  method: string,
+): JsonRecord {
+  const parentAssetId = String(parent.asset_id ?? "asset");
+  const assetId = splitUniqueAssetId(`${parentAssetId}-split-${String(index).padStart(3, "0")}`, existingIds);
+  const latentPath = path.join(outputDir, `${safeAssetFileStem(assetId)}.pt`);
+  const faceCount = Number.isFinite(Number(cluster.face_count)) ? Number(cluster.face_count) : 0;
+  const textDesc = String(parent.text_desc ?? parent.description ?? parentAssetId);
+  const tags = splitAppendUnique(
+    splitRecordListField(parent, "tags"),
+    "split_asset",
+    `split_method:${method}`,
+    `split_parent:${parentAssetId}`,
+  );
+  const qualityNotes = splitAppendUnique(
+    splitRecordListField(parent, "quality_notes"),
+    `split_from=${parentAssetId}`,
+    `split_method=${method}`,
+    `split_index=${String(index).padStart(3, "0")}`,
+    `mesh_face_count=${faceCount}`,
+  );
+
+  writeSplitPlaceholderLatent(latentPath, assetId, parentAssetId, method);
+
+  const record: JsonRecord = {
+    asset_id: assetId,
+    category: parent.category ?? "traffic_sign",
+    mesh_path: glbPath,
+    source: `asset_splitter_${method}`,
+    license: parent.license ?? "derived_from_parent_asset",
+    quality_tier: parent.quality_tier ?? 3,
+    scene_eligible: parent.scene_eligible ?? true,
+    tags,
+    text_desc: `${textDesc} split component ${String(index).padStart(3, "0")}`,
+    latent_path: latentPath,
+    latent_source: "mesh_reference",
+    split: parent.split ?? "train",
+    mesh_face_count: faceCount,
+    parent_asset_id: parentAssetId,
+    parent_mesh_path: parentMeshPath,
+    asset_composition_type: "split_component",
+    split_method: method,
+    split_index: index,
+    split_output_dir: outputDir,
+    quality_notes: qualityNotes,
+  };
+
+  for (const key of ["subcategory", "size_class", "scale_hint", "source_dataset"]) {
+    if (key in parent) {
+      record[key] = parent[key];
+    }
+  }
+  return record;
+}
+
 function discoverSceneLayoutPaths(roots: string[]): string[] {
   const seen = new Set<string>();
   const results: string[] = [];
@@ -1112,6 +1224,211 @@ function viewerApiPlugin(): Plugin {
         const isAssetManifestNormalizeRoute =
           requestUrl.pathname === "/api/asset-manifest/normalize-mesh" ||
           requestUrl.pathname === "/web-viewer/api/asset-manifest/normalize-mesh";
+        const isAssetManifestBackendSplitRoute =
+          requestUrl.pathname === "/api/asset-manifest/split-selected" ||
+          requestUrl.pathname === "/web-viewer/api/asset-manifest/split-selected";
+
+        if (isAssetManifestBackendSplitRoute) {
+          if (req.method !== "POST") {
+            jsonResponse(res, 405, { error: "Method not allowed. Use POST." });
+            return;
+          }
+          const body = await readRequestBody(req);
+          let parsed: {
+            manifest_name?: string;
+            asset_id?: string;
+            method?: string;
+            projection_margin?: number;
+          };
+          try {
+            parsed = JSON.parse(body) as typeof parsed;
+          } catch {
+            jsonResponse(res, 400, { error: "Invalid JSON body." });
+            return;
+          }
+
+          const manifestName = String(parsed.manifest_name ?? "").trim();
+          const assetId = String(parsed.asset_id ?? "").trim();
+          const method = String(parsed.method ?? "auto").trim() || "auto";
+          const projectionMargin = Number(parsed.projection_margin ?? 0.03);
+          if (!manifestName || !assetId) {
+            jsonResponse(res, 400, { error: "Missing manifest_name or asset_id." });
+            return;
+          }
+          if (!new Set(["auto", "primitive", "projection", "loose-3d"]).has(method)) {
+            jsonResponse(res, 400, { error: `Unsupported split method: ${method}` });
+            return;
+          }
+          if (!Number.isFinite(projectionMargin) || projectionMargin < 0) {
+            jsonResponse(res, 400, { error: "Invalid projection_margin." });
+            return;
+          }
+
+          const manifestPath = resolveAssetManifestPath(manifestName);
+          if (!manifestPath) {
+            jsonResponse(res, 403, { error: "Invalid manifest name." });
+            return;
+          }
+          if (!fs.existsSync(manifestPath)) {
+            jsonResponse(res, 404, { error: `Manifest not found: ${manifestName}` });
+            return;
+          }
+
+          const rawLines = fs.readFileSync(manifestPath, "utf-8").split(/\r?\n/);
+          const rows: JsonRecord[] = [];
+          for (const line of rawLines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              rows.push(JSON.parse(trimmed) as JsonRecord);
+            } catch {
+              // Preserve legacy malformed rows; they are not candidates for splitting.
+            }
+          }
+
+          const parent = rows.find((record) => String(record.asset_id ?? "") === assetId);
+          if (!parent) {
+            jsonResponse(res, 404, { error: `Asset not found: ${assetId}` });
+            return;
+          }
+
+          const parentMeshPath = resolveManifestAssetPath(
+            typeof parent.mesh_path === "string" ? parent.mesh_path : "",
+            manifestPath,
+          );
+          if (!parentMeshPath || !fs.existsSync(parentMeshPath)) {
+            jsonResponse(res, 404, { error: `Mesh file not found: ${parentMeshPath}` });
+            return;
+          }
+
+          const scriptPath = path.resolve(repoRoot, "scripts", "split_glb_signs.py");
+          if (!fs.existsSync(scriptPath)) {
+            jsonResponse(res, 500, { error: `Splitter script not found: ${scriptPath}` });
+            return;
+          }
+
+          const outputBase = path.join(path.dirname(manifestPath), "assets_split", safeAssetFileStem(assetId));
+          const runStamp = splitIsoRunStamp();
+          const outputMethod = method === "auto" ? "auto_or_primitive" : method;
+          let outputDir = path.join(outputBase, `${outputMethod}_${runStamp}`);
+          let suffix = 2;
+          while (fs.existsSync(outputDir)) {
+            outputDir = path.join(outputBase, `${outputMethod}_${runStamp}_${suffix}`);
+            suffix += 1;
+          }
+
+          const pythonBin = process.env.ROADGEN_PYTHON_BIN || "python3";
+          const { spawnSync } = await import("node:child_process");
+          const result = spawnSync(
+            pythonBin,
+            [
+              scriptPath,
+              "--method",
+              method,
+              "--input",
+              parentMeshPath,
+              "--output-dir",
+              outputDir,
+              "--projection-margin",
+              String(projectionMargin),
+              "--write-preview",
+            ],
+            {
+              cwd: repoRoot,
+              encoding: "utf-8",
+              timeout: 30 * 60 * 1000,
+              maxBuffer: 64 * 1024 * 1024,
+            },
+          );
+          const scriptOutput = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+          if (result.error || result.status !== 0) {
+            jsonResponse(res, result.error?.name === "ETIMEDOUT" ? 504 : 500, {
+              error: result.error?.message || `Asset split failed with exit code ${result.status}`,
+              output: scriptOutput.slice(-12000),
+            });
+            return;
+          }
+
+          let reportPath = path.join(outputDir, "clusters_split.json");
+          if (!fs.existsSync(reportPath)) {
+            reportPath = path.join(outputDir, "clusters_projection.json");
+          }
+          if (!fs.existsSync(reportPath)) {
+            jsonResponse(res, 500, {
+              error: "Split finished without clusters_split.json or clusters_projection.json.",
+              output: scriptOutput.slice(-12000),
+            });
+            return;
+          }
+
+          let report: JsonRecord;
+          try {
+            report = JSON.parse(fs.readFileSync(reportPath, "utf-8")) as JsonRecord;
+          } catch (error) {
+            jsonResponse(res, 500, { error: `Invalid split report: ${error}` });
+            return;
+          }
+          const clusters = Array.isArray(report.clusters) ? report.clusters as JsonRecord[] : null;
+          if (!clusters) {
+            jsonResponse(res, 500, { error: "Split report does not contain a clusters list." });
+            return;
+          }
+          const actualMethod = String(report.actual_method ?? report.method ?? method);
+          const fallbackReason = report.fallback_reason ?? null;
+
+          const glbFiles = fs.readdirSync(outputDir)
+            .filter((fileName) => /^sign_\d+\.glb$/i.test(fileName))
+            .sort()
+            .map((fileName) => path.join(outputDir, fileName));
+          if (glbFiles.length !== clusters.length) {
+            jsonResponse(res, 500, {
+              error: `Split output mismatch: ${glbFiles.length} GLB files for ${clusters.length} clusters.`,
+              output: scriptOutput.slice(-12000),
+            });
+            return;
+          }
+
+          const existingIds = new Set(rows.map((record) => String(record.asset_id ?? "")).filter(Boolean));
+          const createdRecords = glbFiles.map((glbPath, index) =>
+            buildBackendSplitChildRecord(
+              parent,
+              parentMeshPath,
+              outputDir,
+              glbPath,
+              clusters[index] ?? {},
+              index + 1,
+              existingIds,
+              actualMethod,
+            )
+          );
+
+          const existingText = fs.readFileSync(manifestPath, "utf-8").trimEnd();
+          const appendedText = createdRecords.map((record) => JSON.stringify(record)).join("\n");
+          fs.writeFileSync(manifestPath, `${existingText ? `${existingText}\n` : ""}${appendedText}\n`, "utf-8");
+          cachedAssetDescriptionIndex = null;
+
+          jsonResponse(res, 200, {
+            ok: true,
+            manifest_name: manifestName,
+            asset_id: assetId,
+            requested_method: method,
+            method: actualMethod,
+            actual_method: actualMethod,
+            fallback_reason: fallbackReason,
+            output_dir: outputDir,
+            cluster_count: clusters.length,
+            created_count: createdRecords.length,
+            total_face_count: clusters.reduce((sum, cluster) => sum + Number(cluster.face_count ?? 0), 0),
+            report_path: reportPath,
+            preview_paths: {
+              top: path.join(outputDir, "projection_top.svg"),
+              front: path.join(outputDir, "projection_front.svg"),
+            },
+            assets: createdRecords.map((record) => normalizeManifestRecordPaths({ ...record }, manifestPath)),
+            script_output_tail: scriptOutput.slice(-12000),
+          });
+          return;
+        }
 
         if (isAssetManifestsRoute) {
           const manifests: Array<{ name: string; label: string; count: number }> = [];

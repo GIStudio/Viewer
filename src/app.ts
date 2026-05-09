@@ -32,6 +32,8 @@ import type {
   DesignSchemeVariant,
   BranchRunStatusPayload,
   BranchRunNode,
+  ScenarioDesign,
+  ScenarioDesignCatalogPayload,
 } from "./viewer-types";
 import {
   VIEWER_DESIGN_PRESETS,
@@ -47,6 +49,7 @@ import {
 import {
   loadManifest,
   loadRecentLayouts,
+  apiJson,
   clearManifestCache,
   clearRecentLayoutsCache,
   parseQueryLayoutPath,
@@ -106,7 +109,6 @@ import {
   turnLanePatchSvgClass,
 } from "./viewer-scene-options";
 import { createViewerSceneSelectionController } from "./viewer-scene-selection-controller";
-import { createViewerScenarioDesignsController } from "./viewer-scenario-designs";
 import {
   completeLightingValues,
   DEFAULT_LIGHTING_STATE,
@@ -382,24 +384,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         </div>
       `,
     },
-    {
-      id: "viewer-scenario-designs",
-      title: t("Scenario Designs", "场景方案"),
-      subtitle: t("7 curated design options", "7 个设计方案"),
-      open: true,
-      content: `
-        <div class="viewer-scenario-panel">
-          <div class="viewer-scenario-toolbar">
-            <div id="viewer-scenario-status" class="viewer-scenario-status">Loading scenario designs...</div>
-            <button id="viewer-scenario-generate" class="viewer-nav-button viewer-scenario-generate" type="button" disabled>
-              Generate 3 Each
-            </button>
-          </div>
-          <div id="viewer-scenario-report" class="viewer-scenario-report"></div>
-          <div id="viewer-scenario-list" class="viewer-scenario-list"></div>
-        </div>
-      `,
-    },
   ]);
   shell.setRightTabs(
     [
@@ -519,10 +503,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                 <option value="__custom__">Custom / LLM-Driven（自定义）</option>
               </select>
               <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-prompt">
-                <span>Prompt</span>
+                <span>Prompt / Extra Notes</span>
                 <button class="viewer-help-icon" type="button" data-help="design-prompt" title="了解提示词">?</button>
               </label>
               <textarea id="viewer-design-prompt" class="viewer-design-prompt" rows="5"></textarea>
+              <div class="viewer-design-prompt-hint">
+                选择 Scenario Variant 后，variant 是结构方案；Preset 只提供生成/渲染参数；这里的 Prompt 只作为额外补充。
+              </div>
               <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-count">
                 <span>Schemes</span>
                 <button class="viewer-help-icon" type="button" data-help="design-schemes" title="了解方案数量">?</button>
@@ -536,6 +523,19 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                 <button class="viewer-help-icon" type="button" data-help="design-template" title="了解图模板">?</button>
               </label>
               <input id="viewer-design-template" class="viewer-design-input" type="text" value="${DEFAULT_GRAPH_TEMPLATE_ID}" />
+              <label class="viewer-settings-label" for="viewer-design-scenario">
+                <span>Scenario Design Variant</span>
+              </label>
+              <select id="viewer-design-scenario" class="viewer-select viewer-select-compact">
+                <option value="">Base Template / No Variant</option>
+              </select>
+              <div id="viewer-design-scenario-meta" class="viewer-design-scenario-meta">
+                Base template: ${DEFAULT_GRAPH_TEMPLATE_ID}
+              </div>
+              <div class="viewer-design-scenario-actions">
+                <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Load Saved Preview JSON</button>
+                <button id="viewer-design-scenario-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Open Annotation</button>
+              </div>
               <div class="viewer-design-trace-hint">
                 Pareto Trace 使用当前 Prompt 和 Graph Template，按传统参数搜索采样最多 100 组；连续 20 组未改进时早停。每轮只保留评分前 10 个 GLB/渲染视图，非前 10 重资产会在评分后删除。
               </div>
@@ -935,10 +935,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const errorEl = requireElement<HTMLElement>(root, "#viewer-error");
   const layoutSelectEl = requireElement<HTMLSelectElement>(root, "#layout-select");
   const selectEl = requireElement<HTMLSelectElement>(root, "#scene-select");
-  const scenarioStatusEl = requireElement<HTMLElement>(root, "#viewer-scenario-status");
-  const scenarioGenerateEl = requireElement<HTMLButtonElement>(root, "#viewer-scenario-generate");
-  const scenarioReportEl = requireElement<HTMLElement>(root, "#viewer-scenario-report");
-  const scenarioListEl = requireElement<HTMLElement>(root, "#viewer-scenario-list");
   const sceneGraphLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-scene-graph-link");
   const assetEditorLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-asset-editor-link");
   
@@ -978,6 +974,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const designPromptEl = requireElement<HTMLTextAreaElement>(root, "#viewer-design-prompt");
   const designCountEl = requireElement<HTMLSelectElement>(root, "#viewer-design-count");
   const designTemplateEl = requireElement<HTMLInputElement>(root, "#viewer-design-template");
+  const designScenarioEl = requireElement<HTMLSelectElement>(root, "#viewer-design-scenario");
+  const designScenarioMetaEl = requireElement<HTMLElement>(root, "#viewer-design-scenario-meta");
+  const designScenarioPreviewEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-preview");
+  const designScenarioAnnotationEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-annotation");
   const designBenchmarkEl = requireElement<HTMLButtonElement>(root, "#viewer-design-benchmark");
   const designBranchHistoryEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-history");
   const designBranchRunEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-run");
@@ -1112,6 +1112,88 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   function inferGraphTemplateIdFromLayoutPath(layoutPath: string): string {
     const match = layoutPath.match(/(?:^|\/)graph_template\/([^/]+)(?:\/|$)/);
     return match?.[1] ?? "";
+  }
+
+  let designScenarioCatalog: ScenarioDesignCatalogPayload | null = null;
+
+  function selectedScenarioDesign(): ScenarioDesign | null {
+    const scenarioId = designScenarioEl.value.trim();
+    if (!scenarioId || !designScenarioCatalog) return null;
+    return designScenarioCatalog.items.find((item) => item.scenario_id === scenarioId && item.enabled !== false) ?? null;
+  }
+
+  function renderDesignScenarioOptions(preferredScenarioId: string = designScenarioEl.value): void {
+    const graphTemplateId = designScenarioCatalog?.graph_template_id || DEFAULT_GRAPH_TEMPLATE_ID;
+    const items = designScenarioCatalog?.items ?? [];
+    designScenarioEl.innerHTML = [
+      `<option value="">Base Template / No Variant</option>`,
+      ...items.map((item) => {
+        const enabled = item.enabled !== false;
+        const label = enabled
+          ? `${item.title_zh || item.scenario_id}`
+          : `${item.title_zh || item.scenario_id} (excluded)`;
+        return `<option value="${escapeHtml(item.scenario_id)}" ${enabled ? "" : "disabled"}>${escapeHtml(label)}</option>`;
+      }),
+    ].join("");
+    const canRestore = preferredScenarioId && items.some((item) => item.scenario_id === preferredScenarioId && item.enabled !== false);
+    designScenarioEl.value = canRestore ? preferredScenarioId : "";
+    syncDesignGraphTemplateId(graphTemplateId);
+    updateDesignScenarioMeta();
+  }
+
+  function updateDesignScenarioMeta(): void {
+    const graphTemplateId = designScenarioCatalog?.graph_template_id || designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
+    const scenario = selectedScenarioDesign();
+    designScenarioPreviewEl.disabled = !scenario || scenario.preview_layout_exists === false || !scenario.preview_layout_path;
+    designScenarioAnnotationEl.disabled = !scenario;
+    if (scenario && designScenarioCatalog?.graph_template_id) {
+      syncDesignGraphTemplateId(designScenarioCatalog.graph_template_id);
+    }
+    if (!scenario) {
+      designScenarioMetaEl.textContent = `Base template: ${graphTemplateId} · Generate uses Preset + Prompt directly.`;
+      designScenarioMetaEl.dataset.tone = "base";
+      return;
+    }
+    const previewLabel = scenario.preview_layout_exists === false ? "preview missing" : "preview ready";
+    const patchCount = Number(scenario.template_patch_operation_count ?? 0);
+    const surfaceCount = Number(scenario.surface_annotation_count ?? 0);
+    designScenarioMetaEl.textContent = `Base template: ${graphTemplateId} · ${scenario.scenario_type || "variant"} · ${patchCount} patch ops · ${surfaceCount} surfaces · ${previewLabel}. Saved preview loads an existing scene_layout.json; Generate & Load regenerates from this variant.`;
+    designScenarioMetaEl.dataset.tone = "variant";
+  }
+
+  async function loadDesignScenarioCatalog(): Promise<void> {
+    designScenarioMetaEl.textContent = "Loading scenario design variants...";
+    designScenarioEl.disabled = true;
+    try {
+      designScenarioCatalog = await apiJson<ScenarioDesignCatalogPayload>("/api/scenario-designs");
+      renderDesignScenarioOptions();
+      designScenarioEl.disabled = false;
+    } catch (error) {
+      designScenarioCatalog = null;
+      designScenarioEl.innerHTML = `<option value="">Base Template / No Variant</option>`;
+      designScenarioEl.disabled = false;
+      designScenarioMetaEl.textContent = error instanceof Error ? error.message : "Failed to load scenario design variants.";
+      designScenarioMetaEl.dataset.tone = "error";
+    }
+  }
+
+  async function loadSelectedDesignScenarioPreview(): Promise<void> {
+    const scenario = selectedScenarioDesign();
+    if (!scenario?.preview_layout_path) return;
+    setStatus(`Loading saved scenario preview JSON: ${scenario.title_zh || scenario.scenario_id}...`);
+    await sceneSelectionController.loadLayoutSelection(scenario.preview_layout_path);
+    const recent = await loadRecentLayouts(50, false);
+    populateRecentLayoutOptions(recent, scenario.preview_layout_path);
+    flashStatus(`Saved scenario preview JSON loaded: ${scenario.title_zh || scenario.scenario_id}.`);
+  }
+
+  function openSelectedDesignScenarioAnnotation(): void {
+    const scenario = selectedScenarioDesign();
+    if (scenario) {
+      window.localStorage.setItem("roadgen3d.pendingScenarioDesignId", scenario.scenario_id);
+      flashStatus(`Opening annotation for ${scenario.title_zh || scenario.scenario_id}...`);
+    }
+    sceneGraphLinkEl.click();
   }
 
   const scene = new THREE.Scene();
@@ -1378,23 +1460,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     renderBranchRunResults,
     loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
     populateRecentLayoutOptions,
-  });
-
-  const scenarioDesignsController = createViewerScenarioDesignsController({
-    listEl: scenarioListEl,
-    statusEl: scenarioStatusEl,
-    reportEl: scenarioReportEl,
-    generateButtonEl: scenarioGenerateEl,
-    errorEl,
-    setStatus,
-    flashStatus,
-    setError,
-    setGraphTemplateId: syncDesignGraphTemplateId,
-    loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
-    refreshRecentLayouts: async (selectedPath) => {
-      const recent = await loadRecentLayouts(50, false);
-      populateRecentLayoutOptions(recent, selectedPath);
-    },
+    getSelectedScenarioDesign: selectedScenarioDesign,
   });
 
   const presetsController = createViewerPresetsController({
@@ -2644,6 +2710,15 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       designPromptEl.value = preset.prompt;
     }
   }, { signal });
+  designScenarioEl.addEventListener("change", updateDesignScenarioMeta, { signal });
+  designScenarioPreviewEl.addEventListener("click", () => {
+    void loadSelectedDesignScenarioPreview().catch((error) => {
+      const message = error instanceof Error ? error.message : "Failed to load scenario preview.";
+      setError(errorEl, message);
+      setStatus("Scenario preview failed.");
+    });
+  }, { signal });
+  designScenarioAnnotationEl.addEventListener("click", openSelectedDesignScenarioAnnotation, { signal });
   designGenerateEl.addEventListener("click", () => void designController.runDesignGeneration(), { signal });
   designBenchmarkEl.addEventListener("click", () => void designController.loadBenchmarkExplorer(), { signal });
   designBranchHistoryEl.addEventListener("click", () => void designController.loadBranchRunHistory(), { signal });
@@ -3130,7 +3205,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   try {
     syncLightingUi();
     resizeRenderer();
-    void scenarioDesignsController.loadCatalog();
+    void loadDesignScenarioCatalog();
     if (captureMode) {
       setStatus("Capture API ready");
     } else {
@@ -3213,7 +3288,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     if (animationFrameId) {
       cancelAnimationFrame(animationFrameId);
     }
-    scenarioDesignsController.destroy();
     eventController.abort();
     controls.removeEventListener("lock", handleControlsLock);
     controls.removeEventListener("unlock", handleControlsUnlock);

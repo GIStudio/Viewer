@@ -46,6 +46,16 @@ type ManifestInfo = {
   count: number;
 };
 
+const DEFAULT_ASSET_MANIFEST_NAME = "real_assets_manifest.jsonl";
+const FALLBACK_MANIFESTS: ManifestInfo[] = [
+  { name: "real_assets_manifest.jsonl", label: "Real assets manifest", count: 0 },
+  { name: "real_assets_manifest_v2.jsonl", label: "Real assets manifest v2", count: 0 },
+  { name: "objaverse_assets_manifest.jsonl", label: "Objaverse assets manifest", count: 0 },
+  { name: "objaverse_tree_assets_manifest.jsonl", label: "Objaverse tree assets manifest", count: 0 },
+  { name: "street_furniture/street_furniture_manifest.jsonl", label: "[street_furniture] Street furniture manifest", count: 0 },
+  { name: "building/buildings_manifest.jsonl", label: "[building] Buildings manifest", count: 0 },
+];
+
 type SceneChildInfo = {
   name: string;
   type: string;
@@ -716,6 +726,46 @@ async function createAssetRecords(
   }
   const data = await res.json();
   return (data.assets ?? []) as AssetRecord[];
+}
+
+async function splitAssetWithBackendAuto(
+  manifestName: string,
+  assetId: string,
+): Promise<{
+  assets: AssetRecord[];
+  created_count: number;
+  cluster_count: number;
+  output_dir: string;
+  actual_method: string;
+  fallback_reason: string | null;
+}> {
+  const res = await fetch("/api/asset-manifest/split-selected", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      manifest_name: manifestName,
+      asset_id: assetId,
+      method: "auto",
+      projection_margin: 0.03,
+    }),
+  });
+  const data = await res.json().catch(() => ({ error: res.statusText }));
+  if (!res.ok) {
+    const detail = data?.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : detail?.message ?? data?.error ?? `Backend split failed: ${res.status}`;
+    throw new Error(message);
+  }
+  return {
+    assets: (data.assets ?? []) as AssetRecord[],
+    created_count: Number(data.created_count ?? 0),
+    cluster_count: Number(data.cluster_count ?? 0),
+    output_dir: String(data.output_dir ?? ""),
+    actual_method: String(data.actual_method ?? data.method ?? "auto"),
+    fallback_reason: data.fallback_reason ? String(data.fallback_reason) : null,
+  };
 }
 
 async function saveNormalizedAssetMesh(
@@ -2046,6 +2096,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
             <span class="ae-actions-sep"></span>
             <button id="ae-remove-dups-btn" class="ae-action-btn ae-btn-warning" disabled>Remove Duplicates</button>
             <button id="ae-auto-split-records-btn" class="ae-action-btn ae-btn-secondary" disabled>Auto Split Records</button>
+            <button id="ae-backend-split-btn" class="ae-action-btn ae-btn-primary" disabled>Backend Auto Split</button>
             <button id="ae-extract-sky-btn" class="ae-action-btn ae-btn-secondary" disabled>Extract Sky Dome</button>
             <button id="ae-split-btn" class="ae-action-btn ae-btn-secondary" disabled>Split Selected</button>
           </div>
@@ -2113,6 +2164,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   const exportBtn = qs<HTMLButtonElement>(root, "#ae-export-btn");
   const removeDupsBtn = qs<HTMLButtonElement>(root, "#ae-remove-dups-btn");
   const autoSplitRecordsBtn = qs<HTMLButtonElement>(root, "#ae-auto-split-records-btn");
+  const backendSplitBtn = qs<HTMLButtonElement>(root, "#ae-backend-split-btn");
   const extractSkyBtn = qs<HTMLButtonElement>(root, "#ae-extract-sky-btn");
   const splitBtn = qs<HTMLButtonElement>(root, "#ae-split-btn");
   const modeSolid = qs<HTMLButtonElement>(root, "#ae-mode-solid");
@@ -3328,6 +3380,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     const hasSelection = state.selectedObjects.size > 0 || state.selectedMeshes.size > 0;
     removeDupsBtn.disabled = !hasDups;
     autoSplitRecordsBtn.disabled = !state.selectedAssetId || state.sceneChildren.length < 1;
+    backendSplitBtn.disabled = !state.selectedAssetId || !state.manifestName;
     extractSkyBtn.disabled = !state.selectedAssetId || state.sceneChildren.length < 1;
     splitBtn.disabled = !hasSelection;
   }
@@ -3841,6 +3894,42 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       refreshModelDimensionsFromScene(previewCtx);
     }
     showToast(root, `Removed ${removedCount} duplicate mesh(es)`);
+  });
+
+  /* ── Backend projection split into manifest records ─────────────── */
+  backendSplitBtn.addEventListener("click", async () => {
+    if (!state.selectedAssetId || !state.manifestName) return;
+    const parentAsset = getActiveAsset();
+    if (!parentAsset) return;
+
+    backendSplitBtn.disabled = true;
+    backendSplitBtn.textContent = "Backend Splitting...";
+
+    try {
+      const result = await splitAssetWithBackendAuto(state.manifestName, parentAsset.asset_id);
+      let addedCount = 0;
+      for (const asset of result.assets) {
+        const existingIndex = state.assets.findIndex((item) => item.asset_id === asset.asset_id);
+        if (existingIndex >= 0) {
+          state.assets[existingIndex] = asset;
+        } else {
+          state.assets.unshift(asset);
+          addedCount += 1;
+        }
+      }
+      state.totalAssets += addedCount;
+      rebuildCategoryProfiles(state.assets);
+      applyFilters();
+      showToast(
+        root,
+        `后端自动拆分完成：新增 ${result.created_count || result.assets.length} 个子资产，cluster=${result.cluster_count}, method=${result.actual_method}${result.fallback_reason ? " fallback" : ""}`,
+      );
+    } catch (err) {
+      showToast(root, `后端自动拆分失败: ${err}`, "error");
+    } finally {
+      backendSplitBtn.textContent = "Backend Auto Split";
+      updateActionButtons();
+    }
   });
 
   /* ── Auto split into manifest records ──────────────────────────── */

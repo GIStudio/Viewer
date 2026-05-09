@@ -158,11 +158,14 @@ export type SceneJobCreatePayload = {
     city_name_en: string | null;
     reference_plan_id: string | null;
     graph_template_id: string;
+    scenario_id?: string | null;
   };
   patch_overrides: Record<string, unknown>;
   generation_options: {
     preset_id: string;
     random_seed?: number;
+    scenario_id?: string;
+    scenario_compose_patch_applied?: boolean;
   };
 };
 
@@ -224,6 +227,7 @@ export type ScenarioDesign = {
   surface_annotation_count: number;
   surface_role_counts?: Record<string, number>;
   template_patch_operation_count?: number;
+  compose_config_patch?: Record<string, unknown>;
   preview_layout_path: string;
   preview_layout_exists?: boolean;
 };

@@ -5318,6 +5318,41 @@ body.roadgen-capture-mode .desktop-shell-center-stage {
   gap: 0.52rem;
 }
 
+.viewer-design-scenario-meta {
+  padding: 0.58rem 0.66rem;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.82);
+  color: #475569;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.viewer-design-scenario-meta[data-tone="variant"] {
+  border-color: rgba(37, 99, 235, 0.22);
+  background: rgba(239, 246, 255, 0.74);
+  color: #1e3a8a;
+}
+
+.viewer-design-scenario-meta[data-tone="error"] {
+  border-color: rgba(220, 38, 38, 0.22);
+  background: rgba(254, 242, 242, 0.86);
+  color: #991b1b;
+}
+
+.viewer-design-scenario-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.52rem;
+}
+
+.viewer-design-prompt-hint {
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  margin-top: -0.18rem;
+}
+
 .viewer-design-action-row .viewer-nav-button {
   min-width: 0;
   width: 100%;

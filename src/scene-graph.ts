@@ -6753,6 +6753,11 @@ function buildingRegionHandleFromTarget(
       state.scenarioDesigns = Array.isArray(catalogPayload.items) ? catalogPayload.items : [];
       state.scenarioDesignsError = "";
       renderScenarioDesignOptions(state.selectedScenarioId);
+      const pendingScenarioId = window.localStorage.getItem("roadgen3d.pendingScenarioDesignId") || "";
+      if (pendingScenarioId && state.scenarioDesigns.some((item) => item.scenario_id === pendingScenarioId && item.enabled !== false)) {
+        window.localStorage.removeItem("roadgen3d.pendingScenarioDesignId");
+        void applyScenarioDesignAnnotation(pendingScenarioId);
+      }
     } catch (error) {
       state.scenarioDesigns = [];
       state.scenarioDesignsError = error instanceof Error ? error.message : "Failed to load scenario designs.";
