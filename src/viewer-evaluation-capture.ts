@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { RenderedEvaluationView } from "./viewer-evaluation";
+import { sceneContentBounds } from "./viewer-scene-bounds";
 
 export type EvaluationCaptureDeps = {
   scene: THREE.Scene;
@@ -71,7 +72,7 @@ function makePedestrianEvaluationCamera(
   deps: EvaluationCaptureDeps,
   direction: 1 | -1,
 ): THREE.PerspectiveCamera {
-  const bbox = deps.currentRoot ? new THREE.Box3().setFromObject(deps.currentRoot) : null;
+  const bbox = deps.currentRoot ? sceneContentBounds(deps.currentRoot) : null;
   const eye = deps.currentSpawn.clone();
   if (!Number.isFinite(eye.x) || !Number.isFinite(eye.y) || !Number.isFinite(eye.z)) {
     eye.set(0, deps.avatarEyeHeightM, 0);
@@ -98,7 +99,7 @@ function makeOverviewEvaluationCamera(
   if (!deps.currentRoot) {
     throw new Error("No scene root available for top-down evaluation view.");
   }
-  const bbox = new THREE.Box3().setFromObject(deps.currentRoot);
+  const bbox = sceneContentBounds(deps.currentRoot);
   const center = bbox.getCenter(new THREE.Vector3());
   const size = bbox.getSize(new THREE.Vector3());
   const maxExtent = Math.max(size.x, size.z);

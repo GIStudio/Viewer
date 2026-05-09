@@ -78,6 +78,12 @@ const SYSTEM_NODE_DESCRIPTIONS: Record<string, StaticObjectDescription> = {
     category: "crossing",
     intro: "Pedestrian crossing markings at junction.",
   },
+  junction_normalized_crossing_: {
+    match: "prefix",
+    title: "Crosswalk",
+    category: "crossing",
+    intro: "Normalized pedestrian crossing surface at junction.",
+  },
   road_slab: {
     match: "exact",
     title: "Road Surface",

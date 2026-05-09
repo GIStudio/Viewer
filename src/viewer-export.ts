@@ -5,6 +5,7 @@
  */
 
 import * as THREE from "three";
+import { sceneContentBounds } from "./viewer-scene-bounds";
 
 export const EXPORT_COLORS = {
   carriageway: "#424a57",
@@ -38,7 +39,7 @@ export function exportTopDownMapPng(
     return;
   }
 
-  const bbox = new THREE.Box3().setFromObject(root);
+  const bbox = sceneContentBounds(root);
   const center = bbox.getCenter(new THREE.Vector3());
   const size = bbox.getSize(new THREE.Vector3());
   const maxExtent = Math.max(size.x, size.z);
@@ -103,7 +104,7 @@ export function exportTopDownMapSvg(
     return;
   }
 
-  const bbox = new THREE.Box3().setFromObject(root);
+  const bbox = sceneContentBounds(root);
   const size = bbox.getSize(new THREE.Vector3());
   const maxExtent = Math.max(size.x, size.z);
 

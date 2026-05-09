@@ -16,6 +16,10 @@ import type {
   AnnotatedRoundabout,
   AnnotatedBuildingRegion,
   AnnotatedFunctionalZone,
+  AnnotatedRegion,
+  AnnotatedSurfaceAnnotation,
+  AnnotatedStationStripPatch,
+  RegionRole,
   JunctionArmKey,
   JunctionComposition,
   JunctionLaneSurface,
@@ -64,6 +68,8 @@ import type {
   SideStripLayouts,
   SurfaceEdgeKind,
   SurfaceFlow,
+  SurfaceRole,
+  SurfaceAnnotationKind,
   SurfaceProvenance,
 } from "./sg-types";
 
@@ -84,6 +90,8 @@ import {
   CROSS_SECTION_MODE_DETAILED,
   DEFAULT_CENTERLINE_MARK_WIDTH_M,
   DEFAULT_DRIVE_LANE_WIDTH_M,
+  DEFAULT_SURFACE_MATERIAL_BY_KIND,
+  DEFAULT_SURFACE_ROLE_BY_KIND,
   DEFAULT_FORWARD_DRIVE_LANE_COUNT,
   DEFAULT_PIXELS_PER_METER,
   DEFAULT_REVERSE_DRIVE_LANE_COUNT,
@@ -106,6 +114,10 @@ import {
   STANDALONE_CROSS_ARM_LENGTH_M,
   STRIP_DIRECTION_OPTIONS,
   STRIP_KIND_LABELS,
+  SURFACE_ANNOTATION_KINDS,
+  SURFACE_ANNOTATION_KIND_LABELS,
+  SURFACE_ROLE_LABELS,
+  SURFACE_ROLES,
 } from "./sg-constants";
 import {
   asNonNegativeInt,
@@ -132,6 +144,8 @@ import {
   isStripDirection,
   isStripKind,
   isStripZone,
+  isSurfaceAnnotationKind,
+  isSurfaceRole,
   junctionAnchorPoint,
   laneProfile,
   linkedCrossStripKeys,
@@ -182,6 +196,24 @@ import { unionMergedSurfaceRings } from "./junction-surface-geometry";
 
 // Unified UI components
 import type { DesktopShell } from "./desktop-shell";
+import { applyViewerTranslations, loadViewerLanguage, translateViewerKey, translateViewerLiteral } from "./viewer-i18n";
+import type { ScenarioDesign, ScenarioDesignCatalogPayload } from "./viewer-types";
+
+const DEFAULT_REFERENCE_IMAGE_LOADING_MESSAGE = "Loading default reference plan...";
+
+type SceneGraphStatusText = string | {
+  key: string;
+  fallback?: string;
+};
+
+type ScenarioReferenceAnnotationPayload = {
+  scenario_id: string;
+  graph_template_id: string;
+  preview_layout_path?: string;
+  scenario?: ScenarioDesign;
+  annotation: ReferenceAnnotation;
+  summary?: Record<string, unknown>;
+};
 
 function nextStripId(centerline: AnnotatedCenterline, zone: StripZone): string {
   const used = new Set(centerline.cross_section_strips.map((strip) => strip.strip_id));
@@ -524,6 +556,57 @@ function stripVisualSurfaceFillColor(kind: StripKind): string {
   }
 }
 
+function surfaceAnnotationFillColor(role: SurfaceRole): string {
+  switch (role) {
+    case "bus_lane":
+      return "rgba(64, 148, 92, 0.58)";
+    case "bike_lane":
+      return "rgba(50, 126, 86, 0.50)";
+    case "parking_lane":
+      return "rgba(156, 126, 84, 0.46)";
+    case "median":
+    case "median_green":
+    case "grass_belt":
+      return "rgba(98, 145, 80, 0.52)";
+    case "safety_island":
+      return "rgba(228, 220, 202, 0.68)";
+    case "shared_street_surface":
+      return "rgba(180, 160, 140, 0.48)";
+    case "transit_pad":
+      return "rgba(110, 134, 164, 0.52)";
+    case "sidewalk":
+      return "rgba(235, 224, 206, 0.52)";
+    case "furnishing":
+      return "rgba(126, 101, 71, 0.42)";
+    case "context_ground":
+      return "rgba(183, 212, 230, 0.40)";
+    case "crossing":
+      return "rgba(245, 245, 245, 0.62)";
+    case "carriageway":
+      return "rgba(66, 74, 87, 0.42)";
+    case "colored_pavement":
+    default:
+      return "rgba(207, 156, 96, 0.52)";
+  }
+}
+
+function surfaceAnnotationStrokeColor(role: SurfaceRole): string {
+  switch (role) {
+    case "safety_island":
+      return "rgba(112, 104, 92, 0.86)";
+    case "bus_lane":
+      return "rgba(38, 112, 70, 0.88)";
+    case "transit_pad":
+      return "rgba(78, 100, 130, 0.86)";
+    case "shared_street_surface":
+      return "rgba(132, 111, 88, 0.82)";
+    case "colored_pavement":
+      return "rgba(158, 103, 54, 0.86)";
+    default:
+      return "rgba(80, 84, 88, 0.78)";
+  }
+}
+
 function buildMetaurbanAssetBadgeMarkup(
   kind: StripKind,
   options: {
@@ -579,6 +662,20 @@ function resolveApiUrl(path: string): string {
   return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+async function readApiErrorDetail(response: Response): Promise<string> {
+  try {
+    const payload = await response.clone().json() as { detail?: unknown; error?: unknown };
+    const detail = payload.detail ?? payload.error;
+    return detail == null ? "" : String(detail);
+  } catch {
+    try {
+      return await response.clone().text();
+    } catch {
+      return "";
+    }
+  }
+}
+
 function createEmptyAnnotation(planId = "", imagePath = "", imageWidthPx = 0, imageHeightPx = 0): ReferenceAnnotation {
   return {
     version: ANNOTATION_SCHEMA_VERSION,
@@ -591,8 +688,12 @@ function createEmptyAnnotation(planId = "", imagePath = "", imageWidthPx = 0, im
     junctions: [],
     roundabouts: [],
     control_points: [],
+    regions: [],
+    derived_regions: [],
     building_regions: [],
     functional_zones: [],
+    surface_annotations: [],
+    station_strip_patches: [],
     junction_compositions: [],
   };
 }
@@ -742,6 +843,112 @@ function normalizeFunctionalZone(value: unknown, index: number): AnnotatedFuncti
     kind: isFunctionalZoneKind(kind) ? kind : "plaza",
     points: rawPoints.map((item) => normalizePoint(item)),
     furniture_instances: rawFurniture.map((item, i) => normalizeZoneFurnitureInstance(item, i, id)),
+  };
+}
+
+function isRegionRole(value: string): value is RegionRole {
+  return value === "scene_region" || value === "building_region" || value === "functional_zone";
+}
+
+function normalizeRegion(value: unknown, index: number, fallbackRole: RegionRole = "scene_region"): AnnotatedRegion {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const id = asString(record.id, `region_${String(index + 1).padStart(2, "0")}`);
+  const role = asString(record.region_role ?? record.role, fallbackRole);
+  const rawPoints = Array.isArray(record.points) ? record.points : [];
+  const rawMaterial = record.material && typeof record.material === "object"
+    ? (record.material as Record<string, unknown>)
+    : undefined;
+  const side = record.side === undefined ? undefined : asString(record.side, "");
+  return {
+    id,
+    label: asString(record.label, id),
+    region_role: isRegionRole(role) ? role : fallbackRole,
+    points: rawPoints.map((item) => normalizePoint(item)),
+    kind: record.kind === undefined ? undefined : asString(record.kind, ""),
+    land_use_type: record.land_use_type === undefined ? undefined : asString(record.land_use_type, ""),
+    source_region_id: record.source_region_id === undefined ? undefined : asString(record.source_region_id, ""),
+    derived: Boolean(record.derived),
+    material: rawMaterial,
+    area_m2: record.area_m2 === undefined ? undefined : asNumber(record.area_m2, 0),
+    nearest_centerline_id: record.nearest_centerline_id === undefined ? undefined : asString(record.nearest_centerline_id, ""),
+    nearest_centerline_distance_m: record.nearest_centerline_distance_m === undefined ? undefined : asNumber(record.nearest_centerline_distance_m, 0),
+    side,
+    derivation_status: record.derivation_status === undefined ? undefined : asString(record.derivation_status, ""),
+    polygon_xz: Array.isArray(record.polygon_xz)
+      ? record.polygon_xz
+          .filter((item): item is unknown[] => Array.isArray(item))
+          .map((item) => [asNumber(item[0], 0), asNumber(item[1], 0)])
+      : undefined,
+  };
+}
+
+function normalizeSurfaceAnnotationKind(value: unknown): SurfaceAnnotationKind {
+  const kind = asString(value, "paving_zone");
+  return isSurfaceAnnotationKind(kind) ? kind : "paving_zone";
+}
+
+function normalizeSurfaceRole(value: unknown, kind: SurfaceAnnotationKind): SurfaceRole {
+  const role = asString(value, DEFAULT_SURFACE_ROLE_BY_KIND[kind]);
+  return isSurfaceRole(role) ? role : DEFAULT_SURFACE_ROLE_BY_KIND[kind];
+}
+
+function normalizeSurfaceMaterial(value: unknown, kind: SurfaceAnnotationKind): AnnotatedSurfaceAnnotation["material"] {
+  const fallbackPreset = DEFAULT_SURFACE_MATERIAL_BY_KIND[kind];
+  if (typeof value === "string") {
+    return { preset: asString(value, fallbackPreset) };
+  }
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const colorHex = asString(record.color_hex, "");
+  const textureKey = asString(record.texture_key, "");
+  return {
+    preset: asString(record.preset, fallbackPreset),
+    ...(colorHex ? { color_hex: colorHex.startsWith("#") ? colorHex : `#${colorHex}` } : {}),
+    ...(textureKey ? { texture_key: textureKey } : {}),
+  };
+}
+
+function normalizeSurfaceAnnotation(value: unknown, index: number): AnnotatedSurfaceAnnotation {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const kind = normalizeSurfaceAnnotationKind(record.kind);
+  const id = asString(record.id ?? record.feature_id, `surface_${String(index + 1).padStart(2, "0")}`);
+  return {
+    id,
+    label: asString(record.label, id),
+    kind,
+    surface_role: normalizeSurfaceRole(record.surface_role, kind),
+    centerline_id: asString(record.centerline_id, ""),
+    station_start_m: Math.max(0, asNumber(record.station_start_m, 0)),
+    station_end_m: Math.max(0, asNumber(record.station_end_m, 6)),
+    lateral_start_m: asNumber(record.lateral_start_m, 0),
+    lateral_end_m: asNumber(record.lateral_end_m, 3.5),
+    material: normalizeSurfaceMaterial(record.material, kind),
+  };
+}
+
+function normalizeStationStripPatch(value: unknown, index: number): AnnotatedStationStripPatch {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const updatesRecord = record.updates && typeof record.updates === "object"
+    ? (record.updates as Record<string, unknown>)
+    : record;
+  const rawKind = asString(updatesRecord.kind, "");
+  const rawDirection = asString(updatesRecord.direction, "");
+  const widthValue = updatesRecord.width_m;
+  const updates: AnnotatedStationStripPatch["updates"] = {
+    ...(isStripKind(rawKind) ? { kind: rawKind } : {}),
+    ...(typeof widthValue === "number" || typeof widthValue === "string"
+      ? { width_m: Math.max(0.05, asNumber(widthValue, 0.05)) }
+      : {}),
+    ...(isStripDirection(rawDirection) ? { direction: rawDirection } : {}),
+  };
+  const id = asString(record.id ?? record.feature_id, `station_strip_patch_${String(index + 1).padStart(2, "0")}`);
+  return {
+    id,
+    label: asString(record.label, id),
+    centerline_id: asString(record.centerline_id, ""),
+    strip_id: asString(record.strip_id, ""),
+    station_start_m: Math.max(0, asNumber(record.station_start_m, 0)),
+    station_end_m: Math.max(0, asNumber(record.station_end_m, 1)),
+    updates,
   };
 }
 
@@ -942,6 +1149,18 @@ function normalizeAnnotation(value: unknown): ReferenceAnnotation {
   const functionalZones = Array.isArray(inner.functional_zones)
     ? inner.functional_zones.map((item, index) => normalizeFunctionalZone(item, index))
     : [];
+  const regions = Array.isArray(inner.regions)
+    ? inner.regions.map((item, index) => normalizeRegion(item, index))
+    : [];
+  const derivedRegions = Array.isArray(inner.derived_regions)
+    ? inner.derived_regions.map((item, index) => normalizeRegion(item, index, "building_region"))
+    : [];
+  const surfaceAnnotations = Array.isArray(inner.surface_annotations)
+    ? inner.surface_annotations.map((item, index) => normalizeSurfaceAnnotation(item, index))
+    : [];
+  const stationStripPatches = Array.isArray(inner.station_strip_patches)
+    ? inner.station_strip_patches.map((item, index) => normalizeStationStripPatch(item, index))
+    : [];
   const junctionCompositions = normalizeJunctionCompositions(inner.junction_compositions ?? inner.compositions);
   return {
     version: asString(inner.version, ANNOTATION_SCHEMA_VERSION),
@@ -954,8 +1173,12 @@ function normalizeAnnotation(value: unknown): ReferenceAnnotation {
     junctions,
     roundabouts,
     control_points: controlPoints,
+    regions,
+    derived_regions: derivedRegions,
     building_regions: buildingRegions,
     functional_zones: functionalZones,
+    surface_annotations: surfaceAnnotations,
+    station_strip_patches: stationStripPatches,
     junction_compositions: junctionCompositions,
   };
 }
@@ -968,8 +1191,46 @@ function cloneAnnotation(annotation: ReferenceAnnotation): ReferenceAnnotation {
   return normalizeAnnotation(JSON.parse(stringifyAnnotation(annotation)));
 }
 
-function setStatus(element: HTMLElement, message: string, tone: StatusTone): void {
-  element.textContent = message;
+function resolveSceneGraphStatusText(message: SceneGraphStatusText): string {
+  if (typeof message === "string") {
+    return translateViewerLiteral(loadViewerLanguage(), message) ?? message;
+  }
+  return translateViewerKey(loadViewerLanguage(), message.key) ?? message.fallback ?? message.key;
+}
+
+function applySceneGraphStatusText(element: HTMLElement, message: SceneGraphStatusText): void {
+  if (typeof message === "string") {
+    element.removeAttribute("data-i18n-key");
+    element.dataset.i18nSourceText = message;
+  } else {
+    element.removeAttribute("data-i18n-source-text");
+    element.dataset.i18nKey = message.key;
+  }
+  element.textContent = resolveSceneGraphStatusText(message);
+}
+
+function statusTextFromImageLoadError(
+  error: unknown,
+  fallbackKey: string,
+  fallback: string,
+): SceneGraphStatusText {
+  if (error instanceof Error) {
+    if (error.message === "Failed to load the selected image.") {
+      return { key: "sceneGraph.status.failedSelectedImage", fallback: error.message };
+    }
+    if (error.message === "Timed out while loading the selected image.") {
+      return { key: "sceneGraph.status.selectedImageTimeout", fallback: error.message };
+    }
+    if (error.message === "Failed to fetch") {
+      return { key: fallbackKey, fallback };
+    }
+    return error.message;
+  }
+  return { key: fallbackKey, fallback };
+}
+
+function setStatus(element: HTMLElement, message: SceneGraphStatusText, tone: StatusTone): void {
+  applySceneGraphStatusText(element, message);
   element.dataset.tone = tone;
   const proxyId =
     element.id === "annotation-status"
@@ -980,12 +1241,12 @@ function setStatus(element: HTMLElement, message: string, tone: StatusTone): voi
   if (proxyId) {
     const proxy = document.getElementById(proxyId);
     if (proxy) {
-      proxy.textContent = message;
+      applySceneGraphStatusText(proxy, message);
       proxy.dataset.tone = tone;
     }
     const summary = document.getElementById("desktop-shell-status-summary-text");
     if (summary) {
-      summary.textContent = message;
+      applySceneGraphStatusText(summary, message);
     }
   }
 }
@@ -1007,7 +1268,19 @@ function nextFeatureId(annotation: ReferenceAnnotation, prefix: string): string 
   for (const item of annotation.building_regions) {
     ids.add(item.id);
   }
+  for (const item of annotation.regions) {
+    ids.add(item.id);
+  }
+  for (const item of annotation.derived_regions ?? []) {
+    ids.add(item.id);
+  }
   for (const item of annotation.functional_zones) {
+    ids.add(item.id);
+  }
+  for (const item of annotation.surface_annotations) {
+    ids.add(item.id);
+  }
+  for (const item of annotation.station_strip_patches) {
     ids.add(item.id);
   }
   let counter = 1;
@@ -1026,8 +1299,12 @@ function getFeatureCount(annotation: ReferenceAnnotation): number {
     annotation.junctions.length +
     annotation.roundabouts.length +
     annotation.control_points.length +
+    annotation.regions.length +
+    (annotation.derived_regions?.length ?? 0) +
     annotation.building_regions.length +
-    annotation.functional_zones.length
+    annotation.functional_zones.length +
+    annotation.surface_annotations.length +
+    annotation.station_strip_patches.length
   );
 }
 
@@ -1035,6 +1312,8 @@ function getSelectedFeature(annotation: ReferenceAnnotation, selection: Selectio
   | AnnotatedCenterline
   | AnnotatedBuildingRegion
   | AnnotatedFunctionalZone
+  | AnnotatedRegion
+  | AnnotatedSurfaceAnnotation
   | AnnotatedJunction
   | AnnotatedMarker
   | AnnotatedRoundabout
@@ -1062,8 +1341,18 @@ function getSelectedFeature(annotation: ReferenceAnnotation, selection: Selectio
   if (selection.kind === "building_region") {
     return annotation.building_regions.find((item) => item.id === selection.id) ?? null;
   }
+  if (selection.kind === "region") {
+    return (
+      annotation.regions.find((item) => item.id === selection.id) ??
+      (annotation.derived_regions ?? []).find((item) => item.id === selection.id) ??
+      null
+    );
+  }
   if (selection.kind === "functional_zone") {
     return annotation.functional_zones.find((item) => item.id === selection.id) ?? null;
+  }
+  if (selection.kind === "surface_annotation") {
+    return annotation.surface_annotations.find((item) => item.id === selection.id) ?? null;
   }
   if (selection.kind === "derived_junction") {
     return getJunctionOverlay(annotation, selection.id);
@@ -1079,6 +1368,76 @@ function pixelPointToLocal(annotation: ReferenceAnnotation, point: AnnotationPoi
     x: (point.x - centerX) / ppm,
     y: (centerY - point.y) / ppm,
   };
+}
+
+function centerlineLengthM(centerline: AnnotatedCenterline, pixelsPerMeter: number): number {
+  return polylineLength(centerline.points) / Math.max(pixelsPerMeter, 1e-6);
+}
+
+function polylinePointsBetweenStations(
+  points: AnnotationPoint[],
+  stationStartPx: number,
+  stationEndPx: number,
+): AnnotationPoint[] {
+  if (points.length < 2) {
+    return points.map((point) => ({ ...point }));
+  }
+  const startPx = clamp(stationStartPx, 0, polylineLength(points));
+  const endPx = clamp(stationEndPx, startPx, polylineLength(points));
+  const result: AnnotationPoint[] = [stationToPolylinePoint(points, startPx).point];
+  let accumulated = 0;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    accumulated += pointDistance(points[index], points[index + 1]);
+    if (startPx < accumulated && accumulated < endPx) {
+      result.push(clonePoint(points[index + 1]));
+    }
+  }
+  result.push(stationToPolylinePoint(points, endPx).point);
+  return result.filter((point, index, list) => index === 0 || pointDistance(point, list[index - 1]) > 1e-3);
+}
+
+function surfaceAnnotationPolygonPoints(
+  annotation: ReferenceAnnotation,
+  surface: AnnotatedSurfaceAnnotation,
+): AnnotationPoint[] {
+  const centerline = annotation.centerlines.find((item) => item.id === surface.centerline_id) ?? null;
+  if (!centerline || centerline.points.length < 2) {
+    return [];
+  }
+  const ppm = Math.max(annotation.pixels_per_meter, 1e-6);
+  const spine = polylinePointsBetweenStations(
+    centerline.points,
+    surface.station_start_m * ppm,
+    surface.station_end_m * ppm,
+  );
+  if (spine.length < 2) {
+    return [];
+  }
+  const edgeA = offsetPolyline(spine, surface.lateral_start_m * ppm);
+  const edgeB = offsetPolyline(spine, surface.lateral_end_m * ppm);
+  return [...edgeA, ...edgeB.slice().reverse()];
+}
+
+function stationStripPatchPolylinePoints(
+  annotation: ReferenceAnnotation,
+  patch: AnnotatedStationStripPatch,
+): AnnotationPoint[] {
+  const centerline = annotation.centerlines.find((item) => item.id === patch.centerline_id) ?? null;
+  if (!centerline || centerline.points.length < 2) {
+    return [];
+  }
+  const ppm = Math.max(annotation.pixels_per_meter, 1e-6);
+  const spine = polylinePointsBetweenStations(
+    centerline.points,
+    patch.station_start_m * ppm,
+    patch.station_end_m * ppm,
+  );
+  if (spine.length < 2) {
+    return [];
+  }
+  const offsets = stripCenterOffsetMeters(centerline);
+  const stripOffset = offsets[patch.strip_id]?.centerOffsetM ?? 0;
+  return offsetPolyline(spine, stripOffset * ppm);
 }
 
 function collectAnchorClusters(points: AnnotationPoint[], toleranceM: number): Array<{ point: AnnotationPoint; count: number }> {
@@ -1247,8 +1606,13 @@ function buildAnnotationSummaryMarkup(annotation: ReferenceAnnotation): string {
   const stripCount = annotation.centerlines.reduce((sum, item) => sum + item.cross_section_strips.length, 0);
   const furnitureCount = annotation.centerlines.reduce((sum, item) => sum + item.street_furniture_instances.length, 0);
   const zoneFurnitureCount = annotation.functional_zones.reduce((sum, zone) => sum + zone.furniture_instances.length, 0);
+  const sceneRegionCount = annotation.regions.filter((region) => region.region_role === "scene_region").length;
+  const explicitRegionBuildingCount = annotation.regions.filter((region) => region.region_role === "building_region").length;
+  const derivedRegionCount = annotation.derived_regions?.length ?? 0;
   const buildingRegionCount = annotation.building_regions.length;
   const functionalZoneCount = annotation.functional_zones.length;
+  const surfaceAnnotationCount = annotation.surface_annotations.length;
+  const stationStripPatchCount = annotation.station_strip_patches.length;
   const junctionStats = deriveJunctionStats(annotation);
   return `
     <div>
@@ -1314,12 +1678,32 @@ function buildAnnotationSummaryMarkup(annotation: ReferenceAnnotation): string {
     </div>
     ` : ""}
     <div>
+      <span class="scene-metric-label">Scene Regions</span>
+      <strong>${sceneRegionCount}</strong>
+    </div>
+    <div>
+      <span class="scene-metric-label">Auto Bldg</span>
+      <strong>${derivedRegionCount}</strong>
+    </div>
+    <div>
+      <span class="scene-metric-label">Region Bldg</span>
+      <strong>${explicitRegionBuildingCount}</strong>
+    </div>
+    <div>
       <span class="scene-metric-label">Bldg Regions</span>
       <strong>${buildingRegionCount}</strong>
     </div>
     <div>
       <span class="scene-metric-label">Func Zones</span>
       <strong>${functionalZoneCount}</strong>
+    </div>
+    <div>
+      <span class="scene-metric-label">Design Surfaces</span>
+      <strong>${surfaceAnnotationCount}</strong>
+    </div>
+    <div>
+      <span class="scene-metric-label">Strip Patches</span>
+      <strong>${stationStripPatchCount}</strong>
     </div>
     <div>
       <span class="scene-metric-label">Scale</span>
@@ -1400,6 +1784,18 @@ function buildGraphSummaryMarkup(graphResult: ConvertedGraphPayload | null): str
       <strong>${escapeHtml(String(summary.street_furniture_instance_count ?? 0))}</strong>
     </div>
     <div>
+      <span class="scene-metric-label">Regions</span>
+      <strong>${escapeHtml(String(summary.region_count ?? 0))}</strong>
+    </div>
+    <div>
+      <span class="scene-metric-label">Auto Bldg</span>
+      <strong>${escapeHtml(String(summary.derived_region_count ?? 0))}</strong>
+    </div>
+    <div>
+      <span class="scene-metric-label">Design Surfaces</span>
+      <strong>${escapeHtml(String(summary.surface_annotation_count ?? 0))}</strong>
+    </div>
+    <div>
       <span class="scene-metric-label">MetaUrban Hints</span>
       <strong>${escapeHtml(String(summary.metaurban_asset_hint_count ?? 0))}</strong>
     </div>
@@ -1469,6 +1865,26 @@ function buildFeatureTableMarkup(annotation: ReferenceAnnotation): string {
       </tr>
     `);
   }
+  for (const item of annotation.regions) {
+    rows.push(`
+      <tr>
+        <td>${escapeHtml(item.region_role)}</td>
+        <td>${escapeHtml(item.id)}</td>
+        <td>${escapeHtml(item.label)}</td>
+        <td>${item.points.length} pts · ${item.derived ? "derived" : "explicit"}${item.land_use_type ? ` · ${escapeHtml(item.land_use_type)}` : ""}</td>
+      </tr>
+    `);
+  }
+  for (const item of annotation.derived_regions ?? []) {
+    rows.push(`
+      <tr>
+        <td>derived building</td>
+        <td>${escapeHtml(item.id)}</td>
+        <td>${escapeHtml(item.label)}</td>
+        <td>${item.points.length} pts · ${(item.area_m2 ?? 0).toFixed(1)} m²${item.side ? ` · ${escapeHtml(item.side)}` : ""}</td>
+      </tr>
+    `);
+  }
   for (const item of annotation.functional_zones) {
     rows.push(`
       <tr>
@@ -1476,6 +1892,28 @@ function buildFeatureTableMarkup(annotation: ReferenceAnnotation): string {
         <td>${escapeHtml(item.id)}</td>
         <td>${escapeHtml(item.label)}</td>
         <td>${escapeHtml(item.kind)} · ${item.points.length} pts · ${item.furniture_instances.length} furn.</td>
+      </tr>
+    `);
+  }
+  for (const item of annotation.surface_annotations) {
+    rows.push(`
+      <tr>
+        <td>design surface</td>
+        <td>${escapeHtml(item.id)}</td>
+        <td>${escapeHtml(item.label)}</td>
+        <td>${escapeHtml(SURFACE_ANNOTATION_KIND_LABELS[item.kind])} · ${escapeHtml(SURFACE_ROLE_LABELS[item.surface_role])} · ${escapeHtml(item.centerline_id)} · ${item.station_start_m.toFixed(1)}-${item.station_end_m.toFixed(1)}m</td>
+      </tr>
+    `);
+  }
+  for (const item of annotation.station_strip_patches) {
+    const kind = item.updates.kind ?? "strip";
+    const width = item.updates.width_m === undefined ? "" : ` · ${item.updates.width_m.toFixed(1)}m`;
+    rows.push(`
+      <tr>
+        <td>strip patch</td>
+        <td>${escapeHtml(item.id)}</td>
+        <td>${escapeHtml(item.label)}</td>
+        <td>${escapeHtml(item.centerline_id)} / ${escapeHtml(item.strip_id)} · ${item.station_start_m.toFixed(1)}-${item.station_end_m.toFixed(1)}m · ${escapeHtml(kind)}${width}</td>
       </tr>
     `);
   }
@@ -2046,6 +2484,161 @@ function buildFunctionalZoneInspectorMarkup(zone: AnnotatedFunctionalZone): stri
   `;
 }
 
+function buildRegionInspectorMarkup(region: AnnotatedRegion): string {
+  const pointCount = region.points.length;
+  const centroid = regionCentroid(region);
+  const areaLabel = region.area_m2 !== undefined && Number.isFinite(region.area_m2)
+    ? `${region.area_m2.toFixed(1)} m²`
+    : "editable polygon";
+  const hint = region.region_role === "scene_region"
+    ? "Roads, junctions, and design surfaces will cut this boundary into derived building regions."
+    : region.derived
+      ? "Derived from Scene Region. Materialize it if you want to keep and edit it as an explicit building region."
+      : "Explicit region saved in the unified regions[] model.";
+  return `
+    <section class="annotation-cross-preview-section">
+      <div class="annotation-cross-preview-header">
+        <div>
+          <h3>${escapeHtml(regionRoleLabel(region.region_role))}</h3>
+          <div class="scene-micro-note">${escapeHtml(hint)}</div>
+        </div>
+        <div class="annotation-cross-preview-stats">
+          <span class="annotation-cross-preview-stat">${pointCount} pts</span>
+          <span class="annotation-cross-preview-stat">${escapeHtml(areaLabel)}</span>
+        </div>
+      </div>
+      <div class="scene-inspector-grid">
+        <label class="scene-form-field">
+          <span>ID</span>
+          <input id="annotation-unified-region-id" type="text" value="${escapeHtml(region.id)}" ${region.derived ? "readonly" : ""} />
+        </label>
+        <label class="scene-form-field scene-form-field-wide">
+          <span>Label</span>
+          <input id="annotation-unified-region-label" type="text" value="${escapeHtml(region.label)}" ${region.derived ? "readonly" : ""} />
+        </label>
+        <label class="scene-form-field">
+          <span>Role</span>
+          <select id="annotation-unified-region-role" ${region.derived ? "disabled" : ""}>
+            <option value="scene_region" ${region.region_role === "scene_region" ? "selected" : ""}>Scene Region</option>
+            <option value="building_region" ${region.region_role === "building_region" ? "selected" : ""}>Building Region</option>
+            <option value="functional_zone" ${region.region_role === "functional_zone" ? "selected" : ""}>Functional Region</option>
+          </select>
+        </label>
+        <label class="scene-form-field">
+          <span>Centroid X</span>
+          <input type="number" step="1" value="${centroid.x.toFixed(0)}" readonly />
+        </label>
+        <label class="scene-form-field">
+          <span>Centroid Y</span>
+          <input type="number" step="1" value="${centroid.y.toFixed(0)}" readonly />
+        </label>
+        <label class="scene-form-field">
+          <span>Side</span>
+          <input type="text" value="${escapeHtml(region.side || "")}" readonly />
+        </label>
+        ${region.derived ? `
+          <div class="annotation-detail-actions scene-form-field-wide">
+            <button type="button" class="scene-toolbar-button" data-action="materialize-derived-region">Materialize</button>
+          </div>
+        ` : ""}
+        <div class="scene-fact-card scene-form-field-wide">
+          <span class="scene-fact-label">Region-first</span>
+          <strong>${escapeHtml(hint)}</strong>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function buildSurfaceAnnotationInspectorMarkup(
+  annotation: ReferenceAnnotation,
+  surface: AnnotatedSurfaceAnnotation,
+): string {
+  const centerline = annotation.centerlines.find((item) => item.id === surface.centerline_id) ?? null;
+  const centerlineLength = centerline ? centerlineLengthM(centerline, annotation.pixels_per_meter) : 0;
+  const widthM = surface.lateral_end_m - surface.lateral_start_m;
+  const lengthM = surface.station_end_m - surface.station_start_m;
+  return `
+    <section class="annotation-cross-preview-section">
+      <div class="annotation-cross-preview-header">
+        <div>
+          <h3>Design Surface</h3>
+          <div class="scene-micro-note">Station-bound surface patch for lane changes, islands, pads, and paving.</div>
+        </div>
+        <div class="annotation-cross-preview-stats">
+          <span class="annotation-cross-preview-stat">${lengthM.toFixed(1)}m long</span>
+          <span class="annotation-cross-preview-stat">${widthM.toFixed(1)}m wide</span>
+        </div>
+      </div>
+      <div class="annotation-detail-actions scene-form-field-wide" style="margin-bottom:0.75rem">
+        ${SURFACE_ANNOTATION_KINDS.map((kind) => `
+          <button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="apply-surface-preset" data-surface-kind="${kind}">
+            ${escapeHtml(SURFACE_ANNOTATION_KIND_LABELS[kind])}
+          </button>
+        `).join("")}
+      </div>
+      <div class="scene-inspector-grid">
+        <label class="scene-form-field">
+          <span>ID</span>
+          <input id="annotation-surface-id" type="text" value="${escapeHtml(surface.id)}" />
+        </label>
+        <label class="scene-form-field scene-form-field-wide">
+          <span>Label</span>
+          <input id="annotation-surface-label" type="text" value="${escapeHtml(surface.label)}" />
+        </label>
+        <label class="scene-form-field scene-form-field-wide">
+          <span>Kind</span>
+          <select id="annotation-surface-kind">
+            ${buildSelectOptions(SURFACE_ANNOTATION_KINDS, surface.kind, SURFACE_ANNOTATION_KIND_LABELS)}
+          </select>
+        </label>
+        <label class="scene-form-field scene-form-field-wide">
+          <span>Surface Role</span>
+          <select id="annotation-surface-role">
+            ${buildSelectOptions(SURFACE_ROLES, surface.surface_role, SURFACE_ROLE_LABELS)}
+          </select>
+        </label>
+        <label class="scene-form-field scene-form-field-wide">
+          <span>Centerline</span>
+          <select id="annotation-surface-centerline">
+            ${annotation.centerlines.map((centerlineOption) => `
+              <option value="${escapeHtml(centerlineOption.id)}"${centerlineOption.id === surface.centerline_id ? " selected" : ""}>${escapeHtml(centerlineOption.label || centerlineOption.id)}</option>
+            `).join("")}
+          </select>
+        </label>
+        <label class="scene-form-field">
+          <span>Start Station (m)</span>
+          <input id="annotation-surface-station-start" type="number" min="0" max="${centerlineLength.toFixed(3)}" step="0.5" value="${surface.station_start_m.toFixed(2)}" />
+        </label>
+        <label class="scene-form-field">
+          <span>End Station (m)</span>
+          <input id="annotation-surface-station-end" type="number" min="0" max="${centerlineLength.toFixed(3)}" step="0.5" value="${surface.station_end_m.toFixed(2)}" />
+        </label>
+        <label class="scene-form-field">
+          <span>Lateral Start (m)</span>
+          <input id="annotation-surface-lateral-start" type="number" step="0.25" value="${surface.lateral_start_m.toFixed(2)}" />
+        </label>
+        <label class="scene-form-field">
+          <span>Lateral End (m)</span>
+          <input id="annotation-surface-lateral-end" type="number" step="0.25" value="${surface.lateral_end_m.toFixed(2)}" />
+        </label>
+        <label class="scene-form-field">
+          <span>Material Preset</span>
+          <input id="annotation-surface-material-preset" type="text" value="${escapeHtml(surface.material.preset)}" />
+        </label>
+        <label class="scene-form-field">
+          <span>Color Hex</span>
+          <input id="annotation-surface-color-hex" type="text" placeholder="#RRGGBB" value="${escapeHtml(surface.material.color_hex ?? "")}" />
+        </label>
+        <div class="scene-fact-card scene-form-field-wide">
+          <span class="scene-fact-label">Road Length</span>
+          <strong>${centerline ? `${centerlineLength.toFixed(1)}m on ${escapeHtml(centerline.id)}` : "Missing centerline"}</strong>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function buildJunctionInspectorMarkup(
   junction: AnnotatedJunction,
   overlay: DerivedJunctionOverlay | null,
@@ -2374,8 +2967,14 @@ function buildInspectorMarkup(
   if (selection.kind === "building_region") {
     return buildBuildingRegionInspectorMarkup(feature as AnnotatedBuildingRegion);
   }
+  if (selection.kind === "region") {
+    return buildRegionInspectorMarkup(feature as AnnotatedRegion);
+  }
   if (selection.kind === "functional_zone") {
     return buildFunctionalZoneInspectorMarkup(feature as AnnotatedFunctionalZone);
+  }
+  if (selection.kind === "surface_annotation") {
+    return buildSurfaceAnnotationInspectorMarkup(annotation, feature as AnnotatedSurfaceAnnotation);
   }
   if (selection.kind === "centerline") {
     const centerline = feature as AnnotatedCenterline;
@@ -3126,6 +3725,63 @@ function buildCenterlineOverlayMarkup(
   `;
 }
 
+function buildSurfaceAnnotationOverlayMarkup(
+  annotation: ReferenceAnnotation,
+  surface: AnnotatedSurfaceAnnotation,
+  isSelected: boolean,
+): string {
+  const polygon = surfaceAnnotationPolygonPoints(annotation, surface);
+  if (polygon.length < 3) {
+    return "";
+  }
+  const polygonPoints = polygon.map((point) => `${point.x},${point.y}`).join(" ");
+  const labelPoint = polygon.reduce(
+    (sum, point) => ({ x: sum.x + point.x / polygon.length, y: sum.y + point.y / polygon.length }),
+    { x: 0, y: 0 },
+  );
+  return `
+    <g class="annotation-feature-group">
+      <polygon
+        class="annotation-surface-annotation${isSelected ? " annotation-feature-selected" : ""}"
+        points="${polygonPoints}"
+        style="fill:${surfaceAnnotationFillColor(surface.surface_role)};stroke:${surfaceAnnotationStrokeColor(surface.surface_role)}"
+        data-feature-kind="surface_annotation"
+        data-feature-id="${escapeHtml(surface.id)}"
+      />
+      <text class="annotation-label" x="${labelPoint.x + 8}" y="${labelPoint.y - 8}">
+        ${escapeHtml(surface.label || SURFACE_ANNOTATION_KIND_LABELS[surface.kind])}
+      </text>
+    </g>
+  `;
+}
+
+function buildStationStripPatchOverlayMarkup(
+  annotation: ReferenceAnnotation,
+  patch: AnnotatedStationStripPatch,
+): string {
+  const centerline = annotation.centerlines.find((item) => item.id === patch.centerline_id) ?? null;
+  const polyline = stationStripPatchPolylinePoints(annotation, patch);
+  if (!centerline || polyline.length < 2) {
+    return "";
+  }
+  const targetStrip = centerline.cross_section_strips.find((strip) => strip.strip_id === patch.strip_id) ?? null;
+  const kind = patch.updates.kind ?? targetStrip?.kind ?? "median";
+  const widthM = patch.updates.width_m ?? targetStrip?.width_m ?? 0.5;
+  return `
+    <g class="annotation-feature-group">
+      <polyline
+        class="annotation-cross-strip annotation-station-strip-patch"
+        points="${polyline.map((point) => `${point.x},${point.y}`).join(" ")}"
+        style="stroke:${stripStrokeColor(kind)};stroke-width:${Math.max(2, widthM * annotation.pixels_per_meter)}px;stroke-linecap:butt;opacity:0.92"
+        data-feature-kind="station_strip_patch"
+        data-feature-id="${escapeHtml(patch.id)}"
+        data-centerline-id="${escapeHtml(patch.centerline_id)}"
+        data-strip-id="${escapeHtml(patch.strip_id)}"
+      />
+    </g>
+  `;
+}
+
 function buildBuildingRegionOverlayMarkup(
   region: AnnotatedBuildingRegion,
   isSelected: boolean,
@@ -3203,6 +3859,106 @@ function buildBuildingRegionDraftMarkup(drag: Extract<DragState, { kind: "buildi
         class="annotation-building-region annotation-building-region-draft"
         points="${polygon.map((point) => `${point.x},${point.y}`).join(" ")}"
       />
+    </g>
+  `;
+}
+
+function regionPolygonPoints(region: AnnotatedRegion): AnnotationPoint[] {
+  return region.points.map((point) => clonePoint(point));
+}
+
+function regionCentroid(region: AnnotatedRegion): AnnotationPoint {
+  const points = regionPolygonPoints(region);
+  if (!points.length) {
+    return { x: 0, y: 0 };
+  }
+  return {
+    x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+    y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+  };
+}
+
+function regionBoxPoints(startPoint: AnnotationPoint, currentPoint: AnnotationPoint): AnnotationPoint[] {
+  const minX = Math.min(startPoint.x, currentPoint.x);
+  const maxX = Math.max(startPoint.x, currentPoint.x);
+  const minY = Math.min(startPoint.y, currentPoint.y);
+  const maxY = Math.max(startPoint.y, currentPoint.y);
+  return [
+    { x: minX, y: minY },
+    { x: maxX, y: minY },
+    { x: maxX, y: maxY },
+    { x: minX, y: maxY },
+  ];
+}
+
+function regionRoleLabel(role: RegionRole): string {
+  if (role === "scene_region") {
+    return "Scene Region";
+  }
+  if (role === "building_region") {
+    return "Building Region";
+  }
+  return "Functional Region";
+}
+
+function buildRegionOverlayMarkup(region: AnnotatedRegion, isSelected: boolean): string {
+  const polygon = regionPolygonPoints(region);
+  if (polygon.length < 3) {
+    return "";
+  }
+  const polygonPoints = polygon.map((point) => `${point.x},${point.y}`).join(" ");
+  const labelPoint = polygon[0] ?? regionCentroid(region);
+  const className = [
+    "annotation-region",
+    `annotation-region-${region.region_role.replace(/_/g, "-")}`,
+    region.derived ? "annotation-region-derived" : "",
+    isSelected ? "annotation-region-selected" : "",
+  ].filter(Boolean).join(" ");
+  return `
+    <g class="annotation-feature-group">
+      <polygon
+        class="${className}"
+        points="${polygonPoints}"
+        data-feature-kind="region"
+        data-feature-id="${escapeHtml(region.id)}"
+      />
+      <text class="annotation-label" x="${labelPoint.x}" y="${labelPoint.y - 10}">
+        ${escapeHtml(region.label || regionRoleLabel(region.region_role))}
+      </text>
+    </g>
+  `;
+}
+
+function buildRegionDraftMarkup(drag: Extract<DragState, { kind: "region_draw" | "region_box_draw" }> | null): string {
+  if (!drag) {
+    return "";
+  }
+  const points = drag.kind === "region_box_draw"
+    ? regionBoxPoints(drag.startPoint, drag.currentPoint)
+    : [...drag.points, drag.currentPoint];
+  if (points.length < 2) {
+    return "";
+  }
+  const polygonPoints = points.map((point) => `${point.x},${point.y}`).join(" ");
+  const lineFragments: string[] = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    lineFragments.push(
+      `<line class="annotation-region-draft-line" x1="${points[i].x}" y1="${points[i].y}" x2="${points[i + 1].x}" y2="${points[i + 1].y}" />`,
+    );
+  }
+  return `
+    <g class="annotation-feature-group">
+      <polygon
+        class="annotation-region annotation-region-${drag.regionRole.replace(/_/g, "-")} annotation-region-draft"
+        points="${polygonPoints}"
+      />
+      ${lineFragments.join("")}
+      ${points
+        .map(
+          (point, index) =>
+            `<circle class="annotation-region-draft-vertex" cx="${point.x}" cy="${point.y}" r="4" data-index="${index}" />`,
+        )
+        .join("")}
     </g>
   `;
 }
@@ -3850,6 +4606,7 @@ function buildOverlayMarkup(
   crossDraft: CrossDraft | null,
   buildingRegionDraft: Extract<DragState, { kind: "building_region_draw" }> | null,
   functionalZoneDraft: Extract<DragState, { kind: "functional_zone_draw" }> | null,
+  regionDraft: Extract<DragState, { kind: "region_draw" | "region_box_draw" }> | null,
 ): string {
   const width = Math.max(annotation.image_width_px, 1);
   const height = Math.max(annotation.image_height_px, 1);
@@ -3955,8 +4712,30 @@ function buildOverlayMarkup(
     .map((region) => buildBuildingRegionOverlayMarkup(region, selectedKey === `building_region:${region.id}`))
     .join("");
 
+  const sceneRegionMarkup = annotation.regions
+    .filter((region) => region.region_role === "scene_region")
+    .map((region) => buildRegionOverlayMarkup(region, selectedKey === `region:${region.id}`))
+    .join("");
+
+  const explicitRegionMarkup = annotation.regions
+    .filter((region) => region.region_role !== "scene_region")
+    .map((region) => buildRegionOverlayMarkup(region, selectedKey === `region:${region.id}`))
+    .join("");
+
+  const derivedRegionMarkup = (annotation.derived_regions ?? [])
+    .map((region) => buildRegionOverlayMarkup(region, selectedKey === `region:${region.id}`))
+    .join("");
+
   const functionalZoneMarkup = annotation.functional_zones
     .map((zone) => buildFunctionalZoneOverlayMarkup(zone, selectedKey === `functional_zone:${zone.id}`))
+    .join("");
+
+  const surfaceAnnotationMarkup = annotation.surface_annotations
+    .map((surface) => buildSurfaceAnnotationOverlayMarkup(annotation, surface, selectedKey === `surface_annotation:${surface.id}`))
+    .join("");
+
+  const stationStripPatchMarkup = annotation.station_strip_patches
+    .map((patch) => buildStationStripPatchOverlayMarkup(annotation, patch))
     .join("");
 
   const draftMarkup =
@@ -4059,9 +4838,14 @@ function buildOverlayMarkup(
       aria-label="Reference annotation overlay"
     >
       <rect x="0" y="0" width="${width}" height="${height}" fill="transparent" />
+      ${sceneRegionMarkup}
       ${centerlineMarkup}
+      ${stationStripPatchMarkup}
+      ${surfaceAnnotationMarkup}
       ${derivedJunctionMarkup}
       ${manualCompositionMarkup}
+      ${derivedRegionMarkup}
+      ${explicitRegionMarkup}
       ${buildingRegionMarkup}
       ${functionalZoneMarkup}
       ${markerMarkup}
@@ -4070,6 +4854,7 @@ function buildOverlayMarkup(
       ${buildCrossPreviewMarkup(crossHoverSnap, crossDraft)}
       ${buildBuildingRegionDraftMarkup(buildingRegionDraft)}
       ${buildFunctionalZoneDraftMarkup(functionalZoneDraft)}
+      ${buildRegionDraftMarkup(regionDraft)}
       ${draftMarkup}
     </svg>
   `;
@@ -4090,9 +4875,9 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
   const eventController = new AbortController();
   const { signal } = eventController;
   shell.setHints([
-    "Load or import a reference plan, then pick a tool from the left rail to annotate roads, zones, or furniture.",
-    "The center stage is reserved for the plan image and overlay geometry; inspector and export tools stay on the right.",
-    "Status and graph conversion feedback are moved to the bottom workbench.",
+    { key: "sceneGraph.hints.loadPlan" },
+    { key: "sceneGraph.hints.centerStage" },
+    { key: "sceneGraph.hints.statusFeedback" },
   ]);
   shell.setLeftSections([
     {
@@ -4121,8 +4906,11 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
           <div class="scene-tool-group">
             <div class="scene-tool-group-label">区域 / Zone</div>
             <div class="scene-tool-row">
-              <button id="annotation-tool-building-region" class="scene-tool-button" data-tool="building_region" type="button">Building Region<span class="tool-label-zh">建筑区域</span></button>
-              <button id="annotation-tool-functional-zone" class="scene-tool-button" data-tool="functional_zone" type="button">Functional Zone<span class="tool-label-zh">功能区域</span></button>
+              <button id="annotation-tool-scene-region" class="scene-tool-button" data-tool="scene_region" type="button">Scene Region<span class="tool-label-zh">场景边界</span></button>
+              <button id="annotation-auto-split-regions" class="scene-tool-button" type="button">Auto Split<span class="tool-label-zh">自动切割</span></button>
+              <button id="annotation-tool-functional-zone" class="scene-tool-button" data-tool="functional_zone" type="button">Functional Region<span class="tool-label-zh">功能区域</span></button>
+              <button id="annotation-tool-surface" class="scene-tool-button" data-tool="surface_annotation" type="button">Design Surface<span class="tool-label-zh">设计面</span></button>
+              <button id="annotation-tool-building-region" class="scene-tool-button scene-tool-button-secondary" data-tool="building_region" type="button">Building Region<span class="tool-label-zh">高级手绘</span></button>
             </div>
           </div>
           <div class="scene-tool-group">
@@ -4145,8 +4933,8 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
               <button id="annotation-finish-centerline" class="scene-toolbar-button" type="button">Finish Centerline<span class="tool-label-zh">完成中心线</span></button>
               <button id="annotation-select-all-roads" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">All Roads<span class="tool-label-zh">全部道路</span></button>
               <button id="annotation-undo-point" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Undo Point<span class="tool-label-zh">撤销节点</span></button>
-              <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Delete Selected<span class="tool-label-zh">删除选中</span></button>
-              <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Reset Annotation<span class="tool-label-zh">重置标注</span></button>
+              <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary scene-toolbar-button-danger" type="button">Delete Selected<span class="tool-label-zh">删除选中</span></button>
+              <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary scene-toolbar-button-danger" type="button">Reset Annotation<span class="tool-label-zh">重置标注</span></button>
               <label class="scene-layer-toggle" style="margin-left:0.5rem;gap:0.35rem;">
                 <input id="annotation-snap-to-road" type="checkbox" checked />
                 <span>Snap to Road<span class="tool-label-zh">吸附到道路</span></span>
@@ -4178,6 +4966,12 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
                 <label class="scene-file-button" for="annotation-image-input">Import PNG</label>
                 <input id="annotation-image-input" class="scene-file-input" type="file" accept="image/png,image/*" />
                 <button id="annotation-image-reset" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Clear Image</button>
+              </div>
+              <div class="scene-import-toolbar scene-import-toolbar-compact" style="padding:0;margin-top:0.5rem">
+                <label class="scene-select-wrap" style="min-width:0;flex:1 1 auto">
+                  <span class="scene-select-label">Scenario Design</span>
+                  <select id="annotation-scenario-select" class="scene-select"></select>
+                </label>
               </div>
               <div class="scene-layer-controls scene-layer-controls-annotation" style="padding:0">
                 <label class="scene-layer-toggle" for="annotation-show-original"><input id="annotation-show-original" type="checkbox" checked /><span>Original Image</span></label>
@@ -4214,19 +5008,19 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
         id: "data",
         label: "Data",
         content: `
-          <details class="scene-collapsible-panel">
+          <details class="scene-collapsible-panel" open>
             <summary class="scene-collapsible-summary">Import / Export</summary>
             <div class="scene-collapsible-body">
-              <div class="scene-import-toolbar" style="padding:0">
-                <label class="scene-file-button" for="annotation-json-input">Import JSON</label>
+              <div class="scene-import-toolbar scene-import-toolbar-compact" style="padding:0">
+                <label class="scene-select-wrap" style="min-width:0;flex:1 1 100%">
+                  <span class="scene-select-label">Scenario Design</span>
+                  <select id="annotation-scenario-select-data" class="scene-select"></select>
+                </label>
+                <label class="scene-file-button" for="annotation-json-input">Import Annotation</label>
                 <input id="annotation-json-input" class="scene-file-input" type="file" accept=".json,application/json" />
-                <button id="annotation-apply-json" class="scene-toolbar-button" type="button">Apply JSON</button>
-                <button id="annotation-download-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Download JSON</button>
-                <button id="annotation-copy-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Copy JSON</button>
-              </div>
-              <div class="scene-import-toolbar" style="padding:0">
-                <button id="annotation-convert-graph" class="scene-toolbar-button" type="button">Convert to Graph</button>
-                <button id="annotation-download-graph" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Download Graph</button>
+                <button id="annotation-download-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Download Annotation</button>
+                <button id="annotation-copy-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Copy Annotation</button>
+                <button id="annotation-download-graph" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Download Road Graph</button>
               </div>
             </div>
           </details>
@@ -4235,7 +5029,9 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
             <div class="scene-collapsible-body">
               <label class="scene-form-field scene-form-field-inline" style="padding:0;background:transparent;box-shadow:none"><span>Segment Length (m)</span><input id="annotation-segment-length" type="number" min="4" step="1" value="${DEFAULT_SEGMENT_LENGTH_M}" /></label>
               <label class="scene-form-field scene-form-field-inline" style="padding:0;background:transparent;box-shadow:none"><span>Sidewalk Width (m)</span><input id="annotation-sidewalk-width" type="number" min="1" step="0.5" value="${DEFAULT_SIDEWALK_WIDTH_M}" /></label>
-              <div id="annotation-graph-status" class="scene-status" data-tone="neutral" style="margin:0">Convert 后会在这里显示 graph 结果。</div>
+              <div class="scene-micro-note">Road graph is generated automatically after annotation edits. Use retry only if the automatic conversion fails.</div>
+              <button id="annotation-convert-graph" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Retry Graph Conversion</button>
+              <div id="annotation-graph-status" class="scene-status" data-tone="neutral" style="margin:0" data-i18n-key="sceneGraph.status.graphPlaceholder">Road graph results appear here automatically.</div>
               <div id="annotation-graph-summary" class="scene-metric-grid scene-metric-grid-compact"></div>
               <div class="scene-json-wrap scene-json-wrap-compact" style="padding:0"><textarea id="annotation-graph-json" class="scene-json-input" spellcheck="false" readonly></textarea></div>
             </div>
@@ -4258,8 +5054,11 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
           <details class="scene-collapsible-panel">
             <summary class="scene-collapsible-summary">Annotation JSON</summary>
             <div class="scene-collapsible-body">
+              <div class="scene-import-toolbar scene-import-toolbar-compact" style="padding:0 0 0.5rem">
+                <button id="annotation-apply-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Apply JSON</button>
+              </div>
               <div class="scene-json-wrap scene-json-wrap-compact" style="padding:0"><textarea id="annotation-json" class="scene-json-input" spellcheck="false"></textarea></div>
-              <div id="annotation-status" class="scene-status" data-tone="neutral" style="margin:0.5rem 0 0">Waiting for a reference image.</div>
+              <div id="annotation-status" class="scene-status" data-tone="neutral" style="margin:0.5rem 0 0" data-i18n-key="sceneGraph.status.waitingReferenceImage">Waiting for a reference image.</div>
             </div>
           </details>
         `,
@@ -4279,7 +5078,7 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
   shell.centerStage.innerHTML = `
     <div class="scene-shell-stage">
       <div id="annotation-stage" class="scene-layer-stage scene-canvas-stage" data-has-image="false" data-loading="true" data-empty-state="loading">
-        <div id="annotation-stage-empty" class="scene-image-empty">Loading default reference plan...</div>
+        <div id="annotation-stage-empty" class="scene-image-empty" data-i18n-key="sceneGraph.status.loadingDefaultPlan">Loading default reference plan...</div>
         <div id="annotation-board" class="scene-board" hidden>
           <img id="annotation-original-image" class="scene-original-image annotation-original-image" alt="Reference plan" />
           <div id="annotation-overlay-host" class="scene-graph-overlay"></div>
@@ -4290,13 +5089,17 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     </div>
   `;
   shell.statusStatusHost.innerHTML = `
-    <div id="annotation-status-proxy" class="desktop-shell-inline-status">Waiting for a reference image.</div>
-    <div id="annotation-graph-status-proxy" class="desktop-shell-inline-status">Convert 后会在这里显示 graph 结果。</div>
+    <div id="annotation-status-proxy" class="desktop-shell-inline-status" data-i18n-key="sceneGraph.status.waitingReferenceImage">Waiting for a reference image.</div>
+    <div id="annotation-graph-status-proxy" class="desktop-shell-inline-status" data-i18n-key="sceneGraph.status.graphPlaceholder">Road graph results appear here automatically.</div>
   `;
-  shell.setStatusSummary("Annotation ready.");
+  shell.setStatusSummary({ key: "sceneGraph.status.annotationReady" });
+  shell.setBottomOpen(true);
+  applyViewerTranslations(root, loadViewerLanguage());
 
   const backButton = requireElement<HTMLButtonElement>(root, "#scene-page-back");
   const planSelect = requireElement<HTMLSelectElement>(root, "#annotation-plan-select");
+  const scenarioSelect = requireElement<HTMLSelectElement>(root, "#annotation-scenario-select");
+  const scenarioSelectData = requireElement<HTMLSelectElement>(root, "#annotation-scenario-select-data");
   const imageInput = requireElement<HTMLInputElement>(root, "#annotation-image-input");
   const imageResetButton = requireElement<HTMLButtonElement>(root, "#annotation-image-reset");
   const showOriginalInput = requireElement<HTMLInputElement>(root, "#annotation-show-original");
@@ -4313,6 +5116,7 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
   const pixelsPerMeterInput = requireElement<HTMLInputElement>(root, "#annotation-pixels-per-meter");
   const roundaboutRadiusInput = requireElement<HTMLInputElement>(root, "#annotation-roundabout-radius");
   const finishCenterlineButton = requireElement<HTMLButtonElement>(root, "#annotation-finish-centerline");
+  const autoSplitRegionsButton = requireElement<HTMLButtonElement>(root, "#annotation-auto-split-regions");
   const selectAllRoadsButton = requireElement<HTMLButtonElement>(root, "#annotation-select-all-roads");
   const undoPointButton = requireElement<HTMLButtonElement>(root, "#annotation-undo-point");
   const deleteSelectedButton = requireElement<HTMLButtonElement>(root, "#annotation-delete-selected");
@@ -4345,6 +5149,13 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
 
   const state = {
     referencePlans: [FALLBACK_REFERENCE_PLAN] as ReferencePlan[],
+    scenarioDesigns: [] as ScenarioDesign[],
+    selectedScenarioId: "",
+    scenarioDesignsError: "",
+    isScenarioDesignCatalogLoading: true,
+    isScenarioDesignAnnotationLoading: false,
+    isDerivingRegions: false,
+    derivedRegionsStale: false,
     annotation: createEmptyAnnotation(),
     draftCenterline: [] as AnnotationPoint[],
     selectedTool: "select" as Tool,
@@ -4367,7 +5178,7 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     overlayOpacity: 0.88,
     defaultRoundaboutRadiusPx: DEFAULT_ROUNDABOUT_RADIUS_PX,
     isReferenceImageLoading: true,
-    referenceImageLoadingMessage: "Loading default reference plan...",
+    referenceImageLoadingMessage: DEFAULT_REFERENCE_IMAGE_LOADING_MESSAGE,
     previewResize: null as null | {
       pointerId: number;
       centerlineId: string;
@@ -4392,11 +5203,134 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     snapToRoadEnabled: true,
   };
 
-  function clearGraphResult(reason: string): void {
+  let cleanAnnotationSnapshot = comparableAnnotationSnapshot(state.annotation);
+  let autoGraphTimer: number | null = null;
+  let autoGraphInFlight = false;
+  let autoGraphPending = false;
+
+  function comparableAnnotationSnapshot(annotation: ReferenceAnnotation): string {
+    const snapshot = cloneAnnotation(annotation);
+    for (const centerline of snapshot.centerlines) {
+      syncCenterlineDerivedFields(centerline);
+    }
+    return stringifyAnnotation(snapshot);
+  }
+
+  function updateCleanAnnotationSnapshot(): void {
+    cleanAnnotationSnapshot = comparableAnnotationSnapshot(state.annotation);
+  }
+
+  function isAnnotationDirty(): boolean {
+    return comparableAnnotationSnapshot(state.annotation) !== cleanAnnotationSnapshot;
+  }
+
+  function canConvertGraph(): boolean {
+    return state.annotation.centerlines.length > 0;
+  }
+
+  function scheduleAutoGraphConversion(delayMs = 900): void {
+    if (!canConvertGraph()) {
+      return;
+    }
+    if (autoGraphInFlight) {
+      autoGraphPending = true;
+      return;
+    }
+    if (autoGraphTimer !== null) {
+      window.clearTimeout(autoGraphTimer);
+    }
+    autoGraphTimer = window.setTimeout(() => {
+      autoGraphTimer = null;
+      void runAutoGraphConversion();
+    }, delayMs);
+  }
+
+  async function runAutoGraphConversion(): Promise<void> {
+    if (!canConvertGraph()) {
+      return;
+    }
+    if (autoGraphInFlight) {
+      autoGraphPending = true;
+      return;
+    }
+    autoGraphInFlight = true;
+    autoGraphPending = false;
+    renderAll();
+    try {
+      await convertAnnotationToGraph({ automatic: true });
+    } catch (error) {
+      setStatus(graphStatusEl, error instanceof Error ? error.message : "Failed to convert annotation.", "error");
+    } finally {
+      autoGraphInFlight = false;
+      renderAll();
+      if (autoGraphPending) {
+        scheduleAutoGraphConversion();
+      }
+    }
+  }
+
+  async function deriveBuildingRegions(): Promise<void> {
+    if (state.isDerivingRegions) {
+      return;
+    }
+    if (!state.annotation.regions.some((region) => region.region_role === "scene_region")) {
+      setStatus(statusEl, "Draw a Scene Region first. Roads and design surfaces will cut building regions from it.", "neutral");
+      setTool("scene_region");
+      return;
+    }
+    state.isDerivingRegions = true;
+    autoSplitRegionsButton.disabled = true;
+    setStatus(statusEl, "Auto splitting building regions from scene boundary...", "neutral");
+    try {
+      const response = await fetch(`${API_BASE}/api/reference-annotations/derive-regions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          annotation: state.annotation,
+          options: { min_area_m2: 12 },
+        }),
+      });
+      if (!response.ok) {
+        const detail = await readApiErrorDetail(response);
+        throw new Error(detail || `Auto split failed with ${response.status}.`);
+      }
+      const payload = await response.json() as {
+        derived_regions?: unknown[];
+        summary?: Record<string, unknown>;
+        warnings?: unknown[];
+      };
+      state.annotation.derived_regions = Array.isArray(payload.derived_regions)
+        ? payload.derived_regions.map((item, index) => normalizeRegion(item, index, "building_region"))
+        : [];
+      state.derivedRegionsStale = false;
+      state.selection = state.annotation.derived_regions[0]
+        ? { kind: "region", id: state.annotation.derived_regions[0].id }
+        : state.selection;
+      const count = state.annotation.derived_regions.length;
+      const warningText = Array.isArray(payload.warnings) && payload.warnings.length
+        ? ` ${payload.warnings.map((item) => String(item)).join(" ")}`
+        : "";
+      clearGraphResult("Derived building regions changed. Road graph will refresh automatically.");
+      setStatus(statusEl, `Auto split produced ${count} building region${count === 1 ? "" : "s"}.${warningText}`, count > 0 ? "success" : "neutral");
+      renderAll();
+    } catch (error) {
+      setStatus(statusEl, error instanceof Error ? error.message : "Auto split regions failed.", "error");
+    } finally {
+      state.isDerivingRegions = false;
+      autoSplitRegionsButton.disabled = false;
+      renderAll();
+    }
+  }
+
+  function clearGraphResult(reason: string, options: { autoConvert?: boolean } = {}): void {
     state.graphResult = null;
     graphTextarea.value = "";
     graphSummaryEl.innerHTML = buildGraphSummaryMarkup(null);
-    setStatus(graphStatusEl, reason, "neutral");
+    const shouldAutoConvert = options.autoConvert ?? true;
+    setStatus(graphStatusEl, shouldAutoConvert && canConvertGraph() ? "Road graph will update automatically after edits." : reason, "neutral");
+    if (shouldAutoConvert) {
+      scheduleAutoGraphConversion();
+    }
   }
 
   function selectedCenterline(): AnnotatedCenterline | null {
@@ -4431,27 +5365,68 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     }
     const points = state.drag.points;
     if (points.length < 3) {
-      setStatus(statusEl, "Functional zone needs at least 3 points. Keep clicking to add vertices.", "neutral");
+      setStatus(statusEl, "Functional region needs at least 3 points. Keep clicking to add vertices.", "neutral");
       return;
     }
-    const id = nextFeatureId(state.annotation, "functional_zone");
-    state.annotation.functional_zones.push({
+    const id = nextFeatureId(state.annotation, "functional_region");
+    state.annotation.regions.push({
       id,
-      label: id,
+      label: "Functional Region",
+      region_role: "functional_zone",
       kind: "plaza",
       points: points.map((p) => ({ ...p })),
-      furniture_instances: [],
+      derived: false,
+      material: { preset: "functional_region" },
     });
-    state.selection = { kind: "functional_zone", id };
+    state.selection = { kind: "region", id };
     state.selectedStripId = null;
     clearFurniturePlacement();
     state.drag = null;
-    markAnnotationChanged(`Added functional zone ${id}.`);
+    markAnnotationChanged(`Added functional region ${id}.`);
+    renderAll();
+  }
+
+  function commitRegionDraft(): void {
+    if (state.drag?.kind !== "region_draw" && state.drag?.kind !== "region_box_draw") {
+      return;
+    }
+    const points = state.drag.kind === "region_box_draw"
+      ? regionBoxPoints(state.drag.startPoint, state.drag.currentPoint)
+      : state.drag.points;
+    if (points.length < 3) {
+      setStatus(statusEl, "Scene region needs an area. Drag a box on the reference plan.", "neutral");
+      return;
+    }
+    const boundsWidth = Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x));
+    const boundsHeight = Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y));
+    if (Math.max(boundsWidth, boundsHeight) < 6) {
+      state.drag = null;
+      setStatus(statusEl, "Scene region box was too small. Drag to define the full scene boundary.", "neutral");
+      renderAll();
+      return;
+    }
+    const role = state.drag.regionRole;
+    const id = nextFeatureId(state.annotation, role === "scene_region" ? "scene_region" : "region");
+    state.annotation.regions.push({
+      id,
+      label: role === "scene_region" ? "Scene Region" : id,
+      region_role: role,
+      points: points.map((p) => ({ ...p })),
+      derived: false,
+      material: role === "scene_region" ? { preset: "scene_region_boundary" } : {},
+    });
+    state.selection = { kind: "region", id };
+    state.selectedStripId = null;
+    clearFurniturePlacement();
+    state.drag = null;
+    state.derivedRegionsStale = true;
+    markAnnotationChanged(role === "scene_region" ? "Added scene region. Auto Split can derive building regions from it." : `Added ${regionRoleLabel(role)} ${id}.`);
     renderAll();
   }
 
   function markAnnotationChanged(statusMessage?: string): void {
-    clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+    state.derivedRegionsStale = true;
+    clearGraphResult("Annotation changed. Road graph will refresh automatically.");
     if (statusMessage) {
       setStatus(statusEl, statusMessage, "success");
     }
@@ -4477,9 +5452,23 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     boardEl.hidden = !hasImage;
     stageEmptyEl.hidden = hasImage;
     if (!hasImage) {
-      stageEmptyEl.textContent = state.isReferenceImageLoading
-        ? state.referenceImageLoadingMessage
-        : "Load a reference plan image to start annotating.";
+      const loadingDefaultPlan = state.referenceImageLoadingMessage === DEFAULT_REFERENCE_IMAGE_LOADING_MESSAGE;
+      const i18nKey = state.isReferenceImageLoading && loadingDefaultPlan
+        ? "sceneGraph.status.loadingDefaultPlan"
+        : !state.isReferenceImageLoading
+          ? "sceneGraph.status.loadReferenceImage"
+          : null;
+      if (i18nKey) {
+        stageEmptyEl.dataset.i18nKey = i18nKey;
+        stageEmptyEl.textContent = translateViewerKey(loadViewerLanguage(), i18nKey) ?? (
+          state.isReferenceImageLoading
+            ? DEFAULT_REFERENCE_IMAGE_LOADING_MESSAGE
+            : "Load a reference plan image to start annotating."
+        );
+      } else {
+        stageEmptyEl.removeAttribute("data-i18n-key");
+        stageEmptyEl.textContent = state.referenceImageLoadingMessage;
+      }
     }
     originalImageEl.hidden = !hasImage || !state.showOriginal;
     originalImageEl.style.opacity = String(state.originalOpacity);
@@ -4498,6 +5487,11 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     for (const button of toolButtons) {
       button.dataset.active = button.dataset.tool === state.selectedTool ? "true" : "false";
     }
+    autoSplitRegionsButton.disabled = state.isDerivingRegions;
+    autoSplitRegionsButton.dataset.active = state.isDerivingRegions ? "true" : "false";
+    autoSplitRegionsButton.title = state.derivedRegionsStale
+      ? "Building regions are stale. Auto Split will recompute from scene region and roads."
+      : "Auto split building regions from the scene region.";
   }
 
   function mergeReferencePlans(items: ReferencePlan[]): void {
@@ -4526,6 +5520,45 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     planSelect.value = resolvedPlanId;
   }
 
+  function scenarioDesignSelects(): HTMLSelectElement[] {
+    return [scenarioSelect, scenarioSelectData];
+  }
+
+  function renderScenarioDesignOptions(preferredScenarioId?: string): void {
+    const loading = state.isScenarioDesignCatalogLoading;
+    const unavailable = Boolean(state.scenarioDesignsError);
+    const placeholder = loading
+      ? "Loading scenario designs..."
+      : unavailable
+        ? "Scenario designs unavailable"
+        : "Choose scenario design / 选择方案";
+    const options = [
+      `<option value="">${escapeHtml(placeholder)}</option>`,
+      ...state.scenarioDesigns.map(
+        (item) => {
+          const enabled = item.enabled !== false;
+          const label = enabled
+            ? (item.title_zh || item.scenario_id)
+            : `${item.title_zh || item.scenario_id}（已忽略）`;
+          return `<option value="${escapeHtml(item.scenario_id)}" ${enabled ? "" : "disabled"}>${escapeHtml(label)}</option>`;
+        },
+      ),
+    ];
+    const resolvedScenarioId =
+      (preferredScenarioId && state.scenarioDesigns.some((item) => item.scenario_id === preferredScenarioId && item.enabled !== false)
+        ? preferredScenarioId
+        : "") ||
+      (state.selectedScenarioId && state.scenarioDesigns.some((item) => item.scenario_id === state.selectedScenarioId && item.enabled !== false)
+        ? state.selectedScenarioId
+        : "");
+    for (const selectEl of scenarioDesignSelects()) {
+      selectEl.innerHTML = options.join("");
+      selectEl.value = resolvedScenarioId;
+      selectEl.disabled = loading || unavailable || state.isScenarioDesignAnnotationLoading || state.scenarioDesigns.length === 0;
+      selectEl.title = unavailable ? state.scenarioDesignsError : "";
+    }
+  }
+
   function renderInspector(): void {
     inspectorEl.innerHTML = buildInspectorMarkup(
       state.annotation,
@@ -4534,6 +5567,8 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
       state.pendingFurnitureKind,
       Boolean(state.furniturePlacement),
     );
+    inspectorEl.dataset.i18nScope = "literal";
+    applyViewerTranslations(inspectorEl, loadViewerLanguage());
     const selectedFeature = getSelectedFeature(state.annotation, state.selection);
     if (!selectedFeature || !state.selection) {
       return;
@@ -4589,6 +5624,53 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
       }
       return;
     }
+    if (state.selection.kind === "region") {
+      const region = selectedFeature as AnnotatedRegion;
+      const idInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-unified-region-id");
+      const labelInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-unified-region-label");
+      const roleSelect = inspectorEl.querySelector<HTMLSelectElement>("#annotation-unified-region-role");
+      const updateRegion = (): void => {
+        if (!region.derived && idInput) {
+          const nextId = idInput.value.trim();
+          if (nextId) {
+            region.id = nextId;
+            state.selection = { kind: "region", id: nextId };
+          }
+        }
+        if (!region.derived && labelInput) {
+          region.label = labelInput.value.trim() || region.id;
+        }
+        if (!region.derived && roleSelect && isRegionRole(roleSelect.value)) {
+          region.region_role = roleSelect.value;
+        }
+        markAnnotationChanged();
+        renderAll();
+      };
+      for (const input of [idInput, labelInput, roleSelect]) {
+        input?.addEventListener("input", updateRegion, { signal });
+        input?.addEventListener("change", updateRegion, { signal });
+      }
+      const materializeButton = inspectorEl.querySelector<HTMLButtonElement>("[data-action='materialize-derived-region']");
+      materializeButton?.addEventListener("click", () => {
+        const derived = (state.annotation.derived_regions ?? []).find((item) => item.id === region.id);
+        if (!derived) {
+          return;
+        }
+        const id = nextFeatureId(state.annotation, "building_region");
+        state.annotation.regions.push({
+          ...derived,
+          id,
+          label: derived.label || id,
+          region_role: "building_region",
+          derived: false,
+          points: derived.points.map((point) => ({ ...point })),
+        });
+        state.selection = { kind: "region", id };
+        markAnnotationChanged(`Materialized ${derived.id} as editable building region ${id}.`);
+        renderAll();
+      }, { signal });
+      return;
+    }
     if (state.selection.kind === "functional_zone") {
       const zone = selectedFeature as AnnotatedFunctionalZone;
       const zoneIdInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-zone-id");
@@ -4617,6 +5699,121 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
       for (const input of [zoneIdInput, zoneLabelInput, zoneKindSelect]) {
         input?.addEventListener("input", updateZone, { signal });
         input?.addEventListener("change", updateZone, { signal });
+      }
+      return;
+    }
+    if (state.selection.kind === "surface_annotation") {
+      const surface = selectedFeature as AnnotatedSurfaceAnnotation;
+      const idInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-surface-id");
+      const labelInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-surface-label");
+      const kindSelect = inspectorEl.querySelector<HTMLSelectElement>("#annotation-surface-kind");
+      const roleSelect = inspectorEl.querySelector<HTMLSelectElement>("#annotation-surface-role");
+      const centerlineSelect = inspectorEl.querySelector<HTMLSelectElement>("#annotation-surface-centerline");
+      const stationStartInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-surface-station-start");
+      const stationEndInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-surface-station-end");
+      const lateralStartInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-surface-lateral-start");
+      const lateralEndInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-surface-lateral-end");
+      const materialPresetInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-surface-material-preset");
+      const colorHexInput = inspectorEl.querySelector<HTMLInputElement>("#annotation-surface-color-hex");
+
+      const normalizeSurfaceRange = (): void => {
+        const centerline = state.annotation.centerlines.find((item) => item.id === surface.centerline_id) ?? null;
+        const maxStation = centerline ? centerlineLengthM(centerline, state.annotation.pixels_per_meter) : Math.max(surface.station_end_m, 0.5);
+        surface.station_start_m = clamp(surface.station_start_m, 0, Math.max(maxStation - 0.05, 0));
+        surface.station_end_m = clamp(surface.station_end_m, surface.station_start_m + 0.05, maxStation);
+        if (surface.lateral_end_m <= surface.lateral_start_m + 0.05) {
+          surface.lateral_end_m = surface.lateral_start_m + 0.05;
+        }
+      };
+
+      const updateSurface = (): void => {
+        if (idInput) {
+          const nextId = idInput.value.trim();
+          if (nextId) {
+            surface.id = nextId;
+            state.selection = { kind: "surface_annotation", id: nextId };
+          }
+        }
+        if (labelInput) {
+          surface.label = labelInput.value.trim() || surface.id;
+        }
+        if (kindSelect) {
+          const nextKind = kindSelect.value;
+          if (isSurfaceAnnotationKind(nextKind)) {
+            const kindChanged = surface.kind !== nextKind;
+            surface.kind = nextKind;
+            if (kindChanged) {
+              surface.surface_role = DEFAULT_SURFACE_ROLE_BY_KIND[nextKind];
+              surface.material = { ...surface.material, preset: DEFAULT_SURFACE_MATERIAL_BY_KIND[nextKind] };
+            }
+          }
+        }
+        if (roleSelect && isSurfaceRole(roleSelect.value)) {
+          surface.surface_role = roleSelect.value;
+        }
+        if (centerlineSelect && state.annotation.centerlines.some((item) => item.id === centerlineSelect.value)) {
+          surface.centerline_id = centerlineSelect.value;
+        }
+        if (stationStartInput) {
+          surface.station_start_m = Math.max(0, asNumber(stationStartInput.value, surface.station_start_m));
+        }
+        if (stationEndInput) {
+          surface.station_end_m = Math.max(0, asNumber(stationEndInput.value, surface.station_end_m));
+        }
+        if (lateralStartInput) {
+          surface.lateral_start_m = asNumber(lateralStartInput.value, surface.lateral_start_m);
+        }
+        if (lateralEndInput) {
+          surface.lateral_end_m = asNumber(lateralEndInput.value, surface.lateral_end_m);
+        }
+        if (materialPresetInput) {
+          surface.material = { ...surface.material, preset: materialPresetInput.value.trim() || surface.material.preset };
+        }
+        if (colorHexInput) {
+          const nextColor = colorHexInput.value.trim();
+          surface.material = nextColor
+            ? { ...surface.material, color_hex: nextColor.startsWith("#") ? nextColor : `#${nextColor}` }
+            : { preset: surface.material.preset, texture_key: surface.material.texture_key };
+        }
+        normalizeSurfaceRange();
+        markAnnotationChanged();
+        renderAll();
+      };
+
+      for (const input of [
+        idInput,
+        labelInput,
+        kindSelect,
+        roleSelect,
+        centerlineSelect,
+        stationStartInput,
+        stationEndInput,
+        lateralStartInput,
+        lateralEndInput,
+        materialPresetInput,
+        colorHexInput,
+      ]) {
+        input?.addEventListener("input", updateSurface, { signal });
+        input?.addEventListener("change", updateSurface, { signal });
+      }
+
+      for (const button of Array.from(inspectorEl.querySelectorAll<HTMLButtonElement>("[data-action='apply-surface-preset']"))) {
+        button.addEventListener("click", () => {
+          const nextKind = button.dataset.surfaceKind ?? "";
+          if (!isSurfaceAnnotationKind(nextKind)) {
+            return;
+          }
+          surface.kind = nextKind;
+          surface.surface_role = DEFAULT_SURFACE_ROLE_BY_KIND[nextKind];
+          surface.material = {
+            preset: DEFAULT_SURFACE_MATERIAL_BY_KIND[nextKind],
+            ...(surface.material.color_hex ? { color_hex: surface.material.color_hex } : {}),
+            ...(surface.material.texture_key ? { texture_key: surface.material.texture_key } : {}),
+          };
+          normalizeSurfaceRange();
+          markAnnotationChanged(`Applied ${SURFACE_ANNOTATION_KIND_LABELS[nextKind]} preset.`);
+          renderAll();
+        }, { signal });
       }
       return;
     }
@@ -5117,6 +6314,7 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
       state.crossDraft,
       state.drag?.kind === "building_region_draw" ? state.drag : null,
       state.drag?.kind === "functional_zone_draw" ? state.drag : null,
+      state.drag?.kind === "region_draw" || state.drag?.kind === "region_box_draw" ? state.drag : null,
     );
     updateStageVisibility();
   }
@@ -5146,8 +6344,9 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     imageMetaEl.textContent = showInlineLoading
       ? state.referenceImageLoadingMessage
       : state.currentImageUrl
-        ? `${state.annotation.plan_id || "custom"} · ${state.annotation.image_width_px} × ${state.annotation.image_height_px}px · ${state.annotation.pixels_per_meter.toFixed(1)} px/m · ${state.annotation.centerlines.length} roads · ${state.annotation.centerlines.reduce((sum, item) => sum + item.cross_section_strips.length, 0)} strips · ${state.annotation.centerlines.reduce((sum, item) => sum + item.street_furniture_instances.length, 0)} furniture · ${state.annotation.building_regions.length} building regions`
+        ? `${state.annotation.plan_id || "custom"} · ${state.annotation.image_width_px} × ${state.annotation.image_height_px}px · ${state.annotation.pixels_per_meter.toFixed(1)} px/m · ${state.annotation.centerlines.length} roads · ${state.annotation.centerlines.reduce((sum, item) => sum + item.cross_section_strips.length, 0)} strips · ${state.annotation.centerlines.reduce((sum, item) => sum + item.street_furniture_instances.length, 0)} furniture · ${state.annotation.regions.length} regions · ${(state.annotation.derived_regions ?? []).length} auto building regions · ${state.annotation.surface_annotations.length} design surfaces · ${state.annotation.station_strip_patches.length} strip patches`
         : "选择参考 plan 或导入 PNG 后，就可以在图上开始标注。";
+    applyViewerTranslations(shell.rightRail, loadViewerLanguage());
     finishCenterlineButton.disabled = state.draftCenterline.length < 2;
     selectAllRoadsButton.disabled = state.annotation.centerlines.length === 0;
     selectAllRoadsButton.dataset.active = state.selection?.kind === "road_collection" ? "true" : "false";
@@ -5162,6 +6361,7 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
       state.selection.kind === "derived_junction" ||
       Boolean(selectedJunction && selectedJunction.source_mode === "explicit");
     imageResetButton.disabled = !state.currentImageUrl;
+    convertGraphButton.disabled = !canConvertGraph() || autoGraphInFlight;
     downloadGraphButton.disabled = !state.graphResult;
   }
 
@@ -5184,9 +6384,13 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     } else if (tool === "centerline") {
       setStatus(statusEl, "Centerline Tool: draw approach roads only. Use Branch Tool or Cross Tool to create intersections explicitly.", "neutral");
     } else if (tool === "building_region") {
-      setStatus(statusEl, "Building Region Tool: drag on the canvas to draw a rotatable building-generation region.", "neutral");
+      setStatus(statusEl, "Building Region Tool: advanced legacy rectangle. Prefer Scene Region + Auto Split for normal scene design.", "neutral");
+    } else if (tool === "scene_region") {
+      setStatus(statusEl, "Scene Region Tool: drag a box around the maximum scene boundary. Auto Split derives building regions from roads inside it.", "neutral");
     } else if (tool === "functional_zone") {
-      setStatus(statusEl, "Functional Zone Tool: click to add polygon vertices, double-click or press Enter to finish.", "neutral");
+      setStatus(statusEl, "Functional Region Tool: click polygon vertices for plazas, gardens, and other semantic open spaces.", "neutral");
+    } else if (tool === "surface_annotation") {
+      setStatus(statusEl, "Design Surface Tool: click a road or strip to add a station-bound surface patch, then tune it in Inspector.", "neutral");
     } else if (tool === "tree") {
       setStatus(statusEl, "Tree Tool: click near a road to place a tree on the nearest furnishing strip.", "neutral");
     } else if (tool === "lamp") {
@@ -5312,8 +6516,10 @@ function featureHitFromTarget(target: EventTarget | null): Selection {
     featureKind === "roundabout" ||
     featureKind === "control_point" ||
     featureKind === "derived_junction" ||
+    featureKind === "region" ||
     featureKind === "building_region" ||
-    featureKind === "functional_zone"
+    featureKind === "functional_zone" ||
+    featureKind === "surface_annotation"
   ) {
     return { kind: featureKind, id: featureId };
   }
@@ -5351,10 +6557,13 @@ function buildingRegionHandleFromTarget(
     options: {
       planId: string;
       preserveFeatures: boolean;
+      preserveCurrentOnError?: boolean;
     },
   ): Promise<void> {
-    const { planId, preserveFeatures } = options;
+    const { planId, preserveFeatures, preserveCurrentOnError = false } = options;
     const resolvedImageUrl = resolveApiUrl(imageUrl);
+    const previousImageUrl = state.currentImageUrl;
+    const previousImageSrc = originalImageEl.getAttribute("src") || "";
     state.isReferenceImageLoading = true;
     state.referenceImageLoadingMessage = `Loading reference image: ${planId || "custom"}...`;
     state.currentImageUrl = resolvedImageUrl;
@@ -5388,11 +6597,21 @@ function buildingRegionHandleFromTarget(
       clearBranchDraft();
       clearCrossDraft();
       clearFurniturePlacement();
-      clearGraphResult("Reference image updated. Convert again after annotating.");
+      clearGraphResult("Reference image updated. Road graph will be generated after annotation.");
       setStatus(statusEl, `Loaded reference image: ${planId || "custom"}.`, "success");
     } catch (error) {
-      state.currentImageUrl = "";
-      originalImageEl.removeAttribute("src");
+      if (preserveCurrentOnError) {
+        state.currentImageUrl = previousImageUrl;
+        const restoredSrc = previousImageSrc || previousImageUrl;
+        if (restoredSrc) {
+          originalImageEl.src = restoredSrc;
+        } else {
+          originalImageEl.removeAttribute("src");
+        }
+      } else {
+        state.currentImageUrl = "";
+        originalImageEl.removeAttribute("src");
+      }
       throw error;
     } finally {
       state.isReferenceImageLoading = false;
@@ -5400,15 +6619,87 @@ function buildingRegionHandleFromTarget(
     }
   }
 
+  function currentReferenceImagePathForAnnotation(): string {
+    if (!state.currentImageUrl) {
+      return "";
+    }
+    if (state.currentImageUrl.startsWith(API_BASE)) {
+      return state.currentImageUrl.slice(API_BASE.length) || state.currentImageUrl;
+    }
+    return state.currentImageUrl;
+  }
+
+  function bindAnnotationToCurrentReferenceImage(fallbackImagePath = ""): boolean {
+    const width = originalImageEl.naturalWidth;
+    const height = originalImageEl.naturalHeight;
+    if (!state.currentImageUrl || width <= 0 || height <= 0) {
+      return false;
+    }
+    state.annotation.image_width_px = width;
+    state.annotation.image_height_px = height;
+    state.annotation.image_path = fallbackImagePath || currentReferenceImagePathForAnnotation();
+    return true;
+  }
+
+  async function reconcileImportedAnnotationReferenceImage(
+    actionPast: "Imported" | "Applied",
+    fallbackImagePath = "",
+  ): Promise<void> {
+    const requestedImagePath = state.annotation.image_path;
+    if (requestedImagePath) {
+      try {
+        await loadImageFromUrl(requestedImagePath, {
+          planId: state.annotation.plan_id,
+          preserveFeatures: true,
+          preserveCurrentOnError: true,
+        });
+        clearGraphResult(`${actionPast} annotation JSON. Road graph will refresh automatically.`);
+        setStatus(statusEl, `${actionPast} annotation JSON.`, "success");
+        return;
+      } catch {
+        if (bindAnnotationToCurrentReferenceImage(fallbackImagePath)) {
+          clearGraphResult(`${actionPast} annotation JSON. Keeping current reference image.`);
+          setStatus(
+            statusEl,
+            `${actionPast} annotation JSON. Kept the current reference image because ${requestedImagePath} could not be loaded.`,
+            "neutral",
+          );
+          renderAll();
+          return;
+        }
+        clearGraphResult(`${actionPast} annotation JSON. Load an image to keep editing against the reference.`);
+        setStatus(statusEl, `${actionPast} annotation JSON, but its image path could not be loaded.`, "neutral");
+        renderAll();
+        return;
+      }
+    }
+
+    if (bindAnnotationToCurrentReferenceImage(fallbackImagePath)) {
+      clearGraphResult(`${actionPast} annotation JSON. Keeping current reference image.`);
+      setStatus(statusEl, `${actionPast} annotation JSON. Kept the current reference image.`, "success");
+      renderAll();
+      return;
+    }
+    clearGraphResult(`${actionPast} annotation JSON. Load an image to keep editing against the reference.`);
+    setStatus(statusEl, `${actionPast} annotation JSON. Load an image to keep editing against the reference.`, "success");
+    renderAll();
+  }
+
   async function applyReferencePlan(planId: string): Promise<void> {
     const plan = state.referencePlans.find((item) => item.plan_id === planId);
     if (!plan?.image_url) {
       state.annotation.plan_id = planId;
+      state.selectedScenarioId = "";
+      updateCleanAnnotationSnapshot();
+      renderScenarioDesignOptions();
       setStatus(statusEl, `Selected reference plan ${planId}, but no image URL was provided.`, "neutral");
       renderAll();
       return;
     }
     await loadImageFromUrl(plan.image_url, { planId: plan.plan_id, preserveFeatures: false });
+    state.selectedScenarioId = "";
+    updateCleanAnnotationSnapshot();
+    renderScenarioDesignOptions();
   }
 
   async function loadReferencePlans(options: { silent?: boolean } = {}): Promise<void> {
@@ -5439,6 +6730,117 @@ function buildingRegionHandleFromTarget(
       if (!silent) {
         state.isReferenceImageLoading = false;
       }
+    }
+  }
+
+  async function loadScenarioDesigns(options: { silent?: boolean } = {}): Promise<void> {
+    const { silent = false } = options;
+    state.isScenarioDesignCatalogLoading = true;
+    state.scenarioDesignsError = "";
+    renderScenarioDesignOptions();
+    if (!silent) {
+      setStatus(statusEl, "Loading scenario designs...", "neutral");
+    }
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(`${API_BASE}/api/scenario-designs`, { signal: controller.signal });
+      if (!response.ok) {
+        const detail = await readApiErrorDetail(response);
+        throw new Error(detail || `Failed to load scenario designs (${response.status}).`);
+      }
+      const catalogPayload = (await response.json()) as ScenarioDesignCatalogPayload;
+      state.scenarioDesigns = Array.isArray(catalogPayload.items) ? catalogPayload.items : [];
+      state.scenarioDesignsError = "";
+      renderScenarioDesignOptions(state.selectedScenarioId);
+    } catch (error) {
+      state.scenarioDesigns = [];
+      state.scenarioDesignsError = error instanceof Error ? error.message : "Failed to load scenario designs.";
+      renderScenarioDesignOptions();
+      if (!silent) {
+        setStatus(statusEl, state.scenarioDesignsError, "error");
+      }
+    } finally {
+      window.clearTimeout(timeoutId);
+      state.isScenarioDesignCatalogLoading = false;
+      renderScenarioDesignOptions(state.selectedScenarioId);
+    }
+  }
+
+  function clearAnnotationEditingState(): void {
+    state.selection = null;
+    state.selectedStripId = null;
+    state.draftCenterline = [];
+    state.drag = null;
+    clearBranchDraft();
+    clearCrossDraft();
+    clearFurniturePlacement();
+  }
+
+  async function applyScenarioDesignAnnotation(scenarioId: string): Promise<void> {
+    const scenario = state.scenarioDesigns.find((item) => item.scenario_id === scenarioId);
+    const label = scenario?.title_zh || scenarioId;
+    if (scenario?.enabled === false) {
+      throw new Error(scenario.excluded_reason_zh || "This scenario design is excluded from the current default workflow.");
+    }
+    state.isScenarioDesignAnnotationLoading = true;
+    renderScenarioDesignOptions(scenarioId);
+    setStatus(statusEl, `Loading scenario design: ${label}...`, "neutral");
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/scenario-designs/${encodeURIComponent(scenarioId)}/reference-annotation?graph_template_id=hkust_gz_gate`,
+        { signal: controller.signal },
+      );
+      if (!response.ok) {
+        const detail = await readApiErrorDetail(response);
+        throw new Error(detail || `Failed to load scenario design annotation (${response.status}).`);
+      }
+      const payload = (await response.json()) as ScenarioReferenceAnnotationPayload;
+      const annotation = normalizeAnnotation(payload.annotation);
+      const fallbackImagePath = state.annotation.image_path;
+      state.annotation = annotation;
+      state.selectedScenarioId = scenarioId;
+      clearAnnotationEditingState();
+      clearGraphResult("Scenario design annotation loaded. Road graph will refresh automatically.");
+      if (annotation.image_path) {
+        try {
+          await loadImageFromUrl(annotation.image_path, {
+            planId: annotation.plan_id,
+            preserveFeatures: true,
+            preserveCurrentOnError: true,
+          });
+        } catch {
+          if (bindAnnotationToCurrentReferenceImage(fallbackImagePath)) {
+            clearGraphResult("Scenario design annotation loaded. Keeping current reference image.");
+            setStatus(statusEl, "Scenario annotation loaded. Kept the current reference image.", "neutral");
+          } else {
+            clearGraphResult("Scenario annotation loaded, but its reference image could not be reopened.");
+            setStatus(statusEl, "Scenario annotation loaded, but its reference image could not be reopened.", "neutral");
+          }
+          renderAll();
+        }
+      } else if (bindAnnotationToCurrentReferenceImage(fallbackImagePath)) {
+        clearGraphResult("Scenario design annotation loaded. Keeping current reference image.");
+        setStatus(statusEl, "Scenario annotation loaded. Kept the current reference image.", "success");
+        renderAll();
+      } else {
+        renderAll();
+      }
+      updateCleanAnnotationSnapshot();
+      renderReferencePlanOptions(annotation.plan_id);
+      renderScenarioDesignOptions(scenarioId);
+      if (state.annotation.regions.some((region) => region.region_role === "scene_region")) {
+        await deriveBuildingRegions();
+        updateCleanAnnotationSnapshot();
+      } else {
+        setStatus(statusEl, `Loaded scenario design: ${label}.`, "success");
+      }
+    } finally {
+      window.clearTimeout(timeoutId);
+      state.isScenarioDesignAnnotationLoading = false;
+      renderScenarioDesignOptions(state.selectedScenarioId);
     }
   }
 
@@ -5523,15 +6925,17 @@ function buildingRegionHandleFromTarget(
     state.annotation.junctions = [];
     state.annotation.roundabouts = [];
     state.annotation.control_points = [];
+    state.annotation.regions = [];
+    state.annotation.derived_regions = [];
     state.annotation.building_regions = [];
     state.annotation.functional_zones = [];
-    state.selection = null;
-    state.selectedStripId = null;
-    state.draftCenterline = [];
-    clearBranchDraft();
-    clearCrossDraft();
-    clearFurniturePlacement();
-    clearGraphResult("Annotation reset. Draw new features and convert again.");
+    state.annotation.surface_annotations = [];
+    state.annotation.station_strip_patches = [];
+    state.derivedRegionsStale = false;
+    state.selectedScenarioId = "";
+    clearAnnotationEditingState();
+    clearGraphResult("Annotation reset. Draw new features to generate a road graph.");
+    renderScenarioDesignOptions();
     setStatus(statusEl, "Annotation cleared.", "neutral");
     renderAll();
   }
@@ -5583,18 +6987,30 @@ function buildingRegionHandleFromTarget(
       state.annotation.building_regions = state.annotation.building_regions.filter((item) => item.id !== state.selection?.id);
       state.selection = null;
       setStatus(statusEl, "Deleted building region.", "success");
+    } else if (state.selection.kind === "region") {
+      const selectedId = state.selection.id;
+      const explicitCountBefore = state.annotation.regions.length;
+      state.annotation.regions = state.annotation.regions.filter((item) => item.id !== selectedId);
+      state.annotation.derived_regions = (state.annotation.derived_regions ?? []).filter((item) => item.id !== selectedId);
+      state.selection = null;
+      state.derivedRegionsStale = state.annotation.regions.length !== explicitCountBefore || state.derivedRegionsStale;
+      setStatus(statusEl, "Deleted region.", "success");
     } else if (state.selection.kind === "functional_zone") {
       state.annotation.functional_zones = state.annotation.functional_zones.filter((item) => item.id !== state.selection?.id);
       state.selection = null;
       setStatus(statusEl, "Deleted functional zone.", "success");
+    } else if (state.selection.kind === "surface_annotation") {
+      state.annotation.surface_annotations = state.annotation.surface_annotations.filter((item) => item.id !== state.selection?.id);
+      state.selection = null;
+      setStatus(statusEl, "Deleted design surface.", "success");
     } else if (state.selection.kind === "derived_junction") {
       setStatus(statusEl, "Derived junctions come from shared road vertices. Edit the connected centerlines instead.", "neutral");
     }
-    clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+    clearGraphResult("Annotation changed. Road graph will refresh automatically.");
     renderAll();
   }
 
-  async function convertAnnotationToGraph(): Promise<void> {
+  async function convertAnnotationToGraph(options: { automatic?: boolean } = {}): Promise<void> {
     if (state.annotation.centerlines.length === 0) {
       setStatus(graphStatusEl, "Add at least one centerline before converting.", "error");
       return;
@@ -5604,7 +7020,7 @@ function buildingRegionHandleFromTarget(
       setStatus(graphStatusEl, modelIssues[0].message, "error");
       return;
     }
-    setStatus(graphStatusEl, "Converting annotation to graph...", "neutral");
+    setStatus(graphStatusEl, options.automatic ? "Updating road graph automatically..." : "Converting annotation to graph...", "neutral");
     for (const centerline of state.annotation.centerlines) {
       syncCenterlineDerivedFields(centerline);
     }
@@ -5630,7 +7046,11 @@ function buildingRegionHandleFromTarget(
       annotation: annotationSnapshot,
       summary: {
         ...convertedPayload.summary,
+        region_count: annotationSnapshot.regions.length,
+        derived_region_count: annotationSnapshot.derived_regions?.length ?? 0,
         building_region_count: annotationSnapshot.building_regions.length,
+        surface_annotation_count: annotationSnapshot.surface_annotations.length,
+        station_strip_patch_count: annotationSnapshot.station_strip_patches.length,
       },
     };
     setStatus(graphStatusEl, "Graph conversion complete.", "success");
@@ -5705,6 +7125,74 @@ function buildingRegionHandleFromTarget(
       }
       counter += 1;
     }
+  }
+
+  function inferSurfaceKindFromStrip(stripKind: StripKind | undefined): SurfaceAnnotationKind {
+    if (stripKind === "bus_lane") {
+      return "bus_lane_widening";
+    }
+    if (stripKind === "median" || stripKind === "grass_belt") {
+      return "safety_island";
+    }
+    if (stripKind === "shared_street_surface") {
+      return "shared_surface";
+    }
+    if (stripKind === "colored_pavement") {
+      return "colored_pavement";
+    }
+    return "paving_zone";
+  }
+
+  function createSurfaceAnnotationAtPoint(point: AnnotationPoint, hit: Selection): void {
+    const laneHit = hit?.kind === "lane_element" && hit.elementKind === "road_strip" ? hit : null;
+    const centerlineHitId = hit?.kind === "centerline" ? hit.id : undefined;
+    const centerlineId = laneHit?.centerlineId ?? centerlineHitId ?? findNearestBranchSnapTarget(state.annotation, point, { maxDistancePx: Math.max(BRANCH_SNAP_TOLERANCE_PX, 24) })?.centerlineId ?? "";
+    const centerline = state.annotation.centerlines.find((item) => item.id === centerlineId) ?? null;
+    if (!centerline) {
+      setStatus(statusEl, "Design Surface Tool needs a nearby road or strip to bind the patch.", "error");
+      renderAll();
+      return;
+    }
+    const projection = projectPointOntoPolyline(centerline.points, point);
+    const ppm = Math.max(state.annotation.pixels_per_meter, 1e-6);
+    const centerlineLength = centerlineLengthM(centerline, ppm);
+    const halfLengthM = 9.0;
+    const stationM = projection.stationPx / ppm;
+    const stationStartM = clamp(stationM - halfLengthM, 0, Math.max(centerlineLength - 0.1, 0));
+    const stationEndM = clamp(stationM + halfLengthM, stationStartM + 0.1, centerlineLength);
+    const kind = inferSurfaceKindFromStrip(laneHit?.stripKind);
+    let lateralStartM = projection.lateralPx / ppm - 1.75;
+    let lateralEndM = projection.lateralPx / ppm + 1.75;
+    if (laneHit?.stripId) {
+      const stripOffsets = stripCenterOffsetMeters(centerline);
+      const stripOffset = stripOffsets[laneHit.stripId];
+      if (stripOffset) {
+        lateralStartM = stripOffset.centerOffsetM - stripOffset.widthM * 0.5;
+        lateralEndM = stripOffset.centerOffsetM + stripOffset.widthM * 0.5;
+      }
+    }
+    if (lateralEndM <= lateralStartM + 0.05) {
+      lateralEndM = lateralStartM + 0.05;
+    }
+    const id = nextFeatureId(state.annotation, "surface");
+    const surface: AnnotatedSurfaceAnnotation = {
+      id,
+      label: SURFACE_ANNOTATION_KIND_LABELS[kind],
+      kind,
+      surface_role: DEFAULT_SURFACE_ROLE_BY_KIND[kind],
+      centerline_id: centerline.id,
+      station_start_m: Number(stationStartM.toFixed(3)),
+      station_end_m: Number(stationEndM.toFixed(3)),
+      lateral_start_m: Number(lateralStartM.toFixed(3)),
+      lateral_end_m: Number(lateralEndM.toFixed(3)),
+      material: { preset: DEFAULT_SURFACE_MATERIAL_BY_KIND[kind] },
+    };
+    state.annotation.surface_annotations.push(surface);
+    state.selection = { kind: "surface_annotation", id };
+    state.selectedStripId = laneHit?.stripId ?? null;
+    clearFurniturePlacement();
+    markAnnotationChanged(`Added design surface ${id}.`);
+    renderAll();
   }
 
   function createArmFromProfile(
@@ -6156,7 +7644,7 @@ function buildingRegionHandleFromTarget(
           y_px: point.y,
           yaw_deg: null,
         });
-        clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+        clearGraphResult("Annotation changed. Road graph will refresh automatically.");
         setStatus(
           statusEl,
           `Placed ${state.furniturePlacement.kind} in ${targetZone.label}. Click again to place another.`,
@@ -6205,7 +7693,7 @@ function buildingRegionHandleFromTarget(
       yaw_deg: null,
     });
     syncCenterlineDerivedFields(centerline);
-    clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+    clearGraphResult("Annotation changed. Road graph will refresh automatically.");
     setStatus(
       statusEl,
       `Placed ${state.furniturePlacement.kind} on ${strip.strip_id}. Click again to place another, or cancel placement.`,
@@ -6260,7 +7748,7 @@ function buildingRegionHandleFromTarget(
           y_px: point.y,
           yaw_deg: null,
         });
-        clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+        clearGraphResult("Annotation changed. Road graph will refresh automatically.");
         setStatus(statusEl, `Placed ${FURNITURE_KIND_LABELS[kind]} in ${targetZone.label}.`, "success");
         renderAll();
         return true;
@@ -6349,7 +7837,7 @@ function buildingRegionHandleFromTarget(
       yaw_deg: null,
     });
     syncCenterlineDerivedFields(targetCenterline);
-    clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+    clearGraphResult("Annotation changed. Road graph will refresh automatically.");
     setStatus(statusEl, `Placed ${FURNITURE_KIND_LABELS[kind]} on ${targetStrip.strip_id}.`, "success");
     renderAll();
     return true;
@@ -6372,6 +7860,43 @@ function buildingRegionHandleFromTarget(
     { signal },
   );
 
+  async function handleScenarioDesignSelection(nextScenarioId: string): Promise<void> {
+    const previousScenarioId = state.selectedScenarioId;
+    if (!nextScenarioId) {
+      state.selectedScenarioId = "";
+      renderScenarioDesignOptions();
+      return;
+    }
+    if (isAnnotationDirty()) {
+      const confirmed = window.confirm("Load this scenario design and replace the current annotation?");
+      if (!confirmed) {
+        renderScenarioDesignOptions(previousScenarioId);
+        return;
+      }
+    }
+    try {
+      await applyScenarioDesignAnnotation(nextScenarioId);
+    } catch (error) {
+      state.selectedScenarioId = previousScenarioId;
+      renderScenarioDesignOptions(previousScenarioId);
+      setStatus(
+        statusEl,
+        error instanceof Error ? error.message : "Failed to load scenario design annotation.",
+        "error",
+      );
+    }
+  }
+
+  for (const selectEl of scenarioDesignSelects()) {
+    selectEl.addEventListener(
+      "change",
+      () => {
+        void handleScenarioDesignSelection(selectEl.value);
+      },
+      { signal },
+    );
+  }
+
   planSelect.addEventListener(
     "change",
     async () => {
@@ -6381,7 +7906,11 @@ function buildingRegionHandleFromTarget(
       try {
         await applyReferencePlan(planSelect.value);
       } catch (error) {
-        setStatus(statusEl, error instanceof Error ? error.message : "Failed to load reference plan.", "error");
+        setStatus(
+          statusEl,
+          statusTextFromImageLoadError(error, "sceneGraph.status.failedLoadReferencePlan", "Failed to load reference plan."),
+          "error",
+        );
       }
     },
     { signal },
@@ -6399,9 +7928,16 @@ function buildingRegionHandleFromTarget(
         state.currentObjectUrl = URL.createObjectURL(file);
         await loadImageFromUrl(state.currentObjectUrl, { planId: "custom_upload", preserveFeatures: false });
         state.annotation.image_path = file.name;
+        state.selectedScenarioId = "";
         planSelect.value = "";
+        updateCleanAnnotationSnapshot();
+        renderScenarioDesignOptions();
       } catch (error) {
-        setStatus(statusEl, error instanceof Error ? error.message : "Failed to load uploaded image.", "error");
+        setStatus(
+          statusEl,
+          statusTextFromImageLoadError(error, "sceneGraph.status.failedLoadUploadedImage", "Failed to load uploaded image."),
+          "error",
+        );
       } finally {
         imageInput.value = "";
       }
@@ -6415,14 +7951,11 @@ function buildingRegionHandleFromTarget(
       revokeCurrentObjectUrl();
       state.currentImageUrl = "";
       state.annotation = createEmptyAnnotation(state.annotation.plan_id);
-      state.selection = null;
-      state.selectedStripId = null;
-      state.draftCenterline = [];
-      clearBranchDraft();
-      clearCrossDraft();
-      clearFurniturePlacement();
+      state.selectedScenarioId = "";
+      clearAnnotationEditingState();
       originalImageEl.removeAttribute("src");
       clearGraphResult("Image cleared. Load another reference plan to continue.");
+      renderScenarioDesignOptions();
       setStatus(statusEl, "Reference image cleared.", "neutral");
       renderAll();
     },
@@ -6521,7 +8054,7 @@ function buildingRegionHandleFromTarget(
     "input",
     () => {
       state.annotation.pixels_per_meter = Math.max(0.1, asNumber(pixelsPerMeterInput.value, state.annotation.pixels_per_meter));
-      clearGraphResult("Scale changed. Re-run convert to refresh graph output.");
+      clearGraphResult("Scale changed. Road graph will refresh automatically.");
       renderAll();
     },
     { signal },
@@ -6548,6 +8081,7 @@ function buildingRegionHandleFromTarget(
   }
 
   finishCenterlineButton.addEventListener("click", finalizeDraftCenterline, { signal });
+  autoSplitRegionsButton.addEventListener("click", () => { void deriveBuildingRegions(); }, { signal });
   selectAllRoadsButton.addEventListener(
     "click",
     () => {
@@ -6573,13 +8107,38 @@ function buildingRegionHandleFromTarget(
   undoPointButton.addEventListener(
     "click",
     () => {
-      state.draftCenterline.pop();
+      if (state.drag?.kind === "functional_zone_draw") {
+        state.drag.points.pop();
+        if (state.drag.points.length === 0) {
+          state.drag = null;
+        }
+      } else if (state.drag?.kind === "region_draw") {
+        state.drag.points.pop();
+        if (state.drag.points.length === 0) {
+          state.drag = null;
+        }
+      } else if (state.drag?.kind === "region_box_draw") {
+        state.drag = null;
+      } else {
+        state.draftCenterline.pop();
+      }
       renderAll();
     },
     { signal },
   );
   deleteSelectedButton.addEventListener("click", deleteSelection, { signal });
-  resetAnnotationButton.addEventListener("click", resetAnnotation, { signal });
+  resetAnnotationButton.addEventListener(
+    "click",
+    () => {
+      const confirmed = window.confirm("Reset Annotation will clear all reference annotations on this plan. Continue?");
+      if (!confirmed) {
+        setStatus(statusEl, "Reset cancelled.", "neutral");
+        return;
+      }
+      resetAnnotation();
+    },
+    { signal },
+  );
   snapToRoadInput.addEventListener("change", () => {
     state.snapToRoadEnabled = snapToRoadInput.checked;
     setStatus(statusEl, state.snapToRoadEnabled ? "Road snap enabled." : "Road snap disabled. Furniture will place on selected road/strip.", "neutral");
@@ -6595,6 +8154,10 @@ function buildingRegionHandleFromTarget(
         event.preventDefault();
         commitFunctionalZoneDraft();
       }
+      if (state.drag?.kind === "region_draw") {
+        event.preventDefault();
+        commitRegionDraft();
+      }
     },
     { signal },
   );
@@ -6606,11 +8169,27 @@ function buildingRegionHandleFromTarget(
         event.preventDefault();
         commitFunctionalZoneDraft();
       }
+      if (state.drag?.kind === "region_draw" && event.key === "Enter") {
+        event.preventDefault();
+        commitRegionDraft();
+      }
       if (state.drag?.kind === "functional_zone_draw" && event.key === "Escape") {
         event.preventDefault();
         state.drag = null;
         renderAll();
         setStatus(statusEl, "Cancelled functional zone drawing.", "neutral");
+      }
+      if (state.drag?.kind === "region_draw" && event.key === "Escape") {
+        event.preventDefault();
+        state.drag = null;
+        renderAll();
+        setStatus(statusEl, "Cancelled region drawing.", "neutral");
+      }
+      if (state.drag?.kind === "region_box_draw" && event.key === "Escape") {
+        event.preventDefault();
+        state.drag = null;
+        renderAll();
+        setStatus(statusEl, "Cancelled scene region box.", "neutral");
       }
     },
     { signal },
@@ -6793,6 +8372,26 @@ function buildingRegionHandleFromTarget(
         return;
       }
 
+      if (state.selectedTool === "scene_region") {
+        state.selection = null;
+        state.selectedStripId = null;
+        clearFurniturePlacement();
+        state.drag = {
+          kind: "region_box_draw",
+          pointerId: event.pointerId,
+          regionRole: "scene_region",
+          startPoint: point,
+          currentPoint: point,
+        };
+        renderAll();
+        return;
+      }
+
+      if (state.selectedTool === "surface_annotation") {
+        createSurfaceAnnotationAtPoint(point, hit);
+        return;
+      }
+
       if (state.selectedTool === "tree") {
         placeFurnitureQuick(point, "tree");
         return;
@@ -6835,7 +8434,7 @@ function buildingRegionHandleFromTarget(
         state.annotation.control_points.push({ id, label: id, x: point.x, y: point.y, kind: "control_point" });
         state.selection = { kind: "control_point", id };
         state.selectedStripId = null;
-        clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+        clearGraphResult("Annotation changed. Road graph will refresh automatically.");
         setStatus(statusEl, `Added control point ${id}.`, "success");
         renderAll();
         return;
@@ -6852,7 +8451,7 @@ function buildingRegionHandleFromTarget(
         });
         state.selection = { kind: "roundabout", id };
         state.selectedStripId = null;
-        clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+        clearGraphResult("Annotation changed. Road graph will refresh automatically.");
         setStatus(statusEl, `Added roundabout ${id}.`, "success");
         renderAll();
       }
@@ -6883,7 +8482,7 @@ function buildingRegionHandleFromTarget(
         rightStrip.width_m = Math.max(0.1, state.previewResize.startRightWidthM - clampedDeltaM);
         state.previewResize.didResize = true;
         syncCenterlineDerivedFields(centerline);
-        clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+        clearGraphResult("Annotation changed. Road graph will refresh automatically.");
         renderAll();
         return;
       }
@@ -6902,7 +8501,7 @@ function buildingRegionHandleFromTarget(
       }
       const drag = state.drag;
       const point = imagePointFromPointer(event);
-      if (!point && drag.kind !== "building_region_draw") {
+      if (!point && drag.kind !== "building_region_draw" && drag.kind !== "region_draw" && drag.kind !== "region_box_draw") {
         return;
       }
       if (drag.kind === "building_region_draw") {
@@ -6913,6 +8512,20 @@ function buildingRegionHandleFromTarget(
         return;
       }
       if (drag.kind === "functional_zone_draw") {
+        if (point) {
+          drag.currentPoint = point;
+          renderAll();
+        }
+        return;
+      }
+      if (drag.kind === "region_draw") {
+        if (point) {
+          drag.currentPoint = point;
+          renderAll();
+        }
+        return;
+      }
+      if (drag.kind === "region_box_draw") {
         if (point) {
           drag.currentPoint = point;
           renderAll();
@@ -6992,7 +8605,7 @@ function buildingRegionHandleFromTarget(
         }
       }
       syncSelectionAfterMutation();
-      clearGraphResult("Annotation changed. Re-run convert to refresh graph output.");
+      clearGraphResult("Annotation changed. Road graph will refresh automatically.");
       renderAll();
     },
     { signal },
@@ -7031,6 +8644,10 @@ function buildingRegionHandleFromTarget(
         renderAll();
         return;
       }
+      if (state.drag?.kind === "region_box_draw" && state.drag.pointerId === event.pointerId) {
+        commitRegionDraft();
+        return;
+      }
       if (state.drag && state.drag.pointerId === event.pointerId) {
         if (state.drag.kind === "functional_zone_draw") {
           return;
@@ -7060,27 +8677,13 @@ function buildingRegionHandleFromTarget(
       try {
         const text = await file.text();
         const annotation = normalizeAnnotation(JSON.parse(text));
+        const fallbackImagePath = state.annotation.image_path;
         state.annotation = annotation;
-        state.selection = null;
-        state.selectedStripId = null;
-        state.draftCenterline = [];
-        clearBranchDraft();
-        clearCrossDraft();
-        clearFurniturePlacement();
-        if (annotation.image_path) {
-          try {
-            await loadImageFromUrl(annotation.image_path, { planId: annotation.plan_id, preserveFeatures: true });
-          } catch {
-            state.currentImageUrl = "";
-            clearGraphResult("Annotation JSON imported, but image path could not be loaded.");
-            setStatus(statusEl, "Imported annotation JSON. Image path could not be reopened in browser.", "neutral");
-            renderAll();
-          }
-        } else {
-          clearGraphResult("Annotation JSON imported. Load an image to keep editing against the reference.");
-          setStatus(statusEl, `Imported annotation JSON from ${file.name}.`, "success");
-          renderAll();
-        }
+        state.selectedScenarioId = "";
+        clearAnnotationEditingState();
+        await reconcileImportedAnnotationReferenceImage("Imported", fallbackImagePath);
+        updateCleanAnnotationSnapshot();
+        renderScenarioDesignOptions();
       } catch (error) {
         setStatus(statusEl, error instanceof Error ? error.message : "Failed to import annotation JSON.", "error");
       } finally {
@@ -7095,25 +8698,13 @@ function buildingRegionHandleFromTarget(
     async () => {
       try {
         const annotation = normalizeAnnotation(JSON.parse(jsonTextarea.value));
+        const fallbackImagePath = state.annotation.image_path;
         state.annotation = annotation;
-        state.selection = null;
-        state.selectedStripId = null;
-        state.draftCenterline = [];
-        clearBranchDraft();
-        clearCrossDraft();
-        clearFurniturePlacement();
-        clearGraphResult("Annotation JSON applied. Re-run convert to refresh graph output.");
-        if (annotation.image_path) {
-          try {
-            await loadImageFromUrl(annotation.image_path, { planId: annotation.plan_id, preserveFeatures: true });
-          } catch {
-            setStatus(statusEl, "Applied annotation JSON, but the image path could not be loaded.", "neutral");
-            renderAll();
-          }
-        } else {
-          setStatus(statusEl, "Applied annotation JSON.", "success");
-          renderAll();
-        }
+        state.selectedScenarioId = "";
+        clearAnnotationEditingState();
+        await reconcileImportedAnnotationReferenceImage("Applied", fallbackImagePath);
+        updateCleanAnnotationSnapshot();
+        renderScenarioDesignOptions();
       } catch (error) {
         setStatus(statusEl, error instanceof Error ? error.message : "Failed to apply annotation JSON.", "error");
       }
@@ -7144,10 +8735,25 @@ function buildingRegionHandleFromTarget(
     { signal },
   );
 
+  for (const graphConfigInput of [segmentLengthInput, sidewalkWidthInput]) {
+    graphConfigInput.addEventListener(
+      "change",
+      () => {
+        clearGraphResult("Road graph settings changed.");
+        renderAll();
+      },
+      { signal },
+    );
+  }
+
   convertGraphButton.addEventListener(
     "click",
     async () => {
       try {
+        if (autoGraphTimer !== null) {
+          window.clearTimeout(autoGraphTimer);
+          autoGraphTimer = null;
+        }
         await convertAnnotationToGraph();
       } catch (error) {
         setStatus(graphStatusEl, error instanceof Error ? error.message : "Failed to convert annotation.", "error");
@@ -7177,21 +8783,37 @@ function buildingRegionHandleFromTarget(
   );
 
   renderReferencePlanOptions(FALLBACK_REFERENCE_PLAN.plan_id);
+  renderScenarioDesignOptions();
   renderAll();
   void applyReferencePlan(FALLBACK_REFERENCE_PLAN.plan_id).catch((error) => {
     state.isReferenceImageLoading = false;
     renderAll();
     setStatus(
       statusEl,
-      error instanceof Error ? error.message : `Failed to load default reference plan ${FALLBACK_REFERENCE_PLAN.plan_id}.`,
+      statusTextFromImageLoadError(
+        error,
+        "sceneGraph.status.failedLoadReferencePlan",
+        `Failed to load default reference plan ${FALLBACK_REFERENCE_PLAN.plan_id}.`,
+      ),
       "error",
     );
   });
+  void loadScenarioDesigns({ silent: true });
   void loadReferencePlans({ silent: true }).catch((error) => {
-    setStatus(statusEl, error instanceof Error ? error.message : "Failed to refresh reference plans.", "error");
+    setStatus(
+      statusEl,
+      error instanceof Error && error.message !== "Failed to fetch"
+        ? error.message
+        : { key: "sceneGraph.status.failedRefreshReferencePlans", fallback: "Failed to refresh reference plans." },
+      "error",
+    );
   });
 
   return () => {
+    if (autoGraphTimer !== null) {
+      window.clearTimeout(autoGraphTimer);
+      autoGraphTimer = null;
+    }
     revokeCurrentObjectUrl();
     eventController.abort();
   };

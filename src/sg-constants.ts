@@ -1,4 +1,4 @@
-import type { CrossSectionMode, StripKind, StripDirection, FurnitureKind, FunctionalZoneKind, MetaurbanAssetBadge, ReferencePlan } from "./sg-types";
+import type { CrossSectionMode, StripKind, StripDirection, FurnitureKind, FunctionalZoneKind, MetaurbanAssetBadge, ReferencePlan, SurfaceAnnotationKind, SurfaceRole } from "./sg-types";
 
 export const API_BASE = (import.meta.env.VITE_ROADGEN_API_BASE as string | undefined) || "http://127.0.0.1:8010";
 export const ANNOTATION_SCHEMA_VERSION = "roadgen3d_reference_annotation_v2";
@@ -35,6 +35,9 @@ export const STRIP_KINDS: StripKind[] = [
   "bike_lane",
   "parking_lane",
   "median",
+  "grass_belt",
+  "shared_street_surface",
+  "colored_pavement",
   "nearroad_buffer",
   "nearroad_furnishing",
   "clear_sidewalk",
@@ -47,6 +50,7 @@ export const SIDE_STRIP_KINDS = new Set<StripKind>([
   "clear_sidewalk",
   "farfromroad_buffer",
   "frontage_reserve",
+  "colored_pavement",
 ]);
 export const CENTER_STRIP_KINDS = new Set<StripKind>([
   "drive_lane",
@@ -54,12 +58,18 @@ export const CENTER_STRIP_KINDS = new Set<StripKind>([
   "bike_lane",
   "parking_lane",
   "median",
+  "grass_belt",
+  "shared_street_surface",
+  "colored_pavement",
 ]);
 export const CORNER_LINK_STRIP_KINDS = new Set<StripKind>([
   "drive_lane",
   "bus_lane",
   "bike_lane",
   "parking_lane",
+  "grass_belt",
+  "shared_street_surface",
+  "colored_pavement",
   "nearroad_furnishing",
   "clear_sidewalk",
   "frontage_reserve",
@@ -219,6 +229,78 @@ export const FUNCTIONAL_ZONE_KIND_LABELS: Record<FunctionalZoneKind, string> = {
   parking: "Parking",
   kiosk: "Kiosk",
   sculpture: "Sculpture",
+};
+
+export const SURFACE_ANNOTATION_KINDS: SurfaceAnnotationKind[] = [
+  "bus_lane_widening",
+  "safety_island",
+  "colored_pavement",
+  "shared_surface",
+  "transit_pad",
+  "paving_zone",
+];
+
+export const SURFACE_ROLES: SurfaceRole[] = [
+  "carriageway",
+  "bus_lane",
+  "bike_lane",
+  "parking_lane",
+  "median",
+  "median_green",
+  "grass_belt",
+  "safety_island",
+  "shared_street_surface",
+  "colored_pavement",
+  "sidewalk",
+  "furnishing",
+  "context_ground",
+  "transit_pad",
+  "crossing",
+];
+
+export const SURFACE_ANNOTATION_KIND_LABELS: Record<SurfaceAnnotationKind, string> = {
+  bus_lane_widening: "Bus Lane Widening",
+  safety_island: "Safety Island",
+  colored_pavement: "Colored Pavement",
+  shared_surface: "Shared Surface",
+  transit_pad: "Transit Pad",
+  paving_zone: "Paving Zone",
+};
+
+export const SURFACE_ROLE_LABELS: Record<SurfaceRole, string> = {
+  carriageway: "Carriageway",
+  bus_lane: "Bus Lane",
+  bike_lane: "Bike Lane",
+  parking_lane: "Parking Lane",
+  median: "Median",
+  median_green: "Green Median",
+  grass_belt: "Grass Belt",
+  safety_island: "Safety Island",
+  shared_street_surface: "Shared Street Surface",
+  colored_pavement: "Colored Pavement",
+  sidewalk: "Sidewalk",
+  furnishing: "Furnishing",
+  context_ground: "Context Ground",
+  transit_pad: "Transit Pad",
+  crossing: "Crossing",
+};
+
+export const DEFAULT_SURFACE_ROLE_BY_KIND: Record<SurfaceAnnotationKind, SurfaceRole> = {
+  bus_lane_widening: "bus_lane",
+  safety_island: "safety_island",
+  colored_pavement: "colored_pavement",
+  shared_surface: "shared_street_surface",
+  transit_pad: "transit_pad",
+  paving_zone: "colored_pavement",
+};
+
+export const DEFAULT_SURFACE_MATERIAL_BY_KIND: Record<SurfaceAnnotationKind, string> = {
+  bus_lane_widening: "bus_lane_green",
+  safety_island: "safety_island_concrete",
+  colored_pavement: "colored_pavement",
+  shared_surface: "shared_street_surface",
+  transit_pad: "transit_pad",
+  paving_zone: "paving_zone",
 };
 
 export const FURNITURE_KIND_LABELS: Record<FurnitureKind, string> = {

@@ -13,6 +13,8 @@ import type {
   JunctionOverlayStripLinkEndpoint,
   LaneProfile,
   ReferenceAnnotation,
+  SurfaceAnnotationKind,
+  SurfaceRole,
   StripDirection,
   StripKind,
   StripZone,
@@ -35,6 +37,8 @@ import {
   NOMINAL_STRIP_WIDTHS,
   STRIP_DIRECTION_OPTIONS,
   STRIP_KINDS,
+  SURFACE_ANNOTATION_KINDS,
+  SURFACE_ROLES,
 } from "./sg-constants";
 
 export function asNullableNumber(value: unknown): number | null {
@@ -83,6 +87,14 @@ export function isFurnitureKind(value: string): value is FurnitureKind {
 
 export function isFunctionalZoneKind(value: string): value is import("./sg-types").FunctionalZoneKind {
   return FUNCTIONAL_ZONE_KINDS.includes(value as import("./sg-types").FunctionalZoneKind);
+}
+
+export function isSurfaceAnnotationKind(value: string): value is SurfaceAnnotationKind {
+  return SURFACE_ANNOTATION_KINDS.includes(value as SurfaceAnnotationKind);
+}
+
+export function isSurfaceRole(value: string): value is SurfaceRole {
+  return SURFACE_ROLES.includes(value as SurfaceRole);
 }
 
 export function resolveDriveLaneDefaults(record: Record<string, unknown>): {
@@ -1284,6 +1296,18 @@ export function reserveNextFeatureIds(annotation: ReferenceAnnotation, prefix: s
   for (const item of annotation.control_points) {
     ids.add(item.id);
   }
+  for (const item of annotation.building_regions) {
+    ids.add(item.id);
+  }
+  for (const item of annotation.functional_zones) {
+    ids.add(item.id);
+  }
+  for (const item of annotation.surface_annotations) {
+    ids.add(item.id);
+  }
+  for (const item of annotation.station_strip_patches) {
+    ids.add(item.id);
+  }
   const result: string[] = [];
   let counter = 1;
   while (result.length < count) {
@@ -1314,6 +1338,18 @@ export function reserveNextFeatureIdsWithBlocked(
     ids.add(item.id);
   }
   for (const item of annotation.control_points) {
+    ids.add(item.id);
+  }
+  for (const item of annotation.building_regions) {
+    ids.add(item.id);
+  }
+  for (const item of annotation.functional_zones) {
+    ids.add(item.id);
+  }
+  for (const item of annotation.surface_annotations) {
+    ids.add(item.id);
+  }
+  for (const item of annotation.station_strip_patches) {
     ids.add(item.id);
   }
   const result: string[] = [];

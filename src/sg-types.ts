@@ -48,6 +48,33 @@ export type FunctionalZoneKind =
   | "kiosk"
   | "sculpture";
 
+export type RegionRole = "scene_region" | "building_region" | "functional_zone";
+
+export type SurfaceAnnotationKind =
+  | "bus_lane_widening"
+  | "safety_island"
+  | "colored_pavement"
+  | "shared_surface"
+  | "transit_pad"
+  | "paving_zone";
+
+export type SurfaceRole =
+  | "carriageway"
+  | "bus_lane"
+  | "bike_lane"
+  | "parking_lane"
+  | "median"
+  | "median_green"
+  | "grass_belt"
+  | "safety_island"
+  | "shared_street_surface"
+  | "colored_pavement"
+  | "sidewalk"
+  | "furnishing"
+  | "context_ground"
+  | "transit_pad"
+  | "crossing";
+
 export type AnnotatedCrossSectionStrip = {
   strip_id: string;
   zone: StripZone;
@@ -152,6 +179,57 @@ export type AnnotatedFunctionalZone = {
   kind: FunctionalZoneKind;
   points: AnnotationPoint[];
   furniture_instances: ZoneFurnitureInstance[];
+};
+
+export type AnnotatedRegion = {
+  id: string;
+  label: string;
+  region_role: RegionRole;
+  points: AnnotationPoint[];
+  kind?: FunctionalZoneKind | string;
+  land_use_type?: string;
+  source_region_id?: string;
+  derived?: boolean;
+  material?: Record<string, unknown>;
+  area_m2?: number;
+  nearest_centerline_id?: string;
+  nearest_centerline_distance_m?: number;
+  side?: "left" | "right" | string;
+  derivation_status?: string;
+  polygon_xz?: number[][];
+};
+
+export type SurfaceMaterial = {
+  preset: string;
+  color_hex?: string;
+  texture_key?: string;
+};
+
+export type AnnotatedSurfaceAnnotation = {
+  id: string;
+  label: string;
+  kind: SurfaceAnnotationKind;
+  surface_role: SurfaceRole;
+  centerline_id: string;
+  station_start_m: number;
+  station_end_m: number;
+  lateral_start_m: number;
+  lateral_end_m: number;
+  material: SurfaceMaterial;
+};
+
+export type AnnotatedStationStripPatch = {
+  id: string;
+  label: string;
+  centerline_id: string;
+  strip_id: string;
+  station_start_m: number;
+  station_end_m: number;
+  updates: {
+    kind?: StripKind;
+    width_m?: number;
+    direction?: StripDirection;
+  };
 };
 
 export type BezierCurve3 = {
@@ -259,8 +337,12 @@ export type ReferenceAnnotation = {
   junctions: AnnotatedJunction[];
   roundabouts: AnnotatedRoundabout[];
   control_points: AnnotatedMarker[];
+  regions: AnnotatedRegion[];
+  derived_regions?: AnnotatedRegion[];
   building_regions: AnnotatedBuildingRegion[];
   functional_zones: AnnotatedFunctionalZone[];
+  surface_annotations: AnnotatedSurfaceAnnotation[];
+  station_strip_patches: AnnotatedStationStripPatch[];
   junction_compositions?: JunctionComposition[];
 };
 
@@ -285,6 +367,8 @@ export type ConvertedGraphPayload = {
   road_profiles?: Array<Record<string, unknown>>;
   cross_section_profiles?: Array<Record<string, unknown>>;
   street_furniture_instances?: Array<Record<string, unknown>>;
+  surface_annotations?: Array<Record<string, unknown>>;
+  station_strip_patches?: Array<Record<string, unknown>>;
   derived_junctions?: Array<Record<string, unknown>>;
   metaurban_asset_hints?: Array<Record<string, unknown>>;
   metaurban_asset_guide?: Record<string, unknown>;
@@ -496,7 +580,7 @@ export type MetaurbanAssetBadge = {
   shortLabel: string;
 };
 
-export type Tool = "select" | "adjust" | "centerline" | "branch" | "cross" | "roundabout" | "control_point" | "building_region" | "functional_zone" | "tree" | "lamp" | "bench" | "trash" | "bus_stop" | "bollard" | "mailbox" | "hydrant" | "sign";
+export type Tool = "select" | "adjust" | "centerline" | "branch" | "cross" | "roundabout" | "control_point" | "scene_region" | "building_region" | "functional_zone" | "surface_annotation" | "tree" | "lamp" | "bench" | "trash" | "bus_stop" | "bollard" | "mailbox" | "hydrant" | "sign";
 
 export type LaneElementKind = "road_strip" | "junction_turn_patch" | "junction_connector" | "junction_side_patch";
 
@@ -540,7 +624,7 @@ export type Selection =
       id: string;
     }
   | {
-      kind: "junction" | "roundabout" | "control_point" | "derived_junction" | "building_region" | "functional_zone";
+      kind: "junction" | "roundabout" | "control_point" | "derived_junction" | "region" | "building_region" | "functional_zone" | "surface_annotation";
       id: string;
     }
   | LaneElementSelection
@@ -594,6 +678,20 @@ export type DragState =
       kind: "functional_zone_draw";
       pointerId: number;
       points: AnnotationPoint[];
+      currentPoint: AnnotationPoint;
+    }
+  | {
+      kind: "region_draw";
+      pointerId: number;
+      regionRole: RegionRole;
+      points: AnnotationPoint[];
+      currentPoint: AnnotationPoint;
+    }
+  | {
+      kind: "region_box_draw";
+      pointerId: number;
+      regionRole: RegionRole;
+      startPoint: AnnotationPoint;
       currentPoint: AnnotationPoint;
     }
   | null;

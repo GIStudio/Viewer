@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { ViewerManifest } from "./viewer-types";
+import { isEnvironmentSkyDomeObject } from "./viewer-scene-bounds";
 
 const ROLE_TINTS: Array<{ pattern: RegExp; color: string; maxSaturation: number; minLightness: number; maxLightness: number; roughness: number; metalness: number }> = [
   { pattern: /(crossing|crosswalk|lane_mark|lane_edge_mark|marking)/i, color: "#eee8d4", maxSaturation: 0.16, minLightness: 0.68, maxLightness: 0.9, roughness: 0.82, metalness: 0.0 },
@@ -12,6 +13,8 @@ const ROLE_TINTS: Array<{ pattern: RegExp; color: string; maxSaturation: number;
   { pattern: /(bench|wood|seat)/i, color: "#a7835d", maxSaturation: 0.36, minLightness: 0.42, maxLightness: 0.72, roughness: 0.86, metalness: 0.02 },
   { pattern: /(lamp|bollard|pole|metal|bus_stop|shelter|rail)/i, color: "#687481", maxSaturation: 0.18, minLightness: 0.34, maxLightness: 0.72, roughness: 0.78, metalness: 0.16 },
 ];
+
+const NATURAL_ASSET_PATTERN = /(?:^|[^a-z0-9])(tree|trees|canopy|leaf|leaves|foliage|plant|plants|shrub|shrubs|grass|vegetation|trunk|branch|branches)(?:$|[^a-z0-9])/i;
 
 function materialList(material: THREE.Material | THREE.Material[]): THREE.Material[] {
   return Array.isArray(material) ? material : [material];
@@ -49,6 +52,25 @@ function manifestRecordForMesh(mesh: THREE.Mesh, manifest?: ViewerManifest): Rec
   return null;
 }
 
+function isNaturalAssetMesh(mesh: THREE.Mesh, manifestRecord: Record<string, unknown> | null): boolean {
+  const data = mesh.userData ?? {};
+  const haystack = [
+    manifestRecord?.category,
+    manifestRecord?.asset_role,
+    manifestRecord?.placement_group,
+    manifestRecord?.asset_id,
+    manifestRecord?.instance_id,
+    data.category,
+    data.asset_role,
+    data.placement_group,
+    data.asset_id,
+    data.instance_id,
+    mesh.name,
+    mesh.parent?.name,
+  ].map((value) => String(value ?? "")).join(" ");
+  return NATURAL_ASSET_PATTERN.test(haystack);
+}
+
 function roleForObject(mesh: THREE.Mesh, material: THREE.Material, manifest?: ViewerManifest): (typeof ROLE_TINTS)[number] | null {
   const manifestRecord = manifestRecordForMesh(mesh, manifest);
   const priorityPieces = [
@@ -76,13 +98,16 @@ function roleForObject(mesh: THREE.Mesh, material: THREE.Material, manifest?: Vi
 }
 
 function applyMaterialFinish(mesh: THREE.Mesh, material: THREE.Material, manifest?: ViewerManifest): void {
+  const manifestRecord = manifestRecordForMesh(mesh, manifest);
   const role = roleForObject(mesh, material, manifest);
+  const preserveAuthoredColor = isNaturalAssetMesh(mesh, manifestRecord);
   material.userData = {
     ...material.userData,
     analyticalDioramaFinish: true,
+    authoredColorPreserved: preserveAuthoredColor,
   };
 
-  if ("color" in material && material.color instanceof THREE.Color) {
+  if (!preserveAuthoredColor && "color" in material && material.color instanceof THREE.Color) {
     clampHslColor(material.color, role);
   }
 
@@ -102,6 +127,9 @@ export function applyAnalyticalDioramaFinish(rootObject: THREE.Object3D, manifes
   rootObject.traverse((child) => {
     const mesh = child as THREE.Mesh;
     if (!mesh.isMesh || !mesh.material) {
+      return;
+    }
+    if (isEnvironmentSkyDomeObject(mesh)) {
       return;
     }
     for (const material of materialList(mesh.material)) {
