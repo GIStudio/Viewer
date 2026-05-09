@@ -4,6 +4,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { CSS2DRenderer, CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import type { DesktopShell } from "./desktop-shell";
+import { applyViewerTranslations, loadViewerLanguage } from "./viewer-i18n";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -1874,9 +1875,9 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
 
   // Build the unified header
   shell.setHints([
-    "Use the left rail to pick a manifest, filter assets, and browse the gallery.",
-    "The center workspace stays focused on preview and object selection.",
-    "Metadata, object lists, and export actions live in the right inspector tabs.",
+    { key: "assetEditor.hints.pickManifest" },
+    { key: "assetEditor.hints.centerWorkspace" },
+    { key: "assetEditor.hints.rightInspector" },
   ]);
   shell.setLeftSections([
     {
@@ -1982,8 +1983,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     ],
     "metadata",
   );
-  shell.statusStatusHost.innerHTML = `<div class="desktop-shell-inline-status">Asset editor ready.</div>`;
-  shell.setStatusSummary("Asset editor ready.");
+  shell.statusStatusHost.innerHTML = `<div class="desktop-shell-inline-status" data-i18n-key="assetEditor.status.ready">Asset editor ready.</div>`;
+  shell.setStatusSummary({ key: "assetEditor.status.ready" });
   shell.centerStage.innerHTML = `
     <div class="asset-editor-shell-stage">
       <div id="ae-empty-state" class="ae-empty-state">
@@ -2055,12 +2056,13 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     "help-shortcuts": () => {
       shell.setBottomOpen(true);
       shell.setHints([
-        "Scroll to orbit, right-drag to pan, and use Fit to frame the current asset.",
-        "Toggle Select to enter rectangle selection mode for mesh-level editing.",
-        "Export GLB and Save live in the Export tab on the right rail.",
+        { key: "assetEditor.hints.orbit" },
+        { key: "assetEditor.hints.selection" },
+        { key: "assetEditor.hints.export" },
       ]);
     },
   });
+  applyViewerTranslations(root, loadViewerLanguage());
 
   /* ── Navigation ────────────────────────────────────────────────── */
   backBtn.addEventListener("click", () => {

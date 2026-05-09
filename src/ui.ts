@@ -32,11 +32,11 @@ const ROUTES: Record<AppRoute, RouteConfig> = {
   },
   "scene-graph": {
     id: "scene-graph",
-    label: "Annotation",
+    label: "Reference",
     path: "#scene-graph",
     kicker: "Viewer / Reference",
-    title: "Reference Plan Annotator",
-    subtitle: "先校准道路总宽与参考图，再把中心线拆成车道、步行带、门前预留和街道家具点位，最后导出 JSON 并转换成带详细横断面的道路 graph。",
+    title: "Reference Plan Annotation",
+    subtitle: "Calibrate the plan scale, trace road centerlines, define cross sections and street-furniture anchors, then export JSON or convert to a road graph.",
   },
   "asset-editor": {
     id: "asset-editor",

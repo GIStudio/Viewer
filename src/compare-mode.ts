@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { ViewerManifest } from "./viewer-types";
+import { viewerText, type ViewerLanguage } from "./viewer-i18n";
 
 export interface CompareModeDependencies {
   scene: THREE.Scene;
@@ -19,23 +20,24 @@ export interface CompareModeDependencies {
   compareSelectAEl: HTMLSelectElement;
   compareSelectBEl: HTMLSelectElement;
   // 翻译支持
-  getLang: () => "en" | "zh" | "mixed";
+  getLang: () => ViewerLanguage;
 }
 
 export function createCompareMode(deps: CompareModeDependencies) {
   let compare3dActive = false;
   let compareRootA: THREE.Object3D | null = null;
   let compareRootB: THREE.Object3D | null = null;
+  let lastComparison: {
+    manifestA: ViewerManifest;
+    manifestB: ViewerManifest;
+    layoutJsonA: Record<string, unknown>;
+    layoutJsonB: Record<string, unknown>;
+  } | null = null;
   const compareCameraA = deps.camera.clone();
   const compareCameraB = deps.camera.clone();
 
   function t(en: string, zh: string): string {
-    const lang = deps.getLang();
-    switch (lang) {
-      case "zh": return zh;
-      case "mixed": return `${en} · ${zh}`;
-      default: return en;
-    }
+    return viewerText(deps.getLang(), en, zh);
   }
 
   // 定义配置参数分类
@@ -645,6 +647,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
     const pathA = deps.compareSelectAEl.value;
     const pathB = deps.compareSelectBEl.value;
     if (!pathA || !pathB) {
+      lastComparison = null;
       deps.compareResultsEl.innerHTML = `<div class="viewer-evaluate-empty">${t("Select two layouts to compare.", "选择两个布局进行对比。")}</div>`;
       return;
     }
@@ -657,6 +660,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
         fetch(`./api/file?path=${encodeURIComponent(pathA)}`).then(r => r.json() as Promise<Record<string, unknown>>),
         fetch(`./api/file?path=${encodeURIComponent(pathB)}`).then(r => r.json() as Promise<Record<string, unknown>>),
       ]);
+      lastComparison = { manifestA, manifestB, layoutJsonA, layoutJsonB };
       renderComparisonResults(manifestA, manifestB, layoutJsonA, layoutJsonB);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load layouts for comparison.";
@@ -666,10 +670,10 @@ export function createCompareMode(deps: CompareModeDependencies) {
 
   async function enterCompare3d(a: ViewerManifest, b: ViewerManifest): Promise<void> {
     if (!a.final_scene?.glb_url || !b.final_scene?.glb_url) {
-      deps.flashStatus("Both layouts must have a GLB scene.");
+      deps.flashStatus(t("Both layouts must have a GLB scene.", "两个布局都需要 GLB 场景。"));
       return;
     }
-    deps.setStatus("Loading split-screen comparison…");
+    deps.setStatus(t("Loading split-screen comparison...", "正在加载分屏对比..."));
     try {
       await Promise.all([
         loadCompareScene(a.final_scene.glb_url, "a"),
@@ -679,9 +683,9 @@ export function createCompareMode(deps: CompareModeDependencies) {
       const currentRoot = deps.getCurrentRoot();
       if (currentRoot) currentRoot.visible = false;
       deps.exitCompare3dEl.hidden = false;
-      deps.flashStatus("Split-screen mode active. WASD moves both views.");
+      deps.flashStatus(t("Split-screen mode active. WASD moves both views.", "分屏模式已开启，WASD 会同时移动两侧视图。"));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to load scenes.";
+      const msg = err instanceof Error ? err.message : t("Failed to load scenes.", "场景加载失败。");
       deps.flashStatus(msg);
     }
   }
@@ -695,7 +699,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
     deps.exitCompare3dEl.hidden = true;
     deps.renderer.setScissorTest(false);
     deps.renderer.setViewport(0, 0, deps.renderer.domElement.clientWidth, deps.renderer.domElement.clientHeight);
-    deps.flashStatus("Exited split-screen mode.");
+    deps.flashStatus(t("Exited split-screen mode.", "已退出分屏模式。"));
   }
 
   deps.exitCompare3dEl.addEventListener("click", exitCompare3d);
@@ -738,11 +742,28 @@ export function createCompareMode(deps: CompareModeDependencies) {
     return false;
   }
 
+  function refreshLanguage(): void {
+    deps.exitCompare3dEl.textContent = t("Exit Split View", "退出分屏视图");
+    if (lastComparison) {
+      renderComparisonResults(
+        lastComparison.manifestA,
+        lastComparison.manifestB,
+        lastComparison.layoutJsonA,
+        lastComparison.layoutJsonB,
+      );
+      return;
+    }
+    if (!deps.compareSelectAEl.value || !deps.compareSelectBEl.value) {
+      deps.compareResultsEl.innerHTML = `<div class="viewer-evaluate-empty">${t("Select two layouts to compare.", "选择两个布局进行对比。")}</div>`;
+    }
+  }
+
   return {
     runComparison,
     enterCompare3d,
     exitCompare3d,
     renderCompare3dFrame,
+    refreshLanguage,
     isCompare3dActive: () => compare3dActive,
   };
 }

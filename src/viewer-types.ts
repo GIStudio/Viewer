@@ -207,6 +207,90 @@ export type SceneJobOperation = string | {
   timestamp?: string;
 };
 
+export type ScenarioDesign = {
+  scenario_id: string;
+  title_zh: string;
+  scenario_type: string;
+  enabled?: boolean;
+  excluded_reason_zh?: string;
+  query: string;
+  intent_zh?: string;
+  road_section?: Record<string, unknown>;
+  edge_context?: Record<string, unknown>;
+  region_count?: number;
+  scene_region_count?: number;
+  region_override_count?: number;
+  functional_zone_count: number;
+  surface_annotation_count: number;
+  surface_role_counts?: Record<string, number>;
+  template_patch_operation_count?: number;
+  preview_layout_path: string;
+  preview_layout_exists?: boolean;
+};
+
+export type ScenarioDesignRunSummary = {
+  run_id: string;
+  status: string;
+  created_at?: string;
+  updated_at?: string;
+  total_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  report_path?: string;
+};
+
+export type ScenarioDesignCatalogPayload = {
+  schema_version: string;
+  graph_template_id: string;
+  catalog_path?: string;
+  items: ScenarioDesign[];
+  runs?: ScenarioDesignRunSummary[];
+};
+
+export type ScenarioDesignRunItem = {
+  scenario_id: string;
+  scenario_type?: string;
+  title_zh: string;
+  sample_index: number;
+  seed: number;
+  job_id: string;
+  status: string;
+  stage?: string;
+  progress?: number;
+  scene_layout_path?: string;
+  scene_glb_path?: string;
+  viewer_url?: string;
+  summary?: Record<string, unknown>;
+  error?: string;
+};
+
+export type ScenarioDesignRunPayload = {
+  run_id: string;
+  status: string;
+  created_at?: string;
+  updated_at?: string;
+  finished_at?: string;
+  graph_template_id: string;
+  samples_per_scenario: number;
+  base_seed: number;
+  scenario_count: number;
+  total_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  manifest_path?: string;
+  report_path?: string;
+  items: ScenarioDesignRunItem[];
+  scenarios?: ScenarioDesign[];
+};
+
+export type ScenarioDesignReportPayload = {
+  run_id: string;
+  status: string;
+  report_path: string;
+  content: string;
+  content_summary?: string;
+};
+
 export type KnowledgeSourceKey = "hybrid" | "pdf_rag" | "graph_rag" | "scenario_parameters";
 
 export type KnowledgeSourceStatus = {

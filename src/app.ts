@@ -67,6 +67,12 @@ import {
   removeFrameAndAssetHelpers,
   updateAssetBboxHelpers,
 } from "./viewer-scene-helpers";
+import {
+  isEnvironmentSkyDomeObject,
+  prepareEnvironmentSkyDomeObject,
+  prepareEnvironmentSkyDomes,
+  sceneContentBounds,
+} from "./viewer-scene-bounds";
 import { createAssetMoveController } from "./viewer-asset-move-controller";
 import { createViewerPanelController, type ViewerPanelController } from "./viewer-panel-controller";
 import {
@@ -100,6 +106,7 @@ import {
   turnLanePatchSvgClass,
 } from "./viewer-scene-options";
 import { createViewerSceneSelectionController } from "./viewer-scene-selection-controller";
+import { createViewerScenarioDesignsController } from "./viewer-scenario-designs";
 import {
   completeLightingValues,
   DEFAULT_LIGHTING_STATE,
@@ -114,6 +121,14 @@ import {
   fitViewerLightingRigToBounds,
 } from "./viewer-render-pipeline";
 import { applyAnalyticalDioramaFinish } from "./viewer-visual-style";
+import {
+  VIEWER_LANGUAGE_EVENT,
+  applyViewerTranslations,
+  loadViewerLanguage,
+  normalizeViewerLanguage,
+  viewerText,
+  type ViewerLanguage,
+} from "./viewer-i18n";
 import { createFloatingLaneSystem } from "./viewer-floating-lane";
 import { createHistoryPanelController } from "./viewer-history-panel";
 import {
@@ -126,7 +141,7 @@ import {
 } from "./viewer-evaluation";
 import { captureEvaluationViews, captureGalleryViews, type GalleryCaptureTarget } from "./viewer-evaluation-capture";
 import { createViewerPresetsController } from "./viewer-presets-controller";
-import type { DesktopShell } from "./desktop-shell";
+import type { DesktopShell, ShellI18nText } from "./desktop-shell";
 
 type RecentLayoutsPayload = {
   results?: RecentLayout[];
@@ -339,29 +354,49 @@ function mountViewer(shell: DesktopShell): Promise<() => void> {
 async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const root = shell.root;
   const captureMode = isHeadlessCaptureRequest();
+  let currentLang: ViewerLanguage = loadViewerLanguage();
+  const t = (en: string, zh: string): string => viewerText(currentLang, en, zh);
   document.body.classList.toggle("roadgen-capture-mode", captureMode);
   shell.setHints(captureMode
-    ? ["Headless capture mode is ready for scripted camera renders."]
+    ? [{ key: "viewer.hints.captureMode" }]
     : [
-        "Click to capture mouse, then use WASD to move.",
-        "Shift accelerates movement, Esc unlocks the cursor, and R resets the roam state.",
-        "Use Tools in the top menu or the right tabs for Evaluate, Compare, History, Presets, and Scene Overlay.",
+        { key: "viewer.hints.capture" },
+        { key: "viewer.hints.move" },
+        { key: "viewer.hints.tools" },
       ]);
   shell.setLeftSections([
     {
       id: "viewer-recent-layouts",
-      title: "Recent Layouts",
-      subtitle: "Layout / scene entry",
+      title: t("Recent Layouts", "最近布局"),
+      subtitle: t("Layout / scene entry", "布局 / 场景入口"),
       content: `
         <div class="desktop-shell-form-stack">
           <label class="desktop-shell-field">
-            <span>Recent Result</span>
-            <select id="layout-select" class="viewer-select viewer-select-inline" title="Recent Result"></select>
+            <span data-i18n-key="viewer.left.recentResult">Recent Result</span>
+            <select id="layout-select" class="viewer-select viewer-select-inline" title="Recent Result" data-i18n-title-key="viewer.left.recentResult"></select>
           </label>
           <label class="desktop-shell-field">
-            <span>Scene</span>
-            <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene"></select>
+            <span data-i18n-key="viewer.left.scene">Scene</span>
+            <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene" data-i18n-title-key="viewer.left.scene"></select>
           </label>
+        </div>
+      `,
+    },
+    {
+      id: "viewer-scenario-designs",
+      title: t("Scenario Designs", "场景方案"),
+      subtitle: t("7 curated design options", "7 个设计方案"),
+      open: true,
+      content: `
+        <div class="viewer-scenario-panel">
+          <div class="viewer-scenario-toolbar">
+            <div id="viewer-scenario-status" class="viewer-scenario-status">Loading scenario designs...</div>
+            <button id="viewer-scenario-generate" class="viewer-nav-button viewer-scenario-generate" type="button" disabled>
+              Generate 3 Each
+            </button>
+          </div>
+          <div id="viewer-scenario-report" class="viewer-scenario-report"></div>
+          <div id="viewer-scenario-list" class="viewer-scenario-list"></div>
         </div>
       `,
     },
@@ -370,52 +405,44 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     [
       {
         id: "settings",
-        label: "Settings",
+        label: t("Settings", "设置"),
         content: `
           <aside id="viewer-settings-panel" class="viewer-settings-panel" data-open="false">
             <div class="viewer-settings-header">
               <div>
-                <div class="viewer-settings-title">Display Settings</div>
-                <div class="viewer-settings-subtitle">Light presets, shadows, and laser pointer</div>
+                <div class="viewer-settings-title" data-i18n-key="viewer.settings.title">Display Settings</div>
+                <div class="viewer-settings-subtitle" data-i18n-key="viewer.settings.subtitle">Light presets, shadows, and laser pointer</div>
               </div>
-              <button id="viewer-settings-close" class="viewer-settings-close" type="button" aria-label="Close settings">×</button>
-            </div>
-            <div class="viewer-settings-section viewer-settings-section-divider">
-              <label class="viewer-settings-label">Language · 语言</label>
-              <div class="viewer-lang-switcher">
-                <button id="viewer-lang-en" class="viewer-lang-btn" type="button">English</button>
-                <button id="viewer-lang-zh" class="viewer-lang-btn" type="button">中文</button>
-                <button id="viewer-lang-mixed" class="viewer-lang-btn" type="button">中英混合</button>
-              </div>
+              <button id="viewer-settings-close" class="viewer-settings-close" type="button" aria-label="Close settings" data-i18n-aria-label-key="viewer.settings.close">×</button>
             </div>
             <div class="viewer-settings-section">
-              <label class="viewer-settings-label" for="lighting-preset">Lighting Preset</label>
+              <label class="viewer-settings-label" for="lighting-preset" data-i18n-key="viewer.settings.lightingPreset">Lighting Preset</label>
               <select id="lighting-preset" class="viewer-select viewer-select-compact"></select>
             </div>
             <div class="viewer-settings-section">
               <label class="viewer-range-label" for="lighting-exposure">
-                <span>Exposure</span>
+                <span data-i18n-key="viewer.settings.exposure">Exposure</span>
                 <span id="lighting-exposure-value"></span>
               </label>
               <input id="lighting-exposure" class="viewer-range" type="range" min="0.5" max="2.0" step="0.05" />
             </div>
             <div class="viewer-settings-section">
               <label class="viewer-range-label" for="lighting-key">
-                <span>Key Light Intensity</span>
+                <span data-i18n-key="viewer.settings.keyLight">Key Light Intensity</span>
                 <span id="lighting-key-value"></span>
               </label>
               <input id="lighting-key" class="viewer-range" type="range" min="0.2" max="2.0" step="0.05" />
             </div>
             <div class="viewer-settings-section">
               <label class="viewer-range-label" for="lighting-fill">
-                <span>Fill Light Intensity</span>
+                <span data-i18n-key="viewer.settings.fillLight">Fill Light Intensity</span>
                 <span id="lighting-fill-value"></span>
               </label>
               <input id="lighting-fill" class="viewer-range" type="range" min="0.1" max="1.6" step="0.05" />
             </div>
             <div class="viewer-settings-section">
               <label class="viewer-range-label" for="lighting-warmth">
-                <span>Warmth</span>
+                <span data-i18n-key="viewer.settings.warmth">Warmth</span>
                 <span id="lighting-warmth-value"></span>
               </label>
               <input id="lighting-warmth" class="viewer-range" type="range" min="-1" max="1" step="0.05" />
@@ -472,13 +499,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       },
       {
         id: "design",
-        label: "Design",
+        label: t("Design", "设计"),
         content: `
           <aside id="viewer-design-panel" class="viewer-slide-panel" data-open="false">
             <div class="viewer-slide-panel-header">
               <div>
-                <div class="viewer-slide-panel-title">Design Assistant</div>
-                <div class="viewer-slide-panel-subtitle">Generate scenes, trace RAG / triples / search patches, and compare Pareto scores</div>
+                <div class="viewer-slide-panel-title" data-i18n-key="viewer.design.title">Design Assistant</div>
+                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.design.subtitle">Generate scenes, trace RAG / triples / search patches, and compare Pareto scores</div>
               </div>
               <button id="viewer-design-review-run" class="viewer-design-review-run" type="button" disabled title="重新展开最近一次场景生成步骤">Review Run</button>
               <button id="viewer-design-close" class="viewer-settings-close" type="button" aria-label="Close design assistant">x</button>
@@ -544,13 +571,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       },
       {
         id: "evaluate",
-        label: "Evaluate",
+        label: t("Evaluate", "评估"),
         content: `
           <aside id="viewer-evaluate-panel" class="viewer-slide-panel" data-open="false">
             <div class="viewer-slide-panel-header">
               <div>
-                <div class="viewer-slide-panel-title">Design Evaluation</div>
-                <div class="viewer-slide-panel-subtitle">AI-driven layout assessment and suggestions</div>
+                <div class="viewer-slide-panel-title" data-i18n-key="viewer.evaluate.title">Design Evaluation</div>
+                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.evaluate.subtitle">AI-driven layout assessment and suggestions</div>
               </div>
               <button id="viewer-evaluate-close" class="viewer-settings-close" type="button" aria-label="Close evaluation">x</button>
             </div>
@@ -565,13 +592,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       },
       {
         id: "compare",
-        label: "Compare",
+        label: t("Compare", "对比"),
         content: `
           <aside id="viewer-compare-panel" class="viewer-slide-panel" data-open="false">
             <div class="viewer-slide-panel-header">
               <div>
-                <div class="viewer-slide-panel-title">Layout Comparison</div>
-                <div class="viewer-slide-panel-subtitle">Compare two layouts side-by-side</div>
+                <div class="viewer-slide-panel-title" data-i18n-key="viewer.compare.title">Layout Comparison</div>
+                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.compare.subtitle">Compare two layouts side-by-side</div>
               </div>
               <button id="viewer-compare-close" class="viewer-settings-close" type="button" aria-label="Close comparison">x</button>
             </div>
@@ -593,22 +620,22 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       },
       {
         id: "history",
-        label: "History",
+        label: t("History", "历史"),
         content: `
           <aside id="viewer-history-analysis-panel" class="viewer-slide-panel" data-open="false">
             <div class="viewer-slide-panel-header">
               <div>
-                <div class="viewer-slide-panel-title">📊 History Analysis</div>
-                <div class="viewer-slide-panel-subtitle">Scatter plot analysis of scene generation history</div>
+                <div class="viewer-slide-panel-title" data-i18n-key="viewer.history.title">History Analysis</div>
+                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.history.subtitle">Scatter plot analysis of scene generation history</div>
               </div>
               <button id="viewer-history-analysis-close" class="viewer-settings-close" type="button" aria-label="Close history">x</button>
             </div>
             <div id="viewer-history-analysis-content" class="viewer-slide-panel-body">
               <div class="viewer-history-tabs">
-                <button class="viewer-history-tab" data-tab="scatter" data-active="true">散点图 · Scatter</button>
-                <button class="viewer-history-tab" data-tab="frequency">频次图 · Frequency</button>
-                <button class="viewer-history-tab" data-tab="trend">趋势图 · Trend</button>
-                <button class="viewer-history-tab" data-tab="scores">三系统评分 · Scores</button>
+                <button class="viewer-history-tab" data-tab="scatter" data-active="true" data-i18n-key="viewer.history.scatter">Scatter</button>
+                <button class="viewer-history-tab" data-tab="frequency" data-i18n-key="viewer.history.frequency">Frequency</button>
+                <button class="viewer-history-tab" data-tab="trend" data-i18n-key="viewer.history.trend">Trend</button>
+                <button class="viewer-history-tab" data-tab="scores" data-i18n-key="viewer.history.scores">Three-System Scores</button>
               </div>
               <div id="viewer-history-scatter-plot" class="viewer-history-tab-panel" data-tab="scatter" data-active="true" style="width: 100%;"></div>
               <div id="viewer-history-frequency" class="viewer-history-tab-panel" data-tab="frequency" data-active="false" style="width: 100%;"></div>
@@ -620,13 +647,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       },
       {
         id: "presets",
-        label: "Presets",
+        label: t("Presets", "预设"),
         content: `
           <aside id="viewer-presets-panel" class="viewer-slide-panel" data-open="false">
             <div class="viewer-slide-panel-header">
               <div>
-                <div class="viewer-slide-panel-title">Scene Presets</div>
-                <div class="viewer-slide-panel-subtitle">Pre-configured scene styles. The highlighted card matches the currently loaded scene's generation preset.</div>
+                <div class="viewer-slide-panel-title" data-i18n-key="viewer.presets.title">Scene Presets</div>
+                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.presets.subtitle">Pre-configured scene styles. The highlighted card matches the currently loaded scene's generation preset.</div>
               </div>
               <button id="viewer-presets-close" class="viewer-settings-close" type="button" aria-label="Close presets">x</button>
             </div>
@@ -636,7 +663,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       },
       {
         id: "floating-lane",
-        label: "Floating Lane",
+        label: t("Floating Lane", "浮动车道"),
         content: `
           <div id="viewer-floating-lane-panel-host" class="floating-lane-inline-host">
             <div class="desktop-shell-empty-state">Click Floating Lane button to enable overlay controls.</div>
@@ -645,13 +672,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       },
       {
         id: "help",
-        label: "Help",
+        label: t("Help", "帮助"),
         content: `
           <aside id="viewer-help-panel" class="viewer-slide-panel" data-open="false">
             <div class="viewer-slide-panel-header">
               <div>
-                <div class="viewer-slide-panel-title">Help · 帮助</div>
-                <div class="viewer-slide-panel-subtitle">了解生成流程和各个步骤的详细说明</div>
+                <div class="viewer-slide-panel-title" data-i18n-key="viewer.help.title">Help</div>
+                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.help.subtitle">Generation flow and step-by-step details</div>
               </div>
               <button id="viewer-help-close" class="viewer-settings-close" type="button" aria-label="Close help">x</button>
             </div>
@@ -863,9 +890,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     ],
     null,
   );
-  shell.statusStatusHost.innerHTML = `<div id="viewer-status" class="desktop-shell-inline-status">Loading viewer…</div>`;
-  shell.setStatusSummary("Loading viewer…");
-  shell.statusActivityHost.innerHTML = `<div class="desktop-shell-log-entry" data-tone="neutral">Viewer shell initialized.</div>`;
+  shell.statusStatusHost.innerHTML = `<div id="viewer-status" class="desktop-shell-inline-status" data-i18n-key="viewer.status.loading">${t("Loading viewer...", "正在加载查看器...")}</div>`;
+  shell.setStatusSummary({ key: "viewer.status.loading" });
+  shell.statusActivityHost.innerHTML = `<div class="desktop-shell-log-entry" data-tone="neutral" data-i18n-key="viewer.status.initialized">${t("Viewer shell initialized.", "查看器框架已初始化。")}</div>`;
   shell.centerStage.innerHTML = `
     <div class="viewer-shell viewer-shell-embedded">
       <div class="viewer-command-hub" hidden>
@@ -887,16 +914,16 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       </div>
       <div id="viewer-canvas" class="viewer-canvas"></div>
       <div id="viewer-design-workspace" class="viewer-design-workspace" hidden></div>
-      <button id="viewer-exit-compare3d" class="viewer-exit-compare3d" type="button" hidden>Exit Split View</button>
+      <button id="viewer-exit-compare3d" class="viewer-exit-compare3d" type="button" hidden data-i18n-key="viewer.compare.exit">Exit Split View</button>
       <div id="viewer-crosshair" class="viewer-crosshair" hidden></div>
       <div id="viewer-info-card" class="viewer-info-card" hidden></div>
       <div id="viewer-minimap" class="viewer-minimap">
-        <div class="viewer-minimap-title">Scene Map</div>
+        <div class="viewer-minimap-title" data-i18n-key="viewer.minimap.title">Scene Map</div>
         <div id="viewer-minimap-canvas" class="viewer-minimap-canvas"></div>
         <canvas id="viewer-minimap-overlay" class="viewer-minimap-overlay"></canvas>
       </div>
       <canvas id="viewer-axis-hud" class="viewer-axis-hud"></canvas>
-      <div id="viewer-overlay" class="viewer-overlay">Click scene to capture mouse</div>
+      <div id="viewer-overlay" class="viewer-overlay" data-i18n-key="viewer.overlay.capture">Click scene to capture mouse</div>
       <div id="viewer-error" class="viewer-error" hidden></div>
     </div>
   `;
@@ -908,6 +935,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const errorEl = requireElement<HTMLElement>(root, "#viewer-error");
   const layoutSelectEl = requireElement<HTMLSelectElement>(root, "#layout-select");
   const selectEl = requireElement<HTMLSelectElement>(root, "#scene-select");
+  const scenarioStatusEl = requireElement<HTMLElement>(root, "#viewer-scenario-status");
+  const scenarioGenerateEl = requireElement<HTMLButtonElement>(root, "#viewer-scenario-generate");
+  const scenarioReportEl = requireElement<HTMLElement>(root, "#viewer-scenario-report");
+  const scenarioListEl = requireElement<HTMLElement>(root, "#viewer-scenario-list");
   const sceneGraphLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-scene-graph-link");
   const assetEditorLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-asset-editor-link");
   
@@ -1060,6 +1091,29 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     );
   }
 
+  function syncDesignGraphTemplateId(graphTemplateId: string): void {
+    const normalized = graphTemplateId.trim();
+    if (!normalized) {
+      return;
+    }
+    if (designTemplateEl.value !== normalized) {
+      designTemplateEl.value = normalized;
+    }
+    designTemplateEl.title = `Current graph template: ${normalized}`;
+  }
+
+  function syncDesignGraphTemplateFromManifest(manifest: ViewerManifest | null, layoutPath: string): void {
+    const summary = (manifest?.summary ?? {}) as Record<string, unknown>;
+    const summaryTemplateId = String(summary.graph_template_id ?? summary.graphTemplateId ?? "").trim();
+    const pathTemplateId = inferGraphTemplateIdFromLayoutPath(layoutPath);
+    syncDesignGraphTemplateId(summaryTemplateId || pathTemplateId || DEFAULT_GRAPH_TEMPLATE_ID);
+  }
+
+  function inferGraphTemplateIdFromLayoutPath(layoutPath: string): string {
+    const match = layoutPath.match(/(?:^|\/)graph_template\/([^/]+)(?:\/|$)/);
+    return match?.[1] ?? "";
+  }
+
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#f4f6f2");
 
@@ -1191,7 +1245,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let currentLaserHitPoint: THREE.Vector3 | null = null;
   let currentLaserCopyText = "";
   let lastLaserTargetKey = "";
-  let flyAnimation: { startPos: THREE.Vector3; targetPos: THREE.Vector3; startTime: number; duration: number } | null = null;
+  let flyAnimation: { startAvatarPos: THREE.Vector3; targetAvatarPos: THREE.Vector3; startTime: number; duration: number } | null = null;
   let resumeRoamAfterSettingsClose = false;
   let statusResetHandle: number | null = null;
   let lastBranchRunSnapshot: BranchRunStatusPayload | null = null;
@@ -1200,10 +1254,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let graphOverlayActive = false;
   const graphOverlayMarkers: THREE.Object3D[] = [];
   const recentLayoutsByPath = new Map<string, RecentLayout>();
-
-  // 语言状态
-  type LangMode = "en" | "zh" | "mixed";
-  let currentLang: LangMode = (localStorage.getItem("viewer-lang") as LangMode) || "en";
 
   const lightingState: LightingState = {
     ...DEFAULT_LIGHTING_STATE,
@@ -1279,6 +1329,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     setCurrentManifest: (manifest) => {
       currentManifest = manifest;
       setToggleInput(dioramaFinishToggleEl, manifestDefaultsToDioramaFinish(manifest));
+      syncDesignGraphTemplateFromManifest(manifest, currentLayoutPath);
     },
     loadScene,
     afterLayoutLoaded: () => {
@@ -1327,6 +1378,23 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     renderBranchRunResults,
     loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
     populateRecentLayoutOptions,
+  });
+
+  const scenarioDesignsController = createViewerScenarioDesignsController({
+    listEl: scenarioListEl,
+    statusEl: scenarioStatusEl,
+    reportEl: scenarioReportEl,
+    generateButtonEl: scenarioGenerateEl,
+    errorEl,
+    setStatus,
+    flashStatus,
+    setError,
+    setGraphTemplateId: syncDesignGraphTemplateId,
+    loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
+    refreshRecentLayouts: async (selectedPath) => {
+      const recent = await loadRecentLayouts(50, false);
+      populateRecentLayoutOptions(recent, selectedPath);
+    },
   });
 
   const presetsController = createViewerPresetsController({
@@ -1760,6 +1828,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       if (!mesh.isMesh) {
         return;
       }
+      if (isEnvironmentSkyDomeObject(mesh)) {
+        prepareEnvironmentSkyDomeObject(mesh);
+        return;
+      }
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       if (Array.isArray(mesh.material)) {
@@ -1882,6 +1954,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     console.info(`[viewer-timing] loadScene.glTF (${option.label}): ${gltfLoadMs} ms`);
 
     currentRoot = gltf.scene;
+    prepareEnvironmentSkyDomes(currentRoot);
     const shadowStart = performance.now();
     configureSceneObjectShadows(currentRoot);
     const shadowMs = (performance.now() - shadowStart).toFixed(1);
@@ -1906,7 +1979,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     console.info(`[viewer-timing] loadScene.aux (${option.label}): ${auxMs} ms`);
 
     const boundsStart = performance.now();
-    const bbox = new THREE.Box3().setFromObject(currentRoot);
+    const bbox = sceneContentBounds(currentRoot);
     const spawnCenter = new THREE.Vector3();
     bbox.getCenter(spawnCenter);
     const spawn = inferSpawnFromBbox({ center: spawnCenter }, currentManifest ?? {
@@ -2356,8 +2429,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   function flyCameraTo(x: number, y: number, z: number, durationMs = 900): void {
     if (flyAnimation) return;
     flyAnimation = {
-      startPos: camera.position.clone(),
-      targetPos: new THREE.Vector3(x, y, z),
+      startAvatarPos: currentAvatarPosition.clone(),
+      targetAvatarPos: new THREE.Vector3(x, y, z),
       startTime: performance.now(),
       duration: durationMs,
     };
@@ -2448,65 +2521,59 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }, { signal });
   settingsCloseEl.addEventListener("click", () => panelController.setOpen("settings", false), { signal });
 
-  // 语言切换
-  const langEnBtn = requireElement<HTMLButtonElement>(root, "#viewer-lang-en");
-  const langZhBtn = requireElement<HTMLButtonElement>(root, "#viewer-lang-zh");
-  const langMixedBtn = requireElement<HTMLButtonElement>(root, "#viewer-lang-mixed");
-
-  function updateLangButtons() {
-    langEnBtn.classList.toggle("viewer-lang-btn-active", currentLang === "en");
-    langZhBtn.classList.toggle("viewer-lang-btn-active", currentLang === "zh");
-    langMixedBtn.classList.toggle("viewer-lang-btn-active", currentLang === "mixed");
+  function localizedViewerHints(): ShellI18nText[] {
+    return captureMode
+      ? [{ key: "viewer.hints.captureMode" }]
+      : [
+          { key: "viewer.hints.capture" },
+          { key: "viewer.hints.move" },
+          { key: "viewer.hints.tools" },
+        ];
   }
 
-  function t(en: string, zh: string): string {
-    switch (currentLang) {
-      case "zh": return zh;
-      case "mixed": return `${en} · ${zh}`;
-      default: return en;
+  function updateShellSectionTexts(): void {
+    const recentSection = root.querySelector<HTMLElement>('[data-section-id="viewer-recent-layouts"]');
+    const recentTitle = recentSection?.querySelector<HTMLElement>(".desktop-shell-section-summary > span:first-child");
+    const recentSubtitle = recentSection?.querySelector<HTMLElement>(".desktop-shell-section-subtitle");
+    if (recentTitle) {
+      recentTitle.textContent = t("Recent Layouts", "最近布局");
     }
-  }
-
-  function updatePanelTexts() {
-    // History Analysis 面板
-    const historyPanel = root.querySelector<HTMLElement>("#viewer-history-analysis-panel");
-    if (historyPanel) {
-      const titleEl = historyPanel.querySelector<HTMLElement>(".viewer-slide-panel-title");
-      const subtitleEl = historyPanel.querySelector<HTMLElement>(".viewer-slide-panel-subtitle");
-      if (titleEl) {
-        titleEl.textContent = t("📊 History Analysis", "📊 历史分析");
-      }
-      if (subtitleEl) {
-        subtitleEl.textContent = t("Scatter plot analysis of scene generation history", "场景生成历史的散点图分析");
-      }
+    if (recentSubtitle) {
+      recentSubtitle.textContent = t("Layout / scene entry", "布局 / 场景入口");
     }
 
-    // Layout Comparison 面板
-    const comparePanel = root.querySelector<HTMLElement>("#viewer-compare-panel");
-    if (comparePanel) {
-      const titleEl = comparePanel.querySelector<HTMLElement>(".viewer-slide-panel-title");
-      const subtitleEl = comparePanel.querySelector<HTMLElement>(".viewer-slide-panel-subtitle");
-      if (titleEl) {
-        titleEl.textContent = t("Layout Comparison", "布局对比");
-      }
-      if (subtitleEl) {
-        subtitleEl.textContent = t("Compare two layouts side-by-side", "对比两个布局的配置、指标和地物差异");
+    const tabLabels: Array<[string, string, string]> = [
+      ["settings", "Settings", "设置"],
+      ["design", "Design", "设计"],
+      ["evaluate", "Evaluate", "评估"],
+      ["compare", "Compare", "对比"],
+      ["history", "History", "历史"],
+      ["presets", "Presets", "预设"],
+      ["floating-lane", "Floating Lane", "浮动车道"],
+      ["help", "Help", "帮助"],
+    ];
+    for (const [tabId, en, zh] of tabLabels) {
+      const button = root.querySelector<HTMLButtonElement>(`[data-shell-tab="${tabId}"]`);
+      if (button) {
+        button.textContent = t(en, zh);
       }
     }
   }
 
-  function setLang(lang: LangMode) {
-    currentLang = lang;
-    localStorage.setItem("viewer-lang", lang);
-    updateLangButtons();
-    updatePanelTexts();
+  function applyLocalLanguage(language: ViewerLanguage): void {
+    currentLang = language;
+    root.dataset.viewerLanguage = language;
+    applyViewerTranslations(root, language);
+    updateShellSectionTexts();
+    shell.setHints(localizedViewerHints());
+    compareMode.refreshLanguage();
   }
 
-  langEnBtn.addEventListener("click", () => setLang("en"), { signal });
-  langZhBtn.addEventListener("click", () => setLang("zh"), { signal });
-  langMixedBtn.addEventListener("click", () => setLang("mixed"), { signal });
-  updateLangButtons();
-  updatePanelTexts();
+  window.addEventListener(VIEWER_LANGUAGE_EVENT, (event) => {
+    const detail = (event as CustomEvent<{ language?: unknown }>).detail;
+    applyLocalLanguage(normalizeViewerLanguage(detail?.language));
+  }, { signal });
+  applyLocalLanguage(currentLang);
 
   shell.setMenuActions({
     "file-load-layout": () => {
@@ -2516,9 +2583,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     "file-export-png": () => exportTopdownMapEl.click(),
     "file-export-svg": () => exportTopdownSvgEl.click(),
     "view-reset-view": () => resetView(),
-    "view-language-en": () => langEnBtn.click(),
-    "view-language-zh": () => langZhBtn.click(),
-    "view-language-mixed": () => langMixedBtn.click(),
     "tools-open-settings": () => {
       if (panelController.isOpen("settings")) {
         panelController.setOpen("settings", false);
@@ -2723,7 +2787,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         minimapOverlayEl,
       );
       if (world) {
-        flyCameraTo(world.x, Math.max(0, currentSpawn.y - AVATAR_EYE_HEIGHT_M), world.z);
+        flyCameraTo(world.x, currentAvatarPosition.y, world.z);
       }
     },
     { signal },
@@ -3018,8 +3082,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       const elapsed = performance.now() - flyAnimation.startTime;
       const t = Math.min(elapsed / flyAnimation.duration, 1);
       const ease = 1 - Math.pow(1 - t, 3);
-      camera.position.lerpVectors(flyAnimation.startPos, flyAnimation.targetPos, ease);
+      currentAvatarPosition.lerpVectors(flyAnimation.startAvatarPos, flyAnimation.targetAvatarPos, ease);
+      syncCameraRig();
       if (t >= 1) {
+        currentAvatarPosition.copy(flyAnimation.targetAvatarPos);
+        syncCameraRig();
         flyAnimation = null;
       }
     } else if (isRoamMovementActive()) {
@@ -3063,6 +3130,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   try {
     syncLightingUi();
     resizeRenderer();
+    void scenarioDesignsController.loadCatalog();
     if (captureMode) {
       setStatus("Capture API ready");
     } else {
@@ -3145,6 +3213,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     if (animationFrameId) {
       cancelAnimationFrame(animationFrameId);
     }
+    scenarioDesignsController.destroy();
     eventController.abort();
     controls.removeEventListener("lock", handleControlsLock);
     controls.removeEventListener("unlock", handleControlsUnlock);

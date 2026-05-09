@@ -1,5 +1,16 @@
 import { ROUTES, navigateTo } from "./ui";
 import type { AppRoute } from "./ui";
+import {
+  VIEWER_LANGUAGE_EVENT,
+  applyViewerTranslations,
+  loadViewerLanguage,
+  normalizeViewerLanguage,
+  setViewerLanguage,
+  translateViewerKey,
+  translateViewerLiteral,
+  viewerText,
+  type ViewerLanguage,
+} from "./viewer-i18n";
 
 type ShellMenuId = "file" | "view" | "tools" | "help";
 
@@ -10,9 +21,6 @@ export type ShellMenuActionId =
   | "file-export-json"
   | "file-save-context"
   | "view-reset-view"
-  | "view-language-en"
-  | "view-language-zh"
-  | "view-language-mixed"
   | "tools-open-settings"
   | "tools-open-design"
   | "tools-open-evaluate"
@@ -36,6 +44,11 @@ export interface ShellTab {
   content: string | HTMLElement;
 }
 
+export type ShellI18nText = string | {
+  key: string;
+  fallback?: string;
+};
+
 export interface DesktopShell {
   root: HTMLElement;
   route: AppRoute;
@@ -53,9 +66,9 @@ export interface DesktopShell {
   activateRightTab: (id: string | null) => void;
   setRightPinned: (pinned: boolean) => void;
   setBottomOpen: (open: boolean) => void;
-  setStatusSummary: (message: string) => void;
-  pushActivity: (message: string, tone?: "neutral" | "success" | "warning" | "error") => void;
-  setHints: (hints: string[]) => void;
+  setStatusSummary: (message: ShellI18nText) => void;
+  pushActivity: (message: ShellI18nText, tone?: "neutral" | "success" | "warning" | "error") => void;
+  setHints: (hints: ShellI18nText[]) => void;
   setMenuActions: (actions: Partial<Record<ShellMenuActionId, () => void>>) => void;
   destroy: () => void;
 }
@@ -69,6 +82,7 @@ function createMenuButtonHtml(route: AppRoute): string {
           type="button"
           data-route-switch="${id}"
           ${id === route ? 'aria-current="page"' : ""}
+          data-i18n-key="route.${id}.label"
         >
           ${config.label}
         </button>
@@ -80,38 +94,34 @@ function createMenuButtonHtml(route: AppRoute): string {
 function buildMenuActionsHtml(menuId: ShellMenuId): string {
   if (menuId === "file") {
     return `
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="file-load-layout">Load Layout</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="file-export-png">Export PNG</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="file-export-svg">Export SVG</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="file-export-json">Export JSON</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="file-save-context">Save Context</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="file-load-layout" data-i18n-key="menu.file.loadLayout">Load Layout</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="file-export-png" data-i18n-key="menu.file.exportPng">Export PNG</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="file-export-svg" data-i18n-key="menu.file.exportSvg">Export SVG</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="file-export-json" data-i18n-key="menu.file.exportJson">Export JSON</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="file-save-context" data-i18n-key="menu.file.saveContext">Save Context</button>
     `;
   }
   if (menuId === "view") {
     return `
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="view-reset-view">Reset View</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-toggle="left">Toggle Left Sidebar</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-toggle="right">Toggle Right Sidebar</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-toggle="bottom">Toggle Status Workbench</button>
-      <div class="desktop-shell-menu-divider"></div>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="view-language-en">English</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="view-language-zh">中文</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="view-language-mixed">中英混合</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="view-reset-view" data-i18n-key="menu.view.resetView">Reset View</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-toggle="left" data-i18n-key="menu.view.toggleLeft">Toggle Left Sidebar</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-toggle="right" data-i18n-key="menu.view.toggleRight">Toggle Right Sidebar</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-toggle="bottom" data-i18n-key="menu.view.toggleBottom">Toggle Status Workbench</button>
     `;
   }
   if (menuId === "tools") {
     return `
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-settings">Settings</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-design">Design</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-evaluate">Evaluate</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-compare">Compare</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-history">History</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-presets">Presets</button>
-      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-floating-lane">Floating Lane</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-settings" data-i18n-key="menu.tools.settings">Settings</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-design" data-i18n-key="menu.tools.design">Design</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-evaluate" data-i18n-key="menu.tools.evaluate">Evaluate</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-compare" data-i18n-key="menu.tools.compare">Compare</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-history" data-i18n-key="menu.tools.history">History</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-presets" data-i18n-key="menu.tools.presets">Presets</button>
+      <button class="desktop-shell-menu-action" type="button" data-shell-action="tools-open-floating-lane" data-i18n-key="menu.tools.floatingLane">Floating Lane</button>
     `;
   }
   return `
-    <button class="desktop-shell-menu-action" type="button" data-shell-action="help-shortcuts">Shortcuts</button>
+    <button class="desktop-shell-menu-action" type="button" data-shell-action="help-shortcuts" data-i18n-key="menu.help.shortcuts">Shortcuts</button>
   `;
 }
 
@@ -130,15 +140,20 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
     <div class="desktop-shell desktop-shell-left-auto-collapse desktop-shell-right-auto-collapse" data-route="${route}">
       <header class="desktop-shell-menu">
         <div class="desktop-shell-brand">
-          <div class="desktop-shell-kicker">${routeConfig.kicker}</div>
+          <div class="desktop-shell-kicker" data-i18n-key="shell.${route}.kicker">${routeConfig.kicker}</div>
           <div class="desktop-shell-title-wrap">
-            <h1 class="desktop-shell-title">${routeConfig.title}</h1>
-            ${routeConfig.subtitle ? `<p class="desktop-shell-subtitle">${routeConfig.subtitle}</p>` : ""}
+            <h1 class="desktop-shell-title" data-i18n-key="shell.${route}.title">${routeConfig.title}</h1>
+            ${routeConfig.subtitle ? `<p class="desktop-shell-subtitle" data-i18n-key="shell.${route}.subtitle">${routeConfig.subtitle}</p>` : ""}
           </div>
         </div>
         <nav class="desktop-shell-route-switch" aria-label="Modules">
           ${createMenuButtonHtml(route)}
         </nav>
+        <div class="desktop-shell-language-switcher" role="group" aria-label="Language" data-i18n-aria-label-key="language.group">
+          <button class="desktop-shell-language-button" type="button" data-viewer-lang="en" data-i18n-aria-label-key="language.en">EN</button>
+          <button class="desktop-shell-language-button" type="button" data-viewer-lang="zh" data-i18n-aria-label-key="language.zh">中文</button>
+          <button class="desktop-shell-language-button" type="button" data-viewer-lang="mixed" data-i18n-aria-label-key="language.mixed">中英</button>
+        </div>
         <div class="desktop-shell-menu-groups">
           ${(["file", "view", "tools", "help"] as const)
             .map(
@@ -150,7 +165,7 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
                     data-shell-menu-toggle="${menuId}"
                     aria-expanded="false"
                   >
-                    ${menuId[0].toUpperCase()}${menuId.slice(1)}
+                    <span data-i18n-key="menu.${menuId}">${menuId[0].toUpperCase()}${menuId.slice(1)}</span>
                   </button>
                   <div class="desktop-shell-menu-popover" data-shell-menu="${menuId}" hidden>
                     ${buildMenuActionsHtml(menuId)}
@@ -166,8 +181,8 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
         <aside class="desktop-shell-rail desktop-shell-rail-left" data-shell-region="left">
           <div class="desktop-shell-rail-header">
             <div>
-              <div class="desktop-shell-rail-kicker">Navigation</div>
-              <div class="desktop-shell-rail-title">Left Sidebar</div>
+              <div class="desktop-shell-rail-kicker" data-i18n-key="shell.navigation">Navigation</div>
+              <div class="desktop-shell-rail-title" data-i18n-key="shell.leftSidebar">Left Sidebar</div>
             </div>
             <button
               class="desktop-shell-rail-pin"
@@ -175,6 +190,7 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
               data-shell-left-pin
               aria-pressed="false"
               title="Pin left sidebar"
+              data-i18n-key="shell.pin"
             >
               Pin
             </button>
@@ -189,8 +205,8 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
         <aside class="desktop-shell-rail desktop-shell-rail-right" data-shell-region="right">
           <div class="desktop-shell-rail-header">
             <div>
-              <div class="desktop-shell-rail-kicker">Inspector</div>
-              <div class="desktop-shell-rail-title">Right Sidebar</div>
+              <div class="desktop-shell-rail-kicker" data-i18n-key="shell.inspector">Inspector</div>
+              <div class="desktop-shell-rail-title" data-i18n-key="shell.rightSidebar">Right Sidebar</div>
             </div>
             <button
               class="desktop-shell-rail-pin"
@@ -198,6 +214,7 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
               data-shell-right-pin
               aria-pressed="false"
               title="Pin right sidebar"
+              data-i18n-key="shell.pin"
             >
               Pin
             </button>
@@ -209,14 +226,14 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
 
       <section class="desktop-shell-status" data-open="false">
         <button class="desktop-shell-status-summary" type="button" id="desktop-shell-status-summary-toggle" aria-expanded="false">
-          <span class="desktop-shell-status-summary-label">Status Workbench</span>
-          <span id="desktop-shell-status-summary-text">Ready.</span>
+          <span class="desktop-shell-status-summary-label" data-i18n-key="shell.statusWorkbench">Status Workbench</span>
+          <span id="desktop-shell-status-summary-text" data-i18n-key="shell.status.ready">Ready.</span>
         </button>
         <div class="desktop-shell-status-body">
           <div class="desktop-shell-status-tabs">
-            <button class="desktop-shell-status-tab active" type="button" data-shell-status-tab="status">Status</button>
-            <button class="desktop-shell-status-tab" type="button" data-shell-status-tab="activity">Activity</button>
-            <button class="desktop-shell-status-tab" type="button" data-shell-status-tab="hints">Hints</button>
+            <button class="desktop-shell-status-tab active" type="button" data-shell-status-tab="status" data-i18n-key="shell.status">Status</button>
+            <button class="desktop-shell-status-tab" type="button" data-shell-status-tab="activity" data-i18n-key="shell.activity">Activity</button>
+            <button class="desktop-shell-status-tab" type="button" data-shell-status-tab="hints" data-i18n-key="shell.hints">Hints</button>
           </div>
           <div class="desktop-shell-status-panels">
             <div class="desktop-shell-status-panel active" data-shell-status-panel="status">
@@ -276,9 +293,71 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
   const activityHost = activityHostNode;
   const hintsHost = hintsHostNode;
   const statusWorkbench = statusWorkbenchNode;
+  let currentLanguage: ViewerLanguage = loadViewerLanguage();
 
   const menuActionHandlers: Partial<Record<ShellMenuActionId, () => void>> = {};
   let activeRightTab: string | null = null;
+  let currentHints: ShellI18nText[] = [];
+
+  function resolveI18nText(message: ShellI18nText): string {
+    if (typeof message === "string") {
+      return translateViewerLiteral(currentLanguage, message) ?? message;
+    }
+    return translateViewerKey(currentLanguage, message.key) ?? message.fallback ?? message.key;
+  }
+
+  function applyI18nMetadata(element: HTMLElement, message: ShellI18nText): void {
+    if (typeof message === "string") {
+      element.removeAttribute("data-i18n-key");
+      element.dataset.i18nSourceText = message;
+      return;
+    }
+    element.removeAttribute("data-i18n-source-text");
+    element.dataset.i18nKey = message.key;
+  }
+
+  function renderHints(): void {
+    hintsHost.innerHTML = "";
+    currentHints.forEach((hint) => {
+      const entry = document.createElement("div");
+      entry.className = "desktop-shell-log-entry";
+      entry.dataset.tone = "neutral";
+      applyI18nMetadata(entry, hint);
+      entry.textContent = resolveI18nText(hint);
+      hintsHost.appendChild(entry);
+    });
+  }
+
+  function syncLanguageButtons(language: ViewerLanguage): void {
+    root.querySelectorAll<HTMLButtonElement>("[data-viewer-lang]").forEach((button) => {
+      const isActive = button.dataset.viewerLang === language;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+  }
+
+  function updatePinButtonText(button: HTMLButtonElement | null, pinned: boolean, side: "left" | "right"): void {
+    if (!button) {
+      return;
+    }
+    button.textContent = pinned
+      ? viewerText(currentLanguage, "Pinned", "已固定")
+      : viewerText(currentLanguage, "Pin", "固定");
+    button.title = pinned
+      ? viewerText(currentLanguage, `Unpin ${side} sidebar`, `取消固定${side === "left" ? "左" : "右"}侧栏`)
+      : viewerText(currentLanguage, `Pin ${side} sidebar`, `固定${side === "left" ? "左" : "右"}侧栏`);
+  }
+
+  function applyShellLanguage(language: ViewerLanguage): void {
+    currentLanguage = language;
+    shellRoot.dataset.viewerLanguage = language;
+    document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
+    applyViewerTranslations(root, language);
+    syncLanguageButtons(language);
+    renderHints();
+    updatePinButtonText(root.querySelector<HTMLButtonElement>("[data-shell-left-pin]"), shellRoot.classList.contains("desktop-shell-left-pinned"), "left");
+    updatePinButtonText(root.querySelector<HTMLButtonElement>("[data-shell-right-pin]"), shellRoot.classList.contains("desktop-shell-right-pinned"), "right");
+  }
 
   function refreshActionAvailability(): void {
     root.querySelectorAll<HTMLElement>("[data-shell-action]").forEach((element) => {
@@ -309,10 +388,7 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
     shellRoot.classList.toggle("desktop-shell-right-pinned", pinned);
     const rightPinButton = root.querySelector<HTMLButtonElement>("[data-shell-right-pin]");
     rightPinButton?.setAttribute("aria-pressed", pinned ? "true" : "false");
-    if (rightPinButton) {
-      rightPinButton.textContent = pinned ? "Pinned" : "Pin";
-      rightPinButton.title = pinned ? "Unpin right sidebar" : "Pin right sidebar";
-    }
+    updatePinButtonText(rightPinButton, pinned, "right");
   }
 
   function activateRightTab(id: string | null): void {
@@ -360,6 +436,7 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
       button.type = "button";
       button.className = "desktop-shell-tab-button";
       button.dataset.shellTab = tab.id;
+      button.dataset.i18nSourceText = tab.label;
       button.textContent = tab.label;
       button.addEventListener("click", () => activateRightTab(tab.id));
       rightTabButtons.appendChild(button);
@@ -367,24 +444,26 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
       const panel = document.createElement("section");
       panel.className = "desktop-shell-tab-panel";
       panel.dataset.shellTabPanel = tab.id;
+      panel.dataset.i18nScope = "literal";
       renderSectionContent(panel, tab.content);
       rightTabPanels.appendChild(panel);
     });
     activateRightTab(activeId);
+    applyViewerTranslations(root, currentLanguage);
   }
 
-  function pushActivity(message: string, tone: "neutral" | "success" | "warning" | "error" = "neutral"): void {
+  function pushActivity(message: ShellI18nText, tone: "neutral" | "success" | "warning" | "error" = "neutral"): void {
     const entry = document.createElement("div");
     entry.className = "desktop-shell-log-entry";
     entry.dataset.tone = tone;
-    entry.textContent = message;
+    applyI18nMetadata(entry, message);
+    entry.textContent = resolveI18nText(message);
     activityHost.prepend(entry);
   }
 
-  function setHints(hints: string[]): void {
-    hintsHost.innerHTML = hints
-      .map((hint) => `<div class="desktop-shell-log-entry" data-tone="neutral">${hint}</div>`)
-      .join("");
+  function setHints(hints: ShellI18nText[]): void {
+    currentHints = hints.slice();
+    renderHints();
   }
 
   function setMenuActions(actions: Partial<Record<ShellMenuActionId, () => void>>): void {
@@ -454,8 +533,7 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
   leftPinButton?.addEventListener("click", () => {
     const pinned = shellRoot.classList.toggle("desktop-shell-left-pinned");
     leftPinButton.setAttribute("aria-pressed", pinned ? "true" : "false");
-    leftPinButton.textContent = pinned ? "Pinned" : "Pin";
-    leftPinButton.title = pinned ? "Unpin left sidebar" : "Pin left sidebar";
+    updatePinButtonText(leftPinButton, pinned, "left");
   });
 
   const rightPinButton = root.querySelector<HTMLButtonElement>("[data-shell-right-pin]");
@@ -501,7 +579,20 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
   };
   document.addEventListener("click", handleDocumentClick);
 
+  root.querySelectorAll<HTMLButtonElement>("[data-viewer-lang]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setViewerLanguage(normalizeViewerLanguage(button.dataset.viewerLang));
+    });
+  });
+
+  const handleViewerLanguageChange = (event: Event) => {
+    const detail = (event as CustomEvent<{ language?: unknown }>).detail;
+    applyShellLanguage(normalizeViewerLanguage(detail?.language));
+  };
+  window.addEventListener(VIEWER_LANGUAGE_EVENT, handleViewerLanguageChange);
+
   refreshActionAvailability();
+  applyShellLanguage(currentLanguage);
 
   return {
     root,
@@ -520,14 +611,16 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
     activateRightTab,
     setRightPinned,
     setBottomOpen,
-    setStatusSummary: (message: string) => {
-      summaryText.textContent = message;
+    setStatusSummary: (message: ShellI18nText) => {
+      applyI18nMetadata(summaryText, message);
+      summaryText.textContent = resolveI18nText(message);
     },
     pushActivity,
     setHints,
     setMenuActions,
     destroy: () => {
       document.removeEventListener("click", handleDocumentClick);
+      window.removeEventListener(VIEWER_LANGUAGE_EVENT, handleViewerLanguageChange);
     },
   };
 }

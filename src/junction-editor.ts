@@ -48,6 +48,7 @@ import {
   pointOnBezier,
 } from "./sg-geometry";
 import type { DesktopShell } from "./desktop-shell";
+import { applyViewerTranslations, loadViewerLanguage } from "./viewer-i18n";
 
 type LaneFlow = "inbound" | "outbound";
 type ArmKey = JunctionArmKey;
@@ -251,9 +252,9 @@ export function mountJunctionEditor(shell: DesktopShell): () => void {
 
 function renderDesktopShell(shell: DesktopShell, state: EditorState): void {
   shell.setHints([
-    "Cross skeleton uses five points: the center plus four road-arm endpoints.",
-    "Use Multi Select and Merge Selected from the right rail to build turn or corner surfaces.",
-    "Draw Corner Skeleton and Draw Patch stay available for manual corner geometry overrides.",
+    { key: "junctionEditor.hints.crossSkeleton" },
+    { key: "junctionEditor.hints.multiSelect" },
+    { key: "junctionEditor.hints.cornerPatch" },
   ]);
   shell.setLeftSections([
     {
@@ -417,12 +418,13 @@ function renderDesktopShell(shell: DesktopShell, state: EditorState): void {
       shell.root.querySelector<HTMLButtonElement>('[data-shell-status-tab="hints"]')?.click();
     },
   });
+  const statusMessageHtml = state.mergeStatusMessage
+    ? escapeHtml(state.mergeStatusMessage)
+    : `<span data-i18n-key="junctionEditor.status.readyDetailed">Junction editor ready. Center stays fixed at the visual origin; use the left rail to edit arm lengths and lane counts.</span>`;
   shell.statusStatusHost.innerHTML = `
-    <div class="desktop-shell-inline-status">
-      ${escapeHtml(state.mergeStatusMessage ?? "Junction editor ready. Center stays fixed at the visual origin; use the left rail to edit arm lengths and lane counts.")}
-    </div>
+    <div class="desktop-shell-inline-status">${statusMessageHtml}</div>
   `;
-  shell.setStatusSummary(state.mergeStatusMessage ?? "Junction editor ready.");
+  shell.setStatusSummary(state.mergeStatusMessage ?? { key: "junctionEditor.status.ready" });
   shell.centerStage.innerHTML = `
     <div class="je-canvas-shell">
       <div class="je-canvas-wrap">
@@ -434,6 +436,7 @@ function renderDesktopShell(shell: DesktopShell, state: EditorState): void {
       </div>
     </div>
   `;
+  applyViewerTranslations(shell.root, loadViewerLanguage());
 }
 
 function buildHTML(state: EditorState): string {
