@@ -62,12 +62,14 @@ type AssetEditorState = {
   assets: AssetRecord[];
   filteredAssets: AssetRecord[];
   selectedAssetId: string | null;
+  selectedAssetIds: Set<string>;
   selectedObjects: Set<string>;
   scaleValue: number;
   renderMode: "solid" | "wireframe";
   searchQuery: string;
   categoryFilter: string;
   qualityTierFilter: string;
+  eligibilityFilter: string;
   sceneChildren: SceneChildInfo[];
   selectionMode: boolean;
   selectedMeshes: Set<THREE.Mesh>;
@@ -128,6 +130,10 @@ function formatTagInput(value: unknown): string {
 function shortId(assetId: string): string {
   if (assetId.length > 36) return assetId.slice(0, 12) + "..." + assetId.slice(-6);
   return assetId;
+}
+
+function isSceneEligible(asset?: AssetRecord | null): boolean {
+  return asset?.scene_eligible !== false;
 }
 
 function categoryBadgeClass(cat: string): string {
@@ -652,6 +658,32 @@ async function saveAssetMetadata(
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error ?? `Save failed: ${res.status}`);
   }
+}
+
+async function bulkSaveAssetMetadata(
+  manifestName: string,
+  updates: Record<string, unknown>,
+  options: { assetIds?: string[]; scope?: "selected" | "all" },
+): Promise<{ updatedCount: number; missingAssetIds: string[] }> {
+  const res = await fetch("/api/asset-manifest/bulk-save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      manifest_name: manifestName,
+      asset_ids: options.assetIds ?? [],
+      scope: options.scope ?? "selected",
+      updates,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error ?? `Bulk save failed: ${res.status}`);
+  }
+  const data = await res.json();
+  return {
+    updatedCount: Number(data.updated_count ?? 0),
+    missingAssetIds: Array.isArray(data.missing_asset_ids) ? data.missing_asset_ids.map(String) : [],
+  };
 }
 
 async function deleteAssetRecord(
@@ -1849,12 +1881,14 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     assets: [],
     filteredAssets: [],
     selectedAssetId: null,
+    selectedAssetIds: new Set(),
     selectedObjects: new Set(),
     scaleValue: 1,
     renderMode: "solid",
     searchQuery: "",
     categoryFilter: "",
     qualityTierFilter: "",
+    eligibilityFilter: "",
     sceneChildren: [],
     selectionMode: false,
     selectedMeshes: new Set(),
@@ -1872,6 +1906,14 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
 
   let previewCtx: PreviewContext | null = null;
   let destroyed = false;
+  const shellRoot = root.querySelector<HTMLElement>(".desktop-shell");
+  shellRoot?.classList.add("desktop-shell-left-pinned");
+  const leftPinButton = root.querySelector<HTMLButtonElement>("[data-shell-left-pin]");
+  if (leftPinButton) {
+    leftPinButton.setAttribute("aria-pressed", "true");
+    leftPinButton.textContent = "Pinned";
+    leftPinButton.title = "Unpin left sidebar";
+  }
 
   // Build the unified header
   shell.setHints([
@@ -1905,6 +1947,11 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
             <option value="1">T1 — Low-poly</option>
             <option value="0">T0 — Unusable</option>
           </select>
+          <select id="ae-eligibility-filter" class="ae-filter-select">
+            <option value="">All Eligibility</option>
+            <option value="eligible">Enabled for generation</option>
+            <option value="disabled">Disabled</option>
+          </select>
         </div>
       `,
     },
@@ -1915,7 +1962,31 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       content: `
         <div class="asset-gallery-panel asset-gallery-panel-shell">
           <div class="ae-gallery-stats" id="ae-gallery-stats"></div>
-          <div class="ae-gallery-grid" id="ae-gallery-grid"></div>
+          <div class="ae-bulk-toolbar" id="ae-bulk-toolbar">
+            <button id="ae-select-filtered-btn" class="ae-bulk-btn" type="button">Select Filtered</button>
+            <button id="ae-clear-selection-btn" class="ae-bulk-btn" type="button" disabled>Clear</button>
+            <span class="ae-bulk-spacer"></span>
+            <button id="ae-enable-selected-btn" class="ae-bulk-btn ae-bulk-btn-safe" type="button" disabled>Enable Selected</button>
+            <button id="ae-disable-selected-btn" class="ae-bulk-btn ae-bulk-btn-danger" type="button" disabled>Disable Selected</button>
+            <button id="ae-disable-filtered-btn" class="ae-bulk-btn ae-bulk-btn-danger" type="button" disabled>Disable Filtered</button>
+            <button id="ae-disable-manifest-btn" class="ae-bulk-btn ae-bulk-btn-danger" type="button" disabled>Disable Manifest</button>
+          </div>
+          <div class="ae-asset-table-wrap">
+            <table class="ae-asset-table">
+              <thead>
+                <tr>
+                  <th class="ae-select-cell"><input id="ae-select-all-filtered" type="checkbox" aria-label="Select all filtered assets" /></th>
+                  <th>Asset</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th>Tier</th>
+                  <th>Source</th>
+                  <th>Faces</th>
+                </tr>
+              </thead>
+              <tbody id="ae-gallery-grid"></tbody>
+            </table>
+          </div>
           <div class="ae-load-more-section" id="ae-load-more-section" style="display:none;">
             <button id="ae-load-more-btn" class="ae-load-more-btn" type="button">Load More</button>
             <span id="ae-load-more-info" class="ae-load-more-info"></span>
@@ -2019,8 +2090,16 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   const searchInput = qs<HTMLInputElement>(root, "#ae-search");
   const categoryFilter = qs<HTMLSelectElement>(root, "#ae-category-filter");
   const tierFilter = qs<HTMLSelectElement>(root, "#ae-tier-filter");
+  const eligibilityFilter = qs<HTMLSelectElement>(root, "#ae-eligibility-filter");
   const galleryStats = qs<HTMLDivElement>(root, "#ae-gallery-stats");
-  const galleryGrid = qs<HTMLDivElement>(root, "#ae-gallery-grid");
+  const galleryGrid = qs<HTMLTableSectionElement>(root, "#ae-gallery-grid");
+  const selectAllFiltered = qs<HTMLInputElement>(root, "#ae-select-all-filtered");
+  const selectFilteredBtn = qs<HTMLButtonElement>(root, "#ae-select-filtered-btn");
+  const clearSelectionBtn = qs<HTMLButtonElement>(root, "#ae-clear-selection-btn");
+  const enableSelectedBtn = qs<HTMLButtonElement>(root, "#ae-enable-selected-btn");
+  const disableSelectedBtn = qs<HTMLButtonElement>(root, "#ae-disable-selected-btn");
+  const disableFilteredBtn = qs<HTMLButtonElement>(root, "#ae-disable-filtered-btn");
+  const disableManifestBtn = qs<HTMLButtonElement>(root, "#ae-disable-manifest-btn");
   const detailPanel = qs<HTMLDivElement>(root, "#ae-detail-panel");
   const emptyState = qs<HTMLDivElement>(root, "#ae-empty-state");
   const detailContent = qs<HTMLDivElement>(root, "#ae-detail-content");
@@ -2089,6 +2168,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     if (!name) return;
     state.manifestName = name;
     state.selectedAssetId = null;
+    state.selectedAssetIds.clear();
     state.selectedObjects.clear();
     state.assets = [];
     state.loadedOffset = 0;
@@ -2150,6 +2230,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
 
   /* ── Category filter ───────────────────────────────────────────── */
   function updateCategoryFilter() {
+    const currentValue = state.categoryFilter || categoryFilter.value;
     const cats = new Set<string>();
     for (const a of state.assets) {
       cats.add(a.category || "unknown");
@@ -2161,6 +2242,9 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       opt.textContent = cat;
       categoryFilter.appendChild(opt);
     }
+    if (currentValue && Array.from(categoryFilter.options).some((option) => option.value === currentValue)) {
+      categoryFilter.value = currentValue;
+    }
   }
 
   /* ── Filters ───────────────────────────────────────────────────── */
@@ -2168,6 +2252,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     const q = state.searchQuery.toLowerCase();
     const cat = state.categoryFilter;
     const tier = state.qualityTierFilter;
+    const eligibility = state.eligibilityFilter;
 
     state.filteredAssets = state.assets.filter((a) => {
       const aCat = a.category || "unknown";
@@ -2186,9 +2271,16 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       }
       if (cat && aCat !== cat) return false;
       if (tier && String(a.quality_tier) !== tier) return false;
+      if (eligibility === "eligible" && !isSceneEligible(a)) return false;
+      if (eligibility === "disabled" && isSceneEligible(a)) return false;
       return true;
     });
 
+    for (const assetId of Array.from(state.selectedAssetIds)) {
+      if (!state.assets.some((asset) => asset.asset_id === assetId)) {
+        state.selectedAssetIds.delete(assetId);
+      }
+    }
     renderGallery();
   }
 
@@ -2204,8 +2296,97 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     state.qualityTierFilter = tierFilter.value;
     applyFilters();
   });
+  eligibilityFilter.addEventListener("change", () => {
+    state.eligibilityFilter = eligibilityFilter.value;
+    applyFilters();
+  });
 
   /* ── Gallery rendering ─────────────────────────────────────────── */
+  function filteredAssetIds(): string[] {
+    return state.filteredAssets.map((asset) => asset.asset_id);
+  }
+
+  function updateBulkControls() {
+    const selectedCount = state.selectedAssetIds.size;
+    const filteredIds = filteredAssetIds();
+    const filteredCount = filteredIds.length;
+    const selectedFilteredCount = filteredIds.filter((assetId) => state.selectedAssetIds.has(assetId)).length;
+    const allFilteredSelected = filteredCount > 0 && selectedFilteredCount === filteredCount;
+    const someFilteredSelected = selectedFilteredCount > 0 && selectedFilteredCount < filteredCount;
+
+    selectAllFiltered.checked = allFilteredSelected;
+    selectAllFiltered.indeterminate = someFilteredSelected;
+    selectAllFiltered.disabled = filteredCount === 0;
+    selectFilteredBtn.disabled = filteredCount === 0;
+    clearSelectionBtn.disabled = selectedCount === 0;
+    enableSelectedBtn.disabled = selectedCount === 0 || !state.manifestName;
+    disableSelectedBtn.disabled = selectedCount === 0 || !state.manifestName;
+    disableFilteredBtn.disabled = filteredCount === 0 || !state.manifestName;
+    disableManifestBtn.disabled = !state.manifestName || state.totalAssets === 0;
+
+    const selectedText = selectedCount > 0 ? ` · ${selectedCount.toLocaleString()} selected` : "";
+    galleryStats.dataset.selectedText = selectedText;
+  }
+
+  function applyBulkUpdatesToLoadedAssets(assetIds: Set<string> | null, updates: Record<string, unknown>) {
+    for (const asset of state.assets) {
+      if (assetIds !== null && !assetIds.has(asset.asset_id)) continue;
+      Object.assign(asset, updates);
+    }
+    const activeAsset = getActiveAsset();
+    if (activeAsset) {
+      updateEligibleToolbar(activeAsset);
+      renderInfoPanel(activeAsset);
+    }
+    rebuildCategoryProfiles(state.assets);
+    updateCategoryFilter();
+    applyFilters();
+  }
+
+  async function updateAssetEligibilityBatch(
+    assetIds: string[],
+    eligible: boolean,
+    reason: string,
+  ) {
+    if (!state.manifestName || assetIds.length === 0) return;
+    const uniqueIds = Array.from(new Set(assetIds));
+    const updates = {
+      scene_eligible: eligible,
+      scene_exclusion_reason: eligible ? "" : reason,
+    };
+    try {
+      const result = await bulkSaveAssetMetadata(state.manifestName, updates, {
+        assetIds: uniqueIds,
+        scope: "selected",
+      });
+      applyBulkUpdatesToLoadedAssets(new Set(uniqueIds), updates);
+      showToast(root, `${eligible ? "Enabled" : "Disabled"} ${result.updatedCount.toLocaleString()} assets`);
+    } catch (err) {
+      showToast(root, `Bulk update failed: ${err}`, "error");
+    }
+  }
+
+  async function disableCurrentManifest() {
+    if (!state.manifestName) return;
+    const total = state.totalAssets || state.assets.length;
+    const ok = window.confirm(
+      `Disable every asset in this manifest?\n\nManifest: ${state.manifestName}\nAssets: ${total.toLocaleString()}\n\nThis writes scene_eligible=false to the manifest JSONL.`,
+    );
+    if (!ok) return;
+    const updates = {
+      scene_eligible: false,
+      scene_exclusion_reason: "disabled_by_manifest_bulk",
+    };
+    try {
+      const result = await bulkSaveAssetMetadata(state.manifestName, updates, { scope: "all" });
+      applyBulkUpdatesToLoadedAssets(null, updates);
+      state.selectedAssetIds.clear();
+      showToast(root, `Disabled ${result.updatedCount.toLocaleString()} assets in ${state.manifestName}`);
+    } catch (err) {
+      showToast(root, `Manifest disable failed: ${err}`, "error");
+    }
+  }
+
   function renderGallery() {
     galleryGrid.innerHTML = "";
     
@@ -2218,43 +2399,97 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       return acc;
     }, new Set<string>()).size;
     const catSuffix = state.totalAssets > state.assets.length ? "（部分加载）" : "（完整加载）";
-    galleryStats.textContent = `${state.filteredAssets.length} 个展示 / ${loadedText} 资产 / ${catCount} 类别 ${catSuffix}`;
+    const selectedText = state.selectedAssetIds.size > 0 ? ` / ${state.selectedAssetIds.size.toLocaleString()} 已选择` : "";
+    galleryStats.textContent = `${state.filteredAssets.length} 个展示 / ${loadedText} 资产 / ${catCount} 类别 ${catSuffix}${selectedText}`;
 
     for (const asset of state.filteredAssets) {
-      const card = document.createElement("div");
-      card.className = "ae-asset-card" + (asset.asset_id === state.selectedAssetId ? " active" : "");
-      card.dataset.assetId = asset.asset_id;
+      const row = document.createElement("tr");
+      row.className = [
+        "ae-asset-row",
+        asset.asset_id === state.selectedAssetId ? "active" : "",
+        state.selectedAssetIds.has(asset.asset_id) ? "selected" : "",
+        isSceneEligible(asset) ? "" : "disabled",
+      ].filter(Boolean).join(" ");
+      row.dataset.assetId = asset.asset_id;
 
       const fCount = asset.face_count ?? asset.mesh_face_count ?? 0;
       const vCount = asset.vertex_count ?? asset.quality_metrics?.vertex_count ?? 0;
       const tier = asset.quality_tier;
-      const eligible = asset.scene_eligible;
+      const eligible = isSceneEligible(asset);
       const cat = asset.category || "unknown";
 
-      card.innerHTML = `
-        <div class="ae-card-header">
-          <span class="ae-card-category ${categoryBadgeClass(cat)}">${cat}</span>
-          ${eligible ? '<span class="ae-card-eligible" title="Scene eligible">&#10003;</span>' : ""}
-        </div>
-        <div class="ae-card-body">
-          <div class="ae-card-id">${shortId(asset.asset_id)}</div>
-          <div class="ae-card-stats">
-            <span title="Faces">${fCount.toLocaleString()}f</span>
-            <span title="Vertices">${vCount.toLocaleString()}v</span>
-          </div>
-        </div>
-        <div class="ae-card-footer">
-          <span class="ae-card-tier" style="color:${tierColor(tier)}">
-            ${tier !== undefined ? `T${tier}` : "T?"}
-          </span>
-          <span class="ae-card-source">${asset.source ?? ""}</span>
-        </div>
+      row.innerHTML = `
+        <td class="ae-select-cell">
+          <input class="ae-asset-select" type="checkbox" data-asset-id="${escapeHtml(asset.asset_id)}" ${state.selectedAssetIds.has(asset.asset_id) ? "checked" : ""} aria-label="Select ${escapeHtml(asset.asset_id)}" />
+        </td>
+        <td>
+          <button class="ae-asset-id-button" type="button" data-asset-id="${escapeHtml(asset.asset_id)}" title="${escapeHtml(asset.asset_id)}">${escapeHtml(shortId(asset.asset_id))}</button>
+          <div class="ae-asset-desc">${escapeHtml(String(asset.text_desc ?? ""))}</div>
+        </td>
+        <td><span class="ae-card-category ${categoryBadgeClass(cat)}">${escapeHtml(cat)}</span></td>
+        <td><span class="ae-eligibility-pill ${eligible ? "eligible" : "disabled"}">${eligible ? "Enabled" : "Disabled"}</span></td>
+        <td><span class="ae-card-tier" style="color:${tierColor(tier)}">${tier !== undefined ? `T${tier}` : "T?"}</span></td>
+        <td><span class="ae-table-muted">${escapeHtml(String(asset.source ?? ""))}</span></td>
+        <td><span class="ae-table-mono" title="${vCount.toLocaleString()} vertices">${fCount.toLocaleString()}f</span></td>
       `;
 
-      card.addEventListener("click", () => selectAsset(asset.asset_id));
-      galleryGrid.appendChild(card);
+      row.addEventListener("click", (event) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest(".ae-asset-select")) return;
+        void selectAsset(asset.asset_id);
+      });
+      const checkbox = row.querySelector<HTMLInputElement>(".ae-asset-select");
+      checkbox?.addEventListener("change", () => {
+        if (checkbox.checked) {
+          state.selectedAssetIds.add(asset.asset_id);
+        } else {
+          state.selectedAssetIds.delete(asset.asset_id);
+        }
+        renderGallery();
+      });
+      galleryGrid.appendChild(row);
     }
+    updateBulkControls();
   }
+
+  selectAllFiltered.addEventListener("change", () => {
+    const ids = filteredAssetIds();
+    if (selectAllFiltered.checked) {
+      ids.forEach((assetId) => state.selectedAssetIds.add(assetId));
+    } else {
+      ids.forEach((assetId) => state.selectedAssetIds.delete(assetId));
+    }
+    renderGallery();
+  });
+
+  selectFilteredBtn.addEventListener("click", () => {
+    filteredAssetIds().forEach((assetId) => state.selectedAssetIds.add(assetId));
+    renderGallery();
+  });
+
+  clearSelectionBtn.addEventListener("click", () => {
+    state.selectedAssetIds.clear();
+    renderGallery();
+  });
+
+  enableSelectedBtn.addEventListener("click", () => {
+    void updateAssetEligibilityBatch(Array.from(state.selectedAssetIds), true, "");
+  });
+
+  disableSelectedBtn.addEventListener("click", () => {
+    void updateAssetEligibilityBatch(Array.from(state.selectedAssetIds), false, "disabled_by_asset_editor_bulk");
+  });
+
+  disableFilteredBtn.addEventListener("click", () => {
+    const ids = filteredAssetIds();
+    const ok = window.confirm(`Disable ${ids.length.toLocaleString()} currently loaded filtered assets?`);
+    if (!ok) return;
+    void updateAssetEligibilityBatch(ids, false, "disabled_by_asset_editor_filtered");
+  });
+
+  disableManifestBtn.addEventListener("click", () => {
+    void disableCurrentManifest();
+  });
 
   /* ── Asset selection ───────────────────────────────────────────── */
   async function selectAsset(assetId: string) {
@@ -2280,7 +2515,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     frontSelect.value = state.frontDirection;
 
     // Update gallery selection
-    galleryGrid.querySelectorAll(".ae-asset-card").forEach((el) => {
+    galleryGrid.querySelectorAll(".ae-asset-row").forEach((el) => {
       el.classList.toggle("active", (el as HTMLElement).dataset.assetId === assetId);
     });
 
@@ -2349,6 +2584,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     detailContent.style.display = "none";
     saveBtn.disabled = true;
     deleteRecordBtn.disabled = true;
+    updateEligibleToolbar(null);
   }
 
   /* ── Dimensions display ──────────────────────────────────────────── */
@@ -2967,8 +3203,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     if (!checkbox || !label) return;
     const enabled = Boolean(asset);
     checkbox.disabled = !enabled;
-    checkbox.checked = Boolean(asset?.scene_eligible);
-    label.classList.toggle("active", Boolean(asset?.scene_eligible));
+    checkbox.checked = enabled ? isSceneEligible(asset) : false;
+    label.classList.toggle("active", enabled && isSceneEligible(asset));
     label.style.opacity = enabled ? "1" : "0.55";
   }
 

@@ -1103,6 +1103,9 @@ function viewerApiPlugin(): Plugin {
         const isAssetManifestSaveRoute =
           requestUrl.pathname === "/api/asset-manifest/save" ||
           requestUrl.pathname === "/web-viewer/api/asset-manifest/save";
+        const isAssetManifestBulkSaveRoute =
+          requestUrl.pathname === "/api/asset-manifest/bulk-save" ||
+          requestUrl.pathname === "/web-viewer/api/asset-manifest/bulk-save";
         const isAssetManifestCreateRoute =
           requestUrl.pathname === "/api/asset-manifest/create" ||
           requestUrl.pathname === "/web-viewer/api/asset-manifest/create";
@@ -1306,6 +1309,85 @@ function viewerApiPlugin(): Plugin {
           fs.writeFileSync(manifestPath, newLines.join("\n"), "utf-8");
           cachedAssetDescriptionIndex = null;
           jsonResponse(res, 200, { ok: true });
+          return;
+        }
+
+        if (isAssetManifestBulkSaveRoute) {
+          if (req.method !== "POST") {
+            jsonResponse(res, 405, { error: "Method not allowed. Use POST." });
+            return;
+          }
+          const body = await readRequestBody(req);
+          let parsed: { manifest_name?: string; asset_ids?: unknown; scope?: string; updates?: JsonRecord };
+          try {
+            parsed = JSON.parse(body) as typeof parsed;
+          } catch {
+            jsonResponse(res, 400, { error: "Invalid JSON body." });
+            return;
+          }
+          const manifestName = String(parsed.manifest_name ?? "").trim();
+          const scope = String(parsed.scope ?? "selected").trim().toLowerCase();
+          const updates = parsed.updates && typeof parsed.updates === "object" ? parsed.updates : null;
+          const assetIds = Array.isArray(parsed.asset_ids)
+            ? Array.from(new Set(parsed.asset_ids.map((item) => String(item ?? "").trim()).filter(Boolean)))
+            : [];
+          if (!manifestName || !updates) {
+            jsonResponse(res, 400, { error: "Missing manifest_name or updates." });
+            return;
+          }
+          if (scope !== "all" && assetIds.length === 0) {
+            jsonResponse(res, 400, { error: "Missing asset_ids for selected bulk update." });
+            return;
+          }
+          const manifestPath = resolveAssetManifestPath(manifestName);
+          if (!manifestPath) {
+            jsonResponse(res, 403, { error: "Invalid manifest name." });
+            return;
+          }
+          if (!fs.existsSync(manifestPath)) {
+            jsonResponse(res, 404, { error: `Manifest not found: ${manifestName}` });
+            return;
+          }
+
+          const wantedIds = new Set(assetIds);
+          const seenIds = new Set<string>();
+          const rawLines = fs.readFileSync(manifestPath, "utf-8").split(/\r?\n/);
+          const newLines: string[] = [];
+          let updatedCount = 0;
+          for (const line of rawLines) {
+            const trimmed = line.trim();
+            if (!trimmed) {
+              newLines.push(line);
+              continue;
+            }
+            try {
+              const record = JSON.parse(trimmed) as JsonRecord;
+              const assetId = String(record.asset_id ?? "").trim();
+              const shouldUpdate = scope === "all" || wantedIds.has(assetId);
+              if (assetId && shouldUpdate) {
+                const merged = { ...record, ...updates };
+                newLines.push(JSON.stringify(merged));
+                seenIds.add(assetId);
+                updatedCount += 1;
+              } else {
+                newLines.push(trimmed);
+              }
+            } catch {
+              newLines.push(line);
+            }
+          }
+          const missingAssetIds = assetIds.filter((assetId) => !seenIds.has(assetId));
+          if (scope !== "all" && updatedCount === 0) {
+            jsonResponse(res, 404, { error: "No matching assets found.", missing_asset_ids: missingAssetIds });
+            return;
+          }
+          fs.writeFileSync(manifestPath, newLines.join("\n"), "utf-8");
+          cachedAssetDescriptionIndex = null;
+          jsonResponse(res, 200, {
+            ok: true,
+            updated_count: updatedCount,
+            missing_asset_ids: missingAssetIds,
+          });
           return;
         }
 
