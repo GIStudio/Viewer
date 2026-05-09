@@ -127,6 +127,19 @@ import {
   createViewerRenderPipeline,
   fitViewerLightingRigToBounds,
 } from "./viewer-render-pipeline";
+import {
+  DEFAULT_ENVIRONMENT_STATE,
+  SUN_CYCLE_SPEED_LABELS,
+  WEATHER_MODE_LABELS,
+  advanceEnvironmentSunCycle,
+  applyEnvironmentMaterialState,
+  createViewerWeatherEffects,
+  deriveEnvironmentLightingState,
+  disposeViewerWeatherEffects,
+  normalizeEnvironmentState,
+  updateViewerWeatherEffects,
+  type EnvironmentState,
+} from "./viewer-environment";
 import { applyAnalyticalDioramaFinish } from "./viewer-visual-style";
 import {
   VIEWER_LANGUAGE_EVENT,
@@ -514,6 +527,33 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                 <span id="lighting-shadow-value"></span>
               </label>
               <input id="lighting-shadow" class="viewer-range" type="range" min="0" max="1" step="0.05" />
+            </div>
+            <div class="viewer-settings-section viewer-settings-section-divider viewer-environment-section">
+              <div class="viewer-settings-group-title">Environment / 环境</div>
+              <label class="viewer-settings-label" for="environment-weather">Weather / 天气</label>
+              <select id="environment-weather" class="viewer-select viewer-select-compact"></select>
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-range-label" for="environment-intensity">
+                <span>Intensity / 强度</span>
+                <span id="environment-intensity-value"></span>
+              </label>
+              <input id="environment-intensity" class="viewer-range" type="range" min="0" max="1" step="0.05" />
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-range-label" for="environment-time">
+                <span>Time of Day / 日照时间</span>
+                <span id="environment-time-value"></span>
+              </label>
+              <input id="environment-time" class="viewer-range" type="range" min="0" max="24" step="0.25" />
+            </div>
+            <div class="viewer-settings-section">
+              <button id="environment-sun-cycle-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="environment-sun-cycle-enabled" aria-pressed="false">Animate Sun / 日照动画</button>
+              <input id="environment-sun-cycle-enabled" class="viewer-toggle-input" type="checkbox" />
+            </div>
+            <div class="viewer-settings-section">
+              <label class="viewer-settings-label" for="environment-sun-cycle-speed">Cycle Speed / 循环速度</label>
+              <select id="environment-sun-cycle-speed" class="viewer-select viewer-select-compact"></select>
             </div>
             <div class="viewer-settings-section viewer-settings-section-divider">
               <button id="third-person-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="third-person-enabled" aria-pressed="false">Third Person Camera</button>
@@ -1122,6 +1162,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const fillValueEl = requireElement<HTMLElement>(root, "#lighting-fill-value");
   const warmthValueEl = requireElement<HTMLElement>(root, "#lighting-warmth-value");
   const shadowValueEl = requireElement<HTMLElement>(root, "#lighting-shadow-value");
+  const environmentWeatherEl = requireElement<HTMLSelectElement>(root, "#environment-weather");
+  const environmentIntensityInput = requireElement<HTMLInputElement>(root, "#environment-intensity");
+  const environmentTimeInput = requireElement<HTMLInputElement>(root, "#environment-time");
+  const environmentSunCycleToggleEl = requireElement<HTMLInputElement>(root, "#environment-sun-cycle-enabled");
+  const environmentSunCycleSpeedEl = requireElement<HTMLSelectElement>(root, "#environment-sun-cycle-speed");
+  const environmentIntensityValueEl = requireElement<HTMLElement>(root, "#environment-intensity-value");
+  const environmentTimeValueEl = requireElement<HTMLElement>(root, "#environment-time-value");
   const thirdPersonToggleEl = requireElement<HTMLInputElement>(root, "#third-person-enabled");
   const frameModeToggleEl = requireElement<HTMLInputElement>(root, "#frame-mode-enabled");
   const assetBboxToggleEl = requireElement<HTMLInputElement>(root, "#asset-bbox-enabled");
@@ -1666,6 +1713,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   minimapCamera.up.set(0, 0, -1);
 
   const lightingRig = createViewerLightingRig(scene);
+  const weatherEffects = createViewerWeatherEffects(scene);
 
   const controls = new PointerLockControls(camera, renderer.domElement);
   scene.add(camera);
@@ -1751,6 +1799,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   const lightingState: LightingState = {
     ...DEFAULT_LIGHTING_STATE,
+  };
+  let environmentState: EnvironmentState = {
+    ...DEFAULT_ENVIRONMENT_STATE,
   };
 
   let panelController: ViewerPanelController;
@@ -1951,12 +2002,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   function applyLightingState(): void {
+    const effectiveLightingState = deriveEnvironmentLightingState(lightingState, environmentState);
     applyViewerLightingState({
       scene,
       renderer,
       rig: lightingRig,
       pipeline: renderPipeline,
-      state: lightingState,
+      state: effectiveLightingState,
     });
   }
 
@@ -1973,6 +2025,20 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     warmthValueEl.textContent = lightingState.warmth.toFixed(2);
     shadowValueEl.textContent = lightingState.shadowStrength.toFixed(2);
     crosshairEl.hidden = !laserToggleEl.checked;
+    applyLightingState();
+  }
+
+  function syncEnvironmentUi(options: { applyMaterials?: boolean } = {}): void {
+    environmentWeatherEl.value = environmentState.weatherMode;
+    environmentIntensityInput.value = environmentState.weatherIntensity.toString();
+    environmentTimeInput.value = environmentState.timeOfDayHours.toString();
+    setToggleInput(environmentSunCycleToggleEl, environmentState.sunCycleEnabled);
+    environmentSunCycleSpeedEl.value = environmentState.sunCycleSpeed;
+    environmentIntensityValueEl.textContent = environmentState.weatherIntensity.toFixed(2);
+    environmentTimeValueEl.textContent = `${environmentState.timeOfDayHours.toFixed(2)}h`;
+    if (options.applyMaterials) {
+      applyEnvironmentMaterialState(currentRoot, environmentState);
+    }
     applyLightingState();
   }
 
@@ -2495,6 +2561,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       lightingState.preset = presetKey;
       Object.assign(lightingState, completeLightingValues(LIGHTING_PRESETS[presetKey]));
     }
+    const summaryEnvironment = currentManifest?.summary?.environment_system as Record<string, unknown> | undefined;
+    environmentState = normalizeEnvironmentState(
+      currentManifest?.environment_state
+      ?? summaryEnvironment?.environment_state,
+    );
+    syncEnvironmentUi({ applyMaterials: true });
     syncLightingUi();
     setStatus(`Viewing ${option.label}`);
     console.info(`[viewer-timing] loadScene.total (${option.label}): ${(performance.now() - loadStart).toFixed(1)} ms`);
@@ -3294,12 +3366,92 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     { signal },
   );
 
+  for (const [weatherMode, weatherLabel] of Object.entries(WEATHER_MODE_LABELS)) {
+    const optionEl = document.createElement("option");
+    optionEl.value = weatherMode;
+    optionEl.textContent = weatherLabel;
+    environmentWeatherEl.appendChild(optionEl);
+  }
+
+  for (const [speedKey, speedLabel] of Object.entries(SUN_CYCLE_SPEED_LABELS)) {
+    const optionEl = document.createElement("option");
+    optionEl.value = speedKey;
+    optionEl.textContent = speedLabel;
+    environmentSunCycleSpeedEl.appendChild(optionEl);
+  }
+
   for (const [presetKey, presetLabel] of Object.entries(LIGHTING_PRESET_LABELS)) {
     const optionEl = document.createElement("option");
     optionEl.value = presetKey;
     optionEl.textContent = presetLabel;
     lightingPresetEl.appendChild(optionEl);
   }
+
+  environmentWeatherEl.addEventListener(
+    "change",
+    () => {
+      environmentState = {
+        ...environmentState,
+        weatherMode: environmentWeatherEl.value as EnvironmentState["weatherMode"],
+        weatherIntensity: environmentWeatherEl.value === "clear" ? 0 : Math.max(environmentState.weatherIntensity, 0.65),
+        source: "viewer_runtime",
+      };
+      syncEnvironmentUi({ applyMaterials: true });
+    },
+    { signal },
+  );
+
+  environmentIntensityInput.addEventListener(
+    "input",
+    () => {
+      environmentState = {
+        ...environmentState,
+        weatherIntensity: Number(environmentIntensityInput.value),
+        source: "viewer_runtime",
+      };
+      syncEnvironmentUi({ applyMaterials: true });
+    },
+    { signal },
+  );
+
+  environmentTimeInput.addEventListener(
+    "input",
+    () => {
+      environmentState = {
+        ...environmentState,
+        timeOfDayHours: Number(environmentTimeInput.value),
+        source: "viewer_runtime",
+      };
+      syncEnvironmentUi();
+    },
+    { signal },
+  );
+
+  environmentSunCycleToggleEl.addEventListener(
+    "change",
+    () => {
+      environmentState = {
+        ...environmentState,
+        sunCycleEnabled: environmentSunCycleToggleEl.checked,
+        source: "viewer_runtime",
+      };
+      syncEnvironmentUi();
+    },
+    { signal },
+  );
+
+  environmentSunCycleSpeedEl.addEventListener(
+    "change",
+    () => {
+      environmentState = {
+        ...environmentState,
+        sunCycleSpeed: environmentSunCycleSpeedEl.value as EnvironmentState["sunCycleSpeed"],
+        source: "viewer_runtime",
+      };
+      syncEnvironmentUi();
+    },
+    { signal },
+  );
 
   lightingPresetEl.addEventListener(
     "change",
@@ -3609,6 +3761,18 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     updateAssetBboxHelpers(scene);
     updateLaserPointer();
     floatingLaneSystem.updateAnimation(delta);
+    const nextEnvironmentState = advanceEnvironmentSunCycle(environmentState, delta);
+    if (nextEnvironmentState !== environmentState) {
+      environmentState = nextEnvironmentState;
+      syncEnvironmentUi();
+    }
+    updateViewerWeatherEffects(
+      weatherEffects,
+      environmentState,
+      delta,
+      lightingRig.sceneCenter,
+      lightingRig.sceneExtent,
+    );
 
     const didRenderCompare = compareMode.renderCompare3dFrame();
     if (!didRenderCompare) {
@@ -3629,6 +3793,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     animationFrameId = requestAnimationFrame(animate);
   }
   try {
+    syncEnvironmentUi();
     syncLightingUi();
     resizeRenderer();
     void loadDesignScenarioCatalog();
@@ -3723,6 +3888,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     clearGraphOverlay();
     floatingLaneSystem.clearOverlay();
     assetMoveController.dispose();
+    disposeViewerWeatherEffects(weatherEffects);
     renderPipeline.dispose();
     renderer.dispose();
     minimapRenderer.dispose();

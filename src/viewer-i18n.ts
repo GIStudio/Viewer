@@ -181,7 +181,7 @@ const TRANSLATIONS: Record<string, Translation> = {
   },
   "junctionEditor.status.ready": { en: "Junction editor ready.", zh: "路口编辑器已就绪。" },
   "viewer.settings.title": { en: "Display Settings", zh: "显示设置" },
-  "viewer.settings.subtitle": { en: "Light presets, shadows, and laser pointer", zh: "光照预设、阴影和激光指示器" },
+  "viewer.settings.subtitle": { en: "Light, weather, sun, shadows, and laser pointer", zh: "光照、天气、日照、阴影和激光指示器" },
   "viewer.settings.close": { en: "Close settings", zh: "关闭设置" },
   "viewer.settings.lightingPreset": { en: "Lighting Preset", zh: "光照预设" },
   "viewer.settings.exposure": { en: "Exposure", zh: "曝光" },

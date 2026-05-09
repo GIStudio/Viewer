@@ -18,6 +18,7 @@ export type ViewerManifest = {
   layout_path?: string;
   lighting_preset?: string;
   lighting_params?: Record<string, unknown>;
+  environment_state?: Record<string, unknown> | null;
   default_selection?: string;
   static_object_descriptions?: Record<string, StaticObjectDescription>;
   summary?: Record<string, unknown>;
