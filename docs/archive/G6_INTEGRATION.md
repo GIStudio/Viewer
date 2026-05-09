@@ -1,5 +1,9 @@
 # AntV G6 可视化集成说明
 
+> Status: historical  
+> Last verified: 2026-05-08  
+> Note: This records the original G6 integration plan. Check `package.json` and current Viewer modules before using dependency or API details.
+
 ## 已完成的工作
 
 ### 1. G6 可视化模块创建

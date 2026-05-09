@@ -2,9 +2,13 @@
 
 A browser-based 3D street scene viewer and asset editor built with [Three.js](https://threejs.org/) and [Vite](https://vitejs.dev/).
 
+> Status: current viewer entry  
+> Last verified: 2026-05-08
+
 ## Features
 
 - **3D Scene Viewer** — load and inspect street scene GLB files with a free-camera orbit control
+- **Scenario Designs Workspace** — load curated scenario designs and submit catalog-driven batch generation through `/api/scenario-designs/runs`
 - **Design Workspace** — generate street scenes from presets or custom prompts through the RoadGen3D API
 - **Branch / Pareto Trace** — run 100-sample branch searches, inspect 3D score scatter plots, and trace active RAG evidence, parameter triples, LLM patches, directives, and rejected edits
 - **Persistent Benchmark Explorer** — browse historical benchmark samples, filter by preset / batch / run, compare Pareto fronts, and reload retained artifacts
@@ -19,6 +23,21 @@ A browser-based 3D street scene viewer and asset editor built with [Three.js](ht
   - Persist changes back to the manifest file
 - **Scene Graph** — hierarchical object tree with click-to-select highlighting
 - **Instance Inspector** — click any placed object to view its manifest metadata
+
+## Documentation
+
+| Document | Purpose |
+|---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Current Viewer code organization guard |
+| [docs/road.md](docs/road.md) | Road geometry notes |
+| [docs/multi-lane.md](docs/multi-lane.md) | Multi-lane band geometry notes |
+| [docs/archive/README.md](docs/archive/README.md) | Historical plans and refactor notes |
+
+## Current Generation Routes
+
+The current Scenario Designs panel does not use per-sample LLM/RAG drafting. It loads `/api/scenario-designs`, submits `/api/scenario-designs/runs`, and the backend converts catalog entries into `template_patch` and `compose_config_patch` before reusing `/api/scene/jobs` with `preset_id=skip_llm`.
+
+The Design and Branch panels still use `/api/scene/jobs`, `/api/design/branch-runs`, benchmark analysis, and evaluation endpoints for prompt/preset experiments.
 
 ## Getting Started
 
@@ -84,6 +103,7 @@ src/
   main.ts           Entry point
   app.ts            Top-level app shell and routing
   asset-editor.ts   Asset Editor panel (Three.js preview + manifest CRUD)
+  viewer-scenario-designs.ts  Scenario Designs catalog and batch-run UI
   viewer-design-controller.ts  Design workspace, branch runs, benchmark explorer
   viewer-branch-workspace.ts   Branch trace, influence matrix, score scatter shell
   branch-score-scatter-3d.ts   Three.js Pareto / score scatter renderer

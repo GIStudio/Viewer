@@ -1,5 +1,9 @@
 # Viewer 模块化重构进度报告
 
+> Status: historical  
+> Last verified: 2026-05-08  
+> Note: This records an earlier refactor checkpoint and should not be read as the current Viewer state.
+
 ## 总体进展
 
 **开始时间**: 2026-04-27

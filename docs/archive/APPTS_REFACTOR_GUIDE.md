@@ -1,5 +1,9 @@
 # app.ts 重构指南
 
+> Status: historical  
+> Last verified: 2026-05-08  
+> Note: This was an intermediate migration guide. Current code organization rules live in [../../ARCHITECTURE.md](../../ARCHITECTURE.md).
+
 ## 已完成的修改
 
 ### 1. 更新导入语句 (Line 1-81)

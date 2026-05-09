@@ -1,5 +1,9 @@
 # Viewer 编译错误修复计划
 
+> Status: historical  
+> Last verified: 2026-05-08  
+> Note: This was a point-in-time repair plan. Current verification should use `npm --prefix web/viewer run typecheck`.
+
 ## 当前状态
 
 - **总错误数**: 130
