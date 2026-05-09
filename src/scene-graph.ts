@@ -6753,6 +6753,23 @@ function buildingRegionHandleFromTarget(
       state.scenarioDesigns = Array.isArray(catalogPayload.items) ? catalogPayload.items : [];
       state.scenarioDesignsError = "";
       renderScenarioDesignOptions(state.selectedScenarioId);
+      const pendingDraftAnnotation = window.localStorage.getItem("roadgen3d.pendingScenarioDraftAnnotation") || "";
+      if (pendingDraftAnnotation) {
+        window.localStorage.removeItem("roadgen3d.pendingScenarioDraftAnnotation");
+        try {
+          const payload = JSON.parse(pendingDraftAnnotation) as {
+            scenario_id?: string;
+            title_zh?: string;
+            annotation?: unknown;
+          };
+          if (payload.annotation) {
+            void applyScenarioDraftAnnotation(payload);
+            return;
+          }
+        } catch {
+          setStatus(statusEl, "Failed to parse draft scenario annotation.", "error");
+        }
+      }
       const pendingScenarioId = window.localStorage.getItem("roadgen3d.pendingScenarioDesignId") || "";
       if (pendingScenarioId && state.scenarioDesigns.some((item) => item.scenario_id === pendingScenarioId && item.enabled !== false)) {
         window.localStorage.removeItem("roadgen3d.pendingScenarioDesignId");
@@ -6782,27 +6799,11 @@ function buildingRegionHandleFromTarget(
     clearFurniturePlacement();
   }
 
-  async function applyScenarioDesignAnnotation(scenarioId: string): Promise<void> {
-    const scenario = state.scenarioDesigns.find((item) => item.scenario_id === scenarioId);
-    const label = scenario?.title_zh || scenarioId;
-    if (scenario?.enabled === false) {
-      throw new Error(scenario.excluded_reason_zh || "This scenario design is excluded from the current default workflow.");
-    }
-    state.isScenarioDesignAnnotationLoading = true;
-    renderScenarioDesignOptions(scenarioId);
-    setStatus(statusEl, `Loading scenario design: ${label}...`, "neutral");
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/scenario-designs/${encodeURIComponent(scenarioId)}/reference-annotation?graph_template_id=hkust_gz_gate`,
-        { signal: controller.signal },
-      );
-      if (!response.ok) {
-        const detail = await readApiErrorDetail(response);
-        throw new Error(detail || `Failed to load scenario design annotation (${response.status}).`);
-      }
-      const payload = (await response.json()) as ScenarioReferenceAnnotationPayload;
+  async function applyScenarioAnnotationPayload(
+    scenarioId: string,
+    label: string,
+    payload: ScenarioReferenceAnnotationPayload,
+  ): Promise<void> {
       const annotation = normalizeAnnotation(payload.annotation);
       const fallbackImagePath = state.annotation.image_path;
       state.annotation = annotation;
@@ -6842,6 +6843,50 @@ function buildingRegionHandleFromTarget(
       } else {
         setStatus(statusEl, `Loaded scenario design: ${label}.`, "success");
       }
+  }
+
+  async function applyScenarioDraftAnnotation(payload: {
+    scenario_id?: string;
+    title_zh?: string;
+    annotation?: unknown;
+  }): Promise<void> {
+    const scenarioId = String(payload.scenario_id || "draft_semantic_variant");
+    const label = String(payload.title_zh || scenarioId);
+    state.isScenarioDesignAnnotationLoading = true;
+    renderScenarioDesignOptions(scenarioId);
+    setStatus(statusEl, `Loading draft scenario annotation: ${label}...`, "neutral");
+    try {
+      await applyScenarioAnnotationPayload(scenarioId, label, {
+        annotation: payload.annotation as ScenarioReferenceAnnotationPayload["annotation"],
+      } as ScenarioReferenceAnnotationPayload);
+    } finally {
+      state.isScenarioDesignAnnotationLoading = false;
+      renderScenarioDesignOptions(state.selectedScenarioId);
+    }
+  }
+
+  async function applyScenarioDesignAnnotation(scenarioId: string): Promise<void> {
+    const scenario = state.scenarioDesigns.find((item) => item.scenario_id === scenarioId);
+    const label = scenario?.title_zh || scenarioId;
+    if (scenario?.enabled === false) {
+      throw new Error(scenario.excluded_reason_zh || "This scenario design is excluded from the current default workflow.");
+    }
+    state.isScenarioDesignAnnotationLoading = true;
+    renderScenarioDesignOptions(scenarioId);
+    setStatus(statusEl, `Loading scenario design: ${label}...`, "neutral");
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/scenario-designs/${encodeURIComponent(scenarioId)}/reference-annotation?graph_template_id=hkust_gz_gate`,
+        { signal: controller.signal },
+      );
+      if (!response.ok) {
+        const detail = await readApiErrorDetail(response);
+        throw new Error(detail || `Failed to load scenario design annotation (${response.status}).`);
+      }
+      const payload = (await response.json()) as ScenarioReferenceAnnotationPayload;
+      await applyScenarioAnnotationPayload(scenarioId, label, payload);
     } finally {
       window.clearTimeout(timeoutId);
       state.isScenarioDesignAnnotationLoading = false;

@@ -34,6 +34,7 @@ import type {
   BranchRunNode,
   ScenarioDesign,
   ScenarioDesignCatalogPayload,
+  ScenarioDraftVariantPayload,
 } from "./viewer-types";
 import {
   VIEWER_DESIGN_PRESETS,
@@ -50,6 +51,7 @@ import {
   loadManifest,
   loadRecentLayouts,
   apiJson,
+  postApiJson,
   clearManifestCache,
   clearRecentLayoutsCache,
   parseQueryLayoutPath,
@@ -536,6 +538,23 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                 <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Load Saved Preview JSON</button>
                 <button id="viewer-design-scenario-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Open Annotation</button>
               </div>
+              <div class="viewer-design-scenario-draft">
+                <label class="viewer-settings-label" for="viewer-design-scenario-draft-prompt">
+                  <span>Draft Variant from Prompt</span>
+                </label>
+                <textarea id="viewer-design-scenario-draft-prompt" class="viewer-design-scenario-draft-prompt" rows="3" placeholder="例如：道路中段右侧加公交站，绿色铺装"></textarea>
+                <label class="viewer-design-scenario-llm-toggle">
+                  <input id="viewer-design-scenario-use-llm" type="checkbox" checked />
+                  <span>Use LLM semantic parse, fallback to deterministic compiler</span>
+                </label>
+                <div class="viewer-design-scenario-draft-actions">
+                  <button id="viewer-design-scenario-draft" class="viewer-nav-button viewer-nav-button-secondary" type="button">Draft Variant</button>
+                  <button id="viewer-design-scenario-use-draft" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Use Draft Variant</button>
+                </div>
+                <div id="viewer-design-scenario-draft-result" class="viewer-design-scenario-draft-result" data-tone="empty">
+                  用自然语言先生成一个可验证的临时 Scenario Variant，再选择 Use Draft Variant 参与 Generate & Load。
+                </div>
+              </div>
               <div class="viewer-design-trace-hint">
                 Pareto Trace 使用当前 Prompt 和 Graph Template，按传统参数搜索采样最多 100 组；连续 20 组未改进时早停。每轮只保留评分前 10 个 GLB/渲染视图，非前 10 重资产会在评分后删除。
               </div>
@@ -978,6 +997,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const designScenarioMetaEl = requireElement<HTMLElement>(root, "#viewer-design-scenario-meta");
   const designScenarioPreviewEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-preview");
   const designScenarioAnnotationEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-annotation");
+  const designScenarioDraftPromptEl = requireElement<HTMLTextAreaElement>(root, "#viewer-design-scenario-draft-prompt");
+  const designScenarioUseLlmEl = requireElement<HTMLInputElement>(root, "#viewer-design-scenario-use-llm");
+  const designScenarioDraftEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-draft");
+  const designScenarioUseDraftEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-use-draft");
+  const designScenarioDraftResultEl = requireElement<HTMLElement>(root, "#viewer-design-scenario-draft-result");
   const designBenchmarkEl = requireElement<HTMLButtonElement>(root, "#viewer-design-benchmark");
   const designBranchHistoryEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-history");
   const designBranchRunEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-run");
@@ -1115,18 +1139,27 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   let designScenarioCatalog: ScenarioDesignCatalogPayload | null = null;
+  let latestDraftScenario: ScenarioDesign | null = null;
 
   function selectedScenarioDesign(): ScenarioDesign | null {
     const scenarioId = designScenarioEl.value.trim();
-    if (!scenarioId || !designScenarioCatalog) return null;
+    if (!scenarioId) return null;
+    if (latestDraftScenario?.scenario_id === scenarioId && latestDraftScenario.enabled !== false) {
+      return latestDraftScenario;
+    }
+    if (!designScenarioCatalog) return null;
     return designScenarioCatalog.items.find((item) => item.scenario_id === scenarioId && item.enabled !== false) ?? null;
   }
 
   function renderDesignScenarioOptions(preferredScenarioId: string = designScenarioEl.value): void {
-    const graphTemplateId = designScenarioCatalog?.graph_template_id || DEFAULT_GRAPH_TEMPLATE_ID;
+    const graphTemplateId = designScenarioCatalog?.graph_template_id || designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
     const items = designScenarioCatalog?.items ?? [];
+    const draftOption = latestDraftScenario
+      ? `<option value="${escapeHtml(latestDraftScenario.scenario_id)}">Draft · ${escapeHtml(latestDraftScenario.title_zh || latestDraftScenario.scenario_id)}</option>`
+      : "";
     designScenarioEl.innerHTML = [
       `<option value="">Base Template / No Variant</option>`,
+      draftOption,
       ...items.map((item) => {
         const enabled = item.enabled !== false;
         const label = enabled
@@ -1135,7 +1168,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         return `<option value="${escapeHtml(item.scenario_id)}" ${enabled ? "" : "disabled"}>${escapeHtml(label)}</option>`;
       }),
     ].join("");
-    const canRestore = preferredScenarioId && items.some((item) => item.scenario_id === preferredScenarioId && item.enabled !== false);
+    const canRestore = preferredScenarioId && (
+      latestDraftScenario?.scenario_id === preferredScenarioId
+      || items.some((item) => item.scenario_id === preferredScenarioId && item.enabled !== false)
+    );
     designScenarioEl.value = canRestore ? preferredScenarioId : "";
     syncDesignGraphTemplateId(graphTemplateId);
     updateDesignScenarioMeta();
@@ -1145,13 +1181,22 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const graphTemplateId = designScenarioCatalog?.graph_template_id || designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
     const scenario = selectedScenarioDesign();
     designScenarioPreviewEl.disabled = !scenario || scenario.preview_layout_exists === false || !scenario.preview_layout_path;
-    designScenarioAnnotationEl.disabled = !scenario;
+    designScenarioAnnotationEl.disabled = !scenario || (!scenario.annotation && latestDraftScenario?.scenario_id === scenario.scenario_id);
     if (scenario && designScenarioCatalog?.graph_template_id) {
       syncDesignGraphTemplateId(designScenarioCatalog.graph_template_id);
     }
     if (!scenario) {
       designScenarioMetaEl.textContent = `Base template: ${graphTemplateId} · Generate uses Preset + Prompt directly.`;
       designScenarioMetaEl.dataset.tone = "base";
+      return;
+    }
+    if (scenario.template_patch) {
+      const patchCount = getTemplatePatchOperationCount(scenario.template_patch);
+      const defaultCount = Array.isArray(scenario.resolved_defaults) ? scenario.resolved_defaults.length : 0;
+      const warningCount = Array.isArray(scenario.warnings) ? scenario.warnings.length : 0;
+      const parseMethod = scenario.llm_used ? "LLM semantic parse" : `semantic parse=${scenario.semantic_parse_method || "deterministic"}`;
+      designScenarioMetaEl.textContent = `Base template: ${graphTemplateId} · temporary semantic draft · ${parseMethod} · ${patchCount} patch ops · ${defaultCount} resolved defaults · ${warningCount} warnings. Generate & Load uses this draft patch directly.`;
+      designScenarioMetaEl.dataset.tone = warningCount > 0 ? "warning" : "variant";
       return;
     }
     const previewLabel = scenario.preview_layout_exists === false ? "preview missing" : "preview ready";
@@ -1177,6 +1222,132 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
   }
 
+  function getTemplatePatchOperationCount(templatePatch: Record<string, unknown> | undefined): number {
+    const operations = templatePatch?.operations;
+    return Array.isArray(operations) ? operations.length : 0;
+  }
+
+  function summarizeDraftDefaults(defaults: Array<Record<string, unknown>> | undefined): string {
+    if (!Array.isArray(defaults) || defaults.length === 0) {
+      return "No defaults resolved.";
+    }
+    return defaults.map((item, index) => {
+      const feature = String(item.feature ?? "feature");
+      const roadId = String(item.centerline_id ?? item.road_id ?? "primary road");
+      const fraction = Number(item.center_fraction ?? 0.5);
+      const length = Number(item.length_m ?? 0);
+      const width = Number(item.width_m ?? 0);
+      const lateral = String(item.lateral_anchor ?? "right_curbside");
+      return `${index + 1}. ${feature} on ${roadId}, fraction=${Number.isFinite(fraction) ? fraction.toFixed(2) : "?"}, lateral=${lateral}, ${Number.isFinite(length) && length > 0 ? length.toFixed(1) : "?"}m x ${Number.isFinite(width) && width > 0 ? width.toFixed(1) : "?"}m`;
+    }).join("\n");
+  }
+
+  function renderDraftScenarioResult(scenario: ScenarioDesign | null, message = ""): void {
+    if (!scenario) {
+      designScenarioDraftResultEl.textContent = message || "用自然语言先生成一个可验证的临时 Scenario Variant，再选择 Use Draft Variant 参与 Generate & Load。";
+      designScenarioDraftResultEl.dataset.tone = "empty";
+      designScenarioUseDraftEl.disabled = true;
+      return;
+    }
+    const warnings = Array.isArray(scenario.warnings) ? scenario.warnings : [];
+    const citations = Array.isArray(scenario.citations) ? scenario.citations : [];
+    const firstCitation = citations.length > 0
+      ? String(citations[0]?.title ?? citations[0]?.source_id ?? citations[0]?.knowledge_source ?? "RAG evidence")
+      : "none";
+    const lines = [
+      `Draft ready: ${scenario.title_zh || scenario.scenario_id}`,
+      `semantic_parse=${scenario.semantic_parse_method || "deterministic"} · llm_used=${scenario.llm_used ? "true" : "false"}`,
+      ...(!scenario.llm_used && scenario.fallback_reason ? [`fallback: ${scenario.fallback_reason}`] : []),
+      summarizeDraftDefaults(scenario.resolved_defaults),
+      `patch_ops=${getTemplatePatchOperationCount(scenario.template_patch)} · citations=${citations.length} (${firstCitation}) · warnings=${warnings.length}`,
+      ...warnings.map((item) => `warning: ${item}`),
+    ];
+    designScenarioDraftResultEl.textContent = lines.filter(Boolean).join("\n");
+    designScenarioDraftResultEl.dataset.tone = warnings.length > 0 ? "warning" : "ready";
+    designScenarioUseDraftEl.disabled = false;
+  }
+
+  function scenarioFromDraftPayload(payload: ScenarioDraftVariantPayload, prompt: string): ScenarioDesign {
+    const templatePatch = payload.template_patch ?? {};
+    const annotationSummary = (payload.annotation_summary ?? {}) as Record<string, unknown>;
+    const surfaceCount = Number(
+      annotationSummary.surface_annotation_count
+      ?? annotationSummary.surface_annotations
+      ?? annotationSummary.annotation_surface_count
+      ?? 0,
+    );
+    return {
+      scenario_id: payload.scenario_id,
+      title_zh: payload.title_zh || `Draft · ${prompt.slice(0, 24)}`,
+      scenario_type: payload.scenario_type || "semantic_prompt_variant",
+      enabled: true,
+      query: payload.prompt || prompt,
+      intent_zh: payload.prompt || prompt,
+      functional_zone_count: 0,
+      surface_annotation_count: Number.isFinite(surfaceCount) ? surfaceCount : 0,
+      template_patch_operation_count: getTemplatePatchOperationCount(templatePatch),
+      compose_config_patch: {},
+      preview_layout_path: "",
+      preview_layout_exists: false,
+      template_patch: templatePatch,
+      semantic_edits: payload.semantic_edits ?? [],
+      resolved_defaults: payload.resolved_defaults ?? [],
+      warnings: payload.warnings ?? [],
+      citations: payload.citations ?? [],
+      annotation: payload.annotation,
+      annotation_summary: annotationSummary,
+      prompt: payload.prompt || prompt,
+      llm_requested: payload.llm_requested,
+      llm_used: payload.llm_used,
+      fallback_reason: payload.fallback_reason,
+      semantic_parse_method: payload.semantic_parse_method,
+    };
+  }
+
+  async function draftDesignScenarioVariant(): Promise<void> {
+    const prompt = (
+      designScenarioDraftPromptEl.value.trim()
+      || designPromptEl.value.trim()
+    );
+    if (!prompt) {
+      renderDraftScenarioResult(null, "请输入一个自然语言变体，例如：道路中段右侧加公交站，绿色铺装。");
+      return;
+    }
+    const graphTemplateId = designTemplateEl.value.trim() || designScenarioCatalog?.graph_template_id || DEFAULT_GRAPH_TEMPLATE_ID;
+    designScenarioDraftEl.disabled = true;
+    designScenarioUseDraftEl.disabled = true;
+    designScenarioDraftResultEl.textContent = "Drafting semantic variant and validating template patch...";
+    designScenarioDraftResultEl.dataset.tone = "empty";
+    try {
+      const payload = await postApiJson<ScenarioDraftVariantPayload>("/api/scenario-designs/draft-variant", {
+        prompt,
+        graph_template_id: graphTemplateId,
+        use_llm: designScenarioUseLlmEl.checked,
+      });
+      latestDraftScenario = scenarioFromDraftPayload(payload, prompt);
+      renderDesignScenarioOptions(latestDraftScenario.scenario_id);
+      renderDraftScenarioResult(latestDraftScenario);
+      flashStatus(`Draft variant ready: ${latestDraftScenario.title_zh || latestDraftScenario.scenario_id}.`);
+    } catch (error) {
+      latestDraftScenario = null;
+      renderDesignScenarioOptions("");
+      renderDraftScenarioResult(null, error instanceof Error ? error.message : "Draft variant failed.");
+      setError(errorEl, error instanceof Error ? error.message : "Draft variant failed.");
+    } finally {
+      designScenarioDraftEl.disabled = false;
+    }
+  }
+
+  function useLatestDraftScenario(): void {
+    if (!latestDraftScenario) {
+      renderDraftScenarioResult(null, "No draft variant is available yet.");
+      return;
+    }
+    renderDesignScenarioOptions(latestDraftScenario.scenario_id);
+    renderDraftScenarioResult(latestDraftScenario);
+    flashStatus(`Using draft variant: ${latestDraftScenario.title_zh || latestDraftScenario.scenario_id}.`);
+  }
+
   async function loadSelectedDesignScenarioPreview(): Promise<void> {
     const scenario = selectedScenarioDesign();
     if (!scenario?.preview_layout_path) return;
@@ -1190,7 +1361,15 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   function openSelectedDesignScenarioAnnotation(): void {
     const scenario = selectedScenarioDesign();
     if (scenario) {
-      window.localStorage.setItem("roadgen3d.pendingScenarioDesignId", scenario.scenario_id);
+      if (scenario.annotation) {
+        window.localStorage.setItem("roadgen3d.pendingScenarioDraftAnnotation", JSON.stringify({
+          scenario_id: scenario.scenario_id,
+          title_zh: scenario.title_zh,
+          annotation: scenario.annotation,
+        }));
+      } else {
+        window.localStorage.setItem("roadgen3d.pendingScenarioDesignId", scenario.scenario_id);
+      }
       flashStatus(`Opening annotation for ${scenario.title_zh || scenario.scenario_id}...`);
     }
     sceneGraphLinkEl.click();
@@ -2711,6 +2890,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
   }, { signal });
   designScenarioEl.addEventListener("change", updateDesignScenarioMeta, { signal });
+  designScenarioDraftEl.addEventListener("click", () => {
+    void draftDesignScenarioVariant();
+  }, { signal });
+  designScenarioUseDraftEl.addEventListener("click", useLatestDraftScenario, { signal });
   designScenarioPreviewEl.addEventListener("click", () => {
     void loadSelectedDesignScenarioPreview().catch((error) => {
       const message = error instanceof Error ? error.message : "Failed to load scenario preview.";

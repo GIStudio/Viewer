@@ -159,6 +159,9 @@ export type SceneJobCreatePayload = {
     reference_plan_id: string | null;
     graph_template_id: string;
     scenario_id?: string | null;
+    scenario_title?: string | null;
+    scenario_design_variant?: Record<string, unknown> | null;
+    template_patch?: Record<string, unknown> | null;
   };
   patch_overrides: Record<string, unknown>;
   generation_options: {
@@ -230,6 +233,37 @@ export type ScenarioDesign = {
   compose_config_patch?: Record<string, unknown>;
   preview_layout_path: string;
   preview_layout_exists?: boolean;
+  template_patch?: Record<string, unknown>;
+  semantic_edits?: Array<Record<string, unknown>>;
+  resolved_defaults?: Array<Record<string, unknown>>;
+  warnings?: string[];
+  citations?: Array<Record<string, unknown>>;
+  annotation?: Record<string, unknown>;
+  annotation_summary?: Record<string, unknown>;
+  prompt?: string;
+  llm_requested?: boolean;
+  llm_used?: boolean;
+  fallback_reason?: string;
+  semantic_parse_method?: string;
+};
+
+export type ScenarioDraftVariantPayload = {
+  scenario_id: string;
+  title_zh?: string;
+  scenario_type?: string;
+  graph_template_id: string;
+  prompt?: string;
+  semantic_edits?: Array<Record<string, unknown>>;
+  resolved_defaults?: Array<Record<string, unknown>>;
+  template_patch?: Record<string, unknown>;
+  annotation?: Record<string, unknown>;
+  annotation_summary?: Record<string, unknown>;
+  citations?: Array<Record<string, unknown>>;
+  warnings?: string[];
+  llm_requested?: boolean;
+  llm_used?: boolean;
+  fallback_reason?: string;
+  semantic_parse_method?: string;
 };
 
 export type ScenarioDesignRunSummary = {

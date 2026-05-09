@@ -115,6 +115,12 @@ export async function submitDesignJob(
   }, variant);
   const scenarioId = scenario?.scenario_id || "";
   const normalizedPrompt = effectiveDesignPrompt(preset, prompt, scenario);
+  const scenarioContext = scenarioId ? {
+    scenario_id: scenarioId,
+    scenario_title: scenario?.title_zh || scenarioId,
+    scenario_design_variant: scenario as unknown as Record<string, unknown>,
+    ...(scenario?.template_patch ? { template_patch: scenario.template_patch } : {}),
+  } : {};
   
   return postApiJson<SceneJobCreatePayload>("/api/scene/jobs", {
     draft: {
@@ -132,6 +138,7 @@ export async function submitDesignJob(
       reference_plan_id: null,
       graph_template_id: graphTemplateId,
       scenario_id: scenarioId || null,
+      ...scenarioContext,
     },
     patch_overrides: {},
     generation_options: {
