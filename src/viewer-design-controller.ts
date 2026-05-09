@@ -10,6 +10,7 @@ import type {
   BranchRunNode,
   BranchScatterPoint,
   DesignPreset,
+  DesignSemanticSummary,
   DesignSchemeVariant,
   RecentLayout,
   SceneJobResult,
@@ -81,6 +82,8 @@ export type ViewerDesignControllerDeps = {
   errorEl: HTMLElement;
   getSelectedDesignPreset: () => DesignPreset | null;
   getSelectedScenarioDesign: () => ScenarioDesign | null;
+  getDesignSemanticConfigPatch: () => Record<string, unknown>;
+  getDesignSemanticSummary: (preset: DesignPreset | null) => DesignSemanticSummary;
   hasLastDesignRunSnapshot: () => boolean;
   setSelectedBranchNodeId: (nodeId: string | null) => void;
   setStatus: (message: string) => void;
@@ -93,6 +96,8 @@ export type ViewerDesignControllerDeps = {
     variant: DesignSchemeVariant,
     prompt: string,
     graphTemplateId: string,
+    structureSource?: string,
+    semanticSummary?: DesignSemanticSummary,
   ) => void;
   hideDesignWorkspace: () => void;
   renderBranchWorkspace: (payload: BranchRunStatusPayload) => void;
@@ -905,12 +910,14 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     variant: DesignSchemeVariant,
     prompt: string,
     graphTemplateId: string,
+    structureSource: string,
+    semanticSummary: DesignSemanticSummary,
   ): Promise<SceneJobResult> {
     for (let attempt = 0; attempt < DESIGN_MAX_POLL_ATTEMPTS; attempt += 1) {
       const payload = await apiJson<SceneJobStatusPayload>(`/api/scene/jobs/${encodeURIComponent(jobId)}`);
       const { progress, message, stage } = describeDesignJobProgress(payload);
       deps.updateDesignStatus(`${message} (${progress}%)`);
-      deps.renderDesignWorkspace(payload, preset, variant, prompt, graphTemplateId);
+      deps.renderDesignWorkspace(payload, preset, variant, prompt, graphTemplateId, structureSource, semanticSummary);
 
       const isFailed = payload.status === "failed";
       deps.designResultEl.innerHTML = `
@@ -935,9 +942,14 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     if (designIsGenerating) return;
     const preset = deps.getSelectedDesignPreset();
     const scenario = deps.getSelectedScenarioDesign();
-    const prompt = deps.designPromptEl.value.trim() || (preset?.prompt ?? "");
+    const prompt = deps.designPromptEl.value.trim();
     const effectivePrompt = effectiveDesignPrompt(preset, prompt, scenario);
     const graphTemplateId = deps.designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
+    const semanticConfigPatch = deps.getDesignSemanticConfigPatch();
+    const semanticSummary = deps.getDesignSemanticSummary(preset);
+    const structureSource = scenario
+      ? (scenario.title_zh || scenario.scenario_id)
+      : `基础模板 · ${graphTemplateId}`;
     const variants = deps.designCountEl.value === "3" ? DESIGN_SCHEME_VARIANTS : [DESIGN_SCHEME_VARIANTS[0]];
     const generatedSchemes: GeneratedDesignScheme[] = [];
     designIsGenerating = true;
@@ -965,7 +977,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
             </div>
           </div>
         </header>
-        ${renderDesignImprovementSummary(preset, variants[0]!, effectivePrompt, graphTemplateId)}
+        ${renderDesignImprovementSummary(preset, variants[0]!, effectivePrompt, graphTemplateId, structureSource, semanticSummary)}
       </div>
     `;
     deps.setStatus("Submitting design generation job...");
@@ -974,9 +986,9 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       for (const variant of variants) {
         deps.updateDesignStatus(`Submitting ${variant.name} · ${scenarioLabel}...`);
         try {
-          const createPayload = await submitDesignJob(preset, prompt, graphTemplateId, variant, scenario);
+          const createPayload = await submitDesignJob(preset, prompt, graphTemplateId, variant, scenario, semanticConfigPatch);
           deps.updateDesignStatus(`${variant.name}: job ${createPayload.job_id} submitted${scenario ? ` with ${scenario.scenario_id}` : ""}.`);
-          const result = await waitForDesignJob(createPayload.job_id, preset, variant, effectivePrompt, graphTemplateId);
+          const result = await waitForDesignJob(createPayload.job_id, preset, variant, effectivePrompt, graphTemplateId, structureSource, semanticSummary);
           if (!result.scene_layout_path) {
             throw new Error("Generation finished without a scene_layout_path.");
           }

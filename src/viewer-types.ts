@@ -416,6 +416,13 @@ export type DesignRunSnapshot = {
   graphTemplateId: string;
 };
 
+export type DesignSemanticSummary = {
+  skeletonLabel: string;
+  skeletonProfile?: string;
+  streetFurnitureLabel: string;
+  streetFurnitureProfile?: string;
+};
+
 // ============================================================================
 // Design Presets and Variants
 // ============================================================================
@@ -446,6 +453,24 @@ export type DesignSchemeVariant = {
   widthMod: number;
   seed: number;
 };
+
+export const SKELETON_DESIGN_PROFILE_OPTIONS = [
+  { id: "child_friendly_school", label: "儿童友好学校 / Child-Friendly School" },
+  { id: "walkable_commercial", label: "步行商业 / Walkable Commercial" },
+  { id: "vehicle_access_commercial", label: "车行可达商业 / Vehicle Access Commercial" },
+  { id: "transit_priority", label: "公交优先 / Transit Priority" },
+  { id: "green_walkable", label: "绿色慢行 / Green Walkable" },
+  { id: "quiet_residential", label: "安静居住 / Quiet Residential" },
+] as const;
+
+export const STREET_FURNITURE_PROFILE_OPTIONS = [
+  { id: "balanced_complete", label: "平衡完整 / Balanced Complete" },
+  { id: "pedestrian_friendly", label: "步行友好 / Pedestrian Friendly" },
+  { id: "commercial_vitality", label: "商业活力 / Commercial Vitality" },
+  { id: "transit_priority", label: "公交优先 / Transit Priority" },
+  { id: "park_landscape", label: "公园景观 / Park Landscape" },
+  { id: "quiet_residential", label: "安静居住 / Quiet Residential" },
+] as const;
 
 // ============================================================================
 // Branch Run Types
@@ -775,6 +800,10 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
     prompt: "各类使用者平衡的完整街道，行人、自行车、公交、机动车和谐共处",
     color: "#607D8B",
     configPatch: {
+      street_furniture_profile: "balanced_complete",
+      street_furniture_profile_source: "manual",
+      street_furniture_profile_confidence: 1,
+      street_furniture_profile_reasons: ["preset:selected"],
       design_rule_profile: "balanced_complete_street_v1",
       objective_profile: "balanced",
       density: 0.6,
@@ -792,6 +821,10 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
     prompt: "步行安全，全龄友好的完整街道，安静、安全、舒适",
     color: "#4CAF50",
     configPatch: {
+      street_furniture_profile: "pedestrian_friendly",
+      street_furniture_profile_source: "manual",
+      street_furniture_profile_confidence: 1,
+      street_furniture_profile_reasons: ["preset:selected"],
       design_rule_profile: "pedestrian_priority_v1",
       objective_profile: "balanced",
       density: 0.5,
@@ -809,6 +842,10 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
     prompt: "商业活跃的街道，商业设施密集，人流穿梭",
     color: "#FF9800",
     configPatch: {
+      street_furniture_profile: "commercial_vitality",
+      street_furniture_profile_source: "manual",
+      street_furniture_profile_confidence: 1,
+      street_furniture_profile_reasons: ["preset:selected"],
       design_rule_profile: "balanced_complete_street_v1",
       objective_profile: "commerce",
       density: 0.9,
@@ -826,6 +863,10 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
     prompt: "公交优先的街道，公交可达性高，换乘便利",
     color: "#2196F3",
     configPatch: {
+      street_furniture_profile: "transit_priority",
+      street_furniture_profile_source: "manual",
+      street_furniture_profile_confidence: 1,
+      street_furniture_profile_reasons: ["preset:selected"],
       design_rule_profile: "transit_priority_v1",
       objective_profile: "transit",
       density: 0.85,
@@ -843,6 +884,10 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
     prompt: "公园景观街道，绿化丰富，自然生态，休闲舒适",
     color: "#8BC34A",
     configPatch: {
+      street_furniture_profile: "park_landscape",
+      street_furniture_profile_source: "manual",
+      street_furniture_profile_confidence: 1,
+      street_furniture_profile_reasons: ["preset:selected"],
       design_rule_profile: "pedestrian_priority_v1",
       objective_profile: "greening",
       density: 0.25,
@@ -860,6 +905,10 @@ export const VIEWER_DESIGN_PRESETS: DesignPreset[] = [
     prompt: "安静居住街道，绿树成荫，步行安全，适合全龄",
     color: "#9C27B0",
     configPatch: {
+      street_furniture_profile: "quiet_residential",
+      street_furniture_profile_source: "manual",
+      street_furniture_profile_confidence: 1,
+      street_furniture_profile_reasons: ["preset:selected"],
       design_rule_profile: "pedestrian_priority_v1",
       objective_profile: "greening",
       density: 0.35,

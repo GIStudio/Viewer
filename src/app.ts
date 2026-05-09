@@ -30,6 +30,7 @@ import type {
   DesignPreset,
   SceneJobStatusPayload,
   DesignSchemeVariant,
+  DesignSemanticSummary,
   BranchRunStatusPayload,
   BranchRunNode,
   ScenarioDesign,
@@ -39,6 +40,8 @@ import type {
 import {
   VIEWER_DESIGN_PRESETS,
   DEFAULT_GRAPH_TEMPLATE_ID,
+  SKELETON_DESIGN_PROFILE_OPTIONS,
+  STREET_FURNITURE_PROFILE_OPTIONS,
 } from "./viewer-types";
 import {
   requireElement,
@@ -160,6 +163,78 @@ type DesignRunSnapshot = {
   variant: DesignSchemeVariant;
   prompt: string;
   graphTemplateId: string;
+  structureSource?: string;
+  semanticSummary?: DesignSemanticSummary;
+};
+
+function profileOptionsHtml(options: ReadonlyArray<{ id: string; label: string }>, autoLabel: string): string {
+  return [
+    `<option value="">${escapeHtml(autoLabel)}</option>`,
+    ...options.map((option) => `<option value="${escapeHtml(option.id)}">${escapeHtml(option.label)}</option>`),
+  ].join("");
+}
+
+const STREET_FURNITURE_OVERRIDE_PATCHES: Record<string, Record<string, unknown>> = {
+  balanced_complete: {
+    design_rule_profile: "balanced_complete_street_v1",
+    objective_profile: "balanced",
+    style_preset: "civic_clean_v1",
+    density: 0.6,
+    ped_demand_level: "medium",
+    bike_demand_level: "medium",
+    transit_demand_level: "medium",
+    vehicle_demand_level: "medium",
+  },
+  pedestrian_friendly: {
+    design_rule_profile: "pedestrian_priority_v1",
+    objective_profile: "balanced",
+    style_preset: "lush_walkable_v1",
+    density: 0.5,
+    ped_demand_level: "high",
+    bike_demand_level: "medium",
+    transit_demand_level: "medium",
+    vehicle_demand_level: "low",
+  },
+  commercial_vitality: {
+    design_rule_profile: "balanced_complete_street_v1",
+    objective_profile: "commerce",
+    style_preset: "civic_clean_v1",
+    density: 0.9,
+    ped_demand_level: "high",
+    bike_demand_level: "medium",
+    transit_demand_level: "high",
+    vehicle_demand_level: "medium",
+  },
+  transit_priority: {
+    design_rule_profile: "transit_priority_v1",
+    objective_profile: "transit",
+    style_preset: "transit_modern_v1",
+    density: 0.85,
+    ped_demand_level: "high",
+    bike_demand_level: "medium",
+    transit_demand_level: "high",
+    vehicle_demand_level: "high",
+  },
+  park_landscape: {
+    design_rule_profile: "pedestrian_priority_v1",
+    objective_profile: "greening",
+    style_preset: "lush_walkable_v1",
+    density: 0.25,
+    ped_demand_level: "medium",
+    bike_demand_level: "medium",
+    transit_demand_level: "low",
+    vehicle_demand_level: "low",
+  },
+  quiet_residential: {
+    design_rule_profile: "pedestrian_priority_v1",
+    objective_profile: "greening",
+    style_preset: "lush_walkable_v1",
+    density: 0.35,
+    ped_demand_level: "high",
+    bike_demand_level: "medium",
+    transit_demand_level: "low",
+    vehicle_demand_level: "low",
+  },
 };
 
 type RoadGen3DCaptureGalleryRequest = {
@@ -491,98 +566,157 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
             <div class="viewer-slide-panel-header">
               <div>
                 <div class="viewer-slide-panel-title" data-i18n-key="viewer.design.title">Design Assistant</div>
-                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.design.subtitle">Generate scenes, trace RAG / triples / search patches, and compare Pareto scores</div>
+                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.design.subtitle">Choose a street structure, choose a street furniture goal, then generate a 3D scene.</div>
               </div>
-              <button id="viewer-design-review-run" class="viewer-design-review-run" type="button" disabled title="重新展开最近一次场景生成步骤">Review Run</button>
               <button id="viewer-design-close" class="viewer-settings-close" type="button" aria-label="Close design assistant">x</button>
             </div>
             <div class="viewer-slide-panel-body viewer-design-body">
-              <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-preset">
-                <span>Preset</span>
-                <button class="viewer-help-icon" type="button" data-help="design-preset" title="了解预设">?</button>
-              </label>
-              <select id="viewer-design-preset" class="viewer-select viewer-select-compact">
-                <option value="__custom__">Custom / LLM-Driven（自定义）</option>
-              </select>
-              <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-prompt">
-                <span>Prompt / Extra Notes</span>
-                <button class="viewer-help-icon" type="button" data-help="design-prompt" title="了解提示词">?</button>
-              </label>
-              <textarea id="viewer-design-prompt" class="viewer-design-prompt" rows="5"></textarea>
-              <div class="viewer-design-prompt-hint">
-                选择 Scenario Variant 后，variant 是结构方案；Preset 只提供生成/渲染参数；这里的 Prompt 只作为额外补充。
-              </div>
-              <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-count">
-                <span>Schemes</span>
-                <button class="viewer-help-icon" type="button" data-help="design-schemes" title="了解方案数量">?</button>
-              </label>
-              <select id="viewer-design-count" class="viewer-select viewer-select-compact">
-                <option value="1">Single scheme</option>
-                <option value="3">Three variants</option>
-              </select>
-              <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-template">
-                <span>Graph Template</span>
-                <button class="viewer-help-icon" type="button" data-help="design-template" title="了解图模板">?</button>
-              </label>
-              <input id="viewer-design-template" class="viewer-design-input" type="text" value="${DEFAULT_GRAPH_TEMPLATE_ID}" />
-              <label class="viewer-settings-label" for="viewer-design-scenario">
-                <span>Scenario Design Variant</span>
-              </label>
-              <select id="viewer-design-scenario" class="viewer-select viewer-select-compact">
-                <option value="">Base Template / No Variant</option>
-              </select>
-              <div id="viewer-design-scenario-meta" class="viewer-design-scenario-meta">
-                Base template: ${DEFAULT_GRAPH_TEMPLATE_ID}
-              </div>
-              <div class="viewer-design-scenario-actions">
-                <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Load Saved Preview JSON</button>
-                <button id="viewer-design-scenario-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Open Annotation</button>
-              </div>
-              <div class="viewer-design-scenario-draft">
-                <label class="viewer-settings-label" for="viewer-design-scenario-draft-prompt">
-                  <span>Draft Variant from Prompt</span>
-                </label>
-                <textarea id="viewer-design-scenario-draft-prompt" class="viewer-design-scenario-draft-prompt" rows="3" placeholder="例如：道路中段右侧加公交站，绿色铺装"></textarea>
-                <label class="viewer-design-scenario-llm-toggle">
-                  <input id="viewer-design-scenario-use-llm" type="checkbox" checked />
-                  <span>Use LLM semantic parse, fallback to deterministic compiler</span>
-                </label>
-                <div class="viewer-design-scenario-draft-actions">
-                  <button id="viewer-design-scenario-draft" class="viewer-nav-button viewer-nav-button-secondary" type="button">Draft Variant</button>
-                  <button id="viewer-design-scenario-use-draft" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Use Draft Variant</button>
+              <section class="viewer-design-flow-section">
+                <div class="viewer-design-flow-heading">
+                  <span>1</span>
+                  <div>
+                    <strong>场景结构</strong>
+                    <small>决定道路、路口、铺装和功能区。</small>
+                  </div>
                 </div>
-                <div id="viewer-design-scenario-draft-result" class="viewer-design-scenario-draft-result" data-tone="empty">
-                  用自然语言先生成一个可验证的临时 Scenario Variant，再选择 Use Draft Variant 参与 Generate & Load。
+                <label class="viewer-settings-label" for="viewer-design-scenario">
+                  <span>Street Structure / 街道结构</span>
+                </label>
+                <select id="viewer-design-scenario" class="viewer-select viewer-select-compact">
+                  <option value="">基础模板（不套用结构变体）</option>
+                </select>
+                <div id="viewer-design-scenario-meta" class="viewer-design-scenario-meta">
+                  Base template: ${DEFAULT_GRAPH_TEMPLATE_ID}
                 </div>
+                <div id="viewer-design-skeleton-summary" class="viewer-design-layer-summary">
+                  A 骨架功能：自动解析（人工标注 > LLM 标注 > OSM/POI）
+                </div>
+                <div class="viewer-design-scenario-actions">
+                  <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Load Saved Preview JSON</button>
+                  <button id="viewer-design-scenario-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled title="Open annotation in a new tab">Open Annotation</button>
+                </div>
+                <details class="viewer-design-advanced-details viewer-design-structure-draft">
+                  <summary>从一句话创建临时结构</summary>
+                  <div class="viewer-design-scenario-draft">
+                    <label class="viewer-settings-label" for="viewer-design-scenario-draft-prompt">
+                      <span>结构描述</span>
+                    </label>
+                    <textarea id="viewer-design-scenario-draft-prompt" class="viewer-design-scenario-draft-prompt" rows="3" placeholder="例如：道路中段右侧加公交站，绿色铺装"></textarea>
+                    <label class="viewer-design-scenario-llm-toggle">
+                      <input id="viewer-design-scenario-use-llm" type="checkbox" checked />
+                      <span>Use LLM semantic parse, fallback to deterministic compiler</span>
+                    </label>
+                    <div class="viewer-design-scenario-draft-actions">
+                      <button id="viewer-design-scenario-draft" class="viewer-nav-button viewer-nav-button-secondary" type="button">Draft Structure</button>
+                      <button id="viewer-design-scenario-use-draft" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Use Draft Structure</button>
+                    </div>
+                    <div id="viewer-design-scenario-draft-result" class="viewer-design-scenario-draft-result" data-tone="empty">
+                      用自然语言先生成一个可验证的临时结构，再选择 Use Draft Structure 参与 Generate & Load。
+                    </div>
+                  </div>
+                </details>
+              </section>
+              <section class="viewer-design-flow-section">
+                <div class="viewer-design-flow-heading">
+                  <span>2</span>
+                  <div>
+                    <strong>街道家具设计目标</strong>
+                    <small>设置街道家具密度、设施优先级、风格和渲染参数；不会直接改道路结构。</small>
+                  </div>
+                </div>
+                <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-preset">
+                  <span>Street Furniture Design Goal / 街道家具设计目标</span>
+                  <button class="viewer-help-icon" type="button" data-help="design-preset" title="了解街道家具设计目标">?</button>
+                </label>
+                <select id="viewer-design-preset" class="viewer-select viewer-select-compact">
+                  <option value="__custom__">Custom / LLM-Driven（自定义）</option>
+                </select>
+                <div id="viewer-design-furniture-summary" class="viewer-design-layer-summary">
+                  B 家具主题：由街道家具设计目标决定；不直接改道路骨架。
+                </div>
+              </section>
+              <section class="viewer-design-flow-section">
+                <div class="viewer-design-flow-heading">
+                  <span>3</span>
+                  <div>
+                    <strong>补充要求（可选）</strong>
+                    <small>只写额外偏好，不需要重复结构方案。</small>
+                  </div>
+                </div>
+                <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-prompt">
+                  <span>Extra Notes / 补充要求</span>
+                  <button class="viewer-help-icon" type="button" data-help="design-prompt" title="了解补充要求">?</button>
+                </label>
+                <textarea id="viewer-design-prompt" class="viewer-design-prompt" rows="3" placeholder="例如：更像校园入口、减少车行感、加强夜间照明"></textarea>
+                <div class="viewer-design-prompt-hint">
+                  可留空；这里只补充偏好，结构请在上方选择或创建。
+                </div>
+              </section>
+              <section class="viewer-design-flow-section">
+                <div class="viewer-design-flow-heading">
+                  <span>4</span>
+                  <div>
+                    <strong>输出设置</strong>
+                    <small>选择生成一个方案，或生成三个轻微变化方案。</small>
+                  </div>
+                </div>
+                <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-count">
+                  <span>Output / 输出数量</span>
+                  <button class="viewer-help-icon" type="button" data-help="design-schemes" title="了解输出数量">?</button>
+                </label>
+                <select id="viewer-design-count" class="viewer-select viewer-select-compact">
+                  <option value="1">生成 1 个方案</option>
+                  <option value="3">生成 3 个轻微变化方案</option>
+                </select>
+                <details class="viewer-design-advanced-details">
+                  <summary>Advanced Settings / 高级设置</summary>
+                  <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-template">
+                    <span>Graph Template</span>
+                    <button class="viewer-help-icon" type="button" data-help="design-template" title="了解图模板">?</button>
+                  </label>
+                  <input id="viewer-design-template" class="viewer-design-input" type="text" value="${DEFAULT_GRAPH_TEMPLATE_ID}" />
+                  <label class="viewer-settings-label" for="viewer-design-skeleton-profile">
+                    <span>A Skeleton Override / 骨架功能覆盖</span>
+                  </label>
+                  <select id="viewer-design-skeleton-profile" class="viewer-select viewer-select-compact">
+                    ${profileOptionsHtml(SKELETON_DESIGN_PROFILE_OPTIONS, "自动解析（人工 > LLM > OSM/POI）")}
+                  </select>
+                  <label class="viewer-settings-label" for="viewer-design-furniture-profile">
+                    <span>B Furniture Override / 家具主题覆盖</span>
+                  </label>
+                  <select id="viewer-design-furniture-profile" class="viewer-select viewer-select-compact">
+                    ${profileOptionsHtml(STREET_FURNITURE_PROFILE_OPTIONS, "使用上方街道家具设计目标")}
+                  </select>
+                </details>
+              </section>
+              <div class="viewer-design-status-row">
+                <div id="viewer-design-status" class="viewer-design-status">Ready to generate.</div>
+                <button id="viewer-design-review-run" class="viewer-design-review-run" type="button" disabled title="重新展开最近一次场景生成步骤">查看上次生成过程</button>
               </div>
-              <div class="viewer-design-trace-hint">
-                Pareto Trace 使用当前 Prompt 和 Graph Template，按传统参数搜索采样最多 100 组；连续 20 组未改进时早停。每轮只保留评分前 10 个 GLB/渲染视图，非前 10 重资产会在评分后删除。
-              </div>
-              <div id="viewer-design-status" class="viewer-design-status">Ready to generate.</div>
               <div id="viewer-design-result" class="viewer-design-result"></div>
             </div>
             <div class="viewer-slide-panel-footer">
               <div class="viewer-design-action-sections" aria-label="Design assistant actions">
                 <section class="viewer-design-action-section viewer-design-action-section-primary" aria-labelledby="viewer-design-generate-actions-title">
                   <div class="viewer-design-action-heading">
-                    <span id="viewer-design-generate-actions-title">Generate 新建结果</span>
-                    <small>提交新的场景或 Pareto 搜索任务</small>
+                    <span id="viewer-design-generate-actions-title">Generate / 生成</span>
+                    <small>按上方结构、街道家具设计目标和补充要求生成场景。</small>
                   </div>
                   <div class="viewer-design-action-row">
-                    <button id="viewer-design-generate" class="viewer-nav-button" type="button">Generate & Load</button>
-                    <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Pareto Trace</button>
+                    <button id="viewer-design-generate" class="viewer-nav-button" type="button">Generate & Load / 生成并加载</button>
                   </div>
                 </section>
-                <section class="viewer-design-action-section" aria-labelledby="viewer-design-history-actions-title">
-                  <div class="viewer-design-action-heading">
-                    <span id="viewer-design-history-actions-title">Load Previous 历史结果</span>
-                    <small>读取已经保存的 Benchmark 与运行记录</small>
+                <details class="viewer-design-advanced-details viewer-design-analysis-details">
+                  <summary>Advanced Analysis / 高级分析</summary>
+                  <div class="viewer-design-trace-hint">
+                    用于研究多个参数样本、查看历史评分和 Pareto 搜索，不是普通生成入口。
                   </div>
                   <div class="viewer-design-action-row">
+                    <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Run Pareto Search / 批量搜索评分</button>
                     <button id="viewer-design-benchmark" class="viewer-nav-button viewer-nav-button-secondary" type="button">Benchmark Store</button>
                     <button id="viewer-design-branch-history" class="viewer-nav-button viewer-nav-button-secondary" type="button">Run History</button>
                   </div>
-                </section>
+                </details>
               </div>
             </div>
           </aside>
@@ -724,15 +858,15 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                       <button class="viewer-help-step-detail-btn" type="button" data-detail="context">详情</button>
                     </div>
                     <div class="viewer-help-step-content" data-detail-content="context" hidden>
-                      <p>系统会解析你输入的自然语言提示词（Prompt），结合选定的预设（Preset）和图模板（Graph Template），理解你的设计意图并生成可执行的 <code>StreetComposeConfig</code> 配置对象。</p>
-                      <p><strong>预设是什么？</strong> 预设是预先配置好的参数组合，例如"步行友好"会降低车流量、增加绿化，"商业活力"会提高密度和商业设施。</p>
+                      <p>系统会读取你选择的场景结构、街道家具设计目标和可选补充要求，合并为可执行的 <code>StreetComposeConfig</code> 配置对象。</p>
+                      <p><strong>街道家具设计目标是什么？</strong> 它是预先配置好的街道家具和渲染参数组合，例如"步行友好"会增加座椅、照明和绿化，"商业活力"会提高设施密度和界面活跃度。</p>
                       <p><strong>算法过程：</strong></p>
                       <ul class="viewer-help-list">
-                        <li><strong>意图解析：</strong>将自然语言 Prompt 解析为结构化的设计意图，包括目标街道类型、设计规则 profile、客观目标 profile</li>
-                        <li><strong>参数合并：</strong>合并 Preset 的配置补丁、Graph Template 的拓扑约束、以及用户手动覆盖的参数</li>
-                        <li><strong>需求评估：</strong>根据预设或 LLM 推理得到行人/自行车/公交/车流的需求等级（high/medium/low）</li>
+                        <li><strong>结构读取：</strong>确定基础模板、Scenario Design 或临时结构提供的道路和功能区信息</li>
+                        <li><strong>参数合并：</strong>合并街道家具设计目标的配置补丁、结构模板的拓扑约束、以及补充要求</li>
+                        <li><strong>需求评估：</strong>根据街道家具设计目标或 LLM 推理得到行人/自行车/公交/车流的需求等级（high/medium/low）</li>
                         <li><strong>上下文构建：</strong>构建包含 layout_mode、graph_template_id、reference_plan_id 等的场景上下文</li>
-                        <li><strong>RAG 检索：</strong>从知识库（PDF RAG 或 Graph RAG）中检索相关的设计规则和最佳实践作为引用证据</li>
+                        <li><strong>算法证据：</strong>在详情区展示 RAG/GraphRAG 引用证据和参数来源</li>
                       </ul>
                       <p><strong>输出参数：</strong> density、road_width_m、length_m、lane_count、sidewalk_width_m、design_rule_profile、objective_profile 等。</p>
                       <p><strong>在设计面板中查看实时参数：</strong> 生成过程中点击"查看算法详情"按钮，可以看到本次生成实际使用的配置值。</p>
@@ -756,8 +890,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                       <button class="viewer-help-step-detail-btn" type="button" data-detail="layout">详情</button>
                     </div>
                     <div class="viewer-help-step-content" data-detail-content="layout" hidden>
-                      <p>系统会根据图模板（Graph Template）生成街道的骨架，包括道路宽度、车道数量、人行道宽度等基础结构。</p>
-                      <p><strong>图模板是什么？</strong> 图模板定义了街道的拓扑结构，例如 <code>hkust_gz_gate</code> 是港科大（广州）校门的道路布局模板。</p>
+                      <p>系统会根据场景结构生成街道骨架，包括道路宽度、车道数量、人行道宽度和功能区等基础空间结构。</p>
+                      <p><strong>场景结构从哪里来？</strong> 可以来自基础图模板、已保存的 Scenario Design，也可以来自一句话创建的临时结构。</p>
                     </div>
                   </div>
                   <div class="viewer-help-step" data-step="constraint">
@@ -833,8 +967,17 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                 <h3 class="viewer-help-section-title">🎯 Design 面板使用指南</h3>
                 <div class="viewer-help-fields">
                   <div class="viewer-help-field">
-                    <h4 class="viewer-help-field-title">Preset（预设）</h4>
-                    <p>预设是一组参数的快捷选择，每个预设对应特定的街道设计目标。</p>
+                    <h4 class="viewer-help-field-title">场景结构</h4>
+                    <p>场景结构决定道路、路口、铺装和功能区。可以使用基础模板，也可以选择已有结构变体。</p>
+                    <ul class="viewer-help-list">
+                      <li>基础模板：不套用结构变体，直接从默认图模板生成</li>
+                      <li>结构变体：会改变道路功能区、表面铺装或设施位置</li>
+                      <li>临时结构：可以用一句话创建，验证后再参与生成</li>
+                    </ul>
+                  </div>
+                  <div class="viewer-help-field">
+                    <h4 class="viewer-help-field-title">Street Furniture Design Goal（街道家具设计目标）</h4>
+                    <p>街道家具设计目标是一组设施密度、优先级、风格和渲染参数的快捷选择，不直接改变道路结构。</p>
                     <ul class="viewer-help-list">
                       <li><strong>步行友好（Pedestrian Friendly）：</strong>行人优先，全龄友好，低车流量，高绿化</li>
                       <li><strong>商业活力（Commercial Vitality）：</strong>商业活跃，人流密集，高设施密度</li>
@@ -845,20 +988,20 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                     </ul>
                   </div>
                   <div class="viewer-help-field">
-                    <h4 class="viewer-help-field-title">Prompt（提示词）</h4>
-                    <p>用自然语言描述你想要的街道场景。提示词会被系统解析为具体的设计参数。</p>
+                    <h4 class="viewer-help-field-title">Extra Notes（补充要求）</h4>
+                    <p>补充要求是可选偏好，用来微调氛围、风格或设施倾向，不需要重复结构方案。</p>
                     <ul class="viewer-help-list">
-                      <li>可以描述功能定位，如"商业步行街"、"住宅区小巷"</li>
+                      <li>可以描述功能定位，如"更像校园入口"、"减少车行感"</li>
                       <li>可以描述氛围感受，如"安静舒适"、"充满活力"</li>
-                      <li>可以描述具体特征，如"林荫大道"、"有很多座椅"</li>
+                      <li>可以描述具体特征，如"加强夜间照明"、"有更多座椅"</li>
                     </ul>
                   </div>
                   <div class="viewer-help-field">
-                    <h4 class="viewer-help-field-title">Schemes（方案数量）</h4>
+                    <h4 class="viewer-help-field-title">Output（输出数量）</h4>
                     <p>选择生成单个方案还是三个变体（A/B/C）：</p>
                     <ul class="viewer-help-list">
-                      <li><strong>Single scheme：</strong>只生成一个方案，速度更快</li>
-                      <li><strong>Three variants：</strong>生成 A/B/C 三个变体，各有不同的密度和道路宽度扰动，方便对比选择</li>
+                      <li><strong>生成 1 个方案：</strong>速度更快，适合快速预览</li>
+                      <li><strong>生成 3 个轻微变化方案：</strong>A/B/C 会有不同的密度和道路宽度扰动，方便对比选择</li>
                     </ul>
                   </div>
                   <div class="viewer-help-field">
@@ -891,7 +1034,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                   <details class="viewer-help-faq-item">
                     <summary class="viewer-help-faq-question">如何选择最佳方案？</summary>
                     <div class="viewer-help-faq-answer">
-                      <p>建议选择"Three variants"生成 A/B/C 三个变体，它们会在密度和道路宽度上有细微差别。加载后可以使用"Evaluate"面板进行 AI 评分对比。</p>
+                      <p>如果只是快速看效果，先生成 1 个方案；如果要比较设计方向，再生成 3 个轻微变化方案。加载后可以使用 Evaluate 面板进行评分对比。</p>
                     </div>
                   </details>
                   <details class="viewer-help-faq-item">
@@ -995,6 +1138,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const designTemplateEl = requireElement<HTMLInputElement>(root, "#viewer-design-template");
   const designScenarioEl = requireElement<HTMLSelectElement>(root, "#viewer-design-scenario");
   const designScenarioMetaEl = requireElement<HTMLElement>(root, "#viewer-design-scenario-meta");
+  const designSkeletonSummaryEl = requireElement<HTMLElement>(root, "#viewer-design-skeleton-summary");
   const designScenarioPreviewEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-preview");
   const designScenarioAnnotationEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-annotation");
   const designScenarioDraftPromptEl = requireElement<HTMLTextAreaElement>(root, "#viewer-design-scenario-draft-prompt");
@@ -1002,6 +1146,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const designScenarioDraftEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-draft");
   const designScenarioUseDraftEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-use-draft");
   const designScenarioDraftResultEl = requireElement<HTMLElement>(root, "#viewer-design-scenario-draft-result");
+  const designSkeletonProfileEl = requireElement<HTMLSelectElement>(root, "#viewer-design-skeleton-profile");
+  const designFurnitureProfileEl = requireElement<HTMLSelectElement>(root, "#viewer-design-furniture-profile");
+  const designFurnitureSummaryEl = requireElement<HTMLElement>(root, "#viewer-design-furniture-summary");
   const designBenchmarkEl = requireElement<HTMLButtonElement>(root, "#viewer-design-benchmark");
   const designBranchHistoryEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-history");
   const designBranchRunEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-run");
@@ -1151,14 +1298,95 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     return designScenarioCatalog.items.find((item) => item.scenario_id === scenarioId && item.enabled !== false) ?? null;
   }
 
+  function profileLabel(options: ReadonlyArray<{ id: string; label: string }>, profileId: string): string {
+    return options.find((option) => option.id === profileId)?.label ?? profileId;
+  }
+
+  function selectedDesignSemanticConfigPatch(): Record<string, unknown> {
+    const patch: Record<string, unknown> = {};
+    const skeletonProfile = designSkeletonProfileEl.value.trim();
+    if (skeletonProfile) {
+      patch.skeleton_design_profile = skeletonProfile;
+      patch.skeleton_design_profile_source = "manual";
+      patch.skeleton_design_profile_confidence = 1;
+      patch.skeleton_design_profile_reasons = ["viewer_advanced_override"];
+    }
+    const furnitureProfile = designFurnitureProfileEl.value.trim();
+    if (furnitureProfile) {
+      Object.assign(patch, STREET_FURNITURE_OVERRIDE_PATCHES[furnitureProfile] ?? {});
+      patch.street_furniture_profile = furnitureProfile;
+      patch.street_furniture_profile_source = "manual";
+      patch.street_furniture_profile_confidence = 1;
+      patch.street_furniture_profile_reasons = ["viewer_advanced_override"];
+    }
+    return patch;
+  }
+
+  function selectedDesignSemanticSummary(preset: DesignPreset | null): DesignSemanticSummary {
+    const skeletonProfile = designSkeletonProfileEl.value.trim();
+    const furnitureOverride = designFurnitureProfileEl.value.trim();
+    const presetProfile = String(preset?.configPatch?.street_furniture_profile ?? "").trim();
+    const skeletonLabel = skeletonProfile
+      ? `manual override · ${profileLabel(SKELETON_DESIGN_PROFILE_OPTIONS, skeletonProfile)}`
+      : "自动解析（人工标注 > LLM 标注 > OSM/POI）";
+    const streetFurnitureProfile = furnitureOverride || presetProfile;
+    const streetFurnitureLabel = furnitureOverride
+      ? `manual override · ${profileLabel(STREET_FURNITURE_PROFILE_OPTIONS, furnitureOverride)}`
+      : (preset
+        ? `${preset.nameEn} / ${preset.name}`
+        : "Custom / LLM-Driven");
+    return {
+      skeletonLabel,
+      skeletonProfile: skeletonProfile || undefined,
+      streetFurnitureLabel,
+      streetFurnitureProfile: streetFurnitureProfile || undefined,
+    };
+  }
+
+  function updateDesignLayerSummaries(): void {
+    const scenario = selectedScenarioDesign();
+    const skeletonProfile = designSkeletonProfileEl.value.trim();
+    if (skeletonProfile) {
+      designSkeletonSummaryEl.textContent = `A 骨架功能：manual override · ${profileLabel(SKELETON_DESIGN_PROFILE_OPTIONS, skeletonProfile)}`;
+      designSkeletonSummaryEl.dataset.tone = "variant";
+    } else {
+      const scenarioPatch = scenario?.compose_config_patch ?? {};
+      const scenarioSkeleton = String(scenarioPatch.skeleton_design_profile ?? "").trim();
+      if (scenarioSkeleton) {
+        const source = String(scenarioPatch.skeleton_design_profile_source ?? "llm").trim() || "llm";
+        designSkeletonSummaryEl.textContent = `A 骨架功能：${source} · ${profileLabel(SKELETON_DESIGN_PROFILE_OPTIONS, scenarioSkeleton)}`;
+        designSkeletonSummaryEl.dataset.tone = "variant";
+      } else if (scenario) {
+        designSkeletonSummaryEl.textContent = "A 骨架功能：来自所选结构标注；若缺失则按 OSM/POI 或默认规则解析。";
+        designSkeletonSummaryEl.dataset.tone = "base";
+      } else {
+        designSkeletonSummaryEl.textContent = "A 骨架功能：自动解析（人工标注 > LLM 标注 > OSM/POI）";
+        designSkeletonSummaryEl.dataset.tone = "base";
+      }
+    }
+
+    const preset = selectedDesignPreset();
+    const furnitureOverride = designFurnitureProfileEl.value.trim();
+    if (furnitureOverride) {
+      designFurnitureSummaryEl.textContent = `B 家具主题：manual override · ${profileLabel(STREET_FURNITURE_PROFILE_OPTIONS, furnitureOverride)}`;
+      designFurnitureSummaryEl.dataset.tone = "variant";
+    } else if (preset) {
+      designFurnitureSummaryEl.textContent = `B 家具主题：${preset.nameEn} / ${preset.name}；控制家具密度、设施组合和渲染风格。`;
+      designFurnitureSummaryEl.dataset.tone = "base";
+    } else {
+      designFurnitureSummaryEl.textContent = "B 家具主题：Custom / LLM-Driven；可从 A 层语义回退推荐。";
+      designFurnitureSummaryEl.dataset.tone = "base";
+    }
+  }
+
   function renderDesignScenarioOptions(preferredScenarioId: string = designScenarioEl.value): void {
     const graphTemplateId = designScenarioCatalog?.graph_template_id || designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
     const items = designScenarioCatalog?.items ?? [];
     const draftOption = latestDraftScenario
-      ? `<option value="${escapeHtml(latestDraftScenario.scenario_id)}">Draft · ${escapeHtml(latestDraftScenario.title_zh || latestDraftScenario.scenario_id)}</option>`
+      ? `<option value="${escapeHtml(latestDraftScenario.scenario_id)}">临时结构 · ${escapeHtml(latestDraftScenario.title_zh || latestDraftScenario.scenario_id)}</option>`
       : "";
     designScenarioEl.innerHTML = [
-      `<option value="">Base Template / No Variant</option>`,
+      `<option value="">基础模板（不套用结构变体）</option>`,
       draftOption,
       ...items.map((item) => {
         const enabled = item.enabled !== false;
@@ -1186,8 +1414,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       syncDesignGraphTemplateId(designScenarioCatalog.graph_template_id);
     }
     if (!scenario) {
-      designScenarioMetaEl.textContent = `Base template: ${graphTemplateId} · Generate uses Preset + Prompt directly.`;
+      designScenarioMetaEl.textContent = `基础模板：${graphTemplateId}。将使用下方街道家具设计目标和补充要求生成。`;
       designScenarioMetaEl.dataset.tone = "base";
+      updateDesignLayerSummaries();
       return;
     }
     if (scenario.template_patch) {
@@ -1195,15 +1424,17 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       const defaultCount = Array.isArray(scenario.resolved_defaults) ? scenario.resolved_defaults.length : 0;
       const warningCount = Array.isArray(scenario.warnings) ? scenario.warnings.length : 0;
       const parseMethod = scenario.llm_used ? "LLM semantic parse" : `semantic parse=${scenario.semantic_parse_method || "deterministic"}`;
-      designScenarioMetaEl.textContent = `Base template: ${graphTemplateId} · temporary semantic draft · ${parseMethod} · ${patchCount} patch ops · ${defaultCount} resolved defaults · ${warningCount} warnings. Generate & Load uses this draft patch directly.`;
+      designScenarioMetaEl.textContent = `临时结构：${parseMethod} · ${patchCount} 个结构修改 · ${defaultCount} 个自动定位 · ${warningCount} 个提醒。Generate & Load 将使用这个临时结构。`;
       designScenarioMetaEl.dataset.tone = warningCount > 0 ? "warning" : "variant";
+      updateDesignLayerSummaries();
       return;
     }
     const previewLabel = scenario.preview_layout_exists === false ? "preview missing" : "preview ready";
     const patchCount = Number(scenario.template_patch_operation_count ?? 0);
     const surfaceCount = Number(scenario.surface_annotation_count ?? 0);
-    designScenarioMetaEl.textContent = `Base template: ${graphTemplateId} · ${scenario.scenario_type || "variant"} · ${patchCount} patch ops · ${surfaceCount} surfaces · ${previewLabel}. Saved preview loads an existing scene_layout.json; Generate & Load regenerates from this variant.`;
+    designScenarioMetaEl.textContent = `结构来源：${scenario.scenario_type || "variant"} · ${patchCount} 个结构修改 · ${surfaceCount} 个设计表面 · ${previewLabel}。预览会加载已有 scene_layout.json；Generate & Load 会重新生成。`;
     designScenarioMetaEl.dataset.tone = "variant";
+    updateDesignLayerSummaries();
   }
 
   async function loadDesignScenarioCatalog(): Promise<void> {
@@ -1215,7 +1446,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       designScenarioEl.disabled = false;
     } catch (error) {
       designScenarioCatalog = null;
-      designScenarioEl.innerHTML = `<option value="">Base Template / No Variant</option>`;
+      designScenarioEl.innerHTML = `<option value="">基础模板（不套用结构变体）</option>`;
       designScenarioEl.disabled = false;
       designScenarioMetaEl.textContent = error instanceof Error ? error.message : "Failed to load scenario design variants.";
       designScenarioMetaEl.dataset.tone = "error";
@@ -1244,7 +1475,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   function renderDraftScenarioResult(scenario: ScenarioDesign | null, message = ""): void {
     if (!scenario) {
-      designScenarioDraftResultEl.textContent = message || "用自然语言先生成一个可验证的临时 Scenario Variant，再选择 Use Draft Variant 参与 Generate & Load。";
+      designScenarioDraftResultEl.textContent = message || "用自然语言先生成一个可验证的临时结构，再选择 Use Draft Structure 参与 Generate & Load。";
       designScenarioDraftResultEl.dataset.tone = "empty";
       designScenarioUseDraftEl.disabled = true;
       return;
@@ -1255,7 +1486,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       ? String(citations[0]?.title ?? citations[0]?.source_id ?? citations[0]?.knowledge_source ?? "RAG evidence")
       : "none";
     const lines = [
-      `Draft ready: ${scenario.title_zh || scenario.scenario_id}`,
+      `临时结构已生成：${scenario.title_zh || scenario.scenario_id}`,
       `semantic_parse=${scenario.semantic_parse_method || "deterministic"} · llm_used=${scenario.llm_used ? "true" : "false"}`,
       ...(!scenario.llm_used && scenario.fallback_reason ? [`fallback: ${scenario.fallback_reason}`] : []),
       summarizeDraftDefaults(scenario.resolved_defaults),
@@ -1310,13 +1541,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       || designPromptEl.value.trim()
     );
     if (!prompt) {
-      renderDraftScenarioResult(null, "请输入一个自然语言变体，例如：道路中段右侧加公交站，绿色铺装。");
+      renderDraftScenarioResult(null, "请输入一句结构描述，例如：道路中段右侧加公交站，绿色铺装。");
       return;
     }
     const graphTemplateId = designTemplateEl.value.trim() || designScenarioCatalog?.graph_template_id || DEFAULT_GRAPH_TEMPLATE_ID;
     designScenarioDraftEl.disabled = true;
     designScenarioUseDraftEl.disabled = true;
-    designScenarioDraftResultEl.textContent = "Drafting semantic variant and validating template patch...";
+    designScenarioDraftResultEl.textContent = "正在创建临时结构并验证结构修改...";
     designScenarioDraftResultEl.dataset.tone = "empty";
     try {
       const payload = await postApiJson<ScenarioDraftVariantPayload>("/api/scenario-designs/draft-variant", {
@@ -1327,7 +1558,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       latestDraftScenario = scenarioFromDraftPayload(payload, prompt);
       renderDesignScenarioOptions(latestDraftScenario.scenario_id);
       renderDraftScenarioResult(latestDraftScenario);
-      flashStatus(`Draft variant ready: ${latestDraftScenario.title_zh || latestDraftScenario.scenario_id}.`);
+      flashStatus(`Draft structure ready: ${latestDraftScenario.title_zh || latestDraftScenario.scenario_id}.`);
     } catch (error) {
       latestDraftScenario = null;
       renderDesignScenarioOptions("");
@@ -1340,12 +1571,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   function useLatestDraftScenario(): void {
     if (!latestDraftScenario) {
-      renderDraftScenarioResult(null, "No draft variant is available yet.");
+      renderDraftScenarioResult(null, "No draft structure is available yet.");
       return;
     }
     renderDesignScenarioOptions(latestDraftScenario.scenario_id);
     renderDraftScenarioResult(latestDraftScenario);
-    flashStatus(`Using draft variant: ${latestDraftScenario.title_zh || latestDraftScenario.scenario_id}.`);
+    flashStatus(`Using draft structure: ${latestDraftScenario.title_zh || latestDraftScenario.scenario_id}.`);
   }
 
   async function loadSelectedDesignScenarioPreview(): Promise<void> {
@@ -1372,7 +1603,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       }
       flashStatus(`Opening annotation for ${scenario.title_zh || scenario.scenario_id}...`);
     }
-    sceneGraphLinkEl.click();
+    const sceneGraphUrl = new URL(window.location.href);
+    sceneGraphUrl.hash = "scene-graph";
+    window.open(sceneGraphUrl.toString(), "_blank", "noopener");
   }
 
   const scene = new THREE.Scene();
@@ -1625,6 +1858,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     minimapEl,
     errorEl,
     getSelectedDesignPreset: selectedDesignPreset,
+    getDesignSemanticConfigPatch: selectedDesignSemanticConfigPatch,
+    getDesignSemanticSummary: selectedDesignSemanticSummary,
     hasLastDesignRunSnapshot: () => lastDesignRunSnapshot !== null,
     setSelectedBranchNodeId: (nodeId) => {
       selectedBranchNodeId = nodeId;
@@ -2504,10 +2739,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     variant: DesignSchemeVariant,
     prompt: string,
     graphTemplateId: string,
+    structureSource?: string,
+    semanticSummary?: DesignSemanticSummary,
   ): void {
-    lastDesignRunSnapshot = { payload, preset, variant, prompt, graphTemplateId };
+    lastDesignRunSnapshot = { payload, preset, variant, prompt, graphTemplateId, structureSource, semanticSummary };
     designReviewRunEl.disabled = false;
-    const rendered = renderDesignWorkspaceHtml(payload, preset, variant, prompt, graphTemplateId);
+    const rendered = renderDesignWorkspaceHtml(payload, preset, variant, prompt, graphTemplateId, structureSource, semanticSummary);
     designWorkspaceEl.hidden = false;
     minimapEl.hidden = true; // Hide minimap when design workspace is visible
     designWorkspaceEl.innerHTML = rendered.html;
@@ -2532,6 +2769,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       lastDesignRunSnapshot.variant,
       lastDesignRunSnapshot.prompt,
       lastDesignRunSnapshot.graphTemplateId,
+      lastDesignRunSnapshot.structureSource,
+      lastDesignRunSnapshot.semanticSummary,
     );
     flashStatus("Design generation steps reopened.");
   }
@@ -2884,12 +3123,16 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   designReviewRunEl.addEventListener("click", reviewLastDesignRun, { signal });
   designCloseEl.addEventListener("click", () => panelController.setOpen("design", false), { signal });
   designPresetEl.addEventListener("change", () => {
-    const preset = selectedDesignPreset();
-    if (preset) {
-      designPromptEl.value = preset.prompt;
+    const currentPrompt = designPromptEl.value.trim();
+    const presetPromptValues = new Set(VIEWER_DESIGN_PRESETS.map((item) => item.prompt.trim()).filter(Boolean));
+    if (!currentPrompt || presetPromptValues.has(currentPrompt)) {
+      designPromptEl.value = "";
     }
+    updateDesignLayerSummaries();
   }, { signal });
   designScenarioEl.addEventListener("change", updateDesignScenarioMeta, { signal });
+  designSkeletonProfileEl.addEventListener("change", updateDesignLayerSummaries, { signal });
+  designFurnitureProfileEl.addEventListener("change", updateDesignLayerSummaries, { signal });
   designScenarioDraftEl.addEventListener("click", () => {
     void draftDesignScenarioVariant();
   }, { signal });

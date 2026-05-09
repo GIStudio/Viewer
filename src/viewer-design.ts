@@ -104,15 +104,19 @@ export async function submitDesignJob(
   graphTemplateId: string,
   variant: DesignSchemeVariant,
   scenario: ScenarioDesign | null = null,
+  semanticConfigPatch: Record<string, unknown> = {},
 ): Promise<SceneJobCreatePayload> {
   if (scenario?.enabled === false) {
     throw new Error(scenario.excluded_reason_zh || "This scenario design is excluded from generation.");
   }
   const scenarioPatch = scenario?.compose_config_patch ?? {};
-  const configPatch = configForDesignVariant({
-    ...(preset?.configPatch ?? {}),
-    ...scenarioPatch,
-  }, variant);
+  const configPatch = {
+    ...configForDesignVariant({
+      ...(preset?.configPatch ?? {}),
+      ...scenarioPatch,
+    }, variant),
+    ...semanticConfigPatch,
+  };
   const scenarioId = scenario?.scenario_id || "";
   const normalizedPrompt = effectiveDesignPrompt(preset, prompt, scenario);
   const scenarioContext = scenarioId ? {

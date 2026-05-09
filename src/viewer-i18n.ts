@@ -190,8 +190,8 @@ const TRANSLATIONS: Record<string, Translation> = {
   "viewer.settings.warmth": { en: "Warmth", zh: "色温" },
   "viewer.design.title": { en: "Design Assistant", zh: "设计助手" },
   "viewer.design.subtitle": {
-    en: "Generate scenes, trace RAG / triples / search patches, and compare Pareto scores",
-    zh: "生成场景、追踪 RAG / triples / search patches，并对比 Pareto 分数",
+    en: "Choose a street structure, choose a street furniture goal, then generate a 3D scene.",
+    zh: "先选街道结构，再选街道家具设计目标，一键生成 3D 场景",
   },
   "viewer.evaluate.title": { en: "Design Evaluation", zh: "设计评估" },
   "viewer.evaluate.subtitle": { en: "AI-driven layout assessment and suggestions", zh: "AI 驱动的布局评估与建议" },

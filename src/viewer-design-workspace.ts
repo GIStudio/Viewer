@@ -1,5 +1,6 @@
 import type {
   DesignPreset,
+  DesignSemanticSummary,
   DesignSchemeVariant,
   GenerationStep,
   GenerationTrace,
@@ -39,7 +40,7 @@ export const DESIGN_GENERATION_STEPS: GenerationStep[] = [
     label: "布局生成",
     shortLabel: "布局",
     progress: 40,
-    purpose: "把道路图和设计目标转成主题分段、街道断面 program 与候选布局方案。",
+    purpose: "把道路图和街道家具设计目标转成主题分段、街道断面 program 与候选布局方案。",
     detailHint: "这里能看到 theme_segment_count、道路宽度、密度、行人/自行车/公交/车流需求等参数。",
   },
   {
@@ -913,12 +914,21 @@ export function renderDesignImprovementSummary(
   variant: DesignSchemeVariant,
   prompt: string,
   graphTemplateId: string,
+  structureSource = graphTemplateId,
+  semanticSummary?: DesignSemanticSummary,
 ): string {
   const configPatch = preset?.configPatch ?? {};
   const config = configForDesignVariant(configPatch, variant);
   const presetLabel = preset ? `${preset.nameEn} / ${preset.name}` : "Custom / LLM-Driven";
+  const trimmedPrompt = prompt.trim();
+  const skeletonLabel = semanticSummary?.skeletonLabel || "自动解析（人工 > LLM > OSM/POI）";
+  const furnitureLabel = semanticSummary?.streetFurnitureLabel || presetLabel;
   const items = [
-    ["预设", presetLabel],
+    ["结构来源", structureSource],
+    ["A 骨架功能", skeletonLabel],
+    ["B 家具主题", furnitureLabel],
+    ["输出方案", variant.name],
+    ["补充要求", trimmedPrompt || "无"],
     preset ? ["设计规则", config.design_rule_profile] : null,
     preset ? ["目标 profile", config.objective_profile] : null,
     preset ? ["密度", config.density] : ["密度", "LLM 自动推导"],
@@ -927,13 +937,11 @@ export function renderDesignImprovementSummary(
     preset ? ["自行车需求", config.bike_demand_level] : ["自行车需求", "LLM 自动推导"],
     preset ? ["公交需求", config.transit_demand_level] : ["公交需求", "LLM 自动推导"],
     preset ? ["车流需求", config.vehicle_demand_level] : ["车流需求", "LLM 自动推导"],
-    ["图模板", graphTemplateId],
     ["随机种子", variant.seed],
   ].filter((item): item is [string, string | number] => item !== null && item[1] !== undefined && item[1] !== "");
   return `
     <section class="viewer-design-workspace-panel">
-      <div class="viewer-design-workspace-panel-title">本次方案实际改了什么</div>
-      <p class="viewer-design-workspace-copy">${escapeHtml(prompt)}</p>
+      <div class="viewer-design-workspace-panel-title">本次生成设置</div>
       <div class="viewer-design-improvement-grid">
         ${items.map(([label, value]) => `
           <div class="viewer-design-improvement-item">
@@ -1191,6 +1199,8 @@ export function renderDesignWorkspaceHtml(
   variant: DesignSchemeVariant,
   prompt: string,
   graphTemplateId: string,
+  structureSource = graphTemplateId,
+  semanticSummary?: DesignSemanticSummary,
 ): { html: string; stage: string; failed: boolean } {
   const { progress, message, stage } = describeDesignJobProgress(payload);
   const failed = payload.status === "failed";
@@ -1220,7 +1230,7 @@ export function renderDesignWorkspaceHtml(
           <div style="width:${boundedProgress}%"></div>
         </div>
         <div class="viewer-design-workspace-layout">
-          ${renderDesignImprovementSummary(preset, variant, prompt, graphTemplateId)}
+          ${renderDesignImprovementSummary(preset, variant, prompt, graphTemplateId, structureSource, semanticSummary)}
           ${renderCourseDeliverySummary(payload)}
           ${renderGenerationTracePanel(payload.trace)}
           <section class="viewer-design-workspace-panel">
