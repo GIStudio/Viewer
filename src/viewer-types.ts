@@ -45,6 +45,11 @@ export type ViewerManifest = {
   layout_overlay?: {
     bands?: Array<Record<string, unknown>>;
     building_footprints?: Array<Record<string, unknown>>;
+    building_regions?: Array<Record<string, unknown>>;
+    regions?: Array<Record<string, unknown>>;
+    derived_regions?: Array<Record<string, unknown>>;
+    functional_zones?: Array<Record<string, unknown>>;
+    surface_annotations?: Array<Record<string, unknown>>;
     length_m?: number;
     lane_count?: number;
     road_width_m?: number;

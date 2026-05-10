@@ -94,6 +94,7 @@ import {
   exportTopDownMapPng,
   exportTopDownMapSvg,
 } from "./viewer-export";
+import { createExpandedMapController } from "./viewer-expanded-map";
 import {
   buildDesignStageNodes,
   latestOperationForStage,
@@ -998,7 +999,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       <div id="viewer-crosshair" class="viewer-crosshair" hidden></div>
       <div id="viewer-info-card" class="viewer-info-card" hidden></div>
       <div id="viewer-minimap" class="viewer-minimap">
-        <div class="viewer-minimap-title" data-i18n-key="viewer.minimap.title">Scene Map</div>
+        <div class="viewer-minimap-title">
+          <span data-i18n-key="viewer.minimap.title">Scene Map</span>
+          <button id="viewer-minimap-expand" class="viewer-minimap-expand" type="button" aria-label="Expand Scene Map" title="Expand Scene Map">&#x26F6;</button>
+        </div>
         <div id="viewer-minimap-canvas" class="viewer-minimap-canvas"></div>
         <canvas id="viewer-minimap-overlay" class="viewer-minimap-overlay"></canvas>
       </div>
@@ -1026,6 +1030,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const infoCardEl = requireElement<HTMLElement>(root, "#viewer-info-card");
   const crosshairEl = requireElement<HTMLElement>(root, "#viewer-crosshair");
   const minimapEl = requireElement<HTMLElement>(root, "#viewer-minimap");
+  const minimapExpandEl = requireElement<HTMLButtonElement>(root, "#viewer-minimap-expand");
   const minimapHost = requireElement<HTMLElement>(root, "#viewer-minimap-canvas");
   const minimapOverlayEl = requireElement<HTMLCanvasElement>(root, "#viewer-minimap-overlay");
   const axisHudEl = requireElement<HTMLCanvasElement>(root, "#viewer-axis-hud");
@@ -1660,6 +1665,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let flyAnimation: { startAvatarPos: THREE.Vector3; targetAvatarPos: THREE.Vector3; startTime: number; duration: number } | null = null;
   let resumeRoamAfterSettingsClose = false;
   let statusResetHandle: number | null = null;
+  let minimapClickHandle: number | null = null;
   let lastBranchRunSnapshot: BranchRunStatusPayload | null = null;
   let selectedBranchNodeId: string | null = null;
   let lastDesignRunSnapshot: DesignRunSnapshot | null = null;
@@ -1687,6 +1693,16 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     panelHost: requireElement<HTMLElement>(root, "#viewer-floating-lane-panel-host"),
     shell,
     shouldDeactivateTab: () => !panelController?.isAnyOpen(),
+  });
+  const expandedMapController = createExpandedMapController({
+    scene,
+    getRoot: () => currentRoot,
+    getBounds: () => currentSceneBounds,
+    getManifest: () => currentManifest,
+    getAvatarPosition: () => currentAvatarPosition,
+    cameraForwardHorizontal,
+    flyCameraTo,
+    text: t,
   });
 
   panelController = createViewerPanelController({
@@ -2020,6 +2036,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     minimapOverlayEl.height = Math.max(1, Math.round(minimapHeight * dpr));
     minimapOverlayEl.style.width = `${minimapWidth}px`;
     minimapOverlayEl.style.height = `${minimapHeight}px`;
+    expandedMapController.resize();
   }
 
   function cameraForwardHorizontal(): THREE.Vector3 {
@@ -2415,6 +2432,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     console.info(`[viewer-timing] loadScene.bounds (${option.label}): ${boundsMs} ms`);
     fitViewerLightingRigToBounds(lightingRig, bbox);
     updateMinimapCamera(minimapCamera, currentSceneBounds, bbox);
+    expandedMapController.render();
     resetView();
     const params = currentManifest?.lighting_params as Partial<LightingState> | undefined;
     const presetKey = currentManifest?.lighting_preset;
@@ -3214,11 +3232,24 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     floatingLaneSystem.toggleOverlay();
   }, { signal });
 
+  minimapExpandEl.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    expandedMapController.open();
+  }, { signal });
+
   minimapOverlayEl.addEventListener(
     "click",
     (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (minimapClickHandle !== null) {
+        window.clearTimeout(minimapClickHandle);
+        minimapClickHandle = null;
+      }
+      if (event.detail > 1) {
+        return;
+      }
       if (!currentSceneBounds) {
         return;
       }
@@ -3233,8 +3264,24 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         minimapOverlayEl,
       );
       if (world) {
-        flyCameraTo(world.x, currentAvatarPosition.y, world.z);
+        minimapClickHandle = window.setTimeout(() => {
+          flyCameraTo(world.x, currentAvatarPosition.y, world.z);
+          minimapClickHandle = null;
+        }, 180);
       }
+    },
+    { signal },
+  );
+  minimapOverlayEl.addEventListener(
+    "dblclick",
+    (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (minimapClickHandle !== null) {
+        window.clearTimeout(minimapClickHandle);
+        minimapClickHandle = null;
+      }
+      expandedMapController.open();
     },
     { signal },
   );
@@ -3555,6 +3602,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       cameraForwardHorizontal,
       currentLaserHitPoint,
     );
+    expandedMapController.render();
     animationFrameId = requestAnimationFrame(animate);
   }
   try {
@@ -3644,6 +3692,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     if (animationFrameId) {
       cancelAnimationFrame(animationFrameId);
     }
+    if (minimapClickHandle !== null) {
+      window.clearTimeout(minimapClickHandle);
+      minimapClickHandle = null;
+    }
     eventController.abort();
     controls.removeEventListener("lock", handleControlsLock);
     controls.removeEventListener("unlock", handleControlsUnlock);
@@ -3654,6 +3706,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     floatingLaneSystem.clearOverlay();
     assetMoveController.dispose();
     environmentController.dispose();
+    expandedMapController.dispose();
     renderPipeline.dispose();
     renderer.dispose();
     minimapRenderer.dispose();

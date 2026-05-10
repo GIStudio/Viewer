@@ -1167,6 +1167,11 @@ function viewerApiPlugin(): Plugin {
             const streetProgram = (layoutPayload.street_program ?? {}) as JsonRecord;
             const layoutBands = Array.isArray(streetProgram.bands) ? streetProgram.bands : [];
             const buildingFootprints = Array.isArray(layoutPayload.building_footprints) ? layoutPayload.building_footprints : [];
+            const buildingRegions = Array.isArray(layoutPayload.building_regions) ? layoutPayload.building_regions : [];
+            const regions = Array.isArray(layoutPayload.regions) ? layoutPayload.regions : [];
+            const derivedRegions = Array.isArray(layoutPayload.derived_regions) ? layoutPayload.derived_regions : [];
+            const functionalZones = Array.isArray(layoutPayload.functional_zones) ? layoutPayload.functional_zones : [];
+            const surfaceAnnotations = Array.isArray(layoutPayload.surface_annotations) ? layoutPayload.surface_annotations : [];
             const layoutConfig = (layoutPayload.config ?? {}) as JsonRecord;
             const overlayLengthM = asNumber(layoutConfig.length_m, 0);
 
@@ -1190,8 +1195,13 @@ function viewerApiPlugin(): Plugin {
               asset_descriptions: assetDescriptions,
               static_object_descriptions: staticObjectDescriptions,
               layout_overlay: {
-                bands: layoutBands,
-                building_footprints: buildingFootprints,
+                bands: cleanForJson(layoutBands),
+                building_footprints: cleanForJson(buildingFootprints),
+                building_regions: cleanForJson(buildingRegions),
+                regions: cleanForJson(regions),
+                derived_regions: cleanForJson(derivedRegions),
+                functional_zones: cleanForJson(functionalZones),
+                surface_annotations: cleanForJson(surfaceAnnotations),
                 length_m: overlayLengthM,
                 lane_count: asNumber(streetProgram.lane_count, 1),
                 road_width_m: asNumber(streetProgram.road_width_m, 0),
