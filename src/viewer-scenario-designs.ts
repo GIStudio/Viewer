@@ -270,7 +270,7 @@ export function createViewerScenarioDesignsController(
             data-scenario-preview="${escapeHtml(item.preview_layout_path)}"
             ${enabled && item.preview_layout_exists !== false ? "" : "disabled"}
           >
-            Load Preview JSON
+            Preview Structure / 预览结构
           </button>
         </div>
         ${runItems.length > 0 ? `<div class="viewer-scenario-result-list">${runItems.map(renderRunItem).join("")}</div>` : ""}

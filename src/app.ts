@@ -510,7 +510,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                   A 骨架功能：自动解析（人工标注 > LLM 标注 > OSM/POI）
                 </div>
                 <div class="viewer-design-scenario-actions">
-                  <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Load Saved Preview JSON</button>
+                  <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled title="Open the saved preview scene for this structure. It does not regenerate.">Preview Structure / 预览结构</button>
                   <button id="viewer-design-scenario-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled title="Open annotation in a new tab">Open Annotation</button>
                 </div>
                 <details class="viewer-design-advanced-details viewer-design-structure-draft">
@@ -1350,7 +1350,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const previewLabel = scenario.preview_layout_exists === false ? "preview missing" : "preview ready";
     const patchCount = Number(scenario.template_patch_operation_count ?? 0);
     const surfaceCount = Number(scenario.surface_annotation_count ?? 0);
-    designScenarioMetaEl.textContent = `结构来源：${scenario.scenario_type || "variant"} · ${patchCount} 个结构修改 · ${surfaceCount} 个设计表面 · ${previewLabel}。预览会加载已有 scene_layout.json；Generate & Load 会重新生成。`;
+    designScenarioMetaEl.textContent = `结构来源：${scenario.scenario_type || "variant"} · ${patchCount} 个结构修改 · ${surfaceCount} 个设计表面 · ${previewLabel}。预览会打开已保存场景；Generate & Load 会重新生成。`;
     designScenarioMetaEl.dataset.tone = "variant";
     updateDesignLayerSummaries();
   }
@@ -1500,11 +1500,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   async function loadSelectedDesignScenarioPreview(): Promise<void> {
     const scenario = selectedScenarioDesign();
     if (!scenario?.preview_layout_path) return;
-    setStatus(`Loading saved scenario preview JSON: ${scenario.title_zh || scenario.scenario_id}...`);
+    setStatus(`Loading saved structure preview: ${scenario.title_zh || scenario.scenario_id}...`);
     await sceneSelectionController.loadLayoutSelection(scenario.preview_layout_path);
     const recent = await loadRecentLayouts(50, false);
     populateRecentLayoutOptions(recent, scenario.preview_layout_path);
-    flashStatus(`Saved scenario preview JSON loaded: ${scenario.title_zh || scenario.scenario_id}.`);
+    flashStatus(`Saved structure preview loaded: ${scenario.title_zh || scenario.scenario_id}.`);
   }
 
   function openSelectedDesignScenarioAnnotation(): void {

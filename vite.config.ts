@@ -1143,7 +1143,7 @@ function viewerApiPlugin(): Plugin {
               audio_profile: audioProfile,
               lighting_preset: String(outputs.lighting_preset ?? "bright_day"),
               lighting_params: (outputs.lighting_params ?? null) as JsonRecord | null,
-              environment_state: (payload.environment_state ?? outputs.environment_state ?? null) as JsonRecord | null,
+              environment_state: (layoutPayload.environment_state ?? outputs.environment_state ?? null) as JsonRecord | null,
             }, 200,
               `layoutRead=${layoutReadMs}ms parse=${layoutParseMs}ms buildSteps=${buildStepsMs}ms payload=${buildPayloadMs}ms finalScene=${finalSceneStats.size}bytes finalSceneLookup=${finalSceneCheckMs}ms total=${(
                 performance.now() - layoutHandlerStart
