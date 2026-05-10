@@ -151,6 +151,7 @@ const FRONT_AXIS_YAW_DEG: Record<string, number> = {
   "-Z": 180,
   "-X": 270,
 };
+type OrientationPolicy = "face_road" | "face_traffic" | "free";
 
 function normalizeYawDeg(value: unknown, fallback = 0): number {
   const parsed = Number(value);
@@ -177,17 +178,26 @@ function rotateLocalDirection(frontDirection: string, yawDeg: number): THREE.Vec
   return local.normalize();
 }
 
-function orientationPolicyForAsset(asset: AssetRecord | undefined): "face_road" | "face_traffic" | "free" {
+function orientationPolicyForAsset(asset: AssetRecord | undefined): OrientationPolicy {
   const category = String(asset?.category ?? "").trim().toLowerCase();
   if (category === "traffic_sign" || category === "sign" || category.endsWith("_sign")) return "face_traffic";
   if (["tree", "lamp", "bollard", "hydrant", "sky_dome"].includes(category)) return "free";
   return "face_road";
 }
 
-function targetYawForPreviewPolicy(policy: "face_road" | "face_traffic" | "free", frontDirection: string): number {
-  if (policy === "face_traffic") return 270; // against the preview road's +X travel direction
+function targetYawForPreviewPolicy(policy: OrientationPolicy, frontDirection: string): number {
+  if (policy === "face_traffic") return 270; // RHT preview sign faces oncoming +T traffic, i.e. world -X
   if (policy === "free") return FRONT_AXIS_YAW_DEG[normalizeCanonicalFront(frontDirection)] ?? 0;
   return 0; // preview road is drawn along +/-X, with the nearest road edge toward +Z
+}
+
+function finalPreviewYawForPolicy(policy: OrientationPolicy, frontDirection: string, assetYawOffsetDeg: number): number {
+  const front = normalizeCanonicalFront(frontDirection);
+  return normalizeYawDeg(
+    targetYawForPreviewPolicy(policy, front)
+    - (FRONT_AXIS_YAW_DEG[front] ?? 0)
+    + assetYawOffsetDeg,
+  );
 }
 
 function signedYawDeltaDeg(a: number, b: number): number {
@@ -733,7 +743,7 @@ function makeReferenceLabel(text: string, color: string): CSS2DObject {
   return new CSS2DObject(div);
 }
 
-function createRoadReferenceGroup(box?: THREE.Box3): THREE.Group {
+function createRoadReferenceGroup(box?: THREE.Box3, policy: OrientationPolicy = "face_road"): THREE.Group {
   const group = new THREE.Group();
   group.name = "road_orientation_reference";
 
@@ -780,7 +790,29 @@ function createRoadReferenceGroup(box?: THREE.Box3): THREE.Group {
 
   const normalStartZ = bounds.max.z + modelToRoadGap * 0.15;
   const normalLength = Math.max(0.8, roadZ - normalStartZ);
+  const targetArrowLength = Math.max(0.8, roadLength * 0.32);
+  const targetArrowZ = normalStartZ + normalLength * 0.48;
+  const targetArrow =
+    policy === "face_traffic"
+      ? new THREE.ArrowHelper(
+        new THREE.Vector3(-1, 0, 0),
+        new THREE.Vector3(center.x + targetArrowLength * 0.5, roadY + 0.12, targetArrowZ),
+        targetArrowLength,
+        0x00ff88,
+        arrowHeadLength,
+        arrowHeadWidth,
+      )
+      : new THREE.ArrowHelper(
+        new THREE.Vector3(0, 0, 1),
+        new THREE.Vector3(center.x, roadY + 0.12, normalStartZ),
+        normalLength,
+        0x00ff88,
+        arrowHeadLength,
+        arrowHeadWidth,
+      );
 
+  // Right-hand traffic: +T uses the lane on its right side (-Z), while -T uses
+  // the opposite lane (+Z). The labels make that convention visible in preview.
   group.add(
     new THREE.ArrowHelper(
       new THREE.Vector3(1, 0, 0),
@@ -798,23 +830,22 @@ function createRoadReferenceGroup(box?: THREE.Box3): THREE.Group {
       arrowHeadLength,
       arrowHeadWidth,
     ),
-    new THREE.ArrowHelper(
-      new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(center.x, roadY + 0.12, normalStartZ),
-      normalLength,
-      0x00ff88,
-      arrowHeadLength,
-      arrowHeadWidth,
-    ),
+    targetArrow,
   );
 
-  const forwardLabel = makeReferenceLabel("Road +T", "#4aa3ff");
+  const forwardLabel = makeReferenceLabel("RHT +T", "#4aa3ff");
   forwardLabel.position.set(center.x - roadLength * 0.18, labelY, roadZ - roadWidth * 0.72);
-  const reverseLabel = makeReferenceLabel("Road -T", "#ff9f43");
+  const reverseLabel = makeReferenceLabel("RHT -T", "#ff9f43");
   reverseLabel.position.set(center.x + roadLength * 0.18, labelY, roadZ + roadWidth * 0.72);
-  const normalLabel = makeReferenceLabel("Face road", "#00ff88");
-  normalLabel.position.set(center.x + Math.min(roadLength * 0.04, 1.2), labelY, normalStartZ + normalLength * 0.48);
-  group.add(forwardLabel, reverseLabel, normalLabel);
+  const normalLabel = makeReferenceLabel(policy === "face_traffic" ? "Face traffic" : "Face road", "#00ff88");
+  normalLabel.position.set(
+    policy === "face_traffic" ? center.x : center.x + Math.min(roadLength * 0.04, 1.2),
+    labelY,
+    targetArrowZ,
+  );
+  const trafficRuleLabel = makeReferenceLabel("RHT", "#f4c542");
+  trafficRuleLabel.position.set(center.x, labelY + clampNumber(horizontalSpan * 0.015, 0.18, 1.0), roadZ);
+  group.add(forwardLabel, reverseLabel, normalLabel, trafficRuleLabel);
 
   return group;
 }
@@ -1413,7 +1444,7 @@ function applyYaw(ctx: PreviewContext, yawDeg: number) {
   ctx.currentModel.rotation.y = (normalizedYaw * Math.PI) / 180;
 }
 
-function replaceRoadReferenceGroup(ctx: PreviewContext) {
+function replaceRoadReferenceGroup(ctx: PreviewContext, policy: OrientationPolicy = "face_road") {
   if (ctx.roadReferenceGroup) {
     disposeObjectTree(ctx.roadReferenceGroup);
     if (ctx.roadReferenceGroup.parent) {
@@ -1421,7 +1452,7 @@ function replaceRoadReferenceGroup(ctx: PreviewContext) {
     }
   }
   const box = ctx.currentModel ? getObjectBoundingBox(ctx.currentModel) : undefined;
-  ctx.roadReferenceGroup = createRoadReferenceGroup(box);
+  ctx.roadReferenceGroup = createRoadReferenceGroup(box, policy);
   ctx.scene.add(ctx.roadReferenceGroup);
 }
 
@@ -2434,10 +2465,10 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     const policy = orientationPolicyForAsset(asset);
     const front = normalizeCanonicalFront(state.frontDirection);
     const targetYaw = targetYawForPreviewPolicy(policy, front);
-    const finalYaw = normalizeYawDeg(targetYaw - (FRONT_AXIS_YAW_DEG[front] ?? 0) + state.yawValue);
+    const finalYaw = finalPreviewYawForPolicy(policy, front, state.yawValue);
     const currentFrontYaw = normalizeYawDeg((FRONT_AXIS_YAW_DEG[front] ?? 0) + state.yawValue);
     const delta = signedYawDeltaDeg(currentFrontYaw, targetYaw);
-    const targetLabel = policy === "face_traffic" ? "against Road +T" : policy === "free" ? "free" : "face road";
+    const targetLabel = policy === "face_traffic" ? "face traffic (RHT)" : policy === "free" ? "free" : "face road";
     orientationStatus.textContent = `Policy: ${policy} · Target: ${targetLabel} (${Math.round(targetYaw)}°) · Final yaw: ${Math.round(finalYaw)}° · Δ ${Math.round(delta)}°`;
   }
 
@@ -2870,8 +2901,12 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
           refreshModelDimensionsFromScene(previewCtx);
         }
 
-        // Show front arrow with saved direction
-        updateFrontArrow(previewCtx, state.frontDirection, state.yawValue);
+        // Show the front direction after the selected category's preview policy is applied.
+        updateFrontArrow(
+          previewCtx,
+          state.frontDirection,
+          finalPreviewYawForPolicy(orientationPolicyForAsset(asset), state.frontDirection, state.yawValue),
+        );
       } catch (err) {
         showToast(root, `Failed to load GLB: ${err}`, "error");
       }
@@ -3343,8 +3378,9 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     syncSliderToScale(state.scaleValue);
     refreshScaleBarFromDimensions(ctx, dims);
     refreshDimensionValidationPanel(dims);
-    replaceRoadReferenceGroup(ctx);
-    updateFrontArrow(ctx, state.frontDirection, state.yawValue);
+    const policy = orientationPolicyForAsset(getActiveAsset() ?? undefined);
+    replaceRoadReferenceGroup(ctx, policy);
+    updateFrontArrow(ctx, state.frontDirection, finalPreviewYawForPolicy(policy, state.frontDirection, state.yawValue));
     updateOriginAlignmentPanel();
   }
 
@@ -4042,7 +4078,12 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     state.frontDirection = normalizeCanonicalFront(frontSelect.value);
     frontSelect.value = state.frontDirection;
     if (previewCtx) {
-      updateFrontArrow(previewCtx, state.frontDirection, state.yawValue);
+      const policy = orientationPolicyForAsset(getActiveAsset() ?? undefined);
+      updateFrontArrow(
+        previewCtx,
+        state.frontDirection,
+        finalPreviewYawForPolicy(policy, state.frontDirection, state.yawValue),
+      );
     }
     updateOrientationStatus();
   });
