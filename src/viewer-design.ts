@@ -185,14 +185,16 @@ export function describeDesignJobProgress(payload: SceneJobStatusPayload): {
       mesh_generation: 75,
       glb_export: 88,
       scene_rendering: 95,
-      finalizing: 99,
+      finalizing: 96,
+      evaluation: 99,
+      succeeded: 100,
     };
     progress = stageProgress[stage] ?? 50;
     message = `Generating: ${stage.replace(/_/g, " ")}`;
   } else if (payload.status === "succeeded") {
     progress = 100;
     message = "Generation complete. Loading scene...";
-    stage = "finalizing";
+    stage = payload.stage || "succeeded";
   } else if (payload.status === "failed") {
     progress = 0;
     message = payload.error || "Generation failed.";
@@ -351,11 +353,14 @@ export function getStageNodeData(
   currentStage: string,
   failed: boolean,
 ): StageNodeData {
-  const currentIndex = GENERATION_STEPS.findIndex((s) => s.key === currentStage);
+  const directIndex = GENERATION_STEPS.findIndex((s) => s.key === currentStage);
+  const currentIndex = directIndex >= 0
+    ? directIndex
+    : Math.max(0, GENERATION_STEPS.findIndex((s) => s.key === "succeeded"));
   const state =
     failed && index === currentIndex
       ? "failed"
-      : index < currentIndex || step.key === "succeeded"
+      : index < currentIndex
         ? "completed"
         : index === currentIndex
           ? "active"

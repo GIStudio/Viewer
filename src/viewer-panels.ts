@@ -142,11 +142,11 @@ export function createHelpPanelHtml(): string {
             <div class="viewer-help-step" data-step="queue">
               <div class="viewer-help-step-header">
                 <span class="viewer-help-step-number">1</span>
-                <span class="viewer-help-step-title">任务排队中</span>
+                <span class="viewer-help-step-title">任务提交</span>
                 <button class="viewer-help-step-detail-btn" type="button" data-detail="queue">详情</button>
               </div>
               <div class="viewer-help-step-content" data-detail-content="queue" hidden>
-                <p>你的生成请求被提交到后端服务后会进入排队状态。</p>
+                <p>你的生成请求会先提交到后端 job service，然后等待 worker 接手执行。</p>
               </div>
             </div>
           </div>

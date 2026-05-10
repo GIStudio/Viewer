@@ -761,12 +761,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                   <div class="viewer-help-step" data-step="queue">
                     <div class="viewer-help-step-header">
                       <span class="viewer-help-step-number">1</span>
-                      <span class="viewer-help-step-title">任务排队中</span>
+                      <span class="viewer-help-step-title">任务提交</span>
                       <button class="viewer-help-step-detail-btn" type="button" data-detail="queue">详情</button>
                     </div>
                     <div class="viewer-help-step-content" data-detail-content="queue" hidden>
-                      <p>你的生成请求被提交到后端服务后会进入排队状态。系统会按照提交顺序处理每个任务。</p>
-                      <p><strong>为什么需要排队？</strong> 场景生成是计算密集型任务，为保证服务质量，系统按序处理而非并行处理。</p>
+                      <p>你的生成请求会先提交到后端 job service，然后等待 worker 接手执行。</p>
+                      <p><strong>为什么这里可能短暂等待？</strong> 场景生成是计算密集型任务，当前 worker 会按顺序处理请求。</p>
                     </div>
                   </div>
                   <div class="viewer-help-step" data-step="context">

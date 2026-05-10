@@ -13,10 +13,10 @@ import { configForDesignVariant, describeDesignJobProgress } from "./viewer-desi
 export const DESIGN_GENERATION_STEPS: GenerationStep[] = [
   {
     key: "queued",
-    label: "任务排队中",
-    shortLabel: "排队",
+    label: "任务提交",
+    shortLabel: "提交",
     progress: 5,
-    purpose: "任务已经进入后端 job service。当前后端是单 worker 流程，通常不会真正长时间排队。",
+    purpose: "任务已经提交到后端 job service，等待 worker 接手执行。",
     detailHint: "这里记录 job id、提交时间和即将使用的 preset/template。",
   },
   {
@@ -87,9 +87,25 @@ export const DESIGN_GENERATION_STEPS: GenerationStep[] = [
     key: "finalizing",
     label: "结果整理",
     shortLabel: "整理",
-    progress: 99,
+    progress: 96,
     purpose: "写入 scene_layout.json、summary、metrics、render paths 和最终加载入口。",
     detailHint: "这是必要步骤；Viewer 实际加载的是 layout manifest，而不是只加载一个裸 GLB。",
+  },
+  {
+    key: "evaluation",
+    label: "自动评价",
+    shortLabel: "评估",
+    progress: 99,
+    purpose: "读取刚写出的 scene_layout.json 并计算 walkability、safety、beauty 等统一评价。",
+    detailHint: "这一步已经不在排队；场景文件已生成，后端正在补齐评价摘要和 trace。",
+  },
+  {
+    key: "succeeded",
+    label: "生成完成",
+    shortLabel: "完成",
+    progress: 100,
+    purpose: "场景已经生成并可加载到 Viewer。",
+    detailHint: "结果已准备好，Viewer 会加载首个可用方案。",
   },
 ];
 
@@ -100,11 +116,37 @@ export type DesignOperationSummary = {
 };
 
 export function getStepIndex(stage: string): number {
-  return DESIGN_GENERATION_STEPS.findIndex((step) => step.key === stage);
+  const normalized = String(stage || "").trim();
+  const directIndex = DESIGN_GENERATION_STEPS.findIndex((step) => step.key === normalized);
+  if (directIndex >= 0) return directIndex;
+  if (normalized === "running" || normalized === "processing") {
+    return DESIGN_GENERATION_STEPS.findIndex((step) => step.key === "context_resolving");
+  }
+  if (normalized === "graph_parsing") {
+    return DESIGN_GENERATION_STEPS.findIndex((step) => step.key === "layout_generation");
+  }
+  if (normalized === "failed") {
+    return DESIGN_GENERATION_STEPS.findIndex((step) => step.key === "succeeded");
+  }
+  return DESIGN_GENERATION_STEPS.findIndex((step) => step.key === "evaluation");
 }
 
 export function stepForStage(stage: string): GenerationStep {
-  return DESIGN_GENERATION_STEPS.find((step) => step.key === stage) ?? DESIGN_GENERATION_STEPS[0]!;
+  const normalized = String(stage || "").trim();
+  const directStep = DESIGN_GENERATION_STEPS.find((step) => step.key === normalized);
+  if (directStep) return directStep;
+  const fallback = DESIGN_GENERATION_STEPS[getStepIndex(normalized)] ?? DESIGN_GENERATION_STEPS[0]!;
+  const label = normalized
+    ? normalized.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
+    : fallback.label;
+  return {
+    key: normalized || fallback.key,
+    label,
+    shortLabel: "阶段",
+    progress: fallback.progress,
+    purpose: "后端上报了一个 Viewer 尚未单独建模的生成阶段。",
+    detailHint: "请查看当前 operation message 和阶段详情；它不会再被显示成任务提交阶段。",
+  };
 }
 
 function isOperationObject(
@@ -978,7 +1020,7 @@ export function buildDesignStageNodes(payload: SceneJobStatusPayload, currentSta
     const state =
       failed && index === currentIndex
         ? "failed"
-        : index < currentIndex || step.key === "succeeded"
+        : index < currentIndex
           ? "completed"
           : index === currentIndex
             ? "active"
@@ -1098,6 +1140,13 @@ function summarizeStageArtifacts(stage: string, detail: Record<string, unknown> 
     return summaries;
   }
 
+  if (stage === "evaluation") {
+    push("布局文件", record.scene_layout_path || record.layout_path);
+    push("评价状态", record.status);
+    push("综合得分", record.overall);
+    return summaries;
+  }
+
   return Object.entries(record)
     .filter(([, value]) => value !== undefined && value !== null && value !== "")
     .slice(0, 4)
@@ -1159,7 +1208,7 @@ export function renderDesignStageCards(payload: SceneJobStatusPayload, currentSt
         const state =
           failed && index === currentIndex
             ? "failed"
-            : index < currentIndex || step.key === "succeeded"
+            : index < currentIndex
               ? "completed"
               : index === currentIndex
                 ? "active"
