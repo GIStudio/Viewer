@@ -3458,6 +3458,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
         </label>
         <div class="ae-actions-bar" style="margin-top:8px;">
           <button id="ae-align-origin-btn" class="ae-action-btn ${originNeedsFix ? "ae-btn-warning" : "ae-btn-secondary"}" type="button" ${originNeedsFix ? "" : "disabled"}>Align & Save Now</button>
+          <button id="ae-rotate-cw-btn" class="ae-action-btn ae-btn-secondary" type="button">顺时针旋转90°</button>
           <button id="ae-drag-move-toggle" class="ae-action-btn ae-btn-secondary ${state.dragMoveMode ? "active" : ""}" type="button">${state.dragMoveMode ? "Drag Move: On" : "Drag Move: Off"}</button>
         </div>
         <div class="ae-dim-range-hint">Drag Move 开启后，在预览区点击拖动物体；松开鼠标会保存当前坐标。</div>
@@ -3616,6 +3617,42 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     const dragBtn = target.closest<HTMLButtonElement>("#ae-drag-move-toggle");
     if (dragBtn) {
       setDragMoveMode(!state.dragMoveMode);
+    }
+
+    const rotateBtn = target.closest<HTMLButtonElement>("#ae-rotate-cw-btn");
+    if (rotateBtn) {
+      const asset = getActiveAsset();
+      if (!previewCtx || !asset) return;
+
+      const nextYaw = normalizeYawDeg(state.yawValue + 90);
+      state.yawValue = nextYaw;
+      yawInput.value = String(nextYaw);
+      applyYaw(previewCtx, nextYaw);
+      refreshModelDimensionsFromScene(previewCtx);
+      updateOrientationStatus();
+      updateFrontArrow(
+        previewCtx,
+        state.frontDirection,
+        finalPreviewYawForPolicy(orientationPolicyForAsset(asset), state.frontDirection, nextYaw),
+      );
+
+      rotateBtn.disabled = true;
+      rotateBtn.textContent = "旋转中...";
+      void saveCurrentModelOrigin(
+        previewCtx,
+        asset,
+        {
+          yaw_deg: nextYaw,
+          canonical_front: normalizeCanonicalFront(state.frontDirection),
+          origin_fix_mode: "manual-rotate",
+          origin_manual_rotate_saved_at: new Date().toISOString(),
+        },
+        "顺时针旋转90°并自动保存",
+      ).catch((err) => showToast(root, `顺时针旋转并保存失败: ${err}`, "error"))
+        .finally(() => {
+          rotateBtn.disabled = false;
+          rotateBtn.textContent = "顺时针旋转90°";
+        });
     }
   });
 
