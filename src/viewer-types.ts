@@ -35,6 +35,7 @@ export type ViewerManifest = {
   instances?: Record<string, Record<string, unknown>>;
   asset_descriptions?: Record<string, unknown>;
   audio_profile?: Record<string, unknown>;
+  comparison_metadata?: ViewerComparisonMetadata;
   spawn_point?: [number, number, number];
   forward_vector?: [number, number, number];
   scene_bounds?: {
@@ -54,6 +55,39 @@ export type ViewerManifest = {
     lane_count?: number;
     road_width_m?: number;
   };
+};
+
+export type ViewerComparisonMetadata = {
+  preset_id?: string;
+  preset_label?: string;
+  scenario_id?: string;
+  scenario_title?: string;
+  graph_template_id?: string;
+  prompt?: string;
+  variant_id?: string;
+  variant_name?: string;
+  random_seed?: number;
+  density?: number;
+  road_width_m?: number;
+  lane_count?: number;
+  style_preset?: string;
+  instance_count?: number;
+  production_step_ids?: string[];
+};
+
+export type ComparisonItem = {
+  scheme_id: string;
+  variant_name?: string;
+  layout_path: string;
+  metadata?: ViewerComparisonMetadata;
+};
+
+export type ComparisonGroup = {
+  id: string;
+  title?: string;
+  created_at?: string;
+  source?: string;
+  items: ComparisonItem[];
 };
 
 export type InstanceInfo = {

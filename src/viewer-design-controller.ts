@@ -9,9 +9,11 @@ import type {
   BranchRunStatusPayload,
   BranchRunNode,
   BranchScatterPoint,
+  ComparisonGroup,
   DesignPreset,
   DesignSemanticSummary,
   DesignSchemeVariant,
+  ViewerComparisonMetadata,
   RecentLayout,
   SceneJobResult,
   SceneJobStatusPayload,
@@ -42,6 +44,7 @@ type GeneratedDesignScheme = {
   name: string;
   layoutPath: string;
   status: "ready" | "failed";
+  metadata?: ViewerComparisonMetadata;
   error?: string;
 };
 
@@ -104,6 +107,7 @@ export type ViewerDesignControllerDeps = {
   renderBranchRunResults: (payload: BranchRunStatusPayload) => void;
   loadLayoutSelection: (layoutPath: string) => Promise<void>;
   populateRecentLayoutOptions: (layouts: RecentLayout[], selectedPath: string) => void;
+  setComparisonGroup?: (group: ComparisonGroup) => void;
 };
 
 export function createViewerDesignController(deps: ViewerDesignControllerDeps): ViewerDesignController {
@@ -141,6 +145,65 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
         `).join("")}
       </div>
     `;
+  }
+
+  function generatedSchemeMetadata(
+    result: SceneJobResult,
+    preset: DesignPreset | null,
+    variant: DesignSchemeVariant,
+    prompt: string,
+    graphTemplateId: string,
+    scenario: ScenarioDesign | null,
+    presetLabel: string,
+  ): ViewerComparisonMetadata {
+    const composeConfig = result.compose_config ?? {};
+    const summary = result.summary ?? {};
+    const numberOrUndefined = (value: unknown): number | undefined => {
+      const numberValue = Number(value);
+      return Number.isFinite(numberValue) ? numberValue : undefined;
+    };
+    return {
+      preset_id: preset?.id ?? "custom",
+      preset_label: presetLabel,
+      scenario_id: scenario?.scenario_id,
+      scenario_title: scenario ? (scenario.title_zh || scenario.scenario_id) : "Base Template",
+      graph_template_id: graphTemplateId,
+      prompt,
+      variant_id: variant.id,
+      variant_name: variant.name,
+      random_seed: variant.seed,
+      density: numberOrUndefined(composeConfig.density ?? summary.density),
+      road_width_m: numberOrUndefined(composeConfig.road_width_m ?? summary.road_width_m),
+      lane_count: numberOrUndefined(composeConfig.lane_count ?? summary.lane_count),
+      style_preset: String(composeConfig.style_preset ?? summary.style_preset ?? summary.visual_style_preset ?? ""),
+      instance_count: numberOrUndefined(summary.instance_count),
+      production_step_ids: Array.isArray(summary.production_step_ids)
+        ? summary.production_step_ids.map((value) => String(value))
+        : undefined,
+    };
+  }
+
+  function publishComparisonGroup(
+    schemes: GeneratedDesignScheme[],
+    presetLabel: string,
+    scenarioLabel: string,
+  ): void {
+    const readySchemes = schemes.filter((scheme) => scheme.status === "ready" && scheme.layoutPath);
+    if (readySchemes.length < 2) {
+      return;
+    }
+    deps.setComparisonGroup?.({
+      id: `design-run-${Date.now()}`,
+      title: `${scenarioLabel} · ${presetLabel}`,
+      created_at: new Date().toISOString(),
+      source: "design_run",
+      items: readySchemes.map((scheme) => ({
+        scheme_id: scheme.id,
+        variant_name: scheme.name,
+        layout_path: scheme.layoutPath,
+        metadata: scheme.metadata,
+      })),
+    });
   }
 
   function benchmarkSamplesForActivePreset(payload: BenchmarkSamplesPayload): BenchmarkSample[] {
@@ -997,6 +1060,15 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
             name: variant.name,
             layoutPath: result.scene_layout_path,
             status: "ready",
+            metadata: generatedSchemeMetadata(
+              result,
+              preset,
+              variant,
+              effectivePrompt,
+              graphTemplateId,
+              scenario,
+              presetLabel,
+            ),
           });
           renderGeneratedDesignSchemes(generatedSchemes);
         } catch (err) {
@@ -1024,6 +1096,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       const recent = await loadRecentLayouts(50, false);
       deps.populateRecentLayoutOptions(recent, firstReady.layoutPath);
       renderGeneratedDesignSchemes(generatedSchemes);
+      publishComparisonGroup(generatedSchemes, presetLabel, scenarioLabel);
       deps.updateDesignStatus(
         `${generatedSchemes.filter((scheme) => scheme.status === "ready").length}/${variants.length} schemes generated.`,
         "success",

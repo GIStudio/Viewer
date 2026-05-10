@@ -1007,6 +1007,38 @@ function buildSpawnPayload(layoutPayload: Record<string, any>): {
   };
 }
 
+function cleanString(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function buildComparisonMetadata(
+  layoutPayload: JsonRecord,
+  productionSteps: Array<Record<string, unknown>>,
+): JsonRecord {
+  const summary = (layoutPayload.summary ?? {}) as JsonRecord;
+  const config = (layoutPayload.config ?? {}) as JsonRecord;
+  const scenarioVariant = (summary.scenario_design_variant ?? {}) as JsonRecord;
+  return cleanForJson({
+    preset_id: cleanString(summary.preset_id || summary.benchmark_preset_id),
+    preset_label: cleanString(summary.preset_label || summary.preset_name),
+    scenario_id: cleanString(summary.scenario_id || scenarioVariant.scenario_id),
+    scenario_title: cleanString(summary.scenario_title || scenarioVariant.title_zh),
+    graph_template_id: cleanString(summary.graph_template_id || summary.base_graph_template_id || summary.plan_id),
+    prompt: cleanString(config.query || layoutPayload.query || summary.query),
+    variant_id: cleanString(summary.design_variant_id || summary.variant_id),
+    variant_name: cleanString(summary.design_variant_name || summary.variant_name),
+    random_seed: asFiniteNumberOrNull(summary.random_seed) ?? asFiniteNumberOrNull(config.seed) ?? undefined,
+    density: asFiniteNumberOrNull(config.density) ?? asFiniteNumberOrNull(summary.density) ?? undefined,
+    road_width_m: asFiniteNumberOrNull(config.road_width_m) ?? asFiniteNumberOrNull(summary.road_width_m) ?? undefined,
+    lane_count: asFiniteNumberOrNull(config.lane_count) ?? asFiniteNumberOrNull(summary.lane_count) ?? undefined,
+    style_preset: cleanString(config.style_preset || summary.style_preset || summary.visual_style_preset),
+    instance_count: asFiniteNumberOrNull(summary.instance_count) ?? undefined,
+    production_step_ids: productionSteps
+      .map((step) => cleanString(step.step_id))
+      .filter(Boolean),
+  }) as JsonRecord;
+}
+
 function jsonResponse(res: any, statusCode: number, payload: Record<string, unknown>): void {
   res.statusCode = statusCode;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -1194,6 +1226,7 @@ function viewerApiPlugin(): Plugin {
               instances,
               asset_descriptions: assetDescriptions,
               static_object_descriptions: staticObjectDescriptions,
+              comparison_metadata: buildComparisonMetadata(layoutPayload, productionSteps as Array<Record<string, unknown>>),
               layout_overlay: {
                 bands: cleanForJson(layoutBands),
                 building_footprints: cleanForJson(buildingFootprints),

@@ -27,6 +27,9 @@ import type {
   ViewerManifest,
   SceneOption,
   RecentLayout,
+  ComparisonGroup,
+  ComparisonItem,
+  ViewerComparisonMetadata,
   DesignPreset,
   SceneJobStatusPayload,
   DesignSchemeVariant,
@@ -95,6 +98,7 @@ import {
   exportTopDownMapSvg,
 } from "./viewer-export";
 import { createExpandedMapController } from "./viewer-expanded-map";
+import { createSchemeCompareController } from "./viewer-scheme-compare";
 import {
   buildDesignStageNodes,
   latestOperationForStage,
@@ -468,6 +472,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
           </label>
         </div>
       `,
+    },
+    {
+      id: "viewer-scheme-compare-section",
+      title: t("Scheme Compare", "方案对比"),
+      subtitle: t("Same step / multiple results", "相同步骤 / 多生成结果"),
+      content: `<div id="viewer-scheme-compare" class="viewer-scheme-compare"></div>`,
     },
   ]);
   shell.setRightTabs(
@@ -1019,6 +1029,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const errorEl = requireElement<HTMLElement>(root, "#viewer-error");
   const layoutSelectEl = requireElement<HTMLSelectElement>(root, "#layout-select");
   const selectEl = requireElement<HTMLSelectElement>(root, "#scene-select");
+  const schemeCompareEl = requireElement<HTMLElement>(root, "#viewer-scheme-compare");
   const sceneGraphLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-scene-graph-link");
   const assetEditorLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-asset-editor-link");
   
@@ -1618,6 +1629,40 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     getLang: () => currentLang,
   });
 
+  function ensureCompareOption(selectEl: HTMLSelectElement, item: ComparisonItem): void {
+    if (Array.from(selectEl.options).some((option) => option.value === item.layout_path)) {
+      return;
+    }
+    const optionEl = document.createElement("option");
+    optionEl.value = item.layout_path;
+    optionEl.textContent = compactUiLabel(item.variant_name || item.metadata?.variant_name || makeDirectLayoutLabel(item.layout_path));
+    optionEl.title = item.layout_path;
+    selectEl.appendChild(optionEl);
+  }
+
+  function syncComparePair(a: ComparisonItem, b: ComparisonItem, openDetails: boolean): void {
+    populateCompareSelectors();
+    ensureCompareOption(compareSelectAEl, a);
+    ensureCompareOption(compareSelectBEl, b);
+    compareSelectAEl.value = a.layout_path;
+    compareSelectBEl.value = b.layout_path;
+    if (openDetails) {
+      panelController.setOpen("compare", true);
+      void compareMode.runComparison();
+    }
+  }
+
+  const schemeCompareController = createSchemeCompareController({
+    hostEl: schemeCompareEl,
+    loadManifest: (layoutPath) => loadManifest(layoutPath),
+    enterCompareSceneSet: compareMode.enterCompareSceneSet,
+    syncComparePair,
+    escapeHtml,
+    compactUiLabel,
+    flashStatus,
+    setStatus,
+  });
+
   const raycaster = new THREE.Raycaster();
   const clock = new THREE.Clock();
   const eventController = new AbortController();
@@ -1813,6 +1858,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
     populateRecentLayoutOptions,
     getSelectedScenarioDesign: selectedScenarioDesign,
+    setComparisonGroup: (group) => schemeCompareController.setGroup(group),
   });
 
   const presetsController = createViewerPresetsController({
@@ -1826,6 +1872,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
     populateRecentLayoutOptions,
   });
+
+  schemeCompareController.restoreStoredGroup();
 
   function setStatus(message: string): void {
     if (statusResetHandle !== null) {

@@ -1,7 +1,16 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import type { ViewerManifest } from "./viewer-types";
+import type { ViewerComparisonMetadata, ViewerManifest } from "./viewer-types";
 import { viewerText, type ViewerLanguage } from "./viewer-i18n";
+
+export type CompareSceneSetItem = {
+  id: string;
+  label: string;
+  layoutPath: string;
+  glbUrl: string;
+  stepKey?: string;
+  metadata?: ViewerComparisonMetadata;
+};
 
 export interface CompareModeDependencies {
   scene: THREE.Scene;
@@ -25,16 +34,17 @@ export interface CompareModeDependencies {
 
 export function createCompareMode(deps: CompareModeDependencies) {
   let compare3dActive = false;
-  let compareRootA: THREE.Object3D | null = null;
-  let compareRootB: THREE.Object3D | null = null;
+  let compareRoots: THREE.Object3D[] = [];
+  let compareSceneItems: CompareSceneSetItem[] = [];
+  let compareStepLabel = "";
+  let compareLabelsEl: HTMLElement | null = null;
   let lastComparison: {
     manifestA: ViewerManifest;
     manifestB: ViewerManifest;
     layoutJsonA: Record<string, unknown>;
     layoutJsonB: Record<string, unknown>;
   } | null = null;
-  const compareCameraA = deps.camera.clone();
-  const compareCameraB = deps.camera.clone();
+  const compareCameras: THREE.PerspectiveCamera[] = [];
 
   function t(en: string, zh: string): string {
     return viewerText(deps.getLang(), en, zh);
@@ -306,7 +316,47 @@ export function createCompareMode(deps: CompareModeDependencies) {
     };
   }
 
-  async function loadCompareScene(glbUrl: string, side: "a" | "b"): Promise<void> {
+  function disposeCompareSceneSet(): void {
+    compare3dActive = false;
+    for (const root of compareRoots) {
+      deps.scene.remove(root);
+      deps.disposeObject(root);
+    }
+    compareRoots = [];
+    compareSceneItems = [];
+    compareCameras.length = 0;
+    compareLabelsEl?.remove();
+    compareLabelsEl = null;
+    deps.exitCompare3dEl.hidden = true;
+  }
+
+  function renderCompareLabels(items: CompareSceneSetItem[], stepLabel: string): void {
+    compareLabelsEl?.remove();
+    const parent = deps.renderer.domElement.parentElement;
+    if (!parent) {
+      compareLabelsEl = null;
+      return;
+    }
+    const host = document.createElement("div");
+    host.className = "viewer-compare3d-labels";
+    host.style.gridTemplateColumns = `repeat(${Math.max(1, items.length)}, minmax(0, 1fr))`;
+    host.innerHTML = items.map((item) => {
+      const metadata = item.metadata ?? {};
+      const preset = metadata.preset_label || metadata.preset_id || t("Custom", "自定义");
+      const scenario = metadata.scenario_title || metadata.scenario_id || t("Base Template", "基础模板");
+      return `
+        <div class="viewer-compare3d-label">
+          <strong>${deps.escapeHtml(item.label)}</strong>
+          <span>${deps.escapeHtml(stepLabel || t("Final Scene", "最终场景"))}</span>
+          <small>${deps.escapeHtml(preset)} · ${deps.escapeHtml(scenario)}</small>
+        </div>
+      `;
+    }).join("");
+    parent.appendChild(host);
+    compareLabelsEl = host;
+  }
+
+  async function loadCompareScene(glbUrl: string, index: number): Promise<void> {
     return new Promise((resolve, reject) => {
       deps.loader.load(
         glbUrl,
@@ -319,19 +369,11 @@ export function createCompareMode(deps: CompareModeDependencies) {
               mesh.receiveShadow = true;
             }
           });
-          if (side === "a") {
-            if (compareRootA) {
-              deps.scene.remove(compareRootA);
-              deps.disposeObject(compareRootA);
-            }
-            compareRootA = root;
-          } else {
-            if (compareRootB) {
-              deps.scene.remove(compareRootB);
-              deps.disposeObject(compareRootB);
-            }
-            compareRootB = root;
+          if (compareRoots[index]) {
+            deps.scene.remove(compareRoots[index]);
+            deps.disposeObject(compareRoots[index]);
           }
+          compareRoots[index] = root;
           root.visible = false;
           deps.scene.add(root);
           resolve();
@@ -673,17 +715,45 @@ export function createCompareMode(deps: CompareModeDependencies) {
       deps.flashStatus(t("Both layouts must have a GLB scene.", "两个布局都需要 GLB 场景。"));
       return;
     }
+    await enterCompareSceneSet([
+      {
+        id: "A",
+        label: t("Layout A", "布局 A"),
+        layoutPath: a.layout_path || "",
+        glbUrl: a.final_scene.glb_url,
+        stepKey: "final_scene",
+        metadata: a.comparison_metadata,
+      },
+      {
+        id: "B",
+        label: t("Layout B", "布局 B"),
+        layoutPath: b.layout_path || "",
+        glbUrl: b.final_scene.glb_url,
+        stepKey: "final_scene",
+        metadata: b.comparison_metadata,
+      },
+    ], t("Final Scene", "最终场景"));
+  }
+
+  async function enterCompareSceneSet(items: CompareSceneSetItem[], stepLabel = ""): Promise<void> {
+    const viewableItems = items.filter((item) => item.glbUrl);
+    if (viewableItems.length < 2) {
+      deps.flashStatus(t("At least two schemes are required for split view.", "至少需要两个方案才能分屏对比。"));
+      return;
+    }
     deps.setStatus(t("Loading split-screen comparison...", "正在加载分屏对比..."));
     try {
-      await Promise.all([
-        loadCompareScene(a.final_scene.glb_url, "a"),
-        loadCompareScene(b.final_scene.glb_url, "b"),
-      ]);
+      disposeCompareSceneSet();
+      compareSceneItems = viewableItems.slice(0, 3);
+      compareStepLabel = stepLabel;
+      compareCameras.push(...compareSceneItems.map(() => deps.camera.clone()));
+      await Promise.all(compareSceneItems.map((item, index) => loadCompareScene(item.glbUrl, index)));
       compare3dActive = true;
       const currentRoot = deps.getCurrentRoot();
       if (currentRoot) currentRoot.visible = false;
       deps.exitCompare3dEl.hidden = false;
-      deps.flashStatus(t("Split-screen mode active. WASD moves both views.", "分屏模式已开启，WASD 会同时移动两侧视图。"));
+      renderCompareLabels(compareSceneItems, compareStepLabel);
+      deps.flashStatus(t("Split-screen mode active. WASD moves all views.", "分屏模式已开启，WASD 会同步移动所有视图。"));
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("Failed to load scenes.", "场景加载失败。");
       deps.flashStatus(msg);
@@ -694,8 +764,11 @@ export function createCompareMode(deps: CompareModeDependencies) {
     compare3dActive = false;
     const currentRoot = deps.getCurrentRoot();
     if (currentRoot) currentRoot.visible = true;
-    if (compareRootA) compareRootA.visible = false;
-    if (compareRootB) compareRootB.visible = false;
+    for (const root of compareRoots) {
+      root.visible = false;
+    }
+    compareLabelsEl?.remove();
+    compareLabelsEl = null;
     deps.exitCompare3dEl.hidden = true;
     deps.renderer.setScissorTest(false);
     deps.renderer.setViewport(0, 0, deps.renderer.domElement.clientWidth, deps.renderer.domElement.clientHeight);
@@ -705,38 +778,38 @@ export function createCompareMode(deps: CompareModeDependencies) {
   deps.exitCompare3dEl.addEventListener("click", exitCompare3d);
 
   function renderCompare3dFrame(): boolean {
-    if (compare3dActive && compareRootA && compareRootB) {
+    if (compare3dActive && compareRoots.length >= 2) {
       const currentRoot = deps.getCurrentRoot();
       if (currentRoot) currentRoot.visible = false;
-      compareCameraA.position.copy(deps.camera.position);
-      compareCameraA.quaternion.copy(deps.camera.quaternion);
-      compareCameraB.position.copy(deps.camera.position);
-      compareCameraB.quaternion.copy(deps.camera.quaternion);
+      for (const compareCamera of compareCameras) {
+        compareCamera.position.copy(deps.camera.position);
+        compareCamera.quaternion.copy(deps.camera.quaternion);
+      }
 
       const width = deps.renderer.domElement.clientWidth;
       const height = deps.renderer.domElement.clientHeight;
+      const count = Math.max(1, compareRoots.length);
+      const columnWidth = width / count;
       deps.renderer.setScissorTest(true);
 
-      // Left half – Scene A
-      deps.renderer.setViewport(0, 0, width / 2, height);
-      deps.renderer.setScissor(0, 0, width / 2, height);
-      compareRootA.visible = true;
-      compareRootB.visible = false;
-      deps.renderer.render(deps.scene, compareCameraA);
-
-      // Right half – Scene B
-      deps.renderer.setViewport(width / 2, 0, width / 2, height);
-      deps.renderer.setScissor(width / 2, 0, width / 2, height);
-      compareRootA.visible = false;
-      compareRootB.visible = true;
-      deps.renderer.render(deps.scene, compareCameraB);
+      for (let index = 0; index < count; index += 1) {
+        const left = Math.round(index * columnWidth);
+        const right = Math.round((index + 1) * columnWidth);
+        deps.renderer.setViewport(left, 0, right - left, height);
+        deps.renderer.setScissor(left, 0, right - left, height);
+        compareRoots.forEach((root, rootIndex) => {
+          root.visible = rootIndex === index;
+        });
+        deps.renderer.render(deps.scene, compareCameras[index] ?? deps.camera);
+      }
 
       deps.renderer.setScissorTest(false);
       deps.renderer.setViewport(0, 0, width, height);
       return true;
     }
-    if (compareRootA) compareRootA.visible = false;
-    if (compareRootB) compareRootB.visible = false;
+    for (const root of compareRoots) {
+      root.visible = false;
+    }
     const currentRoot = deps.getCurrentRoot();
     if (currentRoot) currentRoot.visible = true;
     return false;
@@ -761,6 +834,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
   return {
     runComparison,
     enterCompare3d,
+    enterCompareSceneSet,
     exitCompare3d,
     renderCompare3dFrame,
     refreshLanguage,

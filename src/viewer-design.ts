@@ -148,6 +148,8 @@ export async function submitDesignJob(
     generation_options: {
       preset_id: preset?.id ?? "custom",
       random_seed: variant.seed,
+      design_variant_id: variant.id,
+      design_variant_name: variant.name,
       ...(scenarioId ? {
         scenario_id: scenarioId,
         scenario_compose_patch_applied: true,
