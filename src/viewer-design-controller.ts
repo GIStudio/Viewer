@@ -9,7 +9,6 @@ import type {
   BranchRunStatusPayload,
   BranchRunNode,
   BranchScatterPoint,
-  ComparisonGroup,
   DesignPreset,
   DesignSemanticSummary,
   DesignSchemeVariant,
@@ -107,7 +106,6 @@ export type ViewerDesignControllerDeps = {
   renderBranchRunResults: (payload: BranchRunStatusPayload) => void;
   loadLayoutSelection: (layoutPath: string) => Promise<void>;
   populateRecentLayoutOptions: (layouts: RecentLayout[], selectedPath: string) => void;
-  setComparisonGroup?: (group: ComparisonGroup) => void;
 };
 
 export function createViewerDesignController(deps: ViewerDesignControllerDeps): ViewerDesignController {
@@ -181,29 +179,6 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
         ? summary.production_step_ids.map((value) => String(value))
         : undefined,
     };
-  }
-
-  function publishComparisonGroup(
-    schemes: GeneratedDesignScheme[],
-    presetLabel: string,
-    scenarioLabel: string,
-  ): void {
-    const readySchemes = schemes.filter((scheme) => scheme.status === "ready" && scheme.layoutPath);
-    if (readySchemes.length < 2) {
-      return;
-    }
-    deps.setComparisonGroup?.({
-      id: `design-run-${Date.now()}`,
-      title: `${scenarioLabel} · ${presetLabel}`,
-      created_at: new Date().toISOString(),
-      source: "design_run",
-      items: readySchemes.map((scheme) => ({
-        scheme_id: scheme.id,
-        variant_name: scheme.name,
-        layout_path: scheme.layoutPath,
-        metadata: scheme.metadata,
-      })),
-    });
   }
 
   function benchmarkSamplesForActivePreset(payload: BenchmarkSamplesPayload): BenchmarkSample[] {
@@ -1096,12 +1071,14 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       const recent = await loadRecentLayouts(50, false);
       deps.populateRecentLayoutOptions(recent, firstReady.layoutPath);
       renderGeneratedDesignSchemes(generatedSchemes);
-      publishComparisonGroup(generatedSchemes, presetLabel, scenarioLabel);
+      const readyCount = generatedSchemes.filter((scheme) => scheme.status === "ready").length;
       deps.updateDesignStatus(
-        `${generatedSchemes.filter((scheme) => scheme.status === "ready").length}/${variants.length} schemes generated.`,
+        `${readyCount}/${variants.length} schemes generated. Select results in Recent Layouts to compare.`,
         "success",
       );
-      deps.flashStatus(`${firstReady.name} loaded in Viewer${scenario ? ` · ${scenario.scenario_id}` : ""}.`);
+      deps.flashStatus(
+        `${firstReady.name} loaded in Viewer${scenario ? ` · ${scenario.scenario_id}` : ""}. Results are available in Recent Layouts for manual comparison.`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Design generation failed.";
       deps.updateDesignStatus(message, "error");

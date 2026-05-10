@@ -27,9 +27,7 @@ import type {
   ViewerManifest,
   SceneOption,
   RecentLayout,
-  ComparisonGroup,
   ComparisonItem,
-  ViewerComparisonMetadata,
   DesignPreset,
   SceneJobStatusPayload,
   DesignSchemeVariant,
@@ -470,14 +468,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
             <span data-i18n-key="viewer.left.scene">Scene</span>
             <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene" data-i18n-title-key="viewer.left.scene"></select>
           </label>
+          <div id="viewer-scheme-compare" class="viewer-scheme-compare"></div>
         </div>
       `,
-    },
-    {
-      id: "viewer-scheme-compare-section",
-      title: t("Scheme Compare", "方案对比"),
-      subtitle: t("Same step / multiple results", "相同步骤 / 多生成结果"),
-      content: `<div id="viewer-scheme-compare" class="viewer-scheme-compare"></div>`,
     },
   ]);
   shell.setRightTabs(
@@ -1659,6 +1652,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     syncComparePair,
     escapeHtml,
     compactUiLabel,
+    makeDirectLayoutLabel,
     flashStatus,
     setStatus,
   });
@@ -1858,7 +1852,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
     populateRecentLayoutOptions,
     getSelectedScenarioDesign: selectedScenarioDesign,
-    setComparisonGroup: (group) => schemeCompareController.setGroup(group),
   });
 
   const presetsController = createViewerPresetsController({
@@ -1873,7 +1866,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     populateRecentLayoutOptions,
   });
 
-  schemeCompareController.restoreStoredGroup();
+  schemeCompareController.restoreStoredSelection();
 
   function setStatus(message: string): void {
     if (statusResetHandle !== null) {
@@ -2579,6 +2572,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       const selectedLayout = recentLayoutsByPath.get(selectedPath);
       layoutSelectEl.title = selectedLayout?.label ?? makeDirectLayoutLabel(selectedPath);
     }
+    schemeCompareController.setRecentLayouts(Array.from(recentLayoutsByPath.values()), selectedPath);
   }
 
   function recentLayoutDirectOptionExists(layoutPath: string): boolean {
@@ -2616,6 +2610,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       }
     }
     layoutSelectEl.disabled = layoutSelectEl.options.length === 0;
+    schemeCompareController.setRecentLayouts(Array.from(recentLayoutsByPath.values()), selectedPath);
   }
 
   function scheduleRecentLayoutHydration(selectedPath: string, initialLoaded: number): void {
@@ -3565,6 +3560,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       try {
         await sceneSelectionController.loadLayoutSelection(nextLayoutPath);
         layoutSelectEl.title = recentLayoutsByPath.get(nextLayoutPath)?.label ?? makeDirectLayoutLabel(nextLayoutPath);
+        schemeCompareController.setRecentLayouts(Array.from(recentLayoutsByPath.values()), nextLayoutPath);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to load scene layout.";
         setError(errorEl, message);
