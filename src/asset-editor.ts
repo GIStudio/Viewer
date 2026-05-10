@@ -114,6 +114,86 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
+const CANONICAL_FRONT_ALIASES: Record<string, string> = {
+  "+x": "+X",
+  "x+": "+X",
+  x: "+X",
+  positive_x: "+X",
+  pos_x: "+X",
+  plus_x: "+X",
+  right: "+X",
+  "-x": "-X",
+  "x-": "-X",
+  negative_x: "-X",
+  neg_x: "-X",
+  minus_x: "-X",
+  left: "-X",
+  "+z": "+Z",
+  "z+": "+Z",
+  z: "+Z",
+  positive_z: "+Z",
+  pos_z: "+Z",
+  plus_z: "+Z",
+  front: "+Z",
+  forward: "+Z",
+  "-z": "-Z",
+  "z-": "-Z",
+  negative_z: "-Z",
+  neg_z: "-Z",
+  minus_z: "-Z",
+  back: "-Z",
+  backward: "-Z",
+};
+
+const FRONT_AXIS_YAW_DEG: Record<string, number> = {
+  "+Z": 0,
+  "+X": 90,
+  "-Z": 180,
+  "-X": 270,
+};
+
+function normalizeYawDeg(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  const base = Number.isFinite(parsed) ? parsed : fallback;
+  return ((base % 360) + 360) % 360;
+}
+
+function normalizeCanonicalFront(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "+Z";
+  const key = raw.toLowerCase().replace(/\s+/g, "_").replace(/^axis_/, "").replace(/_axis$/, "");
+  return CANONICAL_FRONT_ALIASES[key] ?? "+Z";
+}
+
+function rotateLocalDirection(frontDirection: string, yawDeg: number): THREE.Vector3 {
+  const directions: Record<string, THREE.Vector3> = {
+    "+X": new THREE.Vector3(1, 0, 0),
+    "-X": new THREE.Vector3(-1, 0, 0),
+    "+Z": new THREE.Vector3(0, 0, 1),
+    "-Z": new THREE.Vector3(0, 0, -1),
+  };
+  const local = (directions[normalizeCanonicalFront(frontDirection)] ?? directions["+Z"]).clone();
+  local.applyAxisAngle(new THREE.Vector3(0, 1, 0), (normalizeYawDeg(yawDeg) * Math.PI) / 180);
+  return local.normalize();
+}
+
+function orientationPolicyForAsset(asset: AssetRecord | undefined): "face_road" | "face_traffic" | "free" {
+  const category = String(asset?.category ?? "").trim().toLowerCase();
+  if (category === "traffic_sign" || category === "sign" || category.endsWith("_sign")) return "face_traffic";
+  if (["tree", "lamp", "bollard", "hydrant", "sky_dome"].includes(category)) return "free";
+  return "face_road";
+}
+
+function targetYawForPreviewPolicy(policy: "face_road" | "face_traffic" | "free", frontDirection: string): number {
+  if (policy === "face_traffic") return 270; // against the preview road's +X travel direction
+  if (policy === "free") return FRONT_AXIS_YAW_DEG[normalizeCanonicalFront(frontDirection)] ?? 0;
+  return 0; // preview road is drawn along +/-X, with the nearest road edge toward +Z
+}
+
+function signedYawDeltaDeg(a: number, b: number): number {
+  return ((normalizeYawDeg(a - b) + 540) % 360) - 180;
+}
+
 function asStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
@@ -420,6 +500,11 @@ function roundTo(value: number, decimals: number): number {
   return Number(value.toFixed(decimals));
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
 function getObjectBoundingBox(target: THREE.Object3D): THREE.Box3 {
   return new THREE.Box3().setFromObject(target);
 }
@@ -605,6 +690,27 @@ function disposeScaleBar(group: THREE.Group) {
   });
 }
 
+function disposeObjectTree(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    const maybeObject = obj as THREE.Object3D & {
+      geometry?: THREE.BufferGeometry;
+      material?: THREE.Material | THREE.Material[];
+    };
+    if (maybeObject.geometry) {
+      maybeObject.geometry.dispose();
+    }
+    const material = maybeObject.material;
+    if (Array.isArray(material)) {
+      material.forEach((m) => m.dispose());
+    } else {
+      material?.dispose?.();
+    }
+    if (obj instanceof CSS2DObject) {
+      obj.element.remove();
+    }
+  });
+}
+
 function replaceScaleBar(scene: THREE.Scene, current: THREE.Group, config?: ScaleBarConfig): THREE.Group {
   disposeScaleBar(current);
   if (current.parent) {
@@ -616,6 +722,101 @@ function replaceScaleBar(scene: THREE.Scene, current: THREE.Group, config?: Scal
     majorTickInterval: DEFAULT_SCALE_BAR_TICK_INTERVAL,
   };
   return createScaleBar(scene, targetConfig);
+}
+
+function makeReferenceLabel(text: string, color: string): CSS2DObject {
+  const div = document.createElement("div");
+  div.className = "ae-ruler-label";
+  div.style.color = color;
+  div.style.fontWeight = "700";
+  div.textContent = text;
+  return new CSS2DObject(div);
+}
+
+function createRoadReferenceGroup(box?: THREE.Box3): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "road_orientation_reference";
+
+  const bounds = box && !box.isEmpty()
+    ? box.clone()
+    : new THREE.Box3(new THREE.Vector3(-2, 0, -1), new THREE.Vector3(2, 2, 1));
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const tangentSpan = Math.max(size.x, 1);
+  const horizontalSpan = Math.max(size.x, size.z, 1);
+  const sidePadding = clampNumber(tangentSpan * 0.12, 0.8, 6);
+  const roadLength = Math.max(5.2, tangentSpan + sidePadding * 2);
+  const roadWidth = clampNumber(horizontalSpan * 0.06, 0.55, 4);
+  const modelToRoadGap = clampNumber(horizontalSpan * 0.12, 0.8, 8);
+  const roadY = Math.max(0.01, bounds.min.y + 0.01);
+  const roadZ = bounds.max.z + modelToRoadGap + roadWidth * 0.5;
+  const roadMinX = center.x - roadLength * 0.5;
+  const roadMaxX = center.x + roadLength * 0.5;
+  const arrowHeadLength = clampNumber(roadLength * 0.035, 0.18, 2.2);
+  const arrowHeadWidth = clampNumber(arrowHeadLength * 0.45, 0.08, 1.2);
+  const trafficArrowLength = Math.max(1.2, roadLength * 0.34);
+  const trafficArrowOffset = Math.max(roadWidth * 0.24, 0.16);
+  const labelY = roadY + clampNumber(Math.max(size.y * 0.04, horizontalSpan * 0.025), 0.28, 2.4);
+
+  const roadMat = new THREE.MeshBasicMaterial({
+    color: 0x263241,
+    transparent: true,
+    opacity: 0.28,
+    side: THREE.DoubleSide,
+  });
+  const roadPlane = new THREE.Mesh(new THREE.PlaneGeometry(roadLength, roadWidth), roadMat);
+  roadPlane.rotation.x = -Math.PI / 2;
+  roadPlane.position.set(center.x, roadY, roadZ);
+  group.add(roadPlane);
+
+  const roadLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(roadMinX, roadY + 0.03, roadZ),
+      new THREE.Vector3(roadMaxX, roadY + 0.03, roadZ),
+    ]),
+    new THREE.LineBasicMaterial({ color: 0xf4c542 }),
+  );
+  group.add(roadLine);
+
+  const normalStartZ = bounds.max.z + modelToRoadGap * 0.15;
+  const normalLength = Math.max(0.8, roadZ - normalStartZ);
+
+  group.add(
+    new THREE.ArrowHelper(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(center.x - roadLength * 0.42, roadY + 0.08, roadZ - trafficArrowOffset),
+      trafficArrowLength,
+      0x4aa3ff,
+      arrowHeadLength,
+      arrowHeadWidth,
+    ),
+    new THREE.ArrowHelper(
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(center.x + roadLength * 0.42, roadY + 0.08, roadZ + trafficArrowOffset),
+      trafficArrowLength,
+      0xff9f43,
+      arrowHeadLength,
+      arrowHeadWidth,
+    ),
+    new THREE.ArrowHelper(
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(center.x, roadY + 0.12, normalStartZ),
+      normalLength,
+      0x00ff88,
+      arrowHeadLength,
+      arrowHeadWidth,
+    ),
+  );
+
+  const forwardLabel = makeReferenceLabel("Road +T", "#4aa3ff");
+  forwardLabel.position.set(center.x - roadLength * 0.18, labelY, roadZ - roadWidth * 0.72);
+  const reverseLabel = makeReferenceLabel("Road -T", "#ff9f43");
+  reverseLabel.position.set(center.x + roadLength * 0.18, labelY, roadZ + roadWidth * 0.72);
+  const normalLabel = makeReferenceLabel("Face road", "#00ff88");
+  normalLabel.position.set(center.x + Math.min(roadLength * 0.04, 1.2), labelY, normalStartZ + normalLength * 0.48);
+  group.add(forwardLabel, reverseLabel, normalLabel);
+
+  return group;
 }
 
 /* ── API ───────────────────────────────────────────────────────────── */
@@ -646,7 +847,11 @@ async function fetchManifestAssets(
   if (!res.ok) throw new Error(`Failed to fetch manifest: ${res.status}`);
   const data = await res.json();
   return {
-    assets: data.assets ?? [],
+    assets: (data.assets ?? []).map((asset: AssetRecord) => ({
+      ...asset,
+      canonical_front: normalizeCanonicalFront(asset.canonical_front),
+      yaw_deg: normalizeYawDeg(asset.yaw_deg ?? 0),
+    })),
     total: data.total ?? 0,
     offset: data.offset ?? offset,
     limit: data.limit ?? limit,
@@ -806,6 +1011,7 @@ type PreviewContext = {
   labelRenderer: CSS2DRenderer;
   scaleBarGroup: THREE.Group | null;
   frontArrow: THREE.ArrowHelper | null;
+  roadReferenceGroup: THREE.Group | null;
 };
 
 type SelectionBox = {
@@ -1001,6 +1207,9 @@ function createPreviewScene(container: HTMLElement): PreviewContext {
   frontArrow.visible = false;
   scene.add(frontArrow);
 
+  const roadReferenceGroup = createRoadReferenceGroup();
+  scene.add(roadReferenceGroup);
+
   const wireframeMaterial = new THREE.MeshBasicMaterial({
     color: 0x88ccff,
     wireframe: true,
@@ -1024,6 +1233,7 @@ function createPreviewScene(container: HTMLElement): PreviewContext {
     labelRenderer,
     scaleBarGroup,
     frontArrow,
+    roadReferenceGroup,
   };
 
   function animate() {
@@ -1199,28 +1409,50 @@ function applyScale(ctx: PreviewContext, factor: number) {
 function applyYaw(ctx: PreviewContext, yawDeg: number) {
   if (!ctx.currentModel) return;
   // Normalize yaw to [0, 360)
-  const normalizedYaw = ((yawDeg % 360) + 360) % 360;
+  const normalizedYaw = normalizeYawDeg(yawDeg);
   ctx.currentModel.rotation.y = (normalizedYaw * Math.PI) / 180;
-  // Update front arrow rotation if visible
-  if (ctx.frontArrow) {
-    ctx.frontArrow.rotation.y = (normalizedYaw * Math.PI) / 180;
+}
+
+function replaceRoadReferenceGroup(ctx: PreviewContext) {
+  if (ctx.roadReferenceGroup) {
+    disposeObjectTree(ctx.roadReferenceGroup);
+    if (ctx.roadReferenceGroup.parent) {
+      ctx.roadReferenceGroup.parent.remove(ctx.roadReferenceGroup);
+    }
   }
+  const box = ctx.currentModel ? getObjectBoundingBox(ctx.currentModel) : undefined;
+  ctx.roadReferenceGroup = createRoadReferenceGroup(box);
+  ctx.scene.add(ctx.roadReferenceGroup);
 }
 
 function updateFrontArrow(ctx: PreviewContext, frontDirection: string, yawDeg: number = 0) {
   if (!ctx.frontArrow) return;
-
-  // Direction vectors for each canonical front
-  const directions: Record<string, THREE.Vector3> = {
-    "+X": new THREE.Vector3(1, 0, 0),
-    "-X": new THREE.Vector3(-1, 0, 0),
-    "+Z": new THREE.Vector3(0, 0, 1),
-    "-Z": new THREE.Vector3(0, 0, -1),
-  };
-
-  const dir = directions[frontDirection] || directions["+Z"];
+  const dir = rotateLocalDirection(frontDirection, yawDeg);
+  if (ctx.currentModel) {
+    const box = getObjectBoundingBox(ctx.currentModel);
+    if (!box.isEmpty()) {
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const horizontalSpan = Math.max(size.x, size.z, 1);
+      const distances: number[] = [];
+      if (Math.abs(dir.x) > 1e-4) {
+        distances.push((dir.x > 0 ? box.max.x - center.x : center.x - box.min.x) / Math.abs(dir.x));
+      }
+      if (Math.abs(dir.z) > 1e-4) {
+        distances.push((dir.z > 0 ? box.max.z - center.z : center.z - box.min.z) / Math.abs(dir.z));
+      }
+      const positiveDistances = distances.filter((value) => Number.isFinite(value) && value > 0);
+      const edgeDistance = positiveDistances.length > 0 ? Math.min(...positiveDistances) : horizontalSpan * 0.5;
+      const outsidePadding = clampNumber(horizontalSpan * 0.08, 0.6, 8);
+      const length = Math.max(1.2, edgeDistance + outsidePadding);
+      const headLength = clampNumber(length * 0.12, 0.2, 2.5);
+      const headWidth = clampNumber(headLength * 0.45, 0.1, 1.4);
+      center.y = box.max.y + clampNumber(Math.max(size.y * 0.05, horizontalSpan * 0.025), 0.35, 3);
+      ctx.frontArrow.position.copy(center);
+      ctx.frontArrow.setLength(length, headLength, headWidth);
+    }
+  }
   ctx.frontArrow.setDirection(dir);
-  ctx.frontArrow.rotation.y = (yawDeg * Math.PI) / 180;
   ctx.frontArrow.visible = true;
 }
 
@@ -2093,6 +2325,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
                 <option value="-Z">-Z</option>
               </select>
             </div>
+            <div id="ae-orientation-status" class="ae-orientation-status">Road +T/-T: ±X · Face road: +Z</div>
             <span class="ae-actions-sep"></span>
             <button id="ae-remove-dups-btn" class="ae-action-btn ae-btn-warning" disabled>Remove Duplicates</button>
             <button id="ae-auto-split-records-btn" class="ae-action-btn ae-btn-secondary" disabled>Auto Split Records</button>
@@ -2179,6 +2412,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   const loadMoreInfo = qs<HTMLSpanElement>(root, "#ae-load-more-info");
   const yawInput = qs<HTMLInputElement>(root, "#ae-yaw-input");
   const frontSelect = qs<HTMLSelectElement>(root, "#ae-front-select");
+  const orientationStatus = qs<HTMLDivElement>(root, "#ae-orientation-status");
 
   shell.setMenuActions({
     "file-load-layout": () => manifestSelect.focus(),
@@ -2194,6 +2428,18 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     },
   });
   applyViewerTranslations(root, loadViewerLanguage());
+
+  function updateOrientationStatus() {
+    const asset = state.assets.find((a) => a.asset_id === state.selectedAssetId);
+    const policy = orientationPolicyForAsset(asset);
+    const front = normalizeCanonicalFront(state.frontDirection);
+    const targetYaw = targetYawForPreviewPolicy(policy, front);
+    const finalYaw = normalizeYawDeg(targetYaw - (FRONT_AXIS_YAW_DEG[front] ?? 0) + state.yawValue);
+    const currentFrontYaw = normalizeYawDeg((FRONT_AXIS_YAW_DEG[front] ?? 0) + state.yawValue);
+    const delta = signedYawDeltaDeg(currentFrontYaw, targetYaw);
+    const targetLabel = policy === "face_traffic" ? "against Road +T" : policy === "free" ? "free" : "face road";
+    orientationStatus.textContent = `Policy: ${policy} · Target: ${targetLabel} (${Math.round(targetYaw)}°) · Final yaw: ${Math.round(finalYaw)}° · Δ ${Math.round(delta)}°`;
+  }
 
   /* ── Navigation ────────────────────────────────────────────────── */
   backBtn.addEventListener("click", () => {
@@ -2558,13 +2804,14 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     // Load existing scale, yaw, and front direction from asset record
     const asset = state.assets.find((a) => a.asset_id === assetId);
     state.scaleValue = asset?.scale ?? 1;
-    state.yawValue = asset?.yaw_deg ?? 0;
-    state.frontDirection = asset?.canonical_front ?? "+Z";
+    state.yawValue = normalizeYawDeg(asset?.yaw_deg ?? 0);
+    state.frontDirection = normalizeCanonicalFront(asset?.canonical_front ?? "+Z");
     state.modelDimensions = getAssetDimensions(asset);
 
     scaleInput.value = String(state.scaleValue);
     yawInput.value = String(state.yawValue);
     frontSelect.value = state.frontDirection;
+    updateOrientationStatus();
 
     // Update gallery selection
     galleryGrid.querySelectorAll(".ae-asset-row").forEach((el) => {
@@ -3096,6 +3343,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     syncSliderToScale(state.scaleValue);
     refreshScaleBarFromDimensions(ctx, dims);
     refreshDimensionValidationPanel(dims);
+    replaceRoadReferenceGroup(ctx);
+    updateFrontArrow(ctx, state.frontDirection, state.yawValue);
     updateOriginAlignmentPanel();
   }
 
@@ -3779,21 +4028,23 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   yawInput.addEventListener("input", () => {
     const val = parseFloat(yawInput.value);
     if (isNaN(val)) return;
-    const normalizedYaw = ((val % 360) + 360) % 360;
+    const normalizedYaw = normalizeYawDeg(val);
     state.yawValue = normalizedYaw;
     if (previewCtx) {
       applyYaw(previewCtx, normalizedYaw);
-      updateFrontArrow(previewCtx, state.frontDirection, normalizedYaw);
       refreshModelDimensionsFromScene(previewCtx);
     }
+    updateOrientationStatus();
   });
 
   /* ── Front Direction → live preview ───────────────────────────── */
   frontSelect.addEventListener("change", () => {
-    state.frontDirection = frontSelect.value;
+    state.frontDirection = normalizeCanonicalFront(frontSelect.value);
+    frontSelect.value = state.frontDirection;
     if (previewCtx) {
       updateFrontArrow(previewCtx, state.frontDirection, state.yawValue);
     }
+    updateOrientationStatus();
   });
 
   /* ── Export ─────────────────────────────────────────────────────── */
@@ -3820,10 +4071,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
 
     const updates: Record<string, unknown> = { ...curationUpdates };
     updates.scale = state.scaleValue;
-    updates.yaw_deg = state.yawValue;
-    if (state.frontDirection !== "+Z") {
-      updates.canonical_front = state.frontDirection;
-    }
+    updates.yaw_deg = normalizeYawDeg(state.yawValue);
+    updates.canonical_front = normalizeCanonicalFront(state.frontDirection);
     if (state.modelDimensions) {
       updates.dimensions_m = {
         width: state.modelDimensions.width,
@@ -3838,8 +4087,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       if (asset) {
         applyCurationUpdatesToAsset(asset, curationUpdates);
         asset.scale = state.scaleValue;
-        asset.yaw_deg = state.yawValue;
-        if (updates.canonical_front) asset.canonical_front = updates.canonical_front as string;
+        asset.yaw_deg = updates.yaw_deg as number;
+        asset.canonical_front = updates.canonical_front as string;
         if (updates.dimensions_m) asset.dimensions_m = updates.dimensions_m as { width?: number; height?: number; depth?: number };
       }
       renderGallery();

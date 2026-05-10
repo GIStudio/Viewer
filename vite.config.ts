@@ -34,6 +34,62 @@ const IGNORED_DISCOVERY_DIRS = new Set([
 
 type JsonRecord = Record<string, unknown>;
 
+const CANONICAL_FRONT_ALIASES: Record<string, string> = {
+  "+x": "+X",
+  "x+": "+X",
+  x: "+X",
+  positive_x: "+X",
+  pos_x: "+X",
+  plus_x: "+X",
+  right: "+X",
+  "-x": "-X",
+  "x-": "-X",
+  negative_x: "-X",
+  neg_x: "-X",
+  minus_x: "-X",
+  left: "-X",
+  "+z": "+Z",
+  "z+": "+Z",
+  z: "+Z",
+  positive_z: "+Z",
+  pos_z: "+Z",
+  plus_z: "+Z",
+  front: "+Z",
+  forward: "+Z",
+  "-z": "-Z",
+  "z-": "-Z",
+  negative_z: "-Z",
+  neg_z: "-Z",
+  minus_z: "-Z",
+  back: "-Z",
+  backward: "-Z",
+};
+
+function normalizeCanonicalFront(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "+Z";
+  const key = raw.toLowerCase().replace(/\s+/g, "_").replace(/^axis_/, "").replace(/_axis$/, "");
+  return CANONICAL_FRONT_ALIASES[key] ?? "+Z";
+}
+
+function normalizeYawDeg(value: unknown): number {
+  const parsed = Number(value);
+  const base = Number.isFinite(parsed) ? parsed : 0;
+  return ((base % 360) + 360) % 360;
+}
+
+function normalizeAssetManifestUpdates(updates: JsonRecord | null | undefined): JsonRecord {
+  const normalized: JsonRecord = { ...(updates ?? {}) };
+  if ("canonical_front" in normalized || "front_axis" in normalized) {
+    normalized.canonical_front = normalizeCanonicalFront(normalized.canonical_front ?? normalized.front_axis);
+    delete normalized.front_axis;
+  }
+  if ("yaw_deg" in normalized) {
+    normalized.yaw_deg = normalizeYawDeg(normalized.yaw_deg);
+  }
+  return normalized;
+}
+
 type StaticObjectDescription = {
   match: "exact" | "prefix";
   title: string;
@@ -1610,7 +1666,7 @@ function viewerApiPlugin(): Plugin {
             try {
               const record = JSON.parse(trimmed) as JsonRecord;
               if (String(record.asset_id ?? "") === aId) {
-                const merged = { ...record, ...(updates ?? {}) };
+                const merged = { ...record, ...normalizeAssetManifestUpdates(updates) };
                 newLines.push(JSON.stringify(merged));
                 found = true;
               } else {
@@ -1667,6 +1723,7 @@ function viewerApiPlugin(): Plugin {
             return;
           }
 
+          const normalizedUpdates = normalizeAssetManifestUpdates(updates);
           const wantedIds = new Set(assetIds);
           const seenIds = new Set<string>();
           const rawLines = fs.readFileSync(manifestPath, "utf-8").split(/\r?\n/);
@@ -1683,7 +1740,7 @@ function viewerApiPlugin(): Plugin {
               const assetId = String(record.asset_id ?? "").trim();
               const shouldUpdate = scope === "all" || wantedIds.has(assetId);
               if (assetId && shouldUpdate) {
-                const merged = { ...record, ...updates };
+                const merged = { ...record, ...normalizedUpdates };
                 newLines.push(JSON.stringify(merged));
                 seenIds.add(assetId);
                 updatedCount += 1;
@@ -1778,7 +1835,7 @@ function viewerApiPlugin(): Plugin {
             const meshPath = path.join(SPLIT_ASSET_MESH_DIR, `${safeAssetFileStem(assetId)}.glb`);
             fs.writeFileSync(meshPath, glbBuffer);
             const record = {
-              ...item.record,
+              ...normalizeAssetManifestUpdates(item.record as JsonRecord),
               asset_id: assetId,
               mesh_path: meshPath,
             };
@@ -1858,7 +1915,7 @@ function viewerApiPlugin(): Plugin {
               if (String(record.asset_id ?? "") === assetId) {
                 normalizedRecord = {
                   ...record,
-                  ...(parsed.updates ?? {}),
+                  ...normalizeAssetManifestUpdates(parsed.updates),
                   asset_id: assetId,
                   mesh_path: meshPath,
                 };
