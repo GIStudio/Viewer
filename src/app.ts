@@ -646,10 +646,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                 <details class="viewer-design-advanced-details viewer-design-analysis-details">
                   <summary>Advanced Analysis / 高级分析</summary>
                   <div class="viewer-design-trace-hint">
-                    用于研究多个参数样本、查看历史评分和 Pareto 搜索，不是普通生成入口。
+                    用于查看最近评分样本和 Pareto 结果，不会触发新的生成任务。
                   </div>
                   <div class="viewer-design-action-row">
-                    <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Run Pareto Search / 批量搜索评分</button>
+                    <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Load Latest Scores / 加载最近评分</button>
                     <button id="viewer-design-benchmark" class="viewer-nav-button viewer-nav-button-secondary" type="button">Benchmark Store</button>
                     <button id="viewer-design-branch-history" class="viewer-nav-button viewer-nav-button-secondary" type="button">Run History</button>
                   </div>
@@ -3236,7 +3236,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }, { signal });
   designBenchmarkEl.addEventListener("click", () => void designController.loadBenchmarkExplorer(), { signal });
   designBranchHistoryEl.addEventListener("click", () => void designController.loadBranchRunHistory(), { signal });
-  designBranchRunEl.addEventListener("click", () => void designController.runBranchGeneration(), { signal });
+  designBranchRunEl.addEventListener("click", () => void designController.loadLatestScoreResults(), { signal });
   designWorkspaceEl.addEventListener("click", (event) => {
     const target = event.target as Element;
     if (target.closest("[data-design-workspace-close]")) {

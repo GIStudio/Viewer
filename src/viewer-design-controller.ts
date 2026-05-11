@@ -65,6 +65,7 @@ export type ViewerDesignController = {
   runBranchGeneration: () => Promise<void>;
   loadBranchRunHistory: () => Promise<void>;
   loadBenchmarkExplorer: () => Promise<void>;
+  loadLatestScoreResults: () => Promise<void>;
   isDesignGenerating: () => boolean;
   isBranchRunGenerating: () => boolean;
 };
@@ -119,6 +120,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
   let benchmarkCorrelationMode: BenchmarkCorrelationMode = "pooled";
   let benchmarkSelectedFeature = "";
   let benchmarkBatchPollHandle: number | null = null;
+  let loadingLatestScores = false;
 
   function renderGeneratedDesignSchemes(schemes: GeneratedDesignScheme[]): void {
     if (schemes.length === 0) {
@@ -751,7 +753,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
           <div class="viewer-benchmark-explorer">
             <div class="viewer-branch-history-header">
               <strong>Persistent Benchmark Explorer</strong>
-              <span>No scored benchmark samples yet.</span>
+              <span>暂无评分结果</span>
             </div>
             <div class="viewer-benchmark-actions">
               <button class="viewer-nav-button viewer-nav-button-secondary" type="button" data-benchmark-start>Run 6×100 Presets</button>
@@ -761,7 +763,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
         deps.designResultEl.querySelector<HTMLButtonElement>("[data-benchmark-start]")?.addEventListener("click", () => {
           void runBenchmarkBatch();
         });
-        deps.updateDesignStatus("Benchmark store is empty.", "warning");
+        deps.updateDesignStatus("暂无评分结果。可前往 Benchmark Store 或 Run 6×100 Presets 进行生成。", "warning");
         return;
       }
       renderBenchmarkExplorerResult();
@@ -775,6 +777,19 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       deps.setError(deps.errorEl, message);
     } finally {
       deps.designBenchmarkEl.disabled = false;
+    }
+  }
+
+  async function loadLatestScoreResults(): Promise<void> {
+    if (designIsGenerating || branchRunIsGenerating || loadingLatestScores) return;
+    loadingLatestScores = true;
+    deps.designBranchRunEl.disabled = true;
+    deps.updateDesignStatus("Loading latest benchmark scores...");
+    try {
+      await loadBenchmarkExplorer();
+    } finally {
+      loadingLatestScores = false;
+      deps.designBranchRunEl.disabled = false;
     }
   }
 
@@ -1096,6 +1111,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     runBranchGeneration,
     loadBranchRunHistory,
     loadBenchmarkExplorer,
+    loadLatestScoreResults,
     isDesignGenerating: () => designIsGenerating,
     isBranchRunGenerating: () => branchRunIsGenerating,
   };
