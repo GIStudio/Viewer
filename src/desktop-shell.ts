@@ -251,6 +251,10 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
     </div>
   `;
 
+  return bindDesktopShell(root, route);
+}
+
+export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShell {
   const shellRootNode = root.querySelector<HTMLElement>(".desktop-shell");
   const leftRailNode = root.querySelector<HTMLElement>("#desktop-shell-left-rail");
   const centerStageNode = root.querySelector<HTMLElement>("#desktop-shell-center-stage");
@@ -557,6 +561,10 @@ export function createDesktopShell(root: HTMLElement, route: AppRoute): DesktopS
       root.querySelectorAll<HTMLElement>("[data-shell-status-panel]").forEach((panel) => {
         panel.classList.toggle("active", panel.dataset.shellStatusPanel === tabId);
       });
+      const antTab = root.querySelector<HTMLElement>(
+        `.roadgen-ant-status-body [data-node-key="${tabId}"], .roadgen-ant-status-body [id$="-tab-${tabId}"]`,
+      );
+      antTab?.click();
     });
   });
 

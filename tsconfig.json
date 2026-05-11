@@ -9,11 +9,12 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    "jsx": "react-jsx",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
     "types": ["vite/client"],
     "composite": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

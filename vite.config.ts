@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import { performance } from "node:perf_hooks";
 import { URL, fileURLToPath } from "node:url";
 
+import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
 const viewerRoot = fileURLToPath(new URL(".", import.meta.url));
@@ -2210,5 +2211,5 @@ function readRequestBody(req: any): Promise<string> {
 
 export default defineConfig({
   base: "/",
-  plugins: [viewerApiPlugin()],
+  plugins: [react(), viewerApiPlugin()],
 });
