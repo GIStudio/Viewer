@@ -399,6 +399,62 @@ export type ScenarioDesignReportPayload = {
   content_summary?: string;
 };
 
+export type DesignMatrixOption = {
+  key: string;
+  label: string;
+  enabled: boolean;
+  reason?: string;
+  scenario_id?: string | null;
+  preview_layout_path?: string;
+  compose_config_patch?: Record<string, unknown>;
+  template_patch?: Record<string, unknown> | null;
+  prompt?: string;
+  kind?: string;
+};
+
+export type DesignMatrixCell = {
+  cell_key: string;
+  cell_hash: string;
+  structure_key: string;
+  furniture_key: string;
+  status: "ready" | "missing" | "disabled" | "running" | "failed" | string;
+  reason?: string;
+  layout_path?: string;
+  scene_glb_path?: string;
+  updated_at?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type DesignMatrixInventoryPayload = {
+  schema_version: string;
+  graph_template_id: string;
+  rows: DesignMatrixOption[];
+  columns: DesignMatrixOption[];
+  cells: DesignMatrixCell[];
+  generated_at?: string;
+};
+
+export type DesignMatrixGenerateRequest = {
+  graph_template_id: string;
+  structure_key: string;
+  furniture_key: string;
+  custom_structure?: Record<string, unknown> | null;
+  custom_furniture?: Record<string, unknown> | null;
+  source_layout_path?: string;
+  recent_limit?: number;
+  force?: boolean;
+};
+
+export type DesignMatrixGeneratePayload = {
+  mode: "job" | "materialized" | string;
+  cell?: DesignMatrixCell;
+  job_id?: string;
+  status?: string;
+  layout_path?: string;
+  scene_layout_path?: string;
+  scene_glb_path?: string;
+};
+
 export type KnowledgeSourceKey = "hybrid" | "pdf_rag" | "graph_rag" | "scenario_parameters";
 
 export type KnowledgeSourceStatus = {

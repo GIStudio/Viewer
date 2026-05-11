@@ -111,6 +111,7 @@ import {
 } from "./viewer-branch-workspace";
 import { mountBranchScoreScatter3d } from "./branch-score-scatter-3d";
 import { createViewerDesignController } from "./viewer-design-controller";
+import { createViewerDesignMatrixController } from "./viewer-design-matrix";
 import {
   compactUiLabel,
   makeDirectLayoutLabel,
@@ -557,6 +558,18 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                 </select>
                 <div id="viewer-design-furniture-summary" class="viewer-design-layer-summary">
                   B 家具主题：由街道家具设计目标决定；不直接改道路骨架。
+                </div>
+              </section>
+              <section class="viewer-design-flow-section viewer-design-matrix-section">
+                <div class="viewer-design-flow-heading">
+                  <span>2x</span>
+                  <div>
+                    <strong>结构 × 家具预览矩阵</strong>
+                    <small>点击已有结果加载；灰色缺失格点击后按需生成。</small>
+                  </div>
+                </div>
+                <div id="viewer-design-matrix" class="viewer-design-matrix" data-state="empty">
+                  <div class="viewer-design-matrix-empty">Matrix status will appear here.</div>
                 </div>
               </section>
               <section class="viewer-design-flow-section">
@@ -1078,6 +1091,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const designSkeletonProfileEl = requireElement<HTMLSelectElement>(root, "#viewer-design-skeleton-profile");
   const designFurnitureProfileEl = requireElement<HTMLSelectElement>(root, "#viewer-design-furniture-profile");
   const designFurnitureSummaryEl = requireElement<HTMLElement>(root, "#viewer-design-furniture-summary");
+  const designMatrixEl = requireElement<HTMLElement>(root, "#viewer-design-matrix");
   const designBenchmarkEl = requireElement<HTMLButtonElement>(root, "#viewer-design-benchmark");
   const designBranchHistoryEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-history");
   const designBranchRunEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-run");
@@ -1216,6 +1230,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   let designScenarioCatalog: ScenarioDesignCatalogPayload | null = null;
   let latestDraftScenario: ScenarioDesign | null = null;
+  let designMatrixController: ReturnType<typeof createViewerDesignMatrixController> | null = null;
+
+  function scheduleDesignMatrixRefresh(): void {
+    designMatrixController?.scheduleRefresh();
+  }
 
   function selectedScenarioDesign(): ScenarioDesign | null {
     const scenarioId = designScenarioEl.value.trim();
@@ -1373,12 +1392,14 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       designScenarioCatalog = await apiJson<ScenarioDesignCatalogPayload>("/api/scenario-designs");
       renderDesignScenarioOptions();
       designScenarioEl.disabled = false;
+      scheduleDesignMatrixRefresh();
     } catch (error) {
       designScenarioCatalog = null;
       designScenarioEl.innerHTML = `<option value="">基础模板（不套用结构变体）</option>`;
       designScenarioEl.disabled = false;
       designScenarioMetaEl.textContent = error instanceof Error ? error.message : "Failed to load scenario design variants.";
       designScenarioMetaEl.dataset.tone = "error";
+      scheduleDesignMatrixRefresh();
     }
   }
 
@@ -1487,11 +1508,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       latestDraftScenario = scenarioFromDraftPayload(payload, prompt);
       renderDesignScenarioOptions(latestDraftScenario.scenario_id);
       renderDraftScenarioResult(latestDraftScenario);
+      scheduleDesignMatrixRefresh();
       flashStatus(`Draft structure ready: ${latestDraftScenario.title_zh || latestDraftScenario.scenario_id}.`);
     } catch (error) {
       latestDraftScenario = null;
       renderDesignScenarioOptions("");
       renderDraftScenarioResult(null, error instanceof Error ? error.message : "Draft variant failed.");
+      scheduleDesignMatrixRefresh();
       setError(errorEl, error instanceof Error ? error.message : "Draft variant failed.");
     } finally {
       designScenarioDraftEl.disabled = false;
@@ -1505,6 +1528,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
     renderDesignScenarioOptions(latestDraftScenario.scenario_id);
     renderDraftScenarioResult(latestDraftScenario);
+    scheduleDesignMatrixRefresh();
     flashStatus(`Using draft structure: ${latestDraftScenario.title_zh || latestDraftScenario.scenario_id}.`);
   }
 
@@ -1779,7 +1803,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       }
       updateOverlay();
     },
-    onDesignOpen: populateDesignPresets,
+    onDesignOpen: () => {
+      populateDesignPresets();
+      scheduleDesignMatrixRefresh();
+    },
     onCompareOpen: populateCompareSelectors,
     onPresetsOpen: () => presetsController.populatePresetsGrid(),
     onHistoryOpen: () => void historyPanelController.loadAndRenderHistory(),
@@ -1825,6 +1852,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         floatingLaneSystem.clearOverlay();
       }
       applyAudioProfile();
+      scheduleDesignMatrixRefresh();
     },
   });
 
@@ -1859,6 +1887,24 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
     populateRecentLayoutOptions,
     getSelectedScenarioDesign: selectedScenarioDesign,
+  });
+
+  designMatrixController = createViewerDesignMatrixController({
+    matrixEl: designMatrixEl,
+    designPromptEl,
+    designTemplateEl,
+    getSelectedDesignPreset: selectedDesignPreset,
+    getSelectedScenarioDesign: selectedScenarioDesign,
+    getLatestDraftScenario: () => latestDraftScenario,
+    getDesignSemanticConfigPatch: selectedDesignSemanticConfigPatch,
+    getCurrentLayoutPath: () => currentLayoutPath || currentManifest?.layout_path || "",
+    loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
+    populateRecentLayoutOptions,
+    setStatus,
+    setError,
+    flashStatus,
+    updateDesignStatus,
+    errorEl,
   });
 
   const presetsController = createViewerPresetsController({
@@ -3151,10 +3197,22 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       designPromptEl.value = "";
     }
     updateDesignLayerSummaries();
+    scheduleDesignMatrixRefresh();
   }, { signal });
-  designScenarioEl.addEventListener("change", updateDesignScenarioMeta, { signal });
-  designSkeletonProfileEl.addEventListener("change", updateDesignLayerSummaries, { signal });
-  designFurnitureProfileEl.addEventListener("change", updateDesignLayerSummaries, { signal });
+  designScenarioEl.addEventListener("change", () => {
+    updateDesignScenarioMeta();
+    scheduleDesignMatrixRefresh();
+  }, { signal });
+  designPromptEl.addEventListener("input", scheduleDesignMatrixRefresh, { signal });
+  designTemplateEl.addEventListener("input", scheduleDesignMatrixRefresh, { signal });
+  designSkeletonProfileEl.addEventListener("change", () => {
+    updateDesignLayerSummaries();
+    scheduleDesignMatrixRefresh();
+  }, { signal });
+  designFurnitureProfileEl.addEventListener("change", () => {
+    updateDesignLayerSummaries();
+    scheduleDesignMatrixRefresh();
+  }, { signal });
   designScenarioDraftEl.addEventListener("click", () => {
     void draftDesignScenarioVariant();
   }, { signal });
@@ -3167,7 +3225,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     });
   }, { signal });
   designScenarioAnnotationEl.addEventListener("click", openSelectedDesignScenarioAnnotation, { signal });
-  designGenerateEl.addEventListener("click", () => void designController.runDesignGeneration(), { signal });
+  designGenerateEl.addEventListener("click", () => {
+    void designController.runDesignGeneration().finally(scheduleDesignMatrixRefresh);
+  }, { signal });
   designBenchmarkEl.addEventListener("click", () => void designController.loadBenchmarkExplorer(), { signal });
   designBranchHistoryEl.addEventListener("click", () => void designController.loadBranchRunHistory(), { signal });
   designBranchRunEl.addEventListener("click", () => void designController.runBranchGeneration(), { signal });
