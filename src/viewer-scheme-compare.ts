@@ -5,6 +5,7 @@ import type {
   ViewerComparisonMetadata,
   ViewerManifest,
 } from "./viewer-types";
+import { metadataFromManifest, formatMetadataValue } from "./viewer-comparison-metadata";
 
 const STORAGE_KEY = "roadgen3d.manualComparisonPaths.v1";
 const FINAL_STEP_KEY = "final_scene";
@@ -45,31 +46,6 @@ function cleanString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function finiteNumber(value: unknown): number | undefined {
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue) ? numberValue : undefined;
-}
-
-function metadataFromManifest(manifest: ViewerManifest): ViewerComparisonMetadata {
-  const summary = manifest.summary ?? {};
-  const comparison = manifest.comparison_metadata ?? {};
-  return {
-    ...comparison,
-    preset_id: comparison.preset_id || cleanString(summary.preset_id) || cleanString(summary.benchmark_preset_id),
-    preset_label: comparison.preset_label || cleanString(summary.preset_name) || cleanString(summary.preset_label),
-    scenario_id: comparison.scenario_id || cleanString(summary.scenario_id),
-    scenario_title: comparison.scenario_title || cleanString(summary.scenario_title),
-    graph_template_id: comparison.graph_template_id || cleanString(summary.graph_template_id) || cleanString(summary.base_graph_template_id) || cleanString(summary.plan_id),
-    random_seed: comparison.random_seed ?? finiteNumber(summary.random_seed),
-    density: comparison.density ?? finiteNumber(summary.density),
-    road_width_m: comparison.road_width_m ?? finiteNumber(summary.road_width_m),
-    lane_count: comparison.lane_count ?? finiteNumber(summary.lane_count),
-    style_preset: comparison.style_preset || cleanString(summary.style_preset) || cleanString(summary.visual_style_preset),
-    instance_count: comparison.instance_count ?? finiteNumber(summary.instance_count),
-    production_step_ids: comparison.production_step_ids ?? manifest.production_steps?.map((step) => step.step_id),
-  };
-}
-
 function buildStepMap(manifest: ViewerManifest): Map<string, string> {
   const steps = new Map<string, string>();
   steps.set(FINAL_STEP_KEY, manifest.final_scene?.label || "Final Scene");
@@ -99,16 +75,6 @@ function glbForStep(manifest: ViewerManifest, stepKey: string): string {
     return manifest.final_scene?.glb_url || "";
   }
   return manifest.production_steps?.find((step) => step.step_id === stepKey)?.glb_url || "";
-}
-
-function formatValue(value: unknown, suffix = ""): string {
-  if (value === null || value === undefined || value === "") {
-    return "Unknown";
-  }
-  if (typeof value === "number") {
-    return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2)}${suffix}`;
-  }
-  return String(value);
 }
 
 function safeStoredPaths(value: unknown): string[] {
@@ -335,13 +301,13 @@ export function createSchemeCompareController(deps: SchemeCompareControllerDeps)
         <dl class="viewer-scheme-compare-meta">
           <div><dt>Preset</dt><dd>${deps.escapeHtml(preset)}</dd></div>
           <div><dt>Scenario</dt><dd>${deps.escapeHtml(scenario)}</dd></div>
-          <div><dt>Graph</dt><dd>${deps.escapeHtml(formatValue(metadata.graph_template_id))}</dd></div>
-          <div><dt>Seed</dt><dd>${deps.escapeHtml(formatValue(metadata.random_seed))}</dd></div>
-          <div><dt>Density</dt><dd>${deps.escapeHtml(formatValue(metadata.density))}</dd></div>
-          <div><dt>Road</dt><dd>${deps.escapeHtml(formatValue(metadata.road_width_m, " m"))}</dd></div>
-          <div><dt>Lanes</dt><dd>${deps.escapeHtml(formatValue(metadata.lane_count))}</dd></div>
-          <div><dt>Items</dt><dd>${deps.escapeHtml(formatValue(metadata.instance_count))}</dd></div>
-          <div><dt>Style</dt><dd>${deps.escapeHtml(formatValue(metadata.style_preset))}</dd></div>
+          <div><dt>Graph</dt><dd>${deps.escapeHtml(formatMetadataValue(metadata.graph_template_id))}</dd></div>
+          <div><dt>Seed</dt><dd>${deps.escapeHtml(formatMetadataValue(metadata.random_seed))}</dd></div>
+          <div><dt>Density</dt><dd>${deps.escapeHtml(formatMetadataValue(metadata.density))}</dd></div>
+          <div><dt>Road</dt><dd>${deps.escapeHtml(formatMetadataValue(metadata.road_width_m, " m"))}</dd></div>
+          <div><dt>Lanes</dt><dd>${deps.escapeHtml(formatMetadataValue(metadata.lane_count))}</dd></div>
+          <div><dt>Items</dt><dd>${deps.escapeHtml(formatMetadataValue(metadata.instance_count))}</dd></div>
+          <div><dt>Style</dt><dd>${deps.escapeHtml(formatMetadataValue(metadata.style_preset))}</dd></div>
         </dl>
       </article>
     `;

@@ -688,25 +688,60 @@ function asFiniteNumberOrNull(value: unknown): number | null {
 }
 
 function asTriplet(value: unknown): [number, number, number] | null {
-  if (!Array.isArray(value) || value.length !== 3) {
+  if (!Array.isArray(value) || value.length < 3) {
     return null;
   }
-  const items = value.map((entry) => asFiniteNumberOrNull(entry));
+  const items = value.slice(0, 3).map((entry) => asFiniteNumberOrNull(entry));
   if (items.some((entry) => entry === null)) {
     return null;
   }
   return [items[0] ?? 0, items[1] ?? 0, items[2] ?? 0];
 }
 
-function asQuad(value: unknown): [number, number, number, number] | null {
-  if (!Array.isArray(value) || value.length !== 4) {
+function asPair(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length < 2) {
     return null;
   }
-  const items = value.map((entry) => asFiniteNumberOrNull(entry));
+  const items = value.slice(0, 2).map((entry) => asFiniteNumberOrNull(entry));
+  if (items.some((entry) => entry === null)) {
+    return null;
+  }
+  return [items[0] ?? 0, items[1] ?? 0];
+}
+
+function asQuad(value: unknown): [number, number, number, number] | null {
+  if (!Array.isArray(value) || value.length < 4) {
+    return null;
+  }
+  const items = value.slice(0, 4).map((entry) => asFiniteNumberOrNull(entry));
   if (items.some((entry) => entry === null)) {
     return null;
   }
   return [items[0] ?? 0, items[1] ?? 0, items[2] ?? 0, items[3] ?? 0];
+}
+
+function normalizeBboxXz(
+  value: unknown,
+  positionXyz: [number, number, number] | null = null,
+): [number, number, number, number] | null {
+  const quad = asQuad(value);
+  if (!quad) {
+    return null;
+  }
+  const [a, b, c, d] = quad;
+  const currentOrder: [number, number, number, number] = [Math.min(a, b), Math.max(a, b), Math.min(c, d), Math.max(c, d)];
+  const legacyOrder: [number, number, number, number] = [Math.min(a, c), Math.max(a, c), Math.min(b, d), Math.max(b, d)];
+  if (positionXyz) {
+    const [px, , pz] = positionXyz;
+    const currentDistance = Math.abs((currentOrder[0] + currentOrder[1]) / 2 - px)
+      + Math.abs((currentOrder[2] + currentOrder[3]) / 2 - pz);
+    const legacyDistance = Math.abs((legacyOrder[0] + legacyOrder[1]) / 2 - px)
+      + Math.abs((legacyOrder[2] + legacyOrder[3]) / 2 - pz);
+    return legacyDistance + 0.01 < currentDistance ? legacyOrder : currentOrder;
+  }
+  const currentArea = Math.max(0, currentOrder[1] - currentOrder[0]) * Math.max(0, currentOrder[3] - currentOrder[2]);
+  const legacyArea = Math.max(0, legacyOrder[1] - legacyOrder[0]) * Math.max(0, legacyOrder[3] - legacyOrder[2]);
+  return legacyArea + 1e-6 < currentArea ? legacyOrder : currentOrder;
 }
 
 function cleanForJson(value: unknown): unknown {
@@ -844,12 +879,16 @@ function buildInstancePayloads(layoutPayload: JsonRecord): Record<string, JsonRe
       position_xyz: positionXyz,
       bbox_xz: bboxXz,
       anchor_poi_type: String(row.anchor_poi_type ?? "").trim(),
+      anchor_target_xz: asPair(row.anchor_target_xz),
       anchor_distance_m: asFiniteNumberOrNull(row.anchor_distance_m),
       feasibility_score: asFiniteNumberOrNull(row.feasibility_score),
       constraint_penalty: asFiniteNumberOrNull(row.constraint_penalty),
       dist_to_road_edge_m: asFiniteNumberOrNull(row.dist_to_road_edge_m),
       dist_to_nearest_junction_m: asFiniteNumberOrNull(row.dist_to_nearest_junction_m),
       dist_to_nearest_entrance_m: asFiniteNumberOrNull(row.dist_to_nearest_entrance_m),
+      violated_rules: Array.isArray(row.violated_rules)
+        ? row.violated_rules.map((entry) => String(entry ?? "").trim()).filter(Boolean)
+        : [],
     }) as JsonRecord;
   }
   return instances;
@@ -955,14 +994,14 @@ function buildSceneBounds(layoutPayload: JsonRecord): JsonRecord {
       continue;
     }
     const row = placement as JsonRecord;
-    const bbox = asQuad(row.bbox_xz);
+    const position = asTriplet(row.position_xyz);
+    const bbox = normalizeBboxXz(row.bbox_xz, position);
     if (bbox) {
       minX = Math.min(minX, bbox[0]);
-      minZ = Math.min(minZ, bbox[1]);
-      maxX = Math.max(maxX, bbox[2]);
+      maxX = Math.max(maxX, bbox[1]);
+      minZ = Math.min(minZ, bbox[2]);
       maxZ = Math.max(maxZ, bbox[3]);
     } else {
-      const position = asTriplet(row.position_xyz);
       if (position) {
         includeXz(position[0], position[2], 0.75);
         maxY = Math.max(maxY, position[1]);
@@ -1024,6 +1063,10 @@ function buildComparisonMetadata(
     scenario_id: cleanString(summary.scenario_id || scenarioVariant.scenario_id),
     scenario_title: cleanString(summary.scenario_title || scenarioVariant.title_zh),
     graph_template_id: cleanString(summary.graph_template_id || summary.base_graph_template_id || summary.plan_id),
+    skeleton_design_profile: cleanString(summary.skeleton_design_profile || String(summary.semantic_profile_pair ?? "").split("+")[0]),
+    street_furniture_profile: cleanString(summary.street_furniture_profile || String(summary.semantic_profile_pair ?? "").split("+")[1]),
+    curated_street_assets_profile: cleanString(summary.curated_street_assets_profile),
+    furniture_balance_policy: cleanString(summary.furniture_balance_policy),
     prompt: cleanString(config.query || layoutPayload.query || summary.query),
     variant_id: cleanString(summary.design_variant_id || summary.variant_id),
     variant_name: cleanString(summary.design_variant_name || summary.variant_name),
@@ -1199,6 +1242,7 @@ function viewerApiPlugin(): Plugin {
             const streetProgram = (layoutPayload.street_program ?? {}) as JsonRecord;
             const layoutBands = Array.isArray(streetProgram.bands) ? streetProgram.bands : [];
             const buildingFootprints = Array.isArray(layoutPayload.building_footprints) ? layoutPayload.building_footprints : [];
+            const generatedLots = Array.isArray(layoutPayload.generated_lots) ? layoutPayload.generated_lots : [];
             const buildingRegions = Array.isArray(layoutPayload.building_regions) ? layoutPayload.building_regions : [];
             const regions = Array.isArray(layoutPayload.regions) ? layoutPayload.regions : [];
             const derivedRegions = Array.isArray(layoutPayload.derived_regions) ? layoutPayload.derived_regions : [];
@@ -1230,6 +1274,7 @@ function viewerApiPlugin(): Plugin {
               layout_overlay: {
                 bands: cleanForJson(layoutBands),
                 building_footprints: cleanForJson(buildingFootprints),
+                generated_lots: cleanForJson(generatedLots),
                 building_regions: cleanForJson(buildingRegions),
                 regions: cleanForJson(regions),
                 derived_regions: cleanForJson(derivedRegions),

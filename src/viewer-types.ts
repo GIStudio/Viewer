@@ -14,6 +14,29 @@ export type SceneOption = {
   glbUrl: string;
 };
 
+export type ViewerSpatialContext = {
+  junction_points_xz?: Array<[number, number]>;
+  entrance_points_xz?: Array<[number, number]>;
+  bus_stop_points_xz?: Array<[number, number]>;
+  fire_points_xz?: Array<[number, number]>;
+  poi_points_by_type_xz?: Record<string, Array<[number, number]>>;
+  road_half_width_m?: number;
+  length_m?: number;
+};
+
+export type ViewerPoiExclusionZone = {
+  poi_type?: string;
+  position_xz?: [number, number];
+  radius_m?: number;
+  rule_name?: string;
+};
+
+export type ViewerSummary = Record<string, unknown> & {
+  spatial_context?: ViewerSpatialContext;
+  poi_exclusion_zones?: ViewerPoiExclusionZone[];
+  osm_geometry?: Record<string, unknown>;
+};
+
 export type ViewerManifest = {
   layout_path?: string;
   lighting_preset?: string;
@@ -21,7 +44,7 @@ export type ViewerManifest = {
   environment_state?: Record<string, unknown> | null;
   default_selection?: string;
   static_object_descriptions?: Record<string, StaticObjectDescription>;
-  summary?: Record<string, unknown>;
+  summary?: ViewerSummary;
   visual_style?: Record<string, unknown>;
   final_scene: {
     glb_url: string;
@@ -46,6 +69,7 @@ export type ViewerManifest = {
   layout_overlay?: {
     bands?: Array<Record<string, unknown>>;
     building_footprints?: Array<Record<string, unknown>>;
+    generated_lots?: Array<Record<string, unknown>>;
     building_regions?: Array<Record<string, unknown>>;
     regions?: Array<Record<string, unknown>>;
     derived_regions?: Array<Record<string, unknown>>;
@@ -63,6 +87,10 @@ export type ViewerComparisonMetadata = {
   scenario_id?: string;
   scenario_title?: string;
   graph_template_id?: string;
+  skeleton_design_profile?: string;
+  street_furniture_profile?: string;
+  curated_street_assets_profile?: string;
+  furniture_balance_policy?: string;
   prompt?: string;
   variant_id?: string;
   variant_name?: string;
@@ -100,12 +128,14 @@ export type InstanceInfo = {
   position_xyz?: [number, number, number];
   bbox_xz?: [number, number, number, number];
   anchor_poi_type?: string;
+  anchor_target_xz?: [number, number];
   anchor_distance_m?: number;
   feasibility_score?: number;
   constraint_penalty?: number;
   dist_to_road_edge_m?: number;
   dist_to_nearest_junction_m?: number;
   dist_to_nearest_entrance_m?: number;
+  violated_rules?: string[];
 };
 
 export type AssetDescription = {
