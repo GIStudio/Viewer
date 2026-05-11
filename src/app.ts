@@ -2190,10 +2190,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   function handleKey(event: KeyboardEvent, active: boolean): void {
     const movementKey = isRoamMovementKey(event.code);
+    const sceneRoamActive = isPointerLookActive() || isThirdPersonKeyboardRoamActive();
     if (
       movementKey
       && active
-      && (isEditableTarget(event.target) || panelController.isAnyOpen())
+      && isEditableTarget(event.target)
     ) {
       resetMoveState();
       return;
@@ -2201,8 +2202,16 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     if (
       movementKey
       && active
-      && !isPointerLookActive()
-      && currentCameraMode !== "third_person"
+      && panelController.isAnyOpen()
+      && !sceneRoamActive
+    ) {
+      resetMoveState();
+      return;
+    }
+    if (
+      movementKey
+      && active
+      && !sceneRoamActive
     ) {
       return;
     }
