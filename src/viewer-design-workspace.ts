@@ -939,6 +939,24 @@ function renderContextResolvingDiagnostic(detail: Record<string, unknown>): stri
       sidewalk_width_m: detail.sidewalk_width_m || detail.sidewalkWidthM,
     })),
     renderDiagnosticSection("配置补丁", renderDiagnosticKeyValues(asRecord(detail.config_patch || detail.configPatch || detail.compose_config_patch || detail.composeConfigPatch), 20)),
+    renderDiagnosticSection("参数来源 / LLM 覆盖", [
+      renderDiagnosticKeyValues({
+        style_blend_mode: detail.style_blend_mode || detail.styleBlendMode,
+        style_blend_base_profile: detail.style_blend_base_profile || detail.styleBlendBaseProfile,
+        style_blend_target_profile: detail.style_blend_target_profile || detail.styleBlendTargetProfile,
+        style_blend_preserved_explicit_fields: detail.style_blend_preserved_explicit_fields || detail.styleBlendPreservedExplicitFields,
+        style_blend_promoted_fields: detail.style_blend_promoted_fields || detail.styleBlendPromotedFields,
+        style_blend_overridden_explicit_fields: detail.style_blend_overridden_explicit_fields || detail.styleBlendOverriddenExplicitFields,
+        style_transfer_target_profile: detail.style_transfer_target_profile || detail.styleTransferTargetProfile,
+        style_transfer_overridden_explicit_fields: detail.style_transfer_overridden_explicit_fields || detail.styleTransferOverriddenExplicitFields,
+        overridden_llm_fields: detail.overridden_llm_fields || detail.overriddenLlmFields,
+        llm_raw_fields: detail.llm_raw_fields || detail.llmRawFields,
+        defaulted_fields: detail.defaulted_fields || detail.defaultedFields,
+      }),
+      renderDiagnosticKeyValues(asRecord(detail.parameter_sources_by_field || detail.parameterSourcesByField), 32),
+    ].join("")),
+    renderDiagnosticSection("风格融合策略", renderDiagnosticKeyValues(asRecord(detail.style_blend_patch || detail.styleBlendPatch), 20)),
+    renderDiagnosticSection("强转换目标补丁", renderDiagnosticKeyValues(asRecord(detail.style_transfer_target_patch || detail.styleTransferTargetPatch), 20)),
     renderRagEvidenceDiagnosticSections(detail),
   ].join("");
 }
