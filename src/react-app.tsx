@@ -3,6 +3,7 @@ import {
   App as AntdApp,
   Button,
   ConfigProvider,
+  Dropdown,
   Layout,
   Menu,
   Modal,
@@ -23,12 +24,17 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 
-import { mountViewer } from "./app";
-import { mountAssetEditor } from "./asset-editor";
-import { bindDesktopShell } from "./desktop-shell";
-import type { ShellMenuActionId } from "./desktop-shell";
-import { mountJunctionEditor } from "./junction-editor";
-import { mountSceneGraphPage } from "./scene-graph";
+import {
+  bindDesktopShell,
+  SHELL_ACTION_EVENT,
+  SHELL_ACTIONS_CHANGE_EVENT,
+  SHELL_TOGGLE_EVENT,
+} from "./desktop-shell";
+import type {
+  ShellActionsChangeDetail,
+  ShellMenuActionId,
+  ShellToggleTarget,
+} from "./desktop-shell";
 import { navigateTo, ROUTES, type AppRoute } from "./ui";
 import {
   VIEWER_LANGUAGE_EVENT,
@@ -141,41 +147,72 @@ function ShortcutModal({ open, onClose }: { open: boolean; onClose: () => void }
   );
 }
 
-function ShellMenus({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
+function ShellMenus({
+  enabledActions,
+  hostRef,
+  onOpenShortcuts,
+}: {
+  enabledActions: Set<ShellMenuActionId>;
+  hostRef: RefObject<HTMLDivElement>;
+  onOpenShortcuts: () => void;
+}) {
+  function dispatchShellAction(actionId: ShellMenuActionId): void {
+    hostRef.current?.dispatchEvent(new CustomEvent(SHELL_ACTION_EVENT, {
+      detail: { actionId },
+    }));
+  }
+
+  function dispatchShellToggle(target: ShellToggleTarget): void {
+    hostRef.current?.dispatchEvent(new CustomEvent(SHELL_TOGGLE_EVENT, {
+      detail: { target },
+    }));
+  }
+
   return (
     <div className="desktop-shell-menu-groups">
-      {menuGroups.map((group) => (
-        <div className="desktop-shell-menu-group" key={group.id}>
-          <Button
-            className="desktop-shell-menu-toggle"
-            type="default"
-            icon={group.icon}
-            data-shell-menu-toggle={group.id}
-            aria-expanded="false"
-          >
-            <span data-i18n-key={`menu.${group.id}`}>{group.id[0].toUpperCase() + group.id.slice(1)}</span>
-          </Button>
-          <div className="desktop-shell-menu-popover roadgen-ant-menu-popover" data-shell-menu={group.id} hidden>
-            {group.actions.map((action) => {
-              const commonProps = {
-                className: "desktop-shell-menu-action",
-                type: "text" as const,
-                icon: action.icon,
-              };
-              return (
-                <Button
-                  {...commonProps}
-                  key={action.labelKey}
-                  data-shell-action={action.id}
-                  data-shell-toggle={action.toggle}
-                >
-                  <span data-i18n-key={action.labelKey}>{action.fallback}</span>
-                </Button>
-              );
-            })}
+      {menuGroups.map((group) => {
+        const items: MenuProps["items"] = group.actions.map((action) => ({
+          key: action.id ?? `toggle-${action.toggle}`,
+          icon: action.icon,
+          disabled: action.id ? !enabledActions.has(action.id) : false,
+          label: (
+            <span
+              data-shell-action={action.id}
+              data-shell-toggle={action.toggle}
+              data-i18n-key={action.labelKey}
+            >
+              {action.fallback}
+            </span>
+          ),
+        }));
+        return (
+          <div className="desktop-shell-menu-group" key={group.id}>
+            <Dropdown
+              trigger={["click"]}
+              menu={{
+                items,
+                onClick: ({ key }) => {
+                  const action = group.actions.find((item) => (item.id ?? `toggle-${item.toggle}`) === key);
+                  if (action?.id) {
+                    dispatchShellAction(action.id);
+                  } else if (action?.toggle) {
+                    dispatchShellToggle(action.toggle);
+                  }
+                },
+              }}
+            >
+              <Button
+                className="desktop-shell-menu-toggle"
+                type="default"
+                icon={group.icon}
+                data-shell-menu-toggle={group.id}
+              >
+                <span data-i18n-key={`menu.${group.id}`}>{group.id[0].toUpperCase() + group.id.slice(1)}</span>
+              </Button>
+            </Dropdown>
           </div>
-        </div>
-      ))}
+        );
+      })}
       <Tooltip title="Shortcut modal">
         <Button
           className="desktop-shell-help-button"
@@ -199,6 +236,7 @@ function ViewerDesktopShell({
   const routeConfig = ROUTES[route];
   const [language, setLanguage] = useState<ViewerLanguage>(() => loadViewerLanguage());
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [enabledActions, setEnabledActions] = useState<Set<ShellMenuActionId>>(() => new Set());
 
   useEffect(() => {
     const handleLanguageChange = (event: Event) => {
@@ -210,6 +248,19 @@ function ViewerDesktopShell({
     window.addEventListener(VIEWER_LANGUAGE_EVENT, handleLanguageChange);
     return () => window.removeEventListener(VIEWER_LANGUAGE_EVENT, handleLanguageChange);
   }, []);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) {
+      return undefined;
+    }
+    const handleActionsChange = (event: Event) => {
+      const detail = (event as CustomEvent<ShellActionsChangeDetail>).detail;
+      setEnabledActions(new Set(detail?.enabledActions ?? []));
+    };
+    host.addEventListener(SHELL_ACTIONS_CHANGE_EVENT, handleActionsChange);
+    return () => host.removeEventListener(SHELL_ACTIONS_CHANGE_EVENT, handleActionsChange);
+  }, [hostRef, route]);
 
   const routeItems = useMemo<MenuProps["items"]>(
     () =>
@@ -256,7 +307,11 @@ function ViewerDesktopShell({
             options={languageOptions}
             onChange={(nextLanguage) => setViewerLanguage(nextLanguage)}
           />
-          <ShellMenus onOpenShortcuts={() => setShortcutsOpen(true)} />
+          <ShellMenus
+            enabledActions={enabledActions}
+            hostRef={hostRef}
+            onOpenShortcuts={() => setShortcutsOpen(true)}
+          />
         </Layout.Header>
 
         <div className="desktop-shell-main">
@@ -374,16 +429,16 @@ function ViewerRouteIsland({ route }: { route: AppRoute }) {
     async function mountRoute() {
       switch (route) {
         case "scene-graph":
-          routeTeardown = mountSceneGraphPage(shell);
+          routeTeardown = (await import("./scene-graph")).mountSceneGraphPage(shell);
           break;
         case "asset-editor":
-          routeTeardown = mountAssetEditor(shell);
+          routeTeardown = (await import("./asset-editor")).mountAssetEditor(shell);
           break;
         case "junction-editor":
-          routeTeardown = mountJunctionEditor(shell);
+          routeTeardown = (await import("./junction-editor")).mountJunctionEditor(shell);
           break;
         default:
-          routeTeardown = await mountViewer(shell);
+          routeTeardown = await (await import("./app")).mountViewer(shell);
           break;
       }
 

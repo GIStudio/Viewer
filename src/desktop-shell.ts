@@ -14,6 +14,10 @@ import {
 
 type ShellMenuId = "file" | "view" | "tools" | "help";
 
+export const SHELL_ACTION_EVENT = "roadgen3d:shell-action";
+export const SHELL_TOGGLE_EVENT = "roadgen3d:shell-toggle";
+export const SHELL_ACTIONS_CHANGE_EVENT = "roadgen3d:shell-actions-change";
+
 export type ShellMenuActionId =
   | "file-load-layout"
   | "file-export-png"
@@ -47,6 +51,12 @@ export interface ShellTab {
 export type ShellI18nText = string | {
   key: string;
   fallback?: string;
+};
+
+export type ShellToggleTarget = "left" | "right" | "bottom";
+
+export type ShellActionsChangeDetail = {
+  enabledActions: ShellMenuActionId[];
 };
 
 export interface DesktopShell {
@@ -374,6 +384,14 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     });
   }
 
+  function emitActionAvailability(): void {
+    root.dispatchEvent(new CustomEvent<ShellActionsChangeDetail>(SHELL_ACTIONS_CHANGE_EVENT, {
+      detail: {
+        enabledActions: Object.keys(menuActionHandlers) as ShellMenuActionId[],
+      },
+    }));
+  }
+
   function closeMenus(): void {
     root.querySelectorAll<HTMLElement>("[data-shell-menu]").forEach((menu) => {
       menu.hidden = true;
@@ -476,6 +494,7 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     }
     Object.assign(menuActionHandlers, actions);
     refreshActionAvailability();
+    emitActionAvailability();
   }
 
   root.querySelectorAll<HTMLButtonElement>("[data-route-switch]").forEach((button) => {
@@ -490,12 +509,12 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
 
   root.querySelectorAll<HTMLButtonElement>("[data-shell-menu-toggle]").forEach((button) => {
     button.addEventListener("click", (event) => {
-      event.stopPropagation();
       const menuId = button.dataset.shellMenuToggle;
       const menu = menuId ? root.querySelector<HTMLElement>(`[data-shell-menu="${menuId}"]`) : null;
       if (!menu) {
         return;
       }
+      event.stopPropagation();
       const willOpen = menu.hidden;
       closeMenus();
       menu.hidden = !willOpen;
@@ -519,19 +538,50 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     });
   });
 
+  const triggerShellAction = (actionId: ShellMenuActionId): void => {
+    const handler = menuActionHandlers[actionId];
+    if (!handler) {
+      return;
+    }
+    handler();
+    closeMenus();
+  };
+
+  const toggleShellRegion = (target: ShellToggleTarget): void => {
+    if (target === "left") {
+      shellRoot.classList.toggle("desktop-shell-left-collapsed");
+    } else if (target === "right") {
+      shellRoot.classList.toggle("desktop-shell-right-collapsed");
+    } else if (target === "bottom") {
+      setBottomOpen(statusWorkbench.dataset.open !== "true");
+    }
+    closeMenus();
+  };
+
   root.querySelectorAll<HTMLElement>("[data-shell-toggle]").forEach((element) => {
     element.addEventListener("click", () => {
       const target = element.dataset.shellToggle;
-      if (target === "left") {
-        shellRoot.classList.toggle("desktop-shell-left-collapsed");
-      } else if (target === "right") {
-        shellRoot.classList.toggle("desktop-shell-right-collapsed");
-      } else if (target === "bottom") {
-        setBottomOpen(statusWorkbench.dataset.open !== "true");
+      if (target === "left" || target === "right" || target === "bottom") {
+        toggleShellRegion(target);
       }
-      closeMenus();
     });
   });
+
+  const handleShellActionEvent = (event: Event) => {
+    const detail = (event as CustomEvent<{ actionId?: ShellMenuActionId }>).detail;
+    if (detail?.actionId) {
+      triggerShellAction(detail.actionId);
+    }
+  };
+  root.addEventListener(SHELL_ACTION_EVENT, handleShellActionEvent);
+
+  const handleShellToggleEvent = (event: Event) => {
+    const detail = (event as CustomEvent<{ target?: ShellToggleTarget }>).detail;
+    if (detail?.target) {
+      toggleShellRegion(detail.target);
+    }
+  };
+  root.addEventListener(SHELL_TOGGLE_EVENT, handleShellToggleEvent);
 
   const leftPinButton = root.querySelector<HTMLButtonElement>("[data-shell-left-pin]");
   leftPinButton?.addEventListener("click", () => {
@@ -600,6 +650,7 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
   window.addEventListener(VIEWER_LANGUAGE_EVENT, handleViewerLanguageChange);
 
   refreshActionAvailability();
+  emitActionAvailability();
   applyShellLanguage(currentLanguage);
 
   return {
@@ -629,6 +680,8 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     destroy: () => {
       document.removeEventListener("click", handleDocumentClick);
       window.removeEventListener(VIEWER_LANGUAGE_EVENT, handleViewerLanguageChange);
+      root.removeEventListener(SHELL_ACTION_EVENT, handleShellActionEvent);
+      root.removeEventListener(SHELL_TOGGLE_EVENT, handleShellToggleEvent);
     },
   };
 }
