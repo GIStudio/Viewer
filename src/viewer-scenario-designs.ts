@@ -1,4 +1,4 @@
-import { apiJson, postApiJson } from "./viewer-api";
+import { apiJson, postApiJson, type LoadManifestOptions } from "./viewer-api";
 import type {
   ScenarioDesign,
   ScenarioDesignCatalogPayload,
@@ -23,11 +23,12 @@ export type ViewerScenarioDesignsControllerDeps = {
   flashStatus: (message: string, durationMs?: number) => void;
   setError: (element: HTMLElement, message: string) => void;
   setGraphTemplateId: (graphTemplateId: string) => void;
-  loadLayoutSelection: (layoutPath: string, options?: { sceneGlbPath?: string }) => Promise<void>;
+  loadLayoutSelection: (layoutPath: string, options?: LoadManifestOptions) => Promise<void>;
   refreshRecentLayouts: (selectedPath: string) => Promise<void>;
 };
 
 const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "partial", "empty"]);
+const STRUCTURE_PREVIEW_DEFAULT_STEP_KEY = "buildings";
 
 export function createViewerScenarioDesignsController(
   deps: ViewerScenarioDesignsControllerDeps,
@@ -46,7 +47,9 @@ export function createViewerScenarioDesignsController(
     const target = event.target as HTMLElement | null;
     const previewButton = target?.closest<HTMLButtonElement>("[data-scenario-preview]");
     if (previewButton) {
-      void loadLayout(previewButton.dataset.scenarioPreview || "", "Scenario preview loaded.");
+      void loadLayout(previewButton.dataset.scenarioPreview || "", "Structure + buildings preview loaded.", {
+        defaultSceneOptionKey: STRUCTURE_PREVIEW_DEFAULT_STEP_KEY,
+      });
       return;
     }
     const resultButton = target?.closest<HTMLButtonElement>("[data-scenario-result]");
@@ -54,7 +57,7 @@ export function createViewerScenarioDesignsController(
       void loadLayout(
         resultButton.dataset.scenarioResult || "",
         "Scenario result loaded.",
-        resultButton.dataset.scenarioGlb || "",
+        { sceneGlbPath: resultButton.dataset.scenarioGlb || "" },
       );
     }
   });
@@ -168,14 +171,14 @@ export function createViewerScenarioDesignsController(
     }
   }
 
-  async function loadLayout(layoutPath: string, successMessage: string, sceneGlbPath: string = ""): Promise<void> {
+  async function loadLayout(layoutPath: string, successMessage: string, manifestOptions: LoadManifestOptions = {}): Promise<void> {
     if (!layoutPath) {
       return;
     }
     try {
       deps.setGraphTemplateId(currentRun?.graph_template_id || catalog?.graph_template_id || "hkust_gz_gate");
       deps.setStatus("Loading scenario layout...");
-      await deps.loadLayoutSelection(layoutPath, sceneGlbPath ? { sceneGlbPath } : {});
+      await deps.loadLayoutSelection(layoutPath, manifestOptions);
       await deps.refreshRecentLayouts(layoutPath);
       deps.flashStatus(successMessage);
     } catch (error) {
@@ -270,7 +273,7 @@ export function createViewerScenarioDesignsController(
             data-scenario-preview="${escapeHtml(item.preview_layout_path)}"
             ${enabled && item.preview_layout_exists !== false ? "" : "disabled"}
           >
-            Preview Structure / 预览结构
+            Preview Structure + Buildings / 预览结构+建筑
           </button>
         </div>
         ${runItems.length > 0 ? `<div class="viewer-scenario-result-list">${runItems.map(renderRunItem).join("")}</div>` : ""}

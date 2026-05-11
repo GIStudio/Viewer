@@ -160,6 +160,8 @@ import { captureEvaluationViews, captureGalleryViews, type GalleryCaptureTarget 
 import { createViewerPresetsController } from "./viewer-presets-controller";
 import type { DesktopShell, ShellI18nText } from "./desktop-shell";
 
+const STRUCTURE_PREVIEW_DEFAULT_STEP_KEY = "buildings";
+
 type RecentLayoutsPayload = {
   results?: RecentLayout[];
   error?: string;
@@ -514,7 +516,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
                   A 骨架功能：自动解析（人工标注 > LLM 标注 > OSM/POI）
                 </div>
                 <div class="viewer-design-scenario-actions">
-                  <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled title="Open the saved preview scene for this structure. It does not regenerate.">Preview Structure / 预览结构</button>
+                  <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled title="Open the structure preview through the buildings step. It shows roads, functional zones, and building massing without street furniture.">Preview Structure + Buildings / 预览结构+建筑</button>
                   <button id="viewer-design-scenario-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled title="Open annotation in a new tab">Open Annotation</button>
                 </div>
                 <details class="viewer-design-advanced-details viewer-design-structure-draft">
@@ -1359,7 +1361,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     const previewLabel = scenario.preview_layout_exists === false ? "preview missing" : "preview ready";
     const patchCount = Number(scenario.template_patch_operation_count ?? 0);
     const surfaceCount = Number(scenario.surface_annotation_count ?? 0);
-    designScenarioMetaEl.textContent = `结构来源：${scenario.scenario_type || "variant"} · ${patchCount} 个结构修改 · ${surfaceCount} 个设计表面 · ${previewLabel}。预览会打开已保存场景；Generate & Load 会重新生成。`;
+    designScenarioMetaEl.textContent = `结构来源：${scenario.scenario_type || "variant"} · ${patchCount} 个结构修改 · ${surfaceCount} 个设计表面 · ${previewLabel}。预览会打开道路、功能区和建筑体量，不含街道家具；Generate & Load 会根据下一节家具目标生成完整场景。`;
     designScenarioMetaEl.dataset.tone = "variant";
     updateDesignLayerSummaries();
   }
@@ -1509,11 +1511,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   async function loadSelectedDesignScenarioPreview(): Promise<void> {
     const scenario = selectedScenarioDesign();
     if (!scenario?.preview_layout_path) return;
-    setStatus(`Loading saved structure preview: ${scenario.title_zh || scenario.scenario_id}...`);
-    await sceneSelectionController.loadLayoutSelection(scenario.preview_layout_path);
+    setStatus(`Loading structure + buildings preview: ${scenario.title_zh || scenario.scenario_id}...`);
+    await sceneSelectionController.loadLayoutSelection(scenario.preview_layout_path, {
+      defaultSceneOptionKey: STRUCTURE_PREVIEW_DEFAULT_STEP_KEY,
+    });
     const recent = await loadRecentLayouts(50, false);
     populateRecentLayoutOptions(recent, scenario.preview_layout_path);
-    flashStatus(`Saved structure preview loaded: ${scenario.title_zh || scenario.scenario_id}.`);
+    flashStatus(`Structure + buildings preview loaded: ${scenario.title_zh || scenario.scenario_id}.`);
   }
 
   function openSelectedDesignScenarioAnnotation(): void {

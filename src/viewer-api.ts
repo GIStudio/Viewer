@@ -15,6 +15,7 @@ const recentLayoutsCache = new Map<string, RecentLayout[]>();
 
 export type LoadManifestOptions = {
   sceneGlbPath?: string;
+  defaultSceneOptionKey?: string;
 };
 
 /**

@@ -24,6 +24,7 @@ export function createViewerSceneSelectionController(
   deps: ViewerSceneSelectionControllerDeps,
 ): ViewerSceneSelectionController {
   const optionsByKey = new Map<string, SceneOption>();
+  const structurePreviewFallbackKeys = ["land_use_zoning", "road_base", "final_scene"];
 
   function populateSceneOptions(manifest: ViewerManifest): SceneOption[] {
     optionsByKey.clear();
@@ -44,6 +45,35 @@ export function createViewerSceneSelectionController(
     return options;
   }
 
+  function defaultSceneKeyForManifest(
+    manifest: ViewerManifest,
+    options: SceneOption[],
+    manifestOptions: LoadManifestOptions,
+  ): { key: string; fallbackMessage: string } {
+    const requestedKey = String(manifestOptions.defaultSceneOptionKey ?? "").trim();
+    if (requestedKey) {
+      const candidates = [
+        requestedKey,
+        ...structurePreviewFallbackKeys,
+        String(manifest.default_selection ?? ""),
+        options[0]?.key ?? "",
+      ].filter(Boolean);
+      for (const candidate of candidates) {
+        if (!optionsByKey.has(candidate)) {
+          continue;
+        }
+        const fallbackMessage = candidate === requestedKey
+          ? ""
+          : `Preview step "${requestedKey}" is unavailable; loaded ${optionsByKey.get(candidate)?.label ?? candidate}.`;
+        return { key: candidate, fallbackMessage };
+      }
+    }
+
+    const defaultSelection = String(manifest.default_selection ?? "");
+    const key = optionsByKey.has(defaultSelection) ? defaultSelection : options[0]?.key ?? "";
+    return { key, fallbackMessage: "" };
+  }
+
   async function loadLayoutSelection(layoutPath: string, manifestOptions: LoadManifestOptions = {}): Promise<void> {
     deps.clearError(deps.errorEl);
     deps.setStatus("Loading scene set…");
@@ -54,12 +84,14 @@ export function createViewerSceneSelectionController(
     if (options.length === 0) {
       throw new Error("No viewable GLB entries were found in this scene layout.");
     }
-    const defaultSelection = manifest.default_selection as string;
-    const defaultKey = optionsByKey.has(defaultSelection) ? defaultSelection : options[0]?.key ?? "";
+    const { key: defaultKey, fallbackMessage } = defaultSceneKeyForManifest(manifest, options, manifestOptions);
     deps.selectEl.value = defaultKey;
     deps.selectEl.title = optionsByKey.get(defaultKey)?.label ?? "";
     updateQueryLayout(layoutPath);
     await deps.loadScene(optionsByKey.get(defaultKey) ?? options[0]!);
+    if (fallbackMessage) {
+      deps.setStatus(fallbackMessage);
+    }
     deps.afterLayoutLoaded();
   }
 
