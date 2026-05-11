@@ -1,6 +1,14 @@
 import { ROUTES, navigateTo } from "./ui";
 import type { AppRoute } from "./ui";
 import {
+  SHELL_ACTION_EVENT,
+  SHELL_ACTIONS_CHANGE_EVENT,
+  SHELL_TOGGLE_EVENT,
+  type ShellActionsChangeDetail,
+  type ShellMenuActionId,
+  type ShellToggleTarget,
+} from "./shell-events";
+import {
   VIEWER_LANGUAGE_EVENT,
   applyViewerTranslations,
   loadViewerLanguage,
@@ -14,25 +22,16 @@ import {
 
 type ShellMenuId = "file" | "view" | "tools" | "help";
 
-export const SHELL_ACTION_EVENT = "roadgen3d:shell-action";
-export const SHELL_TOGGLE_EVENT = "roadgen3d:shell-toggle";
-export const SHELL_ACTIONS_CHANGE_EVENT = "roadgen3d:shell-actions-change";
-
-export type ShellMenuActionId =
-  | "file-load-layout"
-  | "file-export-png"
-  | "file-export-svg"
-  | "file-export-json"
-  | "file-save-context"
-  | "view-reset-view"
-  | "tools-open-settings"
-  | "tools-open-design"
-  | "tools-open-evaluate"
-  | "tools-open-compare"
-  | "tools-open-history"
-  | "tools-open-presets"
-  | "tools-open-floating-lane"
-  | "help-shortcuts";
+export {
+  SHELL_ACTION_EVENT,
+  SHELL_ACTIONS_CHANGE_EVENT,
+  SHELL_TOGGLE_EVENT,
+};
+export type {
+  ShellActionsChangeDetail,
+  ShellMenuActionId,
+  ShellToggleTarget,
+} from "./shell-events";
 
 export interface ShellSection {
   id: string;
@@ -51,12 +50,6 @@ export interface ShellTab {
 export type ShellI18nText = string | {
   key: string;
   fallback?: string;
-};
-
-export type ShellToggleTarget = "left" | "right" | "bottom";
-
-export type ShellActionsChangeDetail = {
-  enabledActions: ShellMenuActionId[];
 };
 
 export interface DesktopShell {

@@ -1,0 +1,111 @@
+import {
+  DownloadOutlined,
+  EyeOutlined,
+  FileSearchOutlined,
+  QuestionCircleOutlined,
+  SaveOutlined,
+  SlidersOutlined,
+  ToolOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
+import { theme } from "antd";
+import type { ReactNode } from "react";
+
+import type { ShellMenuActionId, ShellToggleTarget } from "../shell-events";
+import type { AppRoute } from "../ui";
+import type { ViewerLanguage } from "../viewer-i18n";
+
+export type MenuGroupId = "file" | "view" | "tools" | "help";
+
+export type ShellMenuAction = {
+  id?: ShellMenuActionId;
+  toggle?: ShellToggleTarget;
+  labelKey: string;
+  fallback: string;
+  icon?: ReactNode;
+};
+
+export type ShellMenuGroup = {
+  id: MenuGroupId;
+  icon: ReactNode;
+  actions: ShellMenuAction[];
+};
+
+export const antdTheme = {
+  algorithm: theme.defaultAlgorithm,
+  token: {
+    colorPrimary: "#00539f",
+    colorInfo: "#00539f",
+    colorWarning: "#ffd100",
+    borderRadius: 8,
+    fontFamily: '"SF Pro Text", "Helvetica Neue", Arial, sans-serif',
+  },
+  components: {
+    Button: {
+      borderRadius: 8,
+    },
+    Menu: {
+      itemBorderRadius: 8,
+      horizontalItemHoverColor: "#00539f",
+      horizontalItemSelectedColor: "#00539f",
+    },
+  },
+};
+
+export const languageOptions: Array<{ value: ViewerLanguage; label: string }> = [
+  { value: "en", label: "EN" },
+  { value: "zh", label: "中文" },
+  { value: "mixed", label: "中英" },
+];
+
+export const menuGroups: ShellMenuGroup[] = [
+  {
+    id: "file",
+    icon: <FileSearchOutlined />,
+    actions: [
+      { id: "file-load-layout", labelKey: "menu.file.loadLayout", fallback: "Load Layout", icon: <UploadOutlined /> },
+      { id: "file-export-png", labelKey: "menu.file.exportPng", fallback: "Export PNG", icon: <DownloadOutlined /> },
+      { id: "file-export-svg", labelKey: "menu.file.exportSvg", fallback: "Export SVG", icon: <DownloadOutlined /> },
+      { id: "file-export-json", labelKey: "menu.file.exportJson", fallback: "Export JSON", icon: <DownloadOutlined /> },
+      { id: "file-save-context", labelKey: "menu.file.saveContext", fallback: "Save Context", icon: <SaveOutlined /> },
+    ],
+  },
+  {
+    id: "view",
+    icon: <EyeOutlined />,
+    actions: [
+      { id: "view-reset-view", labelKey: "menu.view.resetView", fallback: "Reset View", icon: <EyeOutlined /> },
+      { toggle: "left", labelKey: "menu.view.toggleLeft", fallback: "Toggle Left Sidebar" },
+      { toggle: "right", labelKey: "menu.view.toggleRight", fallback: "Toggle Right Sidebar" },
+      { toggle: "bottom", labelKey: "menu.view.toggleBottom", fallback: "Toggle Status Workbench" },
+    ],
+  },
+  {
+    id: "tools",
+    icon: <ToolOutlined />,
+    actions: [
+      { id: "tools-open-settings", labelKey: "menu.tools.settings", fallback: "Settings", icon: <SlidersOutlined /> },
+      { id: "tools-open-design", labelKey: "menu.tools.design", fallback: "Design" },
+      { id: "tools-open-evaluate", labelKey: "menu.tools.evaluate", fallback: "Evaluate" },
+      { id: "tools-open-compare", labelKey: "menu.tools.compare", fallback: "Compare" },
+      { id: "tools-open-history", labelKey: "menu.tools.history", fallback: "History" },
+      { id: "tools-open-presets", labelKey: "menu.tools.presets", fallback: "Presets" },
+      { id: "tools-open-floating-lane", labelKey: "menu.tools.floatingLane", fallback: "Floating Lane" },
+    ],
+  },
+  {
+    id: "help",
+    icon: <QuestionCircleOutlined />,
+    actions: [
+      { id: "help-shortcuts", labelKey: "menu.help.shortcuts", fallback: "Shortcuts", icon: <QuestionCircleOutlined /> },
+    ],
+  },
+];
+
+export function resolveRoute(): AppRoute {
+  const hash = window.location.hash;
+  if (hash === "#scene-graph") return "scene-graph";
+  if (hash === "#asset-editor") return "asset-editor";
+  if (hash === "#junction-editor") return "junction-editor";
+  return "viewer";
+}
