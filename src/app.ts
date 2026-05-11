@@ -1232,7 +1232,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let latestDraftScenario: ScenarioDesign | null = null;
   let designMatrixController: ReturnType<typeof createViewerDesignMatrixController> | null = null;
 
-  function scheduleDesignMatrixRefresh(): void {
+  function scheduleDesignMatrixRefresh(options: { force?: boolean } = {}): void {
+    if (!options.force && panelController && !panelController.isOpen("design")) {
+      return;
+    }
     designMatrixController?.scheduleRefresh();
   }
 
@@ -1805,7 +1808,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     },
     onDesignOpen: () => {
       populateDesignPresets();
-      scheduleDesignMatrixRefresh();
+      scheduleDesignMatrixRefresh({ force: true });
     },
     onCompareOpen: populateCompareSelectors,
     onPresetsOpen: () => presetsController.populatePresetsGrid(),
@@ -1906,6 +1909,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     updateDesignStatus,
     errorEl,
   });
+  if (panelController.isOpen("design")) {
+    scheduleDesignMatrixRefresh();
+  }
 
   const presetsController = createViewerPresetsController({
     presetsGridEl,
@@ -3203,8 +3209,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     updateDesignScenarioMeta();
     scheduleDesignMatrixRefresh();
   }, { signal });
-  designPromptEl.addEventListener("input", scheduleDesignMatrixRefresh, { signal });
-  designTemplateEl.addEventListener("input", scheduleDesignMatrixRefresh, { signal });
+  designPromptEl.addEventListener("input", () => scheduleDesignMatrixRefresh(), { signal });
+  designTemplateEl.addEventListener("input", () => scheduleDesignMatrixRefresh(), { signal });
   designSkeletonProfileEl.addEventListener("change", () => {
     updateDesignLayerSummaries();
     scheduleDesignMatrixRefresh();

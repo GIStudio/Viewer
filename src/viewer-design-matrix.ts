@@ -37,6 +37,7 @@ export type ViewerDesignMatrixControllerDeps = {
 };
 
 const MATRIX_RECENT_LIMIT = 500;
+const MATRIX_INVENTORY_TIMEOUT_MS = 10000;
 const MATRIX_POLL_INTERVAL_MS = 1400;
 const MATRIX_MAX_POLL_ATTEMPTS = 900;
 
@@ -45,6 +46,8 @@ export function createViewerDesignMatrixController(
 ): ViewerDesignMatrixController {
   let inventory: DesignMatrixInventoryPayload | null = null;
   let refreshTimer = 0;
+  let inventoryRequestId = 0;
+  let inventoryAbortController: AbortController | null = null;
   let activeGeneratingCellKey = "";
 
   deps.matrixEl.addEventListener("click", (event) => {
@@ -80,7 +83,7 @@ export function createViewerDesignMatrixController(
       window.clearTimeout(refreshTimer);
     }
     refreshTimer = window.setTimeout(() => {
-      void refresh({ quiet: true });
+      void refresh({ quiet: Boolean(inventory) });
     }, 350);
   }
 
@@ -89,13 +92,41 @@ export function createViewerDesignMatrixController(
       deps.matrixEl.dataset.state = "loading";
       deps.matrixEl.innerHTML = `<div class="viewer-design-matrix-empty">Loading matrix status...</div>`;
     }
+    inventoryAbortController?.abort();
+    const requestId = inventoryRequestId + 1;
+    inventoryRequestId = requestId;
+    const abortController = new AbortController();
+    inventoryAbortController = abortController;
+    let didTimeout = false;
+    const timeoutHandle = window.setTimeout(() => {
+      didTimeout = true;
+      abortController.abort();
+    }, MATRIX_INVENTORY_TIMEOUT_MS);
     try {
-      inventory = await postApiJson<DesignMatrixInventoryPayload>("/api/design/matrix/inventory", buildMatrixRequest());
+      const payload = await apiJson<DesignMatrixInventoryPayload>("/api/design/matrix/inventory", {
+        method: "POST",
+        body: JSON.stringify(buildMatrixRequest()),
+        signal: abortController.signal,
+      });
+      if (requestId !== inventoryRequestId) {
+        return;
+      }
+      inventory = payload;
       render();
     } catch (error) {
+      if (requestId !== inventoryRequestId) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "Failed to load design matrix.";
       deps.matrixEl.dataset.state = "error";
-      deps.matrixEl.innerHTML = `<div class="viewer-design-matrix-error">${escapeHtml(message)}</div>`;
+      deps.matrixEl.innerHTML = `<div class="viewer-design-matrix-error">${escapeHtml(
+        didTimeout ? "Matrix inventory timed out. Reopen Design or change an option to retry." : message,
+      )}</div>`;
+    } finally {
+      window.clearTimeout(timeoutHandle);
+      if (requestId === inventoryRequestId) {
+        inventoryAbortController = null;
+      }
     }
   }
 
@@ -305,7 +336,6 @@ export function createViewerDesignMatrixController(
   }
 
   render();
-  void refresh({ quiet: true });
 
   return {
     refresh,
