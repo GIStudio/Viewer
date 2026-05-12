@@ -1,13 +1,5 @@
 import type { DesktopShell } from "./desktop-shell";
-
-export type ViewerPanelKey =
-  | "settings"
-  | "design"
-  | "evaluate"
-  | "compare"
-  | "presets"
-  | "help"
-  | "history";
+import type { ViewerPanelKey } from "./viewer-panels/types";
 
 type PanelState = Record<ViewerPanelKey, boolean>;
 

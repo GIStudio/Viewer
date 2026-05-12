@@ -1,0 +1,118 @@
+import type { ShellSection, ShellTab } from "../desktop-shell";
+
+export type ViewerPanelKey =
+  | "settings"
+  | "design"
+  | "evaluate"
+  | "compare"
+  | "presets"
+  | "help"
+  | "history";
+
+export type ViewerPanelText = (en: string, zh: string) => string;
+
+export type ViewerLeftSection = ShellSection;
+export type ViewerRightTab = ShellTab;
+
+export type ViewerPanelElements = {
+  canvasHost: HTMLElement;
+  designWorkspaceEl: HTMLElement;
+  statusEl: HTMLElement;
+  overlayEl: HTMLElement;
+  errorEl: HTMLElement;
+  layoutSelectEl: HTMLSelectElement;
+  selectEl: HTMLSelectElement;
+  schemeCompareEl: HTMLElement;
+  sceneGraphLinkEl: HTMLButtonElement;
+  assetEditorLinkEl: HTMLButtonElement;
+  junctionEditorLinkEl: HTMLButtonElement;
+  menuToggleEl: HTMLButtonElement;
+  menuDropdownEl: HTMLElement;
+  settingsToggleEl: HTMLButtonElement;
+  settingsPanelEl: HTMLElement;
+  settingsCloseEl: HTMLButtonElement;
+  infoCardEl: HTMLElement;
+  crosshairEl: HTMLElement;
+  minimapEl: HTMLElement;
+  minimapExpandEl: HTMLButtonElement;
+  minimapHost: HTMLElement;
+  minimapOverlayEl: HTMLCanvasElement;
+  axisHudEl: HTMLCanvasElement;
+  lightingPresetEl: HTMLSelectElement;
+  exposureInput: HTMLInputElement;
+  keyInput: HTMLInputElement;
+  fillInput: HTMLInputElement;
+  warmthInput: HTMLInputElement;
+  shadowInput: HTMLInputElement;
+  exposureValueEl: HTMLElement;
+  keyValueEl: HTMLElement;
+  fillValueEl: HTMLElement;
+  warmthValueEl: HTMLElement;
+  shadowValueEl: HTMLElement;
+  thirdPersonToggleEl: HTMLInputElement;
+  frameModeToggleEl: HTMLInputElement;
+  assetBboxToggleEl: HTMLInputElement;
+  assetMoveToggleEl: HTMLInputElement;
+  laserToggleEl: HTMLInputElement;
+  designToggleEl: HTMLButtonElement;
+  designPanelEl: HTMLElement;
+  designReviewRunEl: HTMLButtonElement;
+  designCloseEl: HTMLButtonElement;
+  designPresetEl: HTMLSelectElement;
+  designPromptEl: HTMLTextAreaElement;
+  designCountEl: HTMLSelectElement;
+  designTemplateEl: HTMLInputElement;
+  designScenarioEl: HTMLSelectElement;
+  designScenarioMetaEl: HTMLElement;
+  designSkeletonSummaryEl: HTMLElement;
+  designScenarioPreviewEl: HTMLButtonElement;
+  designScenarioAnnotationEl: HTMLButtonElement;
+  designScenarioDraftPromptEl: HTMLTextAreaElement;
+  designScenarioUseLlmEl: HTMLInputElement;
+  designScenarioDraftEl: HTMLButtonElement;
+  designScenarioUseDraftEl: HTMLButtonElement;
+  designScenarioDraftResultEl: HTMLElement;
+  designSkeletonProfileEl: HTMLSelectElement;
+  designFurnitureProfileEl: HTMLSelectElement;
+  designFurnitureSummaryEl: HTMLElement;
+  designMatrixEl: HTMLElement;
+  designBenchmarkEl: HTMLButtonElement;
+  designBranchHistoryEl: HTMLButtonElement;
+  designBranchRunEl: HTMLButtonElement;
+  designGenerateEl: HTMLButtonElement;
+  designStatusEl: HTMLElement;
+  designResultEl: HTMLElement;
+  evaluateToggleEl: HTMLButtonElement;
+  evaluatePanelEl: HTMLElement;
+  evaluateCloseEl: HTMLButtonElement;
+  evaluateRunEl: HTMLButtonElement;
+  evaluateContentEl: HTMLElement;
+  compareToggleEl: HTMLButtonElement;
+  comparePanelEl: HTMLElement;
+  compareCloseEl: HTMLButtonElement;
+  compareSelectAEl: HTMLSelectElement;
+  compareSelectBEl: HTMLSelectElement;
+  compareResultsEl: HTMLElement;
+  exitCompare3dEl: HTMLButtonElement;
+  historyAnalysisToggleEl: HTMLButtonElement;
+  historyAnalysisPanelEl: HTMLElement;
+  historyAnalysisCloseEl: HTMLButtonElement;
+  historyAnalysisContentEl: HTMLElement;
+  exportTopdownMapEl: HTMLButtonElement;
+  exportTopdownSvgEl: HTMLButtonElement;
+  presetsToggleEl: HTMLButtonElement;
+  presetsPanelEl: HTMLElement;
+  presetsCloseEl: HTMLButtonElement;
+  presetsGridEl: HTMLElement;
+  helpToggleEl: HTMLButtonElement;
+  helpPanelEl: HTMLElement;
+  helpCloseEl: HTMLButtonElement;
+  helpContentEl: HTMLElement;
+  graphOverlayToggleEl: HTMLInputElement;
+  layoutOverlayToggleEl: HTMLInputElement;
+  analysisOverlayToggleEl: HTMLInputElement;
+  dioramaFinishToggleEl: HTMLInputElement;
+  audioToggleEl: HTMLInputElement;
+  floatingLanePanelHost: HTMLElement;
+  floatingLaneToggleEl: HTMLButtonElement;
+};

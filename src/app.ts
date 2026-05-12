@@ -45,7 +45,6 @@ import {
   STREET_FURNITURE_PROFILE_OPTIONS,
 } from "./viewer-types";
 import {
-  requireElement,
   escapeHtml,
   clamp,
   disposeObject,
@@ -137,7 +136,12 @@ import {
   type EnvironmentState,
 } from "./viewer-environment";
 import { createViewerEnvironmentController, type ViewerEnvironmentController } from "./viewer-environment-controller";
-import { renderViewerSettingsPanelHtml } from "./viewer-settings-panel";
+import {
+  collectViewerPanelElements,
+  createViewerLeftSections,
+  createViewerRightTabs,
+  createViewerStageHtml,
+} from "./viewer-panels";
 import { applyAnalyticalDioramaFinish } from "./viewer-visual-style";
 import {
   VIEWER_LANGUAGE_EVENT,
@@ -179,13 +183,6 @@ type DesignRunSnapshot = {
   structureSource?: string;
   semanticSummary?: DesignSemanticSummary;
 };
-
-function profileOptionsHtml(options: ReadonlyArray<{ id: string; label: string }>, autoLabel: string): string {
-  return [
-    `<option value="">${escapeHtml(autoLabel)}</option>`,
-    ...options.map((option) => `<option value="${escapeHtml(option.id)}">${escapeHtml(option.label)}</option>`),
-  ].join("");
-}
 
 const STREET_FURNITURE_OVERRIDE_PATCHES: Record<string, Record<string, unknown>> = {
   balanced_complete: {
@@ -456,690 +453,121 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         { key: "viewer.hints.move" },
         { key: "viewer.hints.tools" },
       ]);
-  shell.setLeftSections([
-    {
-      id: "viewer-recent-layouts",
-      title: t("Recent Layouts", "最近布局"),
-      subtitle: t("Layout / scene entry", "布局 / 场景入口"),
-      content: `
-        <div class="desktop-shell-form-stack">
-          <label class="desktop-shell-field">
-            <span data-i18n-key="viewer.left.recentResult">Recent Result</span>
-            <select id="layout-select" class="viewer-select viewer-select-inline" title="Recent Result" data-i18n-title-key="viewer.left.recentResult"></select>
-          </label>
-          <label class="desktop-shell-field">
-            <span data-i18n-key="viewer.left.scene">Scene</span>
-            <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene" data-i18n-title-key="viewer.left.scene"></select>
-          </label>
-          <div id="viewer-scheme-compare" class="viewer-scheme-compare"></div>
-        </div>
-      `,
-    },
-  ]);
-  shell.setRightTabs(
-    [
-      {
-        id: "settings",
-        label: t("Settings", "设置"),
-        content: renderViewerSettingsPanelHtml(),
-      },
-      {
-        id: "design",
-        label: t("Design", "设计"),
-        content: `
-          <aside id="viewer-design-panel" class="viewer-slide-panel" data-open="false">
-            <div class="viewer-slide-panel-header">
-              <div>
-                <div class="viewer-slide-panel-title" data-i18n-key="viewer.design.title">Design Assistant</div>
-                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.design.subtitle">Choose a street structure, choose a street furniture goal, then generate a 3D scene.</div>
-              </div>
-              <button id="viewer-design-close" class="viewer-settings-close" type="button" aria-label="Close design assistant">x</button>
-            </div>
-            <div class="viewer-slide-panel-body viewer-design-body">
-              <section class="viewer-design-flow-section">
-                <div class="viewer-design-flow-heading">
-                  <span>1</span>
-                  <div>
-                    <strong>场景结构</strong>
-                    <small>决定道路、路口、铺装和功能区。</small>
-                  </div>
-                </div>
-                <label class="viewer-settings-label" for="viewer-design-scenario">
-                  <span>Street Structure / 街道结构</span>
-                </label>
-                <select id="viewer-design-scenario" class="viewer-select viewer-select-compact">
-                  <option value="">基础模板（不套用结构变体）</option>
-                </select>
-                <div id="viewer-design-scenario-meta" class="viewer-design-scenario-meta">
-                  Base template: ${DEFAULT_GRAPH_TEMPLATE_ID}
-                </div>
-                <div id="viewer-design-skeleton-summary" class="viewer-design-layer-summary">
-                  A 骨架功能：自动解析（人工标注 > LLM 标注 > OSM/POI）
-                </div>
-                <div class="viewer-design-scenario-actions">
-                  <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled title="Open the structure preview through the buildings step. It shows roads, functional zones, and building massing without street furniture.">Preview Structure + Buildings / 预览结构+建筑</button>
-                  <button id="viewer-design-scenario-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled title="Open annotation in a new tab">Open Annotation</button>
-                </div>
-                <details class="viewer-design-advanced-details viewer-design-structure-draft">
-                  <summary>从一句话创建临时结构</summary>
-                  <div class="viewer-design-scenario-draft">
-                    <label class="viewer-settings-label" for="viewer-design-scenario-draft-prompt">
-                      <span>结构描述</span>
-                    </label>
-                    <textarea id="viewer-design-scenario-draft-prompt" class="viewer-design-scenario-draft-prompt" rows="3" placeholder="例如：道路中段右侧加公交站，绿色铺装"></textarea>
-                    <label class="viewer-design-scenario-llm-toggle">
-                      <input id="viewer-design-scenario-use-llm" type="checkbox" checked />
-                      <span>Use LLM semantic parse, fallback to deterministic compiler</span>
-                    </label>
-                    <div class="viewer-design-scenario-draft-actions">
-                      <button id="viewer-design-scenario-draft" class="viewer-nav-button viewer-nav-button-secondary" type="button">Draft Structure</button>
-                      <button id="viewer-design-scenario-use-draft" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>Use Draft Structure</button>
-                    </div>
-                    <div id="viewer-design-scenario-draft-result" class="viewer-design-scenario-draft-result" data-tone="empty">
-                      用自然语言先生成一个可验证的临时结构，再选择 Use Draft Structure 参与 Generate & Load。
-                    </div>
-                  </div>
-                </details>
-              </section>
-              <section class="viewer-design-flow-section">
-                <div class="viewer-design-flow-heading">
-                  <span>2</span>
-                  <div>
-                    <strong>街道家具设计目标</strong>
-                    <small>设置街道家具密度、设施优先级、风格和渲染参数；不会直接改道路结构。</small>
-                  </div>
-                </div>
-                <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-preset">
-                  <span>Street Furniture Design Goal / 街道家具设计目标</span>
-                  <button class="viewer-help-icon" type="button" data-help="design-preset" title="了解街道家具设计目标">?</button>
-                </label>
-                <select id="viewer-design-preset" class="viewer-select viewer-select-compact">
-                  <option value="__custom__">Custom / LLM-Driven（自定义）</option>
-                </select>
-                <div id="viewer-design-furniture-summary" class="viewer-design-layer-summary">
-                  B 家具主题：由街道家具设计目标决定；不直接改道路骨架。
-                </div>
-              </section>
-              <section class="viewer-design-flow-section viewer-design-matrix-section">
-                <div class="viewer-design-flow-heading">
-                  <span>2x</span>
-                  <div>
-                    <strong>结构 × 家具预览矩阵</strong>
-                    <small>点击已有结果加载；灰色缺失格点击后按需生成。</small>
-                  </div>
-                </div>
-                <div id="viewer-design-matrix" class="viewer-design-matrix" data-state="empty">
-                  <div class="viewer-design-matrix-empty">Matrix status will appear here.</div>
-                </div>
-              </section>
-              <section class="viewer-design-flow-section">
-                <div class="viewer-design-flow-heading">
-                  <span>3</span>
-                  <div>
-                    <strong>补充要求（可选）</strong>
-                    <small>只写额外偏好，不需要重复结构方案。</small>
-                  </div>
-                </div>
-                <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-prompt">
-                  <span>Extra Notes / 补充要求</span>
-                  <button class="viewer-help-icon" type="button" data-help="design-prompt" title="了解补充要求">?</button>
-                </label>
-                <textarea id="viewer-design-prompt" class="viewer-design-prompt" rows="3" placeholder="例如：更像校园入口、减少车行感、加强夜间照明"></textarea>
-                <div class="viewer-design-prompt-hint">
-                  可留空；这里只补充偏好，结构请在上方选择或创建。
-                </div>
-              </section>
-              <section class="viewer-design-flow-section">
-                <div class="viewer-design-flow-heading">
-                  <span>4</span>
-                  <div>
-                    <strong>输出设置</strong>
-                    <small>选择生成一个方案，或生成三个轻微变化方案。</small>
-                  </div>
-                </div>
-                <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-count">
-                  <span>Output / 输出数量</span>
-                  <button class="viewer-help-icon" type="button" data-help="design-schemes" title="了解输出数量">?</button>
-                </label>
-                <select id="viewer-design-count" class="viewer-select viewer-select-compact">
-                  <option value="1">生成 1 个方案</option>
-                  <option value="3">生成 3 个轻微变化方案</option>
-                </select>
-                <details class="viewer-design-advanced-details">
-                  <summary>Advanced Settings / 高级设置</summary>
-                  <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-template">
-                    <span>Graph Template</span>
-                    <button class="viewer-help-icon" type="button" data-help="design-template" title="了解图模板">?</button>
-                  </label>
-                  <input id="viewer-design-template" class="viewer-design-input" type="text" value="${DEFAULT_GRAPH_TEMPLATE_ID}" />
-                  <label class="viewer-settings-label" for="viewer-design-skeleton-profile">
-                    <span>A Skeleton Override / 骨架功能覆盖</span>
-                  </label>
-                  <select id="viewer-design-skeleton-profile" class="viewer-select viewer-select-compact">
-                    ${profileOptionsHtml(SKELETON_DESIGN_PROFILE_OPTIONS, "自动解析（人工 > LLM > OSM/POI）")}
-                  </select>
-                  <label class="viewer-settings-label" for="viewer-design-furniture-profile">
-                    <span>B Furniture Override / 家具主题覆盖</span>
-                  </label>
-                  <select id="viewer-design-furniture-profile" class="viewer-select viewer-select-compact">
-                    ${profileOptionsHtml(STREET_FURNITURE_PROFILE_OPTIONS, "使用上方街道家具设计目标")}
-                  </select>
-                </details>
-              </section>
-              <div class="viewer-design-status-row">
-                <div id="viewer-design-status" class="viewer-design-status">Ready to generate.</div>
-                <button id="viewer-design-review-run" class="viewer-design-review-run" type="button" disabled title="重新展开最近一次场景生成步骤">查看上次生成过程</button>
-              </div>
-              <div id="viewer-design-result" class="viewer-design-result"></div>
-            </div>
-            <div class="viewer-slide-panel-footer">
-              <div class="viewer-design-action-sections" aria-label="Design assistant actions">
-                <section class="viewer-design-action-section viewer-design-action-section-primary" aria-labelledby="viewer-design-generate-actions-title">
-                  <div class="viewer-design-action-heading">
-                    <span id="viewer-design-generate-actions-title">Generate / 生成</span>
-                    <small>按上方结构、街道家具设计目标和补充要求生成场景。</small>
-                  </div>
-                  <div class="viewer-design-action-row">
-                    <button id="viewer-design-generate" class="viewer-nav-button" type="button">Generate & Load / 生成并加载</button>
-                  </div>
-                </section>
-                <details class="viewer-design-advanced-details viewer-design-analysis-details">
-                  <summary>Advanced Analysis / 高级分析</summary>
-                  <div class="viewer-design-trace-hint">
-                    用于查看最近评分样本和 Pareto 结果，不会触发新的生成任务。
-                  </div>
-                  <div class="viewer-design-action-row">
-                    <button id="viewer-design-branch-run" class="viewer-nav-button viewer-nav-button-secondary" type="button">Load Latest Scores / 加载最近评分</button>
-                    <button id="viewer-design-benchmark" class="viewer-nav-button viewer-nav-button-secondary" type="button">Benchmark Store</button>
-                    <button id="viewer-design-branch-history" class="viewer-nav-button viewer-nav-button-secondary" type="button">Run History</button>
-                  </div>
-                </details>
-              </div>
-            </div>
-          </aside>
-        `,
-      },
-      {
-        id: "evaluate",
-        label: t("Evaluate", "评估"),
-        content: `
-          <aside id="viewer-evaluate-panel" class="viewer-slide-panel" data-open="false">
-            <div class="viewer-slide-panel-header">
-              <div>
-                <div class="viewer-slide-panel-title" data-i18n-key="viewer.evaluate.title">Design Evaluation</div>
-                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.evaluate.subtitle">AI-driven layout assessment and suggestions</div>
-              </div>
-              <button id="viewer-evaluate-close" class="viewer-settings-close" type="button" aria-label="Close evaluation">x</button>
-            </div>
-            <div id="viewer-evaluate-content" class="viewer-slide-panel-body">
-              <div class="viewer-evaluate-empty">Click "Run Evaluation" to analyze the current layout.</div>
-            </div>
-            <div class="viewer-slide-panel-footer">
-              <button id="viewer-evaluate-run" class="viewer-nav-button" type="button">Run Evaluation</button>
-            </div>
-          </aside>
-        `,
-      },
-      {
-        id: "compare",
-        label: t("Compare", "对比"),
-        content: `
-          <aside id="viewer-compare-panel" class="viewer-slide-panel" data-open="false">
-            <div class="viewer-slide-panel-header">
-              <div>
-                <div class="viewer-slide-panel-title" data-i18n-key="viewer.compare.title">Layout Comparison</div>
-                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.compare.subtitle">Compare two layouts side-by-side</div>
-              </div>
-              <button id="viewer-compare-close" class="viewer-settings-close" type="button" aria-label="Close comparison">x</button>
-            </div>
-            <div class="viewer-slide-panel-body">
-              <div class="viewer-compare-selectors">
-                <div class="viewer-compare-col">
-                  <label class="viewer-settings-label" for="compare-layout-a">Layout A</label>
-                  <select id="compare-layout-a" class="viewer-select viewer-select-compact"></select>
-                </div>
-                <div class="viewer-compare-col">
-                  <label class="viewer-settings-label" for="compare-layout-b">Layout B</label>
-                  <select id="compare-layout-b" class="viewer-select viewer-select-compact"></select>
-                </div>
-              </div>
-              <div id="viewer-compare-results" class="viewer-compare-results"></div>
-            </div>
-          </aside>
-        `,
-      },
-      {
-        id: "history",
-        label: t("History", "历史"),
-        content: `
-          <aside id="viewer-history-analysis-panel" class="viewer-slide-panel" data-open="false">
-            <div class="viewer-slide-panel-header">
-              <div>
-                <div class="viewer-slide-panel-title" data-i18n-key="viewer.history.title">History Analysis</div>
-                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.history.subtitle">Scatter plot analysis of scene generation history</div>
-              </div>
-              <button id="viewer-history-analysis-close" class="viewer-settings-close" type="button" aria-label="Close history">x</button>
-            </div>
-            <div id="viewer-history-analysis-content" class="viewer-slide-panel-body">
-              <div class="viewer-history-tabs">
-                <button class="viewer-history-tab" data-tab="scatter" data-active="true" data-i18n-key="viewer.history.scatter">Scatter</button>
-                <button class="viewer-history-tab" data-tab="frequency" data-i18n-key="viewer.history.frequency">Frequency</button>
-                <button class="viewer-history-tab" data-tab="trend" data-i18n-key="viewer.history.trend">Trend</button>
-                <button class="viewer-history-tab" data-tab="scores" data-i18n-key="viewer.history.scores">Three-System Scores</button>
-              </div>
-              <div id="viewer-history-scatter-plot" class="viewer-history-tab-panel" data-tab="scatter" data-active="true" style="width: 100%;"></div>
-              <div id="viewer-history-frequency" class="viewer-history-tab-panel" data-tab="frequency" data-active="false" style="width: 100%;"></div>
-              <div id="viewer-history-trend" class="viewer-history-tab-panel" data-tab="trend" data-active="false" style="width: 100%;"></div>
-              <div id="viewer-history-scores" class="viewer-history-tab-panel" data-tab="scores" data-active="false" style="width: 100%;"></div>
-            </div>
-          </aside>
-        `,
-      },
-      {
-        id: "presets",
-        label: t("Presets", "预设"),
-        content: `
-          <aside id="viewer-presets-panel" class="viewer-slide-panel" data-open="false">
-            <div class="viewer-slide-panel-header">
-              <div>
-                <div class="viewer-slide-panel-title" data-i18n-key="viewer.presets.title">Scene Presets</div>
-                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.presets.subtitle">Pre-configured scene styles. The highlighted card matches the currently loaded scene's generation preset.</div>
-              </div>
-              <button id="viewer-presets-close" class="viewer-settings-close" type="button" aria-label="Close presets">x</button>
-            </div>
-            <div id="viewer-presets-grid" class="viewer-presets-grid"></div>
-          </aside>
-        `,
-      },
-      {
-        id: "floating-lane",
-        label: t("Floating Lane", "浮动车道"),
-        content: `
-          <div id="viewer-floating-lane-panel-host" class="floating-lane-inline-host">
-            <div class="desktop-shell-empty-state">Click Floating Lane button to enable overlay controls.</div>
-          </div>
-        `,
-      },
-      {
-        id: "help",
-        label: t("Help", "帮助"),
-        content: `
-          <aside id="viewer-help-panel" class="viewer-slide-panel" data-open="false">
-            <div class="viewer-slide-panel-header">
-              <div>
-                <div class="viewer-slide-panel-title" data-i18n-key="viewer.help.title">Help</div>
-                <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.help.subtitle">Generation flow and step-by-step details</div>
-              </div>
-              <button id="viewer-help-close" class="viewer-settings-close" type="button" aria-label="Close help">x</button>
-            </div>
-            <div id="viewer-help-content" class="viewer-slide-panel-body">
-              <div class="viewer-help-section">
-                <h3 class="viewer-help-section-title">🚀 场景生成流程</h3>
-                <p class="viewer-help-intro">当你点击 "Generate & Load" 后，系统会按照以下步骤生成 3D 街道场景：</p>
-                <div class="viewer-help-steps">
-                  <div class="viewer-help-step" data-step="queue">
-                    <div class="viewer-help-step-header">
-                      <span class="viewer-help-step-number">1</span>
-                      <span class="viewer-help-step-title">任务提交</span>
-                      <button class="viewer-help-step-detail-btn" type="button" data-detail="queue">详情</button>
-                    </div>
-                    <div class="viewer-help-step-content" data-detail-content="queue" hidden>
-                      <p>你的生成请求会先提交到后端 job service，然后等待 worker 接手执行。</p>
-                      <p><strong>为什么这里可能短暂等待？</strong> 场景生成是计算密集型任务，当前 worker 会按顺序处理请求。</p>
-                    </div>
-                  </div>
-                  <div class="viewer-help-step" data-step="context">
-                    <div class="viewer-help-step-header">
-                      <span class="viewer-help-step-number">2</span>
-                      <span class="viewer-help-step-title">上下文解析</span>
-                      <button class="viewer-help-step-detail-btn" type="button" data-detail="context">详情</button>
-                    </div>
-                    <div class="viewer-help-step-content" data-detail-content="context" hidden>
-                      <p>系统会读取你选择的场景结构、街道家具设计目标和可选补充要求，合并为可执行的 <code>StreetComposeConfig</code> 配置对象。</p>
-                      <p><strong>街道家具设计目标是什么？</strong> 它是预先配置好的街道家具和渲染参数组合，例如"步行友好"会增加座椅、照明和绿化，"商业活力"会提高设施密度和界面活跃度。</p>
-                      <p><strong>算法过程：</strong></p>
-                      <ul class="viewer-help-list">
-                        <li><strong>结构读取：</strong>确定基础模板、Scenario Design 或临时结构提供的道路和功能区信息</li>
-                        <li><strong>参数合并：</strong>合并街道家具设计目标的配置补丁、结构模板的拓扑约束、以及补充要求</li>
-                        <li><strong>需求评估：</strong>根据街道家具设计目标或 LLM 推理得到行人/自行车/公交/车流的需求等级（high/medium/low）</li>
-                        <li><strong>上下文构建：</strong>构建包含 layout_mode、graph_template_id、reference_plan_id 等的场景上下文</li>
-                        <li><strong>算法证据：</strong>在详情区展示 RAG/GraphRAG 引用证据和参数来源</li>
-                      </ul>
-                      <p><strong>输出参数：</strong> density、road_width_m、length_m、lane_count、sidewalk_width_m、design_rule_profile、objective_profile 等。</p>
-                      <p><strong>在设计面板中查看实时参数：</strong> 生成过程中点击"查看算法详情"按钮，可以看到本次生成实际使用的配置值。</p>
-                    </div>
-                  </div>
-                  <div class="viewer-help-step" data-step="asset">
-                    <div class="viewer-help-step-header">
-                      <span class="viewer-help-step-number">3</span>
-                      <span class="viewer-help-step-title">资产加载</span>
-                      <button class="viewer-help-step-detail-btn" type="button" data-detail="asset">详情</button>
-                    </div>
-                    <div class="viewer-help-step-content" data-detail-content="asset" hidden>
-                      <p>根据解析出的需求，系统会从资产清单（Manifest）中加载对应的 3D 模型，包括树木、路灯、座椅、公交站等街道家具。</p>
-                      <p><strong>资产从哪里来？</strong> 资产存储在 <code>data/real_assets_manifest.jsonl</code> 中，每个资产都有分类、描述和 CLIP 文本嵌入向量用于语义检索。</p>
-                    </div>
-                  </div>
-                  <div class="viewer-help-step" data-step="layout">
-                    <div class="viewer-help-step-header">
-                      <span class="viewer-help-step-number">4</span>
-                      <span class="viewer-help-step-title">布局生成</span>
-                      <button class="viewer-help-step-detail-btn" type="button" data-detail="layout">详情</button>
-                    </div>
-                    <div class="viewer-help-step-content" data-detail-content="layout" hidden>
-                      <p>系统会根据场景结构生成街道骨架，包括道路宽度、车道数量、人行道宽度和功能区等基础空间结构。</p>
-                      <p><strong>场景结构从哪里来？</strong> 可以来自基础图模板、已保存的 Scenario Design，也可以来自一句话创建的临时结构。</p>
-                    </div>
-                  </div>
-                  <div class="viewer-help-step" data-step="constraint">
-                    <div class="viewer-help-step-header">
-                      <span class="viewer-help-step-number">5</span>
-                      <span class="viewer-help-step-title">约束求解</span>
-                      <button class="viewer-help-step-detail-btn" type="button" data-detail="constraint">详情</button>
-                    </div>
-                    <div class="viewer-help-step-content" data-detail-content="constraint" hidden>
-                      <p>系统会检查布局是否满足设计规则（Design Rules）和合规性要求，例如人行道最小宽度、车道间距、无障碍通行等。</p>
-                      <p><strong>不满足约束怎么办？</strong> 系统会自动调整布局以尝试满足约束，如果无法完全满足，会在结果中标记违规项。</p>
-                    </div>
-                  </div>
-                  <div class="viewer-help-step" data-step="composition">
-                    <div class="viewer-help-step-header">
-                      <span class="viewer-help-step-number">6</span>
-                      <span class="viewer-help-step-title">资产组合</span>
-                      <button class="viewer-help-step-detail-btn" type="button" data-detail="composition">详情</button>
-                    </div>
-                    <div class="viewer-help-step-content" data-detail-content="composition" hidden>
-                      <p>系统会使用 CLIP 语义检索，将加载的 3D 资产智能地放置到街道场景中，包括放置位置、旋转角度和缩放比例。</p>
-                      <p><strong>放置策略是什么？</strong> 系统支持规则策略（Rule-based）和学习策略（Learned policy），会根据资产类别、道路功能区（Strip）和 POI 兴趣点进行布局。</p>
-                    </div>
-                  </div>
-                  <div class="viewer-help-step" data-step="mesh">
-                    <div class="viewer-help-step-header">
-                      <span class="viewer-help-step-number">7</span>
-                      <span class="viewer-help-step-title">网格生成</span>
-                      <button class="viewer-help-step-detail-btn" type="button" data-detail="mesh">详情</button>
-                    </div>
-                    <div class="viewer-help-step-content" data-detail-content="mesh" hidden>
-                      <p>所有资产放置完成后，系统会将它们合并为完整的 3D 场景网格（Mesh），包括道路铺装、人行道、建筑体块和所有街道家具。</p>
-                      <p><strong>这一步做什么？</strong> 将离散的 3D 模型整合为统一的场景几何体，为后续的光照计算和渲染做准备。</p>
-                    </div>
-                  </div>
-                  <div class="viewer-help-step" data-step="render">
-                    <div class="viewer-help-step-header">
-                      <span class="viewer-help-step-number">8</span>
-                      <span class="viewer-help-step-title">场景渲染</span>
-                      <button class="viewer-help-step-detail-btn" type="button" data-detail="render">详情</button>
-                    </div>
-                    <div class="viewer-help-step-content" data-detail-content="render" hidden>
-                      <p>系统会应用光照、材质、阴影和色调映射（Tone Mapping），生成最终的可视觉化场景。</p>
-                      <p><strong>光照从哪里来？</strong> 场景使用三点照明系统：主光源（Key Light）、补光（Fill Light）和环境光（Ambient），配合曝光和色温调节。</p>
-                    </div>
-                  </div>
-                  <div class="viewer-help-step" data-step="export">
-                    <div class="viewer-help-step-header">
-                      <span class="viewer-help-step-number">9</span>
-                      <span class="viewer-help-step-title">GLB 导出</span>
-                      <button class="viewer-help-step-detail-btn" type="button" data-detail="export">详情</button>
-                    </div>
-                    <div class="viewer-help-step-content" data-detail-content="export" hidden>
-                      <p>渲染完成后，系统会将场景导出为 GLB 格式（Binary glTF），这是一种高效的 3D 场景文件格式。</p>
-                      <p><strong>为什么用 GLB？</strong> GLB 格式将所有资源（几何体、材质、纹理）打包为单一文件，便于网络传输和 Three.js 加载。</p>
-                    </div>
-                  </div>
-                  <div class="viewer-help-step" data-step="organize">
-                    <div class="viewer-help-step-header">
-                      <span class="viewer-help-step-number">10</span>
-                      <span class="viewer-help-step-title">结果整理</span>
-                      <button class="viewer-help-step-detail-btn" type="button" data-detail="organize">详情</button>
-                    </div>
-                    <div class="viewer-help-step-content" data-detail-content="organize" hidden>
-                      <p>最后，系统会生成 <code>scene_layout.json</code> 文件，包含所有资产的放置信息、场景统计数据和生产步骤（Production Steps）。</p>
-                      <p><strong>生产步骤是什么？</strong> 生产步骤记录了场景构建的中间过程，你可以在 Viewer 中逐步查看道路基础 → 建筑 → 家具 → 最终预览的各个阶段。</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              <div class="viewer-help-section">
-                <h3 class="viewer-help-section-title">🎯 Design 面板使用指南</h3>
-                <div class="viewer-help-fields">
-                  <div class="viewer-help-field">
-                    <h4 class="viewer-help-field-title">场景结构</h4>
-                    <p>场景结构决定道路、路口、铺装和功能区。可以使用基础模板，也可以选择已有结构变体。</p>
-                    <ul class="viewer-help-list">
-                      <li>基础模板：不套用结构变体，直接从默认图模板生成</li>
-                      <li>结构变体：会改变道路功能区、表面铺装或设施位置</li>
-                      <li>临时结构：可以用一句话创建，验证后再参与生成</li>
-                    </ul>
-                  </div>
-                  <div class="viewer-help-field">
-                    <h4 class="viewer-help-field-title">Street Furniture Design Goal（街道家具设计目标）</h4>
-                    <p>街道家具设计目标是一组设施密度、优先级、风格和渲染参数的快捷选择，不直接改变道路结构。</p>
-                    <ul class="viewer-help-list">
-                      <li><strong>步行友好（Pedestrian Friendly）：</strong>行人优先，全龄友好，低车流量，高绿化</li>
-                      <li><strong>商业活力（Commercial Vitality）：</strong>商业活跃，人流密集，高设施密度</li>
-                      <li><strong>公交优先（Transit Priority）：</strong>公交导向，换乘便利，高公交可达性</li>
-                      <li><strong>公园景观（Park Landscape）：</strong>绿化为主，自然生态，休闲舒适</li>
-                      <li><strong>安静居住（Quiet Residential）：</strong>住宅区安静环境，绿树成荫</li>
-                      <li><strong>平衡街道（Balanced Complete）：</strong>各类使用者平衡的完整街道</li>
-                    </ul>
-                  </div>
-                  <div class="viewer-help-field">
-                    <h4 class="viewer-help-field-title">Extra Notes（补充要求）</h4>
-                    <p>补充要求是可选偏好，用来微调氛围、风格或设施倾向，不需要重复结构方案。</p>
-                    <ul class="viewer-help-list">
-                      <li>可以描述功能定位，如"更像校园入口"、"减少车行感"</li>
-                      <li>可以描述氛围感受，如"安静舒适"、"充满活力"</li>
-                      <li>可以描述具体特征，如"加强夜间照明"、"有更多座椅"</li>
-                    </ul>
-                  </div>
-                  <div class="viewer-help-field">
-                    <h4 class="viewer-help-field-title">Output（输出数量）</h4>
-                    <p>选择生成单个方案还是三个变体（A/B/C）：</p>
-                    <ul class="viewer-help-list">
-                      <li><strong>生成 1 个方案：</strong>速度更快，适合快速预览</li>
-                      <li><strong>生成 3 个轻微变化方案：</strong>A/B/C 会有不同的密度和道路宽度扰动，方便对比选择</li>
-                    </ul>
-                  </div>
-                  <div class="viewer-help-field">
-                    <h4 class="viewer-help-field-title">Graph Template（图模板）</h4>
-                    <p>图模板定义了街道的拓扑结构和布局骨架。</p>
-                    <ul class="viewer-help-list">
-                      <li>默认模板：<code>hkust_gz_gate</code>（港科大广州校门）</li>
-                      <li>可以指定其他已配置的模板 ID</li>
-                      <li>模板决定了道路数量、车道宽度和基本布局</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-              
-              <div class="viewer-help-section">
-                <h3 class="viewer-help-section-title">💡 常见问题</h3>
-                <div class="viewer-help-faq">
-                  <details class="viewer-help-faq-item">
-                    <summary class="viewer-help-faq-question">生成一个场景需要多长时间？</summary>
-                    <div class="viewer-help-faq-answer">
-                      <p>通常需要 1-5 分钟，具体取决于场景复杂度、资产数量和服务器负载。计算密集型任务包括布局生成、约束求解和资产组合。</p>
-                    </div>
-                  </details>
-                  <details class="viewer-help-faq-item">
-                    <summary class="viewer-help-faq-question">为什么生成失败了？</summary>
-                    <div class="viewer-help-faq-answer">
-                      <p>可能的原因包括：约束冲突无法解决、资产检索失败、模板配置错误等。请查看错误提示，调整预设或提示词后重试。</p>
-                    </div>
-                  </details>
-                  <details class="viewer-help-faq-item">
-                    <summary class="viewer-help-faq-question">如何选择最佳方案？</summary>
-                    <div class="viewer-help-faq-answer">
-                      <p>如果只是快速看效果，先生成 1 个方案；如果要比较设计方向，再生成 3 个轻微变化方案。加载后可以使用 Evaluate 面板进行评分对比。</p>
-                    </div>
-                  </details>
-                  <details class="viewer-help-faq-item">
-                    <summary class="viewer-help-faq-question">什么是 Production Steps？</summary>
-                    <div class="viewer-help-faq-answer">
-                      <p>Production Steps 是场景构建的中间过程记录，包括道路基础 → 建筑体块 → POI 上下文 → 家具锚点 → 必需家具 → 可选家具 → 最终预览。你可以在 Viewer 的 Settings 中切换到不同步骤查看。</p>
-                    </div>
-                  </details>
-                </div>
-              </div>
-            </div>
-          </aside>
-        `,
-      },
-    ],
-    null,
-  );
+  shell.setLeftSections(createViewerLeftSections(t));
+  shell.setRightTabs(createViewerRightTabs(t), null);
   shell.statusStatusHost.innerHTML = `<div id="viewer-status" class="desktop-shell-inline-status" data-i18n-key="viewer.status.loading">${t("Loading viewer...", "正在加载查看器...")}</div>`;
   shell.setStatusSummary({ key: "viewer.status.loading" });
   shell.statusActivityHost.innerHTML = `<div class="desktop-shell-log-entry" data-tone="neutral" data-i18n-key="viewer.status.initialized">${t("Viewer shell initialized.", "查看器框架已初始化。")}</div>`;
-  shell.centerStage.innerHTML = `
-    <div class="viewer-shell viewer-shell-embedded">
-      <div class="viewer-command-hub" hidden>
-        <button id="viewer-menu-toggle" type="button" aria-label="Menu" aria-expanded="false">☰</button>
-        <div id="viewer-menu-dropdown" hidden></div>
-        <button id="viewer-scene-graph-link" type="button">Annotation</button>
-        <button id="viewer-asset-editor-link" type="button">Asset Editor</button>
-        <button id="viewer-junction-editor-link" type="button">Junction Editor</button>
-        <button id="viewer-settings-toggle" type="button" aria-expanded="false">Settings</button>
-        <button id="viewer-design-toggle" type="button">Design</button>
-        <button id="viewer-compare-toggle" type="button">Compare</button>
-        <button id="viewer-presets-toggle" type="button">Presets</button>
-        <button id="viewer-evaluate-toggle" type="button">Evaluate</button>
-        <button id="viewer-history-analysis-toggle" type="button">History</button>
-        <button id="viewer-floating-lane-toggle" type="button">Floating Lane</button>
-        <button id="viewer-help-toggle" type="button">Help</button>
-        <button id="viewer-export-topdown-map" type="button">Export PNG</button>
-        <button id="viewer-export-topdown-svg" type="button">Export SVG</button>
-      </div>
-      <div id="viewer-canvas" class="viewer-canvas"></div>
-      <div id="viewer-design-workspace" class="viewer-design-workspace" hidden></div>
-      <button id="viewer-exit-compare3d" class="viewer-exit-compare3d" type="button" hidden data-i18n-key="viewer.compare.exit">Exit Split View</button>
-      <div id="viewer-crosshair" class="viewer-crosshair" hidden></div>
-      <div id="viewer-info-card" class="viewer-info-card" hidden></div>
-      <div id="viewer-minimap" class="viewer-minimap">
-        <div class="viewer-minimap-title">
-          <span data-i18n-key="viewer.minimap.title">Scene Map</span>
-          <button id="viewer-minimap-expand" class="viewer-minimap-expand" type="button" aria-label="Expand Scene Map" title="Expand Scene Map">&#x26F6;</button>
-        </div>
-        <div id="viewer-minimap-canvas" class="viewer-minimap-canvas"></div>
-        <canvas id="viewer-minimap-overlay" class="viewer-minimap-overlay"></canvas>
-      </div>
-      <canvas id="viewer-axis-hud" class="viewer-axis-hud"></canvas>
-      <div id="viewer-overlay" class="viewer-overlay" data-i18n-key="viewer.overlay.capture">Click scene to capture mouse</div>
-      <div id="viewer-error" class="viewer-error" hidden></div>
-    </div>
-  `;
+  shell.centerStage.innerHTML = createViewerStageHtml();
 
-  const canvasHost = requireElement<HTMLElement>(root, "#viewer-canvas");
-  const designWorkspaceEl = requireElement<HTMLElement>(root, "#viewer-design-workspace");
-  const statusEl = requireElement<HTMLElement>(root, "#viewer-status");
-  const overlayEl = requireElement<HTMLElement>(root, "#viewer-overlay");
-  const errorEl = requireElement<HTMLElement>(root, "#viewer-error");
-  const layoutSelectEl = requireElement<HTMLSelectElement>(root, "#layout-select");
-  const selectEl = requireElement<HTMLSelectElement>(root, "#scene-select");
-  const schemeCompareEl = requireElement<HTMLElement>(root, "#viewer-scheme-compare");
-  const sceneGraphLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-scene-graph-link");
-  const assetEditorLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-asset-editor-link");
-  
-  const menuToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-menu-toggle");
-  const menuDropdownEl = requireElement<HTMLElement>(root, "#viewer-menu-dropdown");
-  const settingsToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-settings-toggle");
-  const settingsPanelEl = requireElement<HTMLElement>(root, "#viewer-settings-panel");
-  const settingsCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-settings-close");
-  const infoCardEl = requireElement<HTMLElement>(root, "#viewer-info-card");
-  const crosshairEl = requireElement<HTMLElement>(root, "#viewer-crosshair");
-  const minimapEl = requireElement<HTMLElement>(root, "#viewer-minimap");
-  const minimapExpandEl = requireElement<HTMLButtonElement>(root, "#viewer-minimap-expand");
-  const minimapHost = requireElement<HTMLElement>(root, "#viewer-minimap-canvas");
-  const minimapOverlayEl = requireElement<HTMLCanvasElement>(root, "#viewer-minimap-overlay");
-  const axisHudEl = requireElement<HTMLCanvasElement>(root, "#viewer-axis-hud");
-  const lightingPresetEl = requireElement<HTMLSelectElement>(root, "#lighting-preset");
-  const exposureInput = requireElement<HTMLInputElement>(root, "#lighting-exposure");
-  const keyInput = requireElement<HTMLInputElement>(root, "#lighting-key");
-  const fillInput = requireElement<HTMLInputElement>(root, "#lighting-fill");
-  const warmthInput = requireElement<HTMLInputElement>(root, "#lighting-warmth");
-  const shadowInput = requireElement<HTMLInputElement>(root, "#lighting-shadow");
-  const exposureValueEl = requireElement<HTMLElement>(root, "#lighting-exposure-value");
-  const keyValueEl = requireElement<HTMLElement>(root, "#lighting-key-value");
-  const fillValueEl = requireElement<HTMLElement>(root, "#lighting-fill-value");
-  const warmthValueEl = requireElement<HTMLElement>(root, "#lighting-warmth-value");
-  const shadowValueEl = requireElement<HTMLElement>(root, "#lighting-shadow-value");
-  const thirdPersonToggleEl = requireElement<HTMLInputElement>(root, "#third-person-enabled");
-  const frameModeToggleEl = requireElement<HTMLInputElement>(root, "#frame-mode-enabled");
-  const assetBboxToggleEl = requireElement<HTMLInputElement>(root, "#asset-bbox-enabled");
-  const assetMoveToggleEl = requireElement<HTMLInputElement>(root, "#asset-move-enabled");
-  const laserToggleEl = requireElement<HTMLInputElement>(root, "#laser-pointer-enabled");
+  const {
+    canvasHost,
+    designWorkspaceEl,
+    statusEl,
+    overlayEl,
+    errorEl,
+    layoutSelectEl,
+    selectEl,
+    schemeCompareEl,
+    sceneGraphLinkEl,
+    assetEditorLinkEl,
+    junctionEditorLinkEl,
+    menuToggleEl,
+    menuDropdownEl,
+    settingsToggleEl,
+    settingsPanelEl,
+    settingsCloseEl,
+    infoCardEl,
+    crosshairEl,
+    minimapEl,
+    minimapExpandEl,
+    minimapHost,
+    minimapOverlayEl,
+    axisHudEl,
+    lightingPresetEl,
+    exposureInput,
+    keyInput,
+    fillInput,
+    warmthInput,
+    shadowInput,
+    exposureValueEl,
+    keyValueEl,
+    fillValueEl,
+    warmthValueEl,
+    shadowValueEl,
+    thirdPersonToggleEl,
+    frameModeToggleEl,
+    assetBboxToggleEl,
+    assetMoveToggleEl,
+    laserToggleEl,
+    designToggleEl,
+    designPanelEl,
+    designReviewRunEl,
+    designCloseEl,
+    designPresetEl,
+    designPromptEl,
+    designCountEl,
+    designTemplateEl,
+    designScenarioEl,
+    designScenarioMetaEl,
+    designSkeletonSummaryEl,
+    designScenarioPreviewEl,
+    designScenarioAnnotationEl,
+    designScenarioDraftPromptEl,
+    designScenarioUseLlmEl,
+    designScenarioDraftEl,
+    designScenarioUseDraftEl,
+    designScenarioDraftResultEl,
+    designSkeletonProfileEl,
+    designFurnitureProfileEl,
+    designFurnitureSummaryEl,
+    designMatrixEl,
+    designBenchmarkEl,
+    designBranchHistoryEl,
+    designBranchRunEl,
+    designGenerateEl,
+    designStatusEl,
+    designResultEl,
+    evaluateToggleEl,
+    evaluatePanelEl,
+    evaluateCloseEl,
+    evaluateRunEl,
+    evaluateContentEl,
+    compareToggleEl,
+    comparePanelEl,
+    compareCloseEl,
+    compareSelectAEl,
+    compareSelectBEl,
+    compareResultsEl,
+    exitCompare3dEl,
+    historyAnalysisToggleEl,
+    historyAnalysisPanelEl,
+    historyAnalysisCloseEl,
+    historyAnalysisContentEl,
+    exportTopdownMapEl,
+    exportTopdownSvgEl,
+    presetsToggleEl,
+    presetsPanelEl,
+    presetsCloseEl,
+    presetsGridEl,
+    helpToggleEl,
+    helpPanelEl,
+    helpCloseEl,
+    helpContentEl,
+    graphOverlayToggleEl,
+    layoutOverlayToggleEl,
+    analysisOverlayToggleEl,
+    dioramaFinishToggleEl,
+    audioToggleEl,
+    floatingLanePanelHost,
+    floatingLaneToggleEl,
+  } = collectViewerPanelElements(root);
 
-  const designToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-design-toggle");
-  const designPanelEl = requireElement<HTMLElement>(root, "#viewer-design-panel");
-  const designReviewRunEl = requireElement<HTMLButtonElement>(root, "#viewer-design-review-run");
-  const designCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-design-close");
-  const designPresetEl = requireElement<HTMLSelectElement>(root, "#viewer-design-preset");
-  const designPromptEl = requireElement<HTMLTextAreaElement>(root, "#viewer-design-prompt");
-  const designCountEl = requireElement<HTMLSelectElement>(root, "#viewer-design-count");
-  const designTemplateEl = requireElement<HTMLInputElement>(root, "#viewer-design-template");
-  const designScenarioEl = requireElement<HTMLSelectElement>(root, "#viewer-design-scenario");
-  const designScenarioMetaEl = requireElement<HTMLElement>(root, "#viewer-design-scenario-meta");
-  const designSkeletonSummaryEl = requireElement<HTMLElement>(root, "#viewer-design-skeleton-summary");
-  const designScenarioPreviewEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-preview");
-  const designScenarioAnnotationEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-annotation");
-  const designScenarioDraftPromptEl = requireElement<HTMLTextAreaElement>(root, "#viewer-design-scenario-draft-prompt");
-  const designScenarioUseLlmEl = requireElement<HTMLInputElement>(root, "#viewer-design-scenario-use-llm");
-  const designScenarioDraftEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-draft");
-  const designScenarioUseDraftEl = requireElement<HTMLButtonElement>(root, "#viewer-design-scenario-use-draft");
-  const designScenarioDraftResultEl = requireElement<HTMLElement>(root, "#viewer-design-scenario-draft-result");
-  const designSkeletonProfileEl = requireElement<HTMLSelectElement>(root, "#viewer-design-skeleton-profile");
-  const designFurnitureProfileEl = requireElement<HTMLSelectElement>(root, "#viewer-design-furniture-profile");
-  const designFurnitureSummaryEl = requireElement<HTMLElement>(root, "#viewer-design-furniture-summary");
-  const designMatrixEl = requireElement<HTMLElement>(root, "#viewer-design-matrix");
-  const designBenchmarkEl = requireElement<HTMLButtonElement>(root, "#viewer-design-benchmark");
-  const designBranchHistoryEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-history");
-  const designBranchRunEl = requireElement<HTMLButtonElement>(root, "#viewer-design-branch-run");
-  const designGenerateEl = requireElement<HTMLButtonElement>(root, "#viewer-design-generate");
-  const designStatusEl = requireElement<HTMLElement>(root, "#viewer-design-status");
-  const designResultEl = requireElement<HTMLElement>(root, "#viewer-design-result");
-
-  const evaluateToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-evaluate-toggle");
-  const evaluatePanelEl = requireElement<HTMLElement>(root, "#viewer-evaluate-panel");
-  const evaluateCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-evaluate-close");
-  const evaluateRunEl = requireElement<HTMLButtonElement>(root, "#viewer-evaluate-run");
-  const evaluateContentEl = requireElement<HTMLElement>(root, "#viewer-evaluate-content");
-
-  const compareToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-compare-toggle");
-  const comparePanelEl = requireElement<HTMLElement>(root, "#viewer-compare-panel");
-  const compareCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-compare-close");
-  const compareSelectAEl = requireElement<HTMLSelectElement>(root, "#compare-layout-a");
-  const compareSelectBEl = requireElement<HTMLSelectElement>(root, "#compare-layout-b");
-  const compareResultsEl = requireElement<HTMLElement>(root, "#viewer-compare-results");
-  const exitCompare3dEl = requireElement<HTMLButtonElement>(root, "#viewer-exit-compare3d");
-
-  const historyAnalysisToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-history-analysis-toggle");
-  const historyAnalysisPanelEl = requireElement<HTMLElement>(root, "#viewer-history-analysis-panel");
-  const historyAnalysisCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-history-analysis-close");
-  const historyAnalysisContentEl = requireElement<HTMLElement>(root, "#viewer-history-analysis-content");
   const historyPanelController = createHistoryPanelController({
     contentEl: historyAnalysisContentEl,
     loadRecentLayouts,
     loadManifest,
   });
-  const exportTopdownMapEl = requireElement<HTMLButtonElement>(root, "#viewer-export-topdown-map");
-  const exportTopdownSvgEl = requireElement<HTMLButtonElement>(root, "#viewer-export-topdown-svg");
-  const presetsToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-presets-toggle");
-  const presetsPanelEl = requireElement<HTMLElement>(root, "#viewer-presets-panel");
-  const presetsCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-presets-close");
-  const presetsGridEl = requireElement<HTMLElement>(root, "#viewer-presets-grid");
-
-  const helpToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-help-toggle");
-  const helpPanelEl = requireElement<HTMLElement>(root, "#viewer-help-panel");
-  const helpCloseEl = requireElement<HTMLButtonElement>(root, "#viewer-help-close");
-  const helpContentEl = requireElement<HTMLElement>(root, "#viewer-help-content");
-
-  const graphOverlayToggleEl = requireElement<HTMLInputElement>(root, "#graph-overlay-enabled");
-
-  const layoutOverlayToggleEl = requireElement<HTMLInputElement>(root, "#layout-overlay-enabled");
-  const analysisOverlayToggleEl = requireElement<HTMLInputElement>(root, "#analysis-overlay-enabled");
-  const dioramaFinishToggleEl = requireElement<HTMLInputElement>(root, "#diorama-finish-enabled");
-  const audioToggleEl = requireElement<HTMLInputElement>(root, "#audio-enabled");
 
   const toggleButtonsByInput = new Map<HTMLInputElement, HTMLButtonElement>();
   const settingToggleButtons = Array.from(root.querySelectorAll<HTMLButtonElement>(".viewer-toggle-button"));
@@ -1760,7 +1188,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     cameraForwardHorizontal,
     axisHudEl,
     layoutOverlayToggleEl,
-    panelHost: requireElement<HTMLElement>(root, "#viewer-floating-lane-panel-host"),
+    panelHost: floatingLanePanelHost,
     shell,
     shouldDeactivateTab: () => !panelController?.isAnyOpen(),
   });
@@ -3035,7 +2463,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     { signal },
   );
 
-  const junctionEditorLinkEl = requireElement<HTMLButtonElement>(root, "#viewer-junction-editor-link");
   junctionEditorLinkEl.addEventListener(
     "click",
     () => {
@@ -3352,7 +2779,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }, { signal });
 
   // Floating Lane Overlay toggle
-  const floatingLaneToggleEl = requireElement<HTMLButtonElement>(root, "#viewer-floating-lane-toggle");
   floatingLaneToggleEl.addEventListener("click", () => {
     floatingLaneSystem.toggleOverlay();
   }, { signal });
