@@ -448,6 +448,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   const captureMode = isHeadlessCaptureRequest();
   let currentLang: ViewerLanguage = loadViewerLanguage();
   const t = (en: string, zh: string): string => viewerText(currentLang, en, zh);
+  const shellReactPanelCleanups: Array<() => void> = [];
+  const registerShellReactPanelCleanup = (cleanup: () => void): void => {
+    shellReactPanelCleanups.push(cleanup);
+  };
   document.body.classList.toggle("roadgen-capture-mode", captureMode);
   shell.setHints(captureMode
     ? [{ key: "viewer.hints.captureMode" }]
@@ -457,7 +461,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         { key: "viewer.hints.tools" },
       ]);
   shell.setLeftSections(createViewerLeftSections(t));
-  shell.setRightTabs(createViewerRightTabs(t), null);
+  shell.setRightTabs(createViewerRightTabs(t, registerShellReactPanelCleanup), null);
   shell.statusStatusHost.innerHTML = `<div id="viewer-status" class="desktop-shell-inline-status" data-i18n-key="viewer.status.loading">${t("Loading viewer...", "正在加载查看器...")}</div>`;
   shell.setStatusSummary({ key: "viewer.status.loading" });
   shell.statusActivityHost.innerHTML = `<div class="desktop-shell-log-entry" data-tone="neutral" data-i18n-key="viewer.status.initialized">${t("Viewer shell initialized.", "查看器框架已初始化。")}</div>`;
@@ -3254,6 +3258,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       minimapClickHandle = null;
     }
     eventController.abort();
+    shellReactPanelCleanups.splice(0).forEach((cleanup) => cleanup());
     controls.removeEventListener("lock", handleControlsLock);
     controls.removeEventListener("unlock", handleControlsUnlock);
     if (controls.isLocked) {
