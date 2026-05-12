@@ -1,0 +1,245 @@
+.viewer-minimap-title {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.85rem;
+  right: 0.7rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #334155;
+  pointer-events: none;
+}
+
+.viewer-minimap-expand {
+  width: 1.85rem;
+  height: 1.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: zoom-in;
+  pointer-events: auto;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.viewer-minimap-expand:hover,
+.viewer-minimap-expand:focus-visible {
+  border-color: rgba(0, 83, 159, 0.42);
+  background: #fff;
+  color: #00539f;
+  outline: none;
+}
+
+.viewer-minimap-canvas,
+.viewer-minimap-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.viewer-minimap-canvas {
+  cursor: crosshair;
+}
+
+.viewer-minimap-overlay {
+  pointer-events: auto;
+}
+
+.viewer-expanded-map-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.viewer-expanded-map-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.viewer-expanded-map-panel {
+  position: relative;
+  z-index: 1;
+  width: min(92vw, 1200px);
+  height: min(86vh, 900px);
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.72);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.96);
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.32);
+}
+
+.viewer-expanded-map-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem 0.75rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.viewer-expanded-map-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.viewer-expanded-map-heading h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1.02rem;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.viewer-expanded-map-status {
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.viewer-expanded-map-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.viewer-expanded-map-mode {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(241, 245, 249, 0.86);
+}
+
+.viewer-expanded-map-mode button,
+.viewer-expanded-map-export,
+.viewer-expanded-map-close {
+  height: 2rem;
+  border: 0;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 720;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.viewer-expanded-map-mode button {
+  padding: 0 0.75rem;
+  background: transparent;
+}
+
+.viewer-expanded-map-mode button[data-active="true"] {
+  background: #00539f;
+  color: #fff;
+}
+
+.viewer-expanded-map-export {
+  padding: 0 0.75rem;
+  border: 1px solid rgba(0, 83, 159, 0.28);
+  border-radius: 8px;
+  background: rgba(230, 240, 255, 0.92);
+  color: #003366;
+}
+
+.viewer-expanded-map-close {
+  width: 2rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #0f172a;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.viewer-expanded-map-mode button:hover,
+.viewer-expanded-map-export:hover,
+.viewer-expanded-map-close:hover,
+.viewer-expanded-map-layer:hover,
+.viewer-expanded-map-metric:hover,
+.viewer-expanded-map-compare-toggle:hover {
+  filter: brightness(0.98);
+}
+
+.viewer-expanded-map-mode button:focus-visible,
+.viewer-expanded-map-export:focus-visible,
+.viewer-expanded-map-close:focus-visible,
+.viewer-expanded-map-layer:focus-within,
+.viewer-expanded-map-metric:focus-within,
+.viewer-expanded-map-compare-toggle:focus-within,
+.viewer-expanded-map-compare-select select:focus-visible {
+  outline: 2px solid rgba(0, 83, 159, 0.42);
+  outline-offset: 2px;
+}
+
+.viewer-expanded-map-layerbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 1rem;
+  overflow-x: auto;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.viewer-expanded-map-metricbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 1rem 0.6rem;
+  overflow-x: auto;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.viewer-expanded-map-metricbar-label {
+  flex: 0 0 auto;
+  color: #334155;
+  font-size: 0.76rem;
+  font-weight: 780;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.viewer-expanded-map-metricbar-options {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: max-content;
+}
+
+.viewer-expanded-map-comparebar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 1rem;
+  overflow-x: auto;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(248, 250, 252, 0.86);
+}

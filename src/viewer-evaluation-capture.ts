@@ -71,14 +71,15 @@ function currentEvaluationForward(deps: EvaluationCaptureDeps): THREE.Vector3 {
 function makePedestrianEvaluationCamera(
   deps: EvaluationCaptureDeps,
   direction: 1 | -1,
+  eyeHeightM = deps.avatarEyeHeightM,
 ): THREE.PerspectiveCamera {
   const bbox = deps.currentRoot ? sceneContentBounds(deps.currentRoot) : null;
   const eye = deps.currentSpawn.clone();
   if (!Number.isFinite(eye.x) || !Number.isFinite(eye.y) || !Number.isFinite(eye.z)) {
-    eye.set(0, deps.avatarEyeHeightM, 0);
+    eye.set(0, eyeHeightM, 0);
   }
   const groundY = bbox ? bbox.min.y : 0;
-  eye.y = Math.max(eye.y, groundY + deps.avatarEyeHeightM);
+  eye.y = Math.max(eye.y, groundY + eyeHeightM);
 
   const forward = currentEvaluationForward(deps).multiplyScalar(direction);
   const target = eye.clone().add(forward.multiplyScalar(12));
@@ -147,6 +148,11 @@ export async function captureEvaluationViews(
       view_id: "overview_topdown",
       label: "Overview top-down view",
       image_data_url: renderEvaluationCameraToDataUrl(deps, makeOverviewEvaluationCamera(deps)),
+    },
+    {
+      view_id: "child_forward",
+      label: "Child forward view",
+      image_data_url: renderEvaluationCameraToDataUrl(deps, makePedestrianEvaluationCamera(deps, 1, 1.1)),
     },
   ];
   return views.every((view) => view.image_data_url.startsWith("data:image/")) ? views : [];

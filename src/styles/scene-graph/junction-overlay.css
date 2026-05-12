@@ -1,0 +1,248 @@
+.annotation-junction-nearroad-connector {
+  fill: none;
+  stroke: rgba(126, 101, 71, 0.92);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.annotation-junction-frontage-corner {
+  fill: rgb(183, 212, 230);
+  fill-opacity: 0.98;
+  stroke: rgba(119, 160, 186, 0.46);
+  stroke-width: 1;
+}
+
+.annotation-junction-frontage-connector {
+  fill: none;
+  stroke: rgba(183, 212, 230, 0.94);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.annotation-junction-connector-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: stroke;
+}
+
+.annotation-junction-vehicle-connector-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: stroke;
+}
+
+.annotation-junction-turn-lane-patch {
+  fill-opacity: 0.98;
+  stroke-opacity: 0.78;
+  stroke-linejoin: round;
+  pointer-events: auto;
+}
+
+.annotation-junction-turn-lane-patch-selected {
+  fill-opacity: 0.94;
+  stroke-opacity: 0.95;
+}
+
+.annotation-lane-element-selected {
+  filter: drop-shadow(0 0 12px rgba(255, 43, 128, 0.42));
+  stroke: rgba(255, 43, 128, 0.98) !important;
+  stroke-opacity: 1 !important;
+}
+
+.annotation-lane-element-related {
+  filter: drop-shadow(0 0 8px rgba(0, 184, 148, 0.28));
+  stroke: rgba(0, 184, 148, 0.82) !important;
+  stroke-opacity: 0.9 !important;
+}
+
+.annotation-junction-turn-lane-patch.annotation-lane-element-selected,
+.annotation-junction-sidewalk-corner.annotation-lane-element-selected,
+.annotation-junction-nearroad-corner.annotation-lane-element-selected,
+.annotation-junction-frontage-corner.annotation-lane-element-selected {
+  fill-opacity: 0.95;
+  stroke-width: 2.6px !important;
+}
+
+.annotation-junction-turn-lane-patch.annotation-lane-element-related,
+.annotation-junction-sidewalk-corner.annotation-lane-element-related,
+.annotation-junction-nearroad-corner.annotation-lane-element-related,
+.annotation-junction-frontage-corner.annotation-lane-element-related {
+  fill-opacity: 0.78;
+  stroke-width: 2px !important;
+}
+
+.annotation-junction-lane-hit-area {
+  fill: transparent !important;
+  stroke: transparent !important;
+  pointer-events: all;
+}
+
+.annotation-junction-lane-hit-area.annotation-lane-element-selected {
+  fill: rgba(255, 43, 128, 0.16) !important;
+  stroke: rgba(255, 43, 128, 0.98) !important;
+  stroke-opacity: 1 !important;
+  stroke-width: 2.6px !important;
+}
+
+.annotation-junction-lane-hit-area.annotation-lane-element-related {
+  fill: rgba(0, 184, 148, 0.12) !important;
+  stroke: rgba(0, 184, 148, 0.82) !important;
+  stroke-opacity: 0.9 !important;
+  stroke-width: 2px !important;
+}
+
+.annotation-junction-corner-kernel {
+  fill: none;
+  stroke: rgba(45, 117, 220, 0.82);
+  stroke-width: 3;
+  stroke-dasharray: 10 6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.annotation-junction-boundary {
+  stroke: rgba(244, 248, 255, 0.92);
+  stroke-width: 3.6;
+  stroke-dasharray: 10 6;
+}
+
+.annotation-junction-label {
+  fill: #f8fbff;
+  font-size: 12px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: rgba(25, 31, 43, 0.8);
+  stroke-width: 3px;
+}
+
+.annotation-junction-debug-label {
+  fill: #f8fbff;
+  font-size: 10px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: rgba(25, 31, 43, 0.88);
+  stroke-width: 3px;
+  pointer-events: none;
+}
+
+.annotation-junction-core-selected,
+.annotation-junction-crosswalk-selected,
+.annotation-junction-sidewalk-corner-selected,
+.annotation-junction-nearroad-corner-selected,
+.annotation-junction-frontage-corner-selected {
+  filter: drop-shadow(0 0 12px rgba(29, 78, 216, 0.42));
+}
+
+.annotation-junction-core-selected {
+  fill: rgb(56, 64, 75);
+  fill-opacity: 0.96;
+  stroke: rgba(234, 243, 255, 0.95);
+  stroke-width: 2.4;
+}
+
+.annotation-junction-crosswalk-selected {
+  fill: rgba(255, 255, 255, 0.96);
+  stroke: rgba(77, 127, 214, 0.96);
+  stroke-width: 1.6;
+}
+
+.annotation-junction-sidewalk-corner-selected {
+  fill: rgb(248, 238, 219);
+  fill-opacity: 0.98;
+  stroke: rgba(78, 125, 210, 0.82);
+  stroke-width: 1.6;
+}
+
+.annotation-junction-sidewalk-connector-selected {
+  filter: drop-shadow(0 0 12px rgba(29, 78, 216, 0.42));
+  stroke: rgba(78, 125, 210, 0.92);
+}
+
+.annotation-junction-nearroad-corner-selected {
+  fill: rgb(153, 120, 80);
+  fill-opacity: 0.92;
+  stroke: rgba(72, 113, 196, 0.82);
+  stroke-width: 1.6;
+}
+
+.annotation-junction-nearroad-connector-selected {
+  filter: drop-shadow(0 0 12px rgba(29, 78, 216, 0.42));
+  stroke: rgba(72, 113, 196, 0.92);
+}
+
+.annotation-junction-frontage-corner-selected {
+  fill: rgb(196, 225, 241);
+  fill-opacity: 0.92;
+  stroke: rgba(72, 113, 196, 0.82);
+  stroke-width: 1.6;
+}
+
+.annotation-junction-frontage-connector-selected {
+  filter: drop-shadow(0 0 12px rgba(29, 78, 216, 0.42));
+  stroke: rgba(72, 113, 196, 0.92);
+}
+
+.annotation-overlay-svg[data-hide-junction-outlines="true"] .annotation-junction-core,
+.annotation-overlay-svg[data-hide-junction-outlines="true"] .annotation-junction-crosswalk,
+.annotation-overlay-svg[data-hide-junction-outlines="true"] .annotation-junction-sidewalk-corner,
+.annotation-overlay-svg[data-hide-junction-outlines="true"] .annotation-junction-nearroad-corner,
+.annotation-overlay-svg[data-hide-junction-outlines="true"] .annotation-junction-frontage-corner {
+  stroke: none !important;
+}
+
+.annotation-junction-boundary-selected {
+  stroke: rgba(255, 255, 255, 1);
+  stroke-width: 5.4;
+}
+
+.annotation-junction-control-point {
+  fill: rgba(255, 242, 105, 0.96);
+  stroke: rgba(77, 60, 10, 0.92);
+  stroke-width: 1.4;
+  pointer-events: none;
+}
+
+.annotation-junction-foot-point {
+  fill: rgba(255, 255, 255, 0.98);
+  stroke: rgba(25, 56, 118, 0.92);
+  stroke-width: 1.6;
+}
+
+.annotation-junction-corner-focus {
+  fill: rgba(255, 158, 69, 0.96);
+  stroke: rgba(120, 56, 8, 0.95);
+  stroke-width: 1.8;
+  pointer-events: none;
+}
+
+.annotation-junction-boundary-extension {
+  stroke: rgba(255, 178, 87, 0.92);
+  stroke-width: 2.2;
+  stroke-dasharray: 8 6;
+  pointer-events: none;
+}
+
+.annotation-junction-focus-guide {
+  stroke: rgba(255, 241, 173, 0.82);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 5;
+  pointer-events: none;
+}
+
+.annotation-junction-label-selected {
+  fill: #ffffff;
+  stroke: rgba(28, 56, 111, 0.96);
+  stroke-width: 4px;
+}
+
+.annotation-junction-control-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}

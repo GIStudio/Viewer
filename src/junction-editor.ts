@@ -8,6 +8,9 @@
  * 4. 保存/导出路口模板
  */
 
+import "./styles/junction-editor.css";
+import "./style-junction-editor.css";
+
 import { API_BASE } from "./sg-constants";
 import { NOMINAL_STRIP_WIDTHS } from "./sg-constants";
 import {

@@ -20,9 +20,30 @@ export type EvaluationResult = {
   overall: number | null;
   score_weights?: Record<string, number>;
   score_formula?: string;
+  evaluation_profile?: string;
   evaluation: string;
   suggestions: string[];
   config_patch: Record<string, unknown>;
+  indicators?: Record<string, unknown>;
+  indicator_meta?: {
+    profile?: string;
+    walkability?: Record<string, {
+      weight?: number;
+      source?: string;
+      applicability?: string;
+      low_discrimination?: boolean;
+      note?: string;
+    }>;
+    safety?: Record<string, unknown>;
+    beauty?: Record<string, unknown>;
+    child_friendly?: Record<string, unknown>;
+  };
+  child_friendly?: {
+    score: number | null;
+    status: string;
+    indicators?: Record<string, unknown>;
+    suggestions?: string[];
+  };
   llm_status?: {
     safety?: LlmStatusEntry;
     beauty?: LlmStatusEntry;
@@ -30,7 +51,7 @@ export type EvaluationResult = {
 };
 
 export type RenderedEvaluationView = {
-  view_id: "pedestrian_forward" | "pedestrian_reverse" | "overview_topdown";
+  view_id: "pedestrian_forward" | "pedestrian_reverse" | "overview_topdown" | "child_forward";
   label: string;
   image_data_url: string;
 };
@@ -84,15 +105,17 @@ export function hasProvidedVisualInput(entry?: LlmStatusEntry): boolean {
 }
 
 export function renderEvaluationViewsPreview(views: RenderedEvaluationView[]): string {
-  const complete = views.length === 3;
+  const requiredIds: RenderedEvaluationView["view_id"][] = ["pedestrian_forward", "pedestrian_reverse", "overview_topdown", "child_forward"];
+  const capturedIds = new Set(views.map((view) => view.view_id));
+  const complete = requiredIds.every((viewId) => capturedIds.has(viewId));
   if (!complete) {
     return `
         <div class="viewer-evaluate-views" data-state="missing">
           <div class="viewer-evaluate-views-header">
             <span>Rendered views</span>
-            <strong>0 / 3 captured</strong>
+            <strong>${views.length} / 4 captured</strong>
           </div>
-          <div class="viewer-evaluate-views-note">Safety and Beauty will stay N/A until Viewer captures all three visual inputs.</div>
+          <div class="viewer-evaluate-views-note">Visual Safety/Beauty need the pedestrian and overview views; Child Friendly also needs the child-forward view.</div>
         </div>
       `;
   }
@@ -100,7 +123,7 @@ export function renderEvaluationViewsPreview(views: RenderedEvaluationView[]): s
       <div class="viewer-evaluate-views" data-state="provided">
         <div class="viewer-evaluate-views-header">
           <span>Rendered views</span>
-          <strong>${views.length} / 3 captured</strong>
+          <strong>${views.length} / 4 captured</strong>
         </div>
         <div class="viewer-evaluate-view-grid">
           ${views.map((view) => `
@@ -125,10 +148,54 @@ export function enforceVisualEvaluationAvailability(result: EvaluationResult): E
   };
 }
 
+function scoreContributionRows(result: EvaluationResult): string {
+  const weights = result.score_weights || { walkability: 0.45, safety: 0.35, beauty: 0.2 };
+  const entries: Array<{ key: "walkability" | "safety" | "beauty"; label: string; value: number | null; weight: number }> = [
+    { key: "walkability", label: "Walkability", value: result.walkability, weight: Number(weights.walkability ?? 0) },
+    { key: "safety", label: "Visual Safety", value: result.safety, weight: Number(weights.safety ?? 0) },
+    { key: "beauty", label: "Visual Beauty", value: result.beauty, weight: Number(weights.beauty ?? 0) },
+  ];
+  return `
+    <div class="viewer-evaluate-contributions">
+      ${entries.map((entry) => {
+        const score = isScoreValue(entry.value) ? entry.value : 0;
+        const contribution = score * entry.weight;
+        const width = Math.round(clamp(contribution, 0, 100));
+        return `
+          <div class="viewer-evaluate-contribution-row">
+            <span>${escapeHtml(entry.label)}</span>
+            <strong>${formatScore(entry.value)} × ${entry.weight.toFixed(2)}</strong>
+            <div><i style="width:${width}%"></i></div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function indicatorMetaRows(result: EvaluationResult): string {
+  const meta = result.indicator_meta?.walkability || {};
+  const rows = ["TRANSIT_PROX", "FURN_D", "ENTR_DENS", "POI_MIX", "CROSS_PROV"]
+    .map((key) => ({ key, item: meta[key] }))
+    .filter(({ item }) => item);
+  if (rows.length === 0) return "";
+  return `
+    <div class="viewer-evaluate-indicator-meta">
+      ${rows.map(({ key, item }) => `
+        <div class="viewer-evaluate-indicator-row" data-low="${item?.low_discrimination ? "true" : "false"}">
+          <span>${escapeHtml(key)}</span>
+          <strong>${escapeHtml(String(item?.applicability || "local_segment"))}</strong>
+          <em>${escapeHtml(`weight ${Number(item?.weight ?? 0).toFixed(3)}`)}</em>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 export async function requestUnifiedEvaluation(
   layoutPath: string,
   renderedViews: RenderedEvaluationView[],
-  options: { presetId?: string | null; persistToBenchmark?: boolean } = {},
+  options: { presetId?: string | null; persistToBenchmark?: boolean; evaluationProfile?: string } = {},
 ): Promise<EvaluationResult> {
   const response = await fetch(`${API_BASE}/api/design/evaluate/unified`, {
     method: "POST",
@@ -138,6 +205,7 @@ export async function requestUnifiedEvaluation(
       rendered_views: renderedViews,
       preset_id: options.presetId || undefined,
       persist_to_benchmark: Boolean(options.persistToBenchmark),
+      evaluation_profile: options.evaluationProfile || "local_segment_v1",
     }),
   });
 
@@ -172,6 +240,9 @@ export function renderEvaluationResultHtml(
   const safetyStatus = llmStatusPresentation(result.llm_status?.safety);
   const beautyStatus = llmStatusPresentation(result.llm_status?.beauty);
   const scoreFormula = result.score_formula || "overall = walkability 0.45 + safety 0.35 + beauty 0.20";
+  const childScore = result.child_friendly?.score ?? null;
+  const childStatus = result.child_friendly?.status || "missing_child_view";
+  const childStatusLabel = childStatus === "scored_structural_v1" ? "Auxiliary · Child view" : "N/A · Child view";
   return `
       <div class="viewer-evaluate-score">
         <div class="viewer-evaluate-score-ring" style="--score-color:${scoreColor};--score-percent:${scorePercent}">
@@ -181,7 +252,8 @@ export function renderEvaluationResultHtml(
       </div>
       <div class="viewer-evaluate-section">
         <div class="viewer-metrics-group-title">Unified Evaluation Formula</div>
-        <div class="viewer-evaluate-text">${escapeHtml(scoreFormula)}</div>
+        <div class="viewer-evaluate-text">${escapeHtml(result.evaluation_profile || "local_segment_v1")} · ${escapeHtml(scoreFormula)}</div>
+        ${scoreContributionRows(result)}
       </div>
       <div class="viewer-evaluate-score-grid">
         <div class="viewer-evaluate-score-card">
@@ -196,8 +268,17 @@ export function renderEvaluationResultHtml(
           <div class="viewer-evaluate-score-card-label">Visual Beauty</div>
           <div class="viewer-evaluate-score-card-value">${formatScore(result.beauty)}</div>
         </div>
+        <div class="viewer-evaluate-score-card">
+          <div class="viewer-evaluate-score-card-label">Child Friendly</div>
+          <div class="viewer-evaluate-score-card-value">${formatScore(childScore)}</div>
+          <small>${escapeHtml(childStatusLabel)}</small>
+        </div>
       </div>
       ${renderEvaluationViewsPreview(renderedViews)}
+      <div class="viewer-evaluate-section">
+        <div class="viewer-metrics-group-title">Indicator Scope</div>
+        ${indicatorMetaRows(result) || `<div class="viewer-evaluate-text">No indicator metadata returned.</div>`}
+      </div>
       <div class="viewer-evaluate-section">
         <div class="viewer-metrics-group-title">Visual LLM Status</div>
         <div class="viewer-evaluate-llm-status">

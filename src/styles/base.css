@@ -1,0 +1,97 @@
+/* ── HKUST Blue Design System ──────────────────────────────────────────── */
+:root {
+  /* Primary Blue (HKUST) */
+  --color-primary: #00539F;
+  --color-primary-dark: #003366;
+  --color-primary-light: #0066CC;
+  --color-primary-lighter: #E6F0FF;
+
+  /* Accent Yellow */
+  --color-accent: #FFD100;
+  --color-accent-dark: #E5B800;
+  --color-accent-light: #FFED66;
+
+  /* Neutral - Tech White */
+  --color-bg: rgba(255, 255, 255, 0.92);
+  --color-bg-solid: #F8FAFC;
+  --color-bg-panel: rgba(255, 255, 255, 0.88);
+  --color-bg-elevated: rgba(255, 255, 255, 0.96);
+  --color-bg-hover: rgba(0, 102, 204, 0.06);
+  --color-bg-active: rgba(0, 102, 204, 0.1);
+
+  /* Text */
+  --color-text: #1E293B;
+  --color-text-secondary: #64748B;
+  --color-text-muted: #94A3B8;
+
+  /* Borders */
+  --color-border: rgba(148, 163, 184, 0.22);
+  --color-border-light: rgba(148, 163, 184, 0.14);
+
+  /* Shadows */
+  --shadow-sm: 0 8px 24px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 12px 32px rgba(15, 23, 42, 0.1);
+  --shadow-lg: 0 20px 50px rgba(15, 23, 42, 0.12);
+
+  /* Radius */
+  --radius-sm: 0.65rem;
+  --radius-md: 0.85rem;
+  --radius-lg: 1rem;
+  --radius-full: 999px;
+
+  color-scheme: light;
+  font-family: "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  background: linear-gradient(135deg, rgba(230, 240, 255, 0.5) 0%, rgba(255, 255, 255, 0.8) 50%, rgba(255, 247, 220, 0.3) 100%);
+  color: var(--color-text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
+body.roadgen-capture-mode {
+  background: #f7f6f3;
+}
+
+body.roadgen-capture-mode .desktop-shell {
+  grid-template-rows: minmax(0, 1fr);
+  background: #f7f6f3;
+}
+
+body.roadgen-capture-mode .desktop-shell-menu,
+body.roadgen-capture-mode .desktop-shell-rail,
+body.roadgen-capture-mode .desktop-shell-status,
+body.roadgen-capture-mode #viewer-minimap,
+body.roadgen-capture-mode #viewer-axis-hud,
+body.roadgen-capture-mode #viewer-overlay,
+body.roadgen-capture-mode #viewer-info-card,
+body.roadgen-capture-mode #viewer-crosshair {
+  display: none !important;
+}
+
+body.roadgen-capture-mode .desktop-shell-main {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+body.roadgen-capture-mode .desktop-shell-center {
+  padding: 0;
+}
+
+body.roadgen-capture-mode .desktop-shell-center-stage {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: #f7f6f3;
+}

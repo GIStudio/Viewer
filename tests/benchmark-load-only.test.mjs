@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 
 const appSrc = await fs.readFile(new URL("../src/app.ts", import.meta.url), "utf8");
+const designPanelSrc = await fs.readFile(new URL("../src/viewer-panels/designPanel.ts", import.meta.url), "utf8");
 const controllerSrc = await fs.readFile(new URL("../src/viewer-design-controller.ts", import.meta.url), "utf8");
 
 assert.ok(
-  appSrc.includes("<button id=\"viewer-design-branch-run\" class=\"viewer-nav-button viewer-nav-button-secondary\" type=\"button\">Load Latest Scores / 加载最近评分</button>"),
+  designPanelSrc.includes("<button id=\"viewer-design-branch-run\" class=\"viewer-nav-button viewer-nav-button-secondary\" type=\"button\">Load Latest Scores / 加载最近评分</button>"),
   "Advanced branch-run button should expose a read-only label for loading latest benchmark scores.",
 );
 
@@ -42,7 +43,11 @@ assert.ok(
 );
 
 assert.ok(
-  controllerSrc.includes('/api/design/benchmark-samples?limit=10000'),
+  (
+    controllerSrc.includes("function benchmarkSamplesUrl(refresh = true): string") &&
+    controllerSrc.includes("`/api/design/benchmark-samples?${params.toString()}`") &&
+    controllerSrc.includes('limit: "10000"')
+  ),
   "Benchmark explorer should query persisted benchmark samples with limit=10000.",
 );
 

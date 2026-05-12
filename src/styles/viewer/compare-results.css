@@ -1,0 +1,247 @@
+.viewer-scheme-compare-meta dt {
+  color: #94a3b8;
+  font-size: 0.64rem;
+  line-height: 1.2;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.viewer-scheme-compare-meta dd {
+  color: #334155;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-scheme-compare-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.viewer-compare3d-labels {
+  position: absolute;
+  top: 0.85rem;
+  left: 0.85rem;
+  right: 0.85rem;
+  z-index: 45;
+  display: grid;
+  gap: 0.65rem;
+  pointer-events: none;
+}
+
+.viewer-compare3d-label {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+  justify-self: start;
+  max-width: min(18rem, 92%);
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(12px);
+}
+
+.viewer-compare3d-label strong,
+.viewer-compare3d-label span,
+.viewer-compare3d-label small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-compare3d-label strong {
+  color: #0f172a;
+  font-size: 0.82rem;
+}
+
+.viewer-compare3d-label span {
+  color: #334155;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.viewer-compare3d-label small {
+  color: #64748b;
+  font-size: 0.68rem;
+}
+
+/* ── Action Buttons ────────────────────────────────────────────────── */
+
+.viewer-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.2rem;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid rgba(107, 114, 128, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #1f2937;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.viewer-action-btn:hover {
+  background: rgba(243, 244, 246, 0.96);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.viewer-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Viewer Slide Panel (shared for Evaluate, Compare, Presets) ── */
+
+.viewer-slide-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 22;
+  width: min(28rem, calc(100vw - 1rem));
+  height: 100%;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: -24px 0 48px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(12px);
+  transform: translateX(100%);
+  transition: transform 180ms ease;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.viewer-slide-panel[data-open="true"] {
+  transform: translateX(0);
+}
+
+.viewer-slide-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-shrink: 0;
+}
+
+.viewer-slide-panel-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.viewer-slide-panel-subtitle {
+  margin-top: 0.2rem;
+  font-size: 0.88rem;
+  color: #64748b;
+}
+
+.viewer-design-review-run {
+  flex: 0 0 auto;
+  min-height: 2rem;
+  padding: 0 0.7rem;
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  border-radius: 8px;
+  background: rgba(239, 246, 255, 0.92);
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.viewer-design-review-run:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.55);
+  background: rgba(219, 234, 254, 0.96);
+}
+
+.viewer-design-review-run:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.viewer-slide-panel-body {
+  flex: 1 1 auto;
+  margin-top: 1rem;
+  overflow-y: auto;
+}
+
+.viewer-slide-panel-footer {
+  flex-shrink: 0;
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.viewer-design-action-sections {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.viewer-design-action-section {
+  display: grid;
+  gap: 0.58rem;
+  padding: 0.68rem;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.86);
+}
+
+.viewer-design-action-section-primary {
+  border-color: rgba(37, 99, 235, 0.24);
+  background: rgba(239, 246, 255, 0.76);
+}
+
+.viewer-design-action-heading {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.viewer-design-action-heading span {
+  color: #0f172a;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.viewer-design-action-heading small {
+  color: #64748b;
+  font-size: 0.73rem;
+  line-height: 1.35;
+}
+
+.viewer-design-action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.52rem;
+}
+
+.viewer-design-action-section-primary .viewer-design-action-row {
+  grid-template-columns: 1fr;
+}
+
+.viewer-design-analysis-details .viewer-design-action-row {
+  grid-template-columns: 1fr;
+}
+
+.viewer-design-flow-section {
+  display: grid;
+  gap: 0.58rem;
+  padding: 0.72rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.viewer-design-flow-heading {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.55rem;
+  align-items: start;
+}

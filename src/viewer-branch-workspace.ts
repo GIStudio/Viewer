@@ -43,6 +43,7 @@ function restorableGlbPath(node: BranchRunNode): string {
 
 const SCATTER_COLOR_FEATURES = [
   ["", "Overall / Preset"],
+  ["__generation_method", "Generation method"],
   ["scene.tree_count", "Tree count"],
   ["scene.sidewalk_width_m", "Sidewalk width"],
   ["scene.road_width_m", "Road width"],
@@ -54,6 +55,7 @@ const SCATTER_COLOR_FEATURES = [
 ] as const;
 
 function branchPointFeatureValue(point: BranchScatterPoint, feature: string): number | null {
+  if (feature === "__generation_method") return 1;
   const features = point.analysis_features ?? {};
   const [group, key] = feature.split(".", 2);
   const record = group === "input" ? features.input : group === "scene" ? features.scene : group === "derived" ? features.derived : undefined;

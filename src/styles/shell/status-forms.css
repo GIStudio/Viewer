@@ -1,0 +1,245 @@
+.desktop-shell-status-summary {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.desktop-shell-status-summary-label {
+  font-weight: 700;
+}
+
+.desktop-shell-status-body {
+  display: none;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.desktop-shell-status[data-open="true"] .desktop-shell-status-body {
+  display: block;
+}
+
+.desktop-shell-status-tabs {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.75rem 1rem 0;
+}
+
+.desktop-shell-status-tab {
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.desktop-shell-status-tab.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #ffffff;
+}
+
+.desktop-shell-status-panels {
+  padding: 0.9rem 1rem 1rem;
+}
+
+.desktop-shell-status-panel {
+  display: none;
+}
+
+.desktop-shell-status-panel.active {
+  display: block;
+}
+
+.desktop-shell-status-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.desktop-shell-log-entry,
+.desktop-shell-inline-status {
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--color-text);
+  font-size: 0.88rem;
+}
+
+.desktop-shell-log-entry[data-tone="success"],
+.desktop-shell-inline-status[data-tone="success"] {
+  border-color: rgba(22, 163, 74, 0.24);
+  background: rgba(220, 252, 231, 0.7);
+}
+
+.desktop-shell-log-entry[data-tone="warning"],
+.desktop-shell-inline-status[data-tone="warning"] {
+  border-color: rgba(217, 119, 6, 0.25);
+  background: rgba(254, 243, 199, 0.72);
+}
+
+.desktop-shell-log-entry[data-tone="error"],
+.desktop-shell-inline-status[data-tone="error"] {
+  border-color: rgba(220, 38, 38, 0.25);
+  background: rgba(254, 226, 226, 0.72);
+}
+
+.desktop-shell-form-stack {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.desktop-shell-field {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.desktop-shell-inline-button {
+  width: 100%;
+}
+
+.desktop-shell-inline-panel,
+.desktop-shell-empty-state {
+  padding: 0.9rem;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--color-text-secondary);
+}
+
+.desktop-shell-inline-panel-body {
+  margin-top: 0.85rem;
+}
+
+.desktop-shell-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.desktop-shell-chip {
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.viewer-shell-embedded,
+.scene-shell-stage,
+.asset-editor-shell-stage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.viewer-command-hub {
+  display: none;
+}
+
+.desktop-shell .viewer-shell {
+  background: transparent;
+}
+
+.desktop-shell .viewer-canvas[data-slide-open="true"] {
+  margin-right: 0;
+}
+
+.desktop-shell .viewer-settings-panel,
+.desktop-shell .viewer-slide-panel {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: auto;
+  height: auto;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  transform: none;
+  overflow: visible;
+}
+
+.desktop-shell .viewer-settings-panel[data-open="true"],
+.desktop-shell .viewer-slide-panel[data-open="true"] {
+  transform: none;
+}
+
+.desktop-shell .viewer-slide-panel-body,
+.desktop-shell .viewer-settings-panel {
+  max-height: none;
+}
+
+.desktop-shell .viewer-overlay {
+  z-index: 5;
+}
+
+.desktop-shell .asset-gallery-panel-shell {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.desktop-shell .ae-actions-bar-shell {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.scene-bottom-toolbar-shell {
+  padding: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.scene-shell-stage {
+  padding: 0.9rem;
+  background: rgba(248, 250, 252, 0.82);
+}
+
+.je-canvas-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.je-canvas-shell .je-canvas-wrap {
+  height: 100%;
+}
+
+@media (max-width: 1180px) {
+  .desktop-shell-menu {
+    grid-template-columns: 1fr;
+  }
+
+  .desktop-shell-main {
+    grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+  }
+
+  .desktop-shell-rail-right {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(22rem, 85vw);
+    z-index: 12;
+    box-shadow: -12px 0 30px rgba(15, 23, 42, 0.12);
+  }
+
+  .desktop-shell-right-collapsed .desktop-shell-rail-right {
+    display: none;
+  }
+}

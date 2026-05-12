@@ -1,8 +1,9 @@
 import "antd/dist/reset.css";
-import "./style.css";
+import "./styles/base.css";
+import "./styles/shell.css";
+import "./styles/shared.css";
 import "./react-shell.css";
-import "./style-junction-editor.css";
-import "./style-scene-compare.css";
+import "./style.css";
 
 import { createRoot } from "react-dom/client";
 

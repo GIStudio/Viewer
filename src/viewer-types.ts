@@ -500,6 +500,7 @@ export type GenerationTrace = {
   job_id?: string;
   run_id?: string;
   node_id?: string;
+  generation_method?: string;
   status?: string;
   created_at?: string;
   started_at?: string;
@@ -512,6 +513,7 @@ export type GenerationTrace = {
     parameter_sources_by_field?: Record<string, string>;
     knowledge_source?: KnowledgeSourceKey | string;
     evidence_count?: number;
+    generation_method?: string;
   };
   llm_recommendation?: {
     normalized_scene_query?: string;
@@ -522,6 +524,7 @@ export type GenerationTrace = {
     overridden_fields?: string[];
     risk_notes?: string[];
     derivation_status?: string;
+    generation_method?: string;
   };
   process?: {
     current_stage?: string;
@@ -657,6 +660,7 @@ export type BranchRunNode = {
   can_restore_artifact?: boolean;
   evaluation?: Record<string, unknown>;
   trace?: GenerationTrace;
+  generation_method?: string;
   config_patch?: Record<string, unknown>;
   llm_candidate_reasoning?: string;
   optimization_directives?: Array<Record<string, unknown>>;
@@ -691,6 +695,7 @@ export type BranchScatterPoint = {
   depth: number;
   rank: number;
   status: string;
+  generation_method?: string;
   label?: string;
   preset_id?: string;
   preset_name?: string;
@@ -755,6 +760,7 @@ export type BenchmarkSample = {
   prompt?: string;
   graph_template_id?: string;
   knowledge_source?: string;
+  generation_method?: string;
   scene_layout_path?: string;
   scene_glb_path?: string;
   walkability: number | null;

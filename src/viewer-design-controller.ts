@@ -59,6 +59,7 @@ type BranchRunListPayload = {
 
 type BenchmarkExplorerView = "overview" | "correlation";
 type BenchmarkOutcomeKey = "walkability" | "safety" | "beauty" | "overall";
+type BenchmarkGenerationMethodFilter = "all" | "llm_assisted" | "pure_llm" | "parametric" | "unknown_legacy";
 
 export type ViewerDesignController = {
   runDesignGeneration: () => Promise<void>;
@@ -115,6 +116,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
   let benchmarkPayload: BenchmarkSamplesPayload | null = null;
   let benchmarkAnalysisPayload: BenchmarkAnalysisPayload | null = null;
   let activeBenchmarkPresetId = "all";
+  let activeBenchmarkGenerationMethod: BenchmarkGenerationMethodFilter = "all";
   let activeBenchmarkView: BenchmarkExplorerView = "overview";
   let benchmarkAnalysisTarget: BenchmarkOutcomeKey = "overall";
   let benchmarkCorrelationMode: BenchmarkCorrelationMode = "pooled";
@@ -184,9 +186,40 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
   }
 
   function benchmarkSamplesForActivePreset(payload: BenchmarkSamplesPayload): BenchmarkSample[] {
-    const items = payload.items || [];
-    if (activeBenchmarkPresetId === "all") return items;
-    return items.filter((item) => item.preset_id === activeBenchmarkPresetId);
+    let items = payload.items || [];
+    if (activeBenchmarkPresetId !== "all") {
+      items = items.filter((item) => item.preset_id === activeBenchmarkPresetId);
+    }
+    if (activeBenchmarkGenerationMethod !== "all") {
+      items = items.filter((item) => generationMethod(item) === activeBenchmarkGenerationMethod);
+    }
+    return items;
+  }
+
+  function generationMethod(sample: Pick<BenchmarkSample, "generation_method">): BenchmarkGenerationMethodFilter {
+    const value = String(sample.generation_method || "unknown_legacy");
+    return (["llm_assisted", "pure_llm", "parametric", "unknown_legacy"].includes(value)
+      ? value
+      : "unknown_legacy") as BenchmarkGenerationMethodFilter;
+  }
+
+  function generationMethodLabel(method: string): string {
+    return {
+      all: "All methods",
+      llm_assisted: "LLM assisted",
+      pure_llm: "Pure LLM",
+      parametric: "Parametric",
+      unknown_legacy: "Legacy",
+    }[method] || method;
+  }
+
+  function generationMethodCounts(payload: BenchmarkSamplesPayload): Record<string, number> {
+    const counts: Record<string, number> = { all: payload.items?.length ?? 0 };
+    for (const sample of payload.items || []) {
+      const method = generationMethod(sample);
+      counts[method] = (counts[method] || 0) + 1;
+    }
+    return counts;
   }
 
   function benchmarkSyntheticPayload(payload: BenchmarkSamplesPayload): BranchRunStatusPayload {
@@ -222,6 +255,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       preset_id: sample.preset_id,
       preset_name: sample.preset_name,
       preset_color: sample.preset_color,
+      generation_method: generationMethod(sample),
       llm_candidate_reasoning: `${sample.preset_name || sample.preset_id} benchmark sample from ${sample.source || "benchmark store"}.`,
       optimization_directives: [],
       rejected_edits: [],
@@ -260,6 +294,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       preset_name: sample.preset_name,
       preset_label: sample.preset_label,
       preset_color: sample.preset_color,
+      generation_method: generationMethod(sample),
       analysis_features: sample.analysis_features,
     }));
     return {
@@ -289,7 +324,15 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     if (activeBenchmarkPresetId !== "all") {
       params.set("preset_id", activeBenchmarkPresetId);
     }
+    if (activeBenchmarkGenerationMethod !== "all") {
+      params.set("generation_method", activeBenchmarkGenerationMethod);
+    }
     return `/api/design/benchmark-analysis?${params.toString()}`;
+  }
+
+  function benchmarkSamplesUrl(refresh = true): string {
+    const params = new URLSearchParams({ limit: "10000", refresh: refresh ? "true" : "false" });
+    return `/api/design/benchmark-samples?${params.toString()}`;
   }
 
   function mergeAnalysisIntoBenchmarkSamples(analysis: BenchmarkAnalysisPayload): void {
@@ -548,6 +591,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     if (!payload) return;
     const summaries = payload.summaries || [];
     const activeSamples = benchmarkSamplesForActivePreset(payload);
+    const methodCounts = generationMethodCounts(payload);
     const batchLine = batch ? `
       <div class="viewer-benchmark-batch-status">
         <strong>6×100 Batch · ${escapeHtml(batch.status)}</strong>
@@ -581,6 +625,14 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
             </button>
           `).join("")}
         </div>
+        <div class="viewer-benchmark-filters viewer-benchmark-method-filters">
+          ${(["all", "llm_assisted", "pure_llm", "parametric", "unknown_legacy"] as BenchmarkGenerationMethodFilter[]).map((method) => `
+            <button type="button" data-benchmark-method-filter="${escapeHtml(method)}" data-active="${activeBenchmarkGenerationMethod === method ? "true" : "false"}">
+              <span class="viewer-benchmark-method-dot" data-method="${escapeHtml(method)}"></span>
+              ${escapeHtml(generationMethodLabel(method))} · ${methodCounts[method] || 0}
+            </button>
+          `).join("")}
+        </div>
         ${activeBenchmarkView === "correlation" ? renderBenchmarkAnalysisPanel() : `
           <div class="viewer-benchmark-summary-grid">
             ${summaries.map((summary) => `
@@ -610,6 +662,23 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     deps.designResultEl.querySelectorAll<HTMLButtonElement>("[data-benchmark-preset-filter]").forEach((button) => {
       button.addEventListener("click", () => {
         activeBenchmarkPresetId = button.dataset.benchmarkPresetFilter || "all";
+        benchmarkAnalysisPayload = null;
+        benchmarkSelectedFeature = "";
+        deps.setSelectedBranchNodeId(null);
+        renderBenchmarkExplorerResult(batch);
+        deps.renderBranchWorkspace(benchmarkSyntheticPayload(payload));
+        if (activeBenchmarkView === "correlation") {
+          void loadBenchmarkAnalysis().catch((err) => {
+            const message = err instanceof Error ? err.message : "Failed to load benchmark analysis.";
+            deps.updateDesignStatus(message, "error");
+            deps.setError(deps.errorEl, message);
+          });
+        }
+      });
+    });
+    deps.designResultEl.querySelectorAll<HTMLButtonElement>("[data-benchmark-method-filter]").forEach((button) => {
+      button.addEventListener("click", () => {
+        activeBenchmarkGenerationMethod = (button.dataset.benchmarkMethodFilter || "all") as BenchmarkGenerationMethodFilter;
         benchmarkAnalysisPayload = null;
         benchmarkSelectedFeature = "";
         deps.setSelectedBranchNodeId(null);
@@ -745,7 +814,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     deps.designBenchmarkEl.disabled = true;
     deps.updateDesignStatus("Loading persistent benchmark samples...");
     try {
-      benchmarkPayload = await apiJson<BenchmarkSamplesPayload>("/api/design/benchmark-samples?limit=10000");
+      benchmarkPayload = await apiJson<BenchmarkSamplesPayload>(benchmarkSamplesUrl(true));
       benchmarkAnalysisPayload = null;
       benchmarkSelectedFeature = "";
       if ((benchmarkPayload.items || []).length === 0) {

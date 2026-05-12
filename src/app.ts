@@ -11,6 +11,9 @@
  * Before adding more than a small event binding to this file, read:
  * ../ARCHITECTURE.md
  */
+import "./styles/viewer.css";
+import "./style-scene-compare.css";
+
 import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -2361,9 +2364,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         console.warn("Visual evaluation screenshots failed:", captureError);
         renderedViews = [];
       }
-      if (renderedViews.length === 3) {
+      const coreEvaluationViews = renderedViews.filter((view) => view.view_id !== "child_forward");
+      if (coreEvaluationViews.length >= 3) {
         evaluateContentEl.innerHTML = `
-          <div class="viewer-evaluate-loading">Running visual evaluation from 3 rendered views...</div>
+          <div class="viewer-evaluate-loading">Running visual evaluation from ${renderedViews.length} rendered views...</div>
           ${renderEvaluationViewsPreview(renderedViews)}
         `;
         setStatus("Running visual evaluation from captured views...");
@@ -2379,11 +2383,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       const result = await requestUnifiedEvaluation(currentLayoutPath, renderedViews, {
         presetId: String(manifestSummary.preset_id || manifestSummary.benchmark_preset_id || selectedDesignPreset()?.id || "custom"),
         persistToBenchmark: true,
+        evaluationProfile: "local_segment_v1",
       });
       const evalResult = enforceVisualEvaluationAvailability(result);
       evaluateContentEl.innerHTML = renderEvaluationResultHtml(evalResult, renderedViews);
       flashStatus(
-        renderedViews.length === 3
+        coreEvaluationViews.length >= 3
           ? "Visual evaluation complete."
           : "Walkability complete; visual scores unavailable.",
       );

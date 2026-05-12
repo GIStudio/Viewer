@@ -1,0 +1,245 @@
+.ae-asset-table {
+  width: 100%;
+  min-width: 46rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.78rem;
+}
+
+.ae-asset-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.5rem 0.55rem;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-panel);
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.ae-asset-row {
+  cursor: pointer;
+  background: var(--color-bg);
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.ae-asset-row:nth-child(even) {
+  background: color-mix(in srgb, var(--color-bg-elevated) 62%, #ffffff 38%);
+}
+
+.ae-asset-row:hover {
+  background: var(--color-primary-lighter);
+}
+
+.ae-asset-row.active {
+  box-shadow: inset 3px 0 0 var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary-lighter) 78%, #ffffff 22%);
+}
+
+.ae-asset-row.selected {
+  box-shadow: inset 0 0 0 1px rgba(0, 83, 159, 0.18);
+}
+
+.ae-asset-row.disabled {
+  color: var(--color-text-muted);
+}
+
+.ae-asset-table td {
+  padding: 0.5rem 0.55rem;
+  border-bottom: 1px solid var(--color-border-light);
+  vertical-align: middle;
+}
+
+.ae-select-cell {
+  width: 2.3rem;
+  text-align: center;
+}
+
+.ae-asset-id-button {
+  max-width: 13rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-family: "SF Mono", "Roboto Mono", monospace;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ae-asset-id-button:hover {
+  color: var(--color-primary);
+}
+
+.ae-asset-desc {
+  max-width: 16rem;
+  margin-top: 0.12rem;
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ae-eligibility-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  padding: 0.1rem 0.42rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.ae-eligibility-pill.eligible {
+  background: rgba(22, 163, 74, 0.1);
+  color: #166534;
+}
+
+.ae-eligibility-pill.disabled {
+  background: rgba(220, 38, 38, 0.1);
+  color: #991b1b;
+}
+
+.ae-table-muted {
+  display: inline-block;
+  max-width: 8rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ae-table-mono {
+  font-family: "SF Mono", "Roboto Mono", monospace;
+  color: var(--color-text-secondary);
+}
+
+/* Gallery grid */
+.ae-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.65rem;
+  padding: 0.55rem 0.9rem 0.9rem;
+  max-height: calc(100vh - 12rem);
+  overflow-y: auto;
+}
+
+/* Asset card */
+.ae-asset-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.65rem 0.72rem;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  cursor: pointer;
+  transition: box-shadow 120ms ease, transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.ae-asset-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+  border-color: var(--color-primary);
+  background: var(--color-primary-lighter);
+}
+
+.ae-asset-card.active {
+  border-color: var(--color-primary);
+  box-shadow:
+    inset 0 0 0 1px var(--color-primary),
+    var(--shadow-md);
+  background: var(--color-primary-lighter);
+}
+
+/* Card header */
+.ae-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.ae-card-category {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Category badges - HKUST blue palette */
+.badge-tree { background: rgba(0, 83, 159, 0.12); color: var(--color-primary); }
+
+.badge-lamp { background: rgba(255, 209, 0, 0.15); color: #8a6d14; }
+
+.badge-bench { background: rgba(0, 83, 159, 0.08); color: #4a6278; }
+
+.badge-sign { background: rgba(0, 102, 204, 0.12); color: var(--color-primary-light); }
+
+.badge-car { background: rgba(200, 50, 50, 0.1); color: #8a2a2a; }
+
+.badge-building { background: rgba(100, 80, 140, 0.12); color: #5a427a; }
+
+.badge-default { background: rgba(100, 116, 139, 0.12); color: var(--color-text-secondary); }
+
+.ae-card-eligible {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 999px;
+  background: rgba(0, 83, 159, 0.1);
+  color: var(--color-primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+/* Card body */
+.ae-card-body {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.ae-card-id {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text);
+  font-family: "SF Mono", "Roboto Mono", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ae-card-stats {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.76rem;
+  color: var(--color-text-secondary);
+  font-family: "SF Mono", "Roboto Mono", monospace;
+}
+
+/* Card footer */
+.ae-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.ae-card-tier {
+  font-size: 0.78rem;
+  font-weight: 700;
+}

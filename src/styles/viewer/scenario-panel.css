@@ -1,0 +1,54 @@
+.viewer-scenario-result-row[data-status="succeeded"] span {
+  color: #15803d;
+}
+
+.viewer-scenario-result-row[data-status="failed"] span,
+.viewer-scenario-error {
+  color: #b91c1c;
+}
+
+.viewer-scenario-error {
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.viewer-scenario-run-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.viewer-scenario-progress {
+  height: 0.48rem;
+  margin-top: 0.55rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.viewer-scenario-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #16a34a);
+}
+
+.viewer-scenario-report-title {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.viewer-scenario-report-summary {
+  max-height: 8rem;
+  margin: 0.55rem 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #334155;
+}

@@ -1,0 +1,249 @@
+.annotation-strip-row-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.annotation-strip-row-summary {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  align-items: center;
+  color: #42513f;
+  font-size: 0.84rem;
+}
+
+.annotation-overlay-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.annotation-feature-group {
+  pointer-events: none;
+}
+
+.annotation-centerline,
+.annotation-road-band,
+.annotation-cross-strip,
+.annotation-building-region,
+.annotation-region,
+.annotation-surface-annotation,
+.annotation-building-region-handle,
+.annotation-building-region-rotate-handle,
+.annotation-junction-core,
+.annotation-junction-crosswalk,
+.annotation-junction-sidewalk-corner,
+.annotation-junction-nearroad-corner,
+.annotation-junction-frontage-corner,
+.annotation-junction-boundary,
+.annotation-junction-label,
+.annotation-marker,
+.annotation-roundabout,
+.annotation-roundabout-center,
+.annotation-vertex {
+  pointer-events: all;
+}
+
+.annotation-road-band {
+  fill: none;
+  stroke: rgba(44, 133, 255, 0.28);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.annotation-centerline {
+  fill: none;
+  stroke: #1f78ff;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.annotation-cross-strip {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.annotation-cross-strip-selected {
+  filter: drop-shadow(0 0 10px rgba(20, 90, 220, 0.34));
+  stroke: rgba(20, 90, 220, 0.92) !important;
+}
+
+.annotation-cross-strip-linked {
+  filter: drop-shadow(0 0 7px rgba(38, 132, 255, 0.22));
+  stroke: rgba(38, 132, 255, 0.72) !important;
+}
+
+.annotation-building-region {
+  fill: rgba(241, 196, 15, 0.14);
+  stroke: rgba(201, 146, 16, 0.94);
+  stroke-width: 2.4;
+  stroke-dasharray: 12 8;
+}
+
+.annotation-building-region-selected {
+  fill: rgba(241, 196, 15, 0.2);
+  stroke: rgba(180, 99, 14, 0.98);
+  filter: drop-shadow(0 0 12px rgba(212, 132, 34, 0.22));
+}
+
+.annotation-building-region-draft {
+  fill: rgba(241, 196, 15, 0.1);
+  stroke: rgba(201, 146, 16, 0.68);
+}
+
+.annotation-building-region-handle,
+.annotation-building-region-rotate-handle {
+  stroke-width: 2;
+}
+
+.annotation-building-region-handle {
+  fill: #fff9e8;
+  stroke: rgba(180, 99, 14, 0.96);
+}
+
+.annotation-building-region-rotate-guide {
+  fill: none;
+  stroke: rgba(180, 99, 14, 0.76);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+.annotation-building-region-rotate-handle {
+  fill: rgba(180, 99, 14, 0.96);
+  stroke: #fff9e8;
+}
+
+.annotation-functional-zone {
+  fill: rgba(46, 204, 113, 0.12);
+  stroke: rgba(39, 174, 96, 0.92);
+  stroke-width: 2.2;
+}
+
+.annotation-functional-zone-selected {
+  fill: rgba(46, 204, 113, 0.22);
+  stroke: rgba(25, 140, 70, 0.98);
+  filter: drop-shadow(0 0 12px rgba(39, 174, 96, 0.24));
+}
+
+.annotation-region {
+  stroke-width: 2.2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.annotation-region-scene-region {
+  fill: rgba(69, 107, 164, 0.07);
+  stroke: rgba(54, 86, 138, 0.92);
+  stroke-dasharray: 14 8;
+}
+
+.annotation-region-building-region {
+  fill: rgba(229, 169, 63, 0.16);
+  stroke: rgba(171, 104, 21, 0.92);
+}
+
+.annotation-region-functional-zone {
+  fill: rgba(46, 204, 113, 0.11);
+  stroke: rgba(39, 174, 96, 0.88);
+}
+
+.annotation-region-derived {
+  fill: rgba(242, 189, 94, 0.18);
+  stroke-dasharray: 5 4;
+}
+
+.annotation-region-selected {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 12px rgba(69, 107, 164, 0.26));
+}
+
+.annotation-region-draft {
+  fill: rgba(69, 107, 164, 0.08);
+  stroke-dasharray: 8 6;
+}
+
+.annotation-region-draft-line {
+  stroke: rgba(54, 86, 138, 0.72);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.annotation-region-draft-vertex {
+  fill: #edf4ff;
+  stroke: rgba(54, 86, 138, 0.96);
+  stroke-width: 1.5;
+}
+
+.annotation-surface-annotation {
+  stroke-width: 2.4;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: all;
+}
+
+.annotation-surface-annotation.annotation-feature-selected {
+  stroke: #d94646 !important;
+  filter: drop-shadow(0 0 14px rgba(217, 70, 70, 0.3));
+}
+
+.annotation-functional-zone-draft {
+  fill: rgba(46, 204, 113, 0.08);
+  stroke: rgba(39, 174, 96, 0.6);
+  stroke-dasharray: 8 6;
+}
+
+.annotation-functional-zone-draft-line {
+  stroke: rgba(39, 174, 96, 0.6);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.annotation-functional-zone-vertex,
+.annotation-functional-zone-draft-vertex {
+  fill: #e8f8f5;
+  stroke: rgba(25, 140, 70, 0.96);
+  stroke-width: 1.5;
+}
+
+.annotation-junction-visual-surface {
+  pointer-events: all;
+}
+
+.annotation-junction-core {
+  fill: rgb(56, 64, 75);
+  fill-opacity: 0.92;
+  stroke: rgba(27, 34, 47, 0.78);
+  stroke-width: 1.8;
+}
+
+.annotation-junction-crosswalk {
+  fill: rgb(246, 247, 248);
+  fill-opacity: 0.94;
+  stroke: rgba(218, 222, 226, 0.92);
+  stroke-width: 1;
+}
+
+.annotation-junction-sidewalk-corner {
+  fill: rgb(235, 224, 206);
+  fill-opacity: 1;
+  stroke: rgba(188, 177, 159, 0.72);
+  stroke-width: 1;
+}
+
+.annotation-junction-sidewalk-connector {
+  fill: none;
+  stroke: rgba(235, 224, 206, 0.96);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.annotation-junction-nearroad-corner {
+  fill: rgb(126, 101, 71);
+  fill-opacity: 0.98;
+  stroke: rgba(103, 80, 56, 0.5);
+  stroke-width: 1;
+}

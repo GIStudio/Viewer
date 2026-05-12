@@ -1,0 +1,244 @@
+.annotation-centerline-draft {
+  stroke: #53a26d;
+  stroke-dasharray: 18 10;
+}
+
+.annotation-branch-preview {
+  fill: none;
+  stroke: #53a26d;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 18 10;
+}
+
+.annotation-cross-preview {
+  stroke: #2563eb;
+}
+
+.annotation-branch-anchor {
+  fill: #fff7d6;
+  stroke: #53a26d;
+  stroke-width: 4;
+}
+
+.annotation-cross-anchor {
+  fill: #eef5ff;
+  stroke: #2563eb;
+}
+
+.annotation-branch-end {
+  fill: rgba(255, 253, 246, 0.92);
+  stroke: #53a26d;
+  stroke-width: 3;
+}
+
+.annotation-cross-end {
+  stroke: #2563eb;
+}
+
+.annotation-branch-end-snapped {
+  fill: #53a26d;
+}
+
+.annotation-marker {
+  stroke: #fffdf6;
+  stroke-width: 3;
+}
+
+.annotation-junction {
+  fill: #f59e0b;
+}
+
+.annotation-control-point {
+  fill: #e11d48;
+}
+
+.annotation-roundabout {
+  fill: rgba(20, 145, 115, 0.14);
+  stroke: #149173;
+  stroke-width: 6;
+}
+
+.annotation-roundabout-center {
+  fill: #149173;
+  stroke: #fffdf6;
+  stroke-width: 2;
+}
+
+.annotation-vertex {
+  fill: #fffdf6;
+  stroke: #1f78ff;
+  stroke-width: 3;
+}
+
+.annotation-vertex-draft {
+  stroke: #53a26d;
+}
+
+.annotation-feature-selected {
+  filter: drop-shadow(0 0 12px rgba(217, 70, 70, 0.36));
+  stroke: #d94646;
+}
+
+.annotation-vertex-selected {
+  fill: #d94646;
+}
+
+.annotation-furniture-point {
+  fill: #6f4e37;
+  stroke: #fffdf6;
+  stroke-width: 2;
+}
+
+.annotation-furniture-zone-point {
+  fill: #4a7c59;
+  stroke: #fffdf6;
+  stroke-width: 2;
+}
+
+.annotation-furniture-label {
+  font: 600 13px/1 "SF Mono", "Roboto Mono", monospace;
+  fill: #36261b;
+  paint-order: stroke;
+  stroke: rgba(255, 253, 246, 0.92);
+  stroke-width: 3px;
+}
+
+.annotation-label {
+  font: 600 18px/1 "SF Mono", "Roboto Mono", monospace;
+  fill: #1f2a20;
+  paint-order: stroke;
+  stroke: rgba(255, 253, 246, 0.96);
+  stroke-width: 4px;
+}
+
+.scene-bullet-list {
+  margin: 0;
+  padding: 0 1.2rem 1.1rem 2.2rem;
+  color: #2f3a30;
+  line-height: 1.6;
+}
+
+.scene-table-wrap {
+  padding: 0.85rem 1rem 1rem;
+  overflow: auto;
+}
+
+.scene-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 0;
+  table-layout: fixed;
+  font-size: 0.92rem;
+}
+
+.scene-table th,
+.scene-table td {
+  padding: 0.7rem 0.6rem;
+  border-bottom: 1px solid rgba(111, 128, 107, 0.18);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.scene-table th {
+  color: #4f5d4d;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 1320px) {
+  .scene-sidebar {
+    position: static;
+    width: 100%;
+    margin-top: 1rem;
+    grid-template-columns: 1fr;
+    pointer-events: auto;
+  }
+
+  .scene-sidebar-rail {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .scene-sidebar-toggle {
+    width: auto;
+    min-height: 2.55rem;
+    padding: 0.55rem 0.85rem;
+    grid-auto-flow: column;
+  }
+
+  .scene-sidebar-toggle-label {
+    writing-mode: horizontal-tb;
+    text-orientation: mixed;
+    transform: none;
+  }
+
+  .scene-sidebar-content {
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .scene-layer-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .scene-fact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .scene-inspector-grid,
+  .scene-layer-controls-annotation {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  body {
+    overflow: auto;
+  }
+
+  .viewer-topbar,
+  .scene-page-topbar {
+    flex-direction: column;
+  }
+
+  .viewer-actions {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .scene-page {
+    padding: 0.85rem;
+  }
+
+  .scene-layer-toolbar {
+    align-items: stretch;
+  }
+
+  .scene-import-toolbar {
+    align-items: stretch;
+  }
+
+  .scene-file-button,
+  .scene-toolbar-button {
+    width: 100%;
+  }
+
+  .scene-range-control {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .scene-range-control input[type="range"] {
+    width: 100%;
+  }
+
+  .scene-table {
+    min-width: 0;
+  }
+}

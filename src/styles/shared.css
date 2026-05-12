@@ -1,0 +1,96 @@
+/* ── Unified Header Styles (shared across viewer pages) ──────────────────── */
+
+/* Full header layout for scene-graph and asset-editor */
+.viewer-header-full {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.viewer-header-full-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.viewer-header-full-info {
+  min-width: 0;
+}
+
+.viewer-header-full-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+/* Menu button active state */
+.viewer-menu-button-active {
+  background: rgba(31, 42, 32, 0.85) !important;
+  color: #fffdf6 !important;
+  cursor: default;
+}
+
+/* Header responsive */
+@media (max-width: 768px) {
+  .viewer-header-full {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .viewer-header-full-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .viewer-header-full-info .scene-page-subtitle {
+    display: none;
+  }
+}
+
+/* ── Toast Notification (shared) ────────────────────────────────────────── */
+
+.ui-toast {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.85rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.4;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.15);
+  opacity: 0;
+  transform: translateX(1rem);
+  transition: opacity 240ms ease, transform 240ms ease;
+  pointer-events: auto;
+}
+
+.ui-toast.ui-toast-show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.ui-toast-success {
+  background: rgba(221, 239, 215, 0.96);
+  color: #244121;
+  border: 1px solid rgba(34, 120, 50, 0.18);
+}
+
+.ui-toast-error {
+  background: rgba(254, 235, 235, 0.96);
+  color: #8f2020;
+  border: 1px solid rgba(200, 40, 40, 0.18);
+}
+
+.ui-toast-info {
+  background: rgba(219, 234, 255, 0.96);
+  color: #1e3a6e;
+  border: 1px solid rgba(42, 110, 220, 0.18);
+}

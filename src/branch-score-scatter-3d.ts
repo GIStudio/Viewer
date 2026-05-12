@@ -38,8 +38,19 @@ function pointScore(point: BranchScatterPoint, key: ScoreAxis): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function pointColor(point: BranchScatterPoint, colorDomain: FeatureColorDomain = null): THREE.Color {
+function generationMethodColor(method: string | undefined): THREE.Color {
+  const value = String(method || "unknown_legacy");
+  if (value === "llm_assisted") return new THREE.Color("#2563eb");
+  if (value === "pure_llm") return new THREE.Color("#7c3aed");
+  if (value === "parametric") return new THREE.Color("#059669");
+  return new THREE.Color("#64748b");
+}
+
+function pointColor(point: BranchScatterPoint, colorDomain: FeatureColorDomain = null, colorBy = ""): THREE.Color {
   if (point.status !== "succeeded") return new THREE.Color("#94a3b8");
+  if (colorBy === "__generation_method") {
+    return generationMethodColor(point.generation_method);
+  }
   if (colorDomain) {
     const value = pointFeatureValue(point, colorDomain.feature);
     if (value !== null) {
@@ -68,7 +79,7 @@ function buildTooltip(point: BranchScatterPoint, colorBy = ""): string {
   const paretoLabel = point.is_pareto_front
     ? "Pareto front"
     : (typeof point.pareto_rank === "number" ? `Layer ${point.pareto_rank + 1}` : "Not ranked");
-  const colorValue = colorBy ? pointFeatureValue(point, colorBy) : null;
+  const colorValue = colorBy && colorBy !== "__generation_method" ? pointFeatureValue(point, colorBy) : null;
   return `
     <strong>${escapeHtml(point.label || `${point.node_id}`)}</strong>
     <span>${escapeHtml(point.node_id)}</span>
@@ -78,7 +89,8 @@ function buildTooltip(point: BranchScatterPoint, colorBy = ""): string {
       <div><dt>Safe</dt><dd>${formatScore(pointScore(point, "safety"))} <em>${formatDelta(point.delta_safety)}</em></dd></div>
       <div><dt>Beauty</dt><dd>${formatScore(pointScore(point, "beauty"))} <em>${formatDelta(point.delta_beauty)}</em></dd></div>
       <div><dt>Overall</dt><dd>${formatScore(point.overall)} <em>${formatDelta(point.delta_overall)}</em></dd></div>
-      ${colorBy ? `<div><dt>Color</dt><dd>${escapeHtml(colorBy)} = ${colorValue === null ? "N/A" : escapeHtml(formatFeatureValue(colorValue))}</dd></div>` : ""}
+      <div><dt>Method</dt><dd>${escapeHtml(String(point.generation_method || "unknown_legacy"))}</dd></div>
+      ${colorBy && colorBy !== "__generation_method" ? `<div><dt>Color</dt><dd>${escapeHtml(colorBy)} = ${colorValue === null ? "N/A" : escapeHtml(formatFeatureValue(colorValue))}</dd></div>` : ""}
       <div><dt>Pareto</dt><dd>${escapeHtml(paretoLabel)}</dd></div>
       <div><dt>Dominated</dt><dd>${escapeHtml(String(point.dominated_by_count ?? 0))}</dd></div>
     </dl>
@@ -408,7 +420,7 @@ export function mountBranchScoreScatter3d(
 	    const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(radius, 14, 10),
 	      new THREE.MeshStandardMaterial({
-	        color: pointColor(point, colorDomain),
+	        color: pointColor(point, colorDomain, colorBy),
         emissive: selected || pareto ? new THREE.Color(selected ? "#facc15" : "#38bdf8") : new THREE.Color("#000000"),
         emissiveIntensity: selected ? 0.42 : (pareto ? 0.2 : 0),
         transparent: true,
@@ -439,7 +451,7 @@ export function mountBranchScoreScatter3d(
       tooltip.hidden = true;
       return;
     }
-	    tooltip.innerHTML = buildTooltip(point, colorDomain?.feature ?? "");
+	    tooltip.innerHTML = buildTooltip(point, colorBy === "__generation_method" ? colorBy : (colorDomain?.feature ?? ""));
     const bounds = root.getBoundingClientRect();
     tooltip.style.left = `${Math.min(bounds.width - 220, Math.max(12, event.clientX - bounds.left + 14))}px`;
     tooltip.style.top = `${Math.min(bounds.height - 160, Math.max(12, event.clientY - bounds.top + 14))}px`;

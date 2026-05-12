@@ -1,0 +1,217 @@
+.ae-scale-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.ae-scale-input {
+  width: 5rem;
+  min-height: 2.2rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.84rem;
+  font-family: "SF Mono", "Roboto Mono", monospace;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.ae-scale-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(0, 83, 159, 0.1);
+}
+
+.ae-orientation-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ae-yaw-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.ae-yaw-input {
+  width: 4.5rem;
+  min-height: 2.2rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.84rem;
+  font-family: "SF Mono", "Roboto Mono", monospace;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.ae-yaw-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(0, 83, 159, 0.1);
+}
+
+.ae-front-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ae-front-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.ae-front-select {
+  width: 4rem;
+  min-height: 2.2rem;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.84rem;
+  font-family: "SF Mono", "Roboto Mono", monospace;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.ae-front-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(0, 83, 159, 0.1);
+}
+
+.ae-orientation-status {
+  flex: 1 1 18rem;
+  min-width: 16rem;
+  padding: 0.42rem 0.62rem;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  font-size: 0.76rem;
+  font-family: "SF Mono", "Roboto Mono", monospace;
+  line-height: 1.3;
+}
+
+.ae-dimension-display {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-lighter);
+  font-size: 0.8rem;
+  font-family: "SF Mono", "Roboto Mono", monospace;
+  color: var(--color-primary-dark);
+}
+
+.ae-ruler-label {
+  color: #ffffff;
+  font-family: "SF Mono", "Roboto Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 2px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.ae-actions-sep {
+  width: 1px;
+  height: 1.4rem;
+  background: var(--color-border);
+  margin: 0 0.15rem;
+}
+
+/* Toast */
+.ae-toast-container {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+
+.ae-toast {
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.4;
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  transform: translateX(1rem);
+  transition: opacity 240ms ease, transform 240ms ease;
+  pointer-events: auto;
+}
+
+.ae-toast-show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.ae-toast-success {
+  background: var(--color-bg-elevated);
+  color: var(--color-primary-dark);
+  border: 1px solid var(--color-primary);
+}
+
+.ae-toast-error {
+  background: rgba(254, 235, 235, 0.96);
+  color: #8f2020;
+  border: 1px solid rgba(220, 38, 38, 0.3);
+}
+
+/* ── Asset Editor Responsive ────────────────────────────────────────── */
+
+@media (max-width: 1024px) {
+  .ae-gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+    max-height: 30rem;
+  }
+
+  .ae-preview-canvas {
+    height: 18rem;
+  }
+
+  .ae-info-grid {
+    grid-template-columns: 1fr;
+    gap: 0.3rem;
+  }
+
+  .ae-info-label {
+    margin-top: 0.3rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .ae-filter-bar {
+    flex-direction: column;
+  }
+
+  .ae-gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  }
+
+  .ae-actions-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ae-scale-group {
+    flex-wrap: wrap;
+  }
+
+  .ae-actions-sep {
+    width: 100%;
+    height: 1px;
+  }
+}

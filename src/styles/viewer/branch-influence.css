@@ -1,0 +1,248 @@
+.viewer-branch-influence-row > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.viewer-branch-influence-row span,
+.viewer-branch-influence-row em {
+  color: #64748b;
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.viewer-branch-influence-row strong,
+.viewer-branch-influence-row small,
+.viewer-branch-influence-row p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.viewer-branch-influence-row strong {
+  color: #0f172a;
+  font-size: 0.78rem;
+}
+
+.viewer-branch-influence-row small,
+.viewer-branch-influence-row p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.viewer-branch-detail {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.viewer-branch-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.viewer-branch-detail-panel {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1180px) {
+  .viewer-design-workspace-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .viewer-branch-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .viewer-design-workspace {
+    padding: 0.8rem;
+  }
+
+  .viewer-design-workspace-header {
+    display: grid;
+  }
+
+  .viewer-design-workspace-progress {
+    width: 100%;
+    text-align: left;
+  }
+
+  .viewer-design-stage-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.viewer-design-steps {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.viewer-design-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  color: #94a3b8;
+  transition: color 200ms ease;
+}
+
+.viewer-design-step span {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.viewer-design-step strong {
+  color: inherit;
+  font-size: 0.82rem;
+}
+
+.viewer-design-step small {
+  overflow-wrap: anywhere;
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.viewer-design-step.active {
+  color: #2563eb;
+  font-weight: 500;
+}
+
+.viewer-design-step.completed {
+  color: #16a34a;
+}
+
+.viewer-design-step.failed {
+  color: #dc2626;
+}
+
+.viewer-design-step-indicator {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.05rem;
+  border-radius: 50%;
+  border: 2px solid #cbd5e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 200ms ease;
+}
+
+.viewer-design-step.active .viewer-design-step-indicator {
+  border-color: #2563eb;
+  background: #2563eb;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.viewer-design-step.completed .viewer-design-step-indicator {
+  border-color: #16a34a;
+  background: #16a34a;
+}
+
+.viewer-design-step.failed .viewer-design-step-indicator {
+  border-color: #dc2626;
+  background: #dc2626;
+}
+
+.viewer-design-step-indicator svg {
+  width: 0.7rem;
+  height: 0.7rem;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.viewer-design-step.completed .viewer-design-step-indicator svg,
+.viewer-design-step.failed .viewer-design-step-indicator svg {
+  opacity: 1;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
+  }
+}
+
+.viewer-design-loaded,
+.viewer-design-error {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+}
+
+.viewer-design-loaded {
+  background: rgba(240, 253, 244, 0.9);
+  color: #166534;
+}
+
+.viewer-design-loaded span {
+  overflow-wrap: anywhere;
+  color: #15803d;
+}
+
+.viewer-design-schemes {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.viewer-branch-history {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.75rem;
+}
+
+.viewer-branch-history-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #0f172a;
+  font-size: 0.85rem;
+}
+
+.viewer-branch-history-header span {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.viewer-benchmark-explorer {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.viewer-benchmark-actions,
+.viewer-benchmark-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.viewer-benchmark-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.42rem 0.55rem;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #334155;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
