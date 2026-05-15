@@ -1,22 +1,9 @@
-import type { AnnotatedCenterline, AnnotatedCrossSectionStrip, ClippedDisplaySegment, DerivedJunctionOverlay, LaneElementKind, LaneElementSelection, ReferenceAnnotation, SelectedStripCornerFamilyTarget, StripKind, StripZone } from "../sg-types";
-import { CROSS_SECTION_MODE_DETAILED, METAAURBAN_STRIP_DISPLAY_LABELS, STRIP_KIND_LABELS } from "../sg-constants";
+import type { AnnotatedCenterline, AnnotatedCrossSectionStrip, ClippedDisplaySegment, DerivedJunctionOverlay, LaneElementKind, LaneElementSelection, ReferenceAnnotation, SelectedStripCornerFamilyTarget } from "../sg-types";
+import { CROSS_SECTION_MODE_DETAILED } from "../sg-constants";
 import { deriveJunctionOverlayGeometries } from "../sg-geometry";
 import { deriveLaneProfile, getCenterlineCrossSectionWidth, polylineLength, resolvedCrossSectionMode, selectedStripCornerFamilyTargets } from "../sg-utils";
 import { escapeHtml } from "../viewer-utils";
-
-function metaurbanStripLabel(kind: StripKind): string {
-  return METAAURBAN_STRIP_DISPLAY_LABELS[kind] || STRIP_KIND_LABELS[kind];
-}
-
-function stripZoneSideLabel(zone: StripZone): string {
-  if (zone === "left") {
-    return "Left side";
-  }
-  if (zone === "right") {
-    return "Right side";
-  }
-  return "Center";
-}
+import { metaurbanStripLabel, stripZoneSideLabel } from "./overlayDisplay";
 
 function stripDirectionChip(strip: AnnotatedCrossSectionStrip): string {
   if (strip.direction === "forward") {
