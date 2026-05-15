@@ -74,45 +74,47 @@ export function renderViewerSettingsPanelHtml(): string {
         <label class="viewer-settings-label" for="environment-sun-cycle-speed">Cycle Speed / 循环速度</label>
         <select id="environment-sun-cycle-speed" class="viewer-select viewer-select-compact"></select>
       </div>
-      <div class="viewer-settings-section viewer-settings-section-divider">
-        <button id="third-person-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="third-person-enabled" aria-pressed="false">Third Person Camera</button>
-        <input id="third-person-enabled" class="viewer-toggle-input" type="checkbox" />
-      </div>
-      <div class="viewer-settings-section">
-        <button id="frame-mode-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="frame-mode-enabled" aria-pressed="false">Frame Mode (Show Boundaries)</button>
-        <input id="frame-mode-enabled" class="viewer-toggle-input" type="checkbox" />
-      </div>
-      <div class="viewer-settings-section">
-        <button id="asset-bbox-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="asset-bbox-enabled" aria-pressed="false">Asset BBoxes</button>
-        <input id="asset-bbox-enabled" class="viewer-toggle-input" type="checkbox" />
-      </div>
-      <div class="viewer-settings-section">
-        <button id="asset-move-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="asset-move-enabled" aria-pressed="false">Asset Move Mode</button>
-        <input id="asset-move-enabled" class="viewer-toggle-input" type="checkbox" />
-      </div>
-      <div class="viewer-settings-section">
-        <button id="laser-pointer-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="laser-pointer-enabled" aria-pressed="false">Laser Pointer</button>
-        <input id="laser-pointer-enabled" class="viewer-toggle-input" type="checkbox" />
-      </div>
-      <div class="viewer-settings-section">
-        <button id="graph-overlay-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="graph-overlay-enabled" aria-pressed="false">Graph Overlay</button>
-        <input id="graph-overlay-enabled" class="viewer-toggle-input" type="checkbox" />
-      </div>
-      <div class="viewer-settings-section">
-        <button id="layout-overlay-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="layout-overlay-enabled" aria-pressed="false">Scene Overlay</button>
-        <input id="layout-overlay-enabled" class="viewer-toggle-input" type="checkbox" />
-      </div>
-      <div class="viewer-settings-section">
-        <button id="analysis-overlay-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="analysis-overlay-enabled" aria-pressed="false">Analysis Overlay</button>
-        <input id="analysis-overlay-enabled" class="viewer-toggle-input" type="checkbox" />
-      </div>
-      <div class="viewer-settings-section">
-        <button id="diorama-finish-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="diorama-finish-enabled" aria-pressed="false">Diorama Finish</button>
-        <input id="diorama-finish-enabled" class="viewer-toggle-input" type="checkbox" />
-      </div>
-      <div class="viewer-settings-section">
-        <button id="audio-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="audio-enabled" aria-pressed="false">Ambient Audio</button>
-        <input id="audio-enabled" class="viewer-toggle-input" type="checkbox" />
+      <div class="viewer-settings-section viewer-settings-section-divider viewer-settings-toggle-group" role="group" aria-label="Viewer display toggles">
+        <div class="viewer-settings-toggle-section">
+          <button id="third-person-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="third-person-enabled" aria-pressed="false" aria-label="Third Person Camera">Third Person</button>
+          <input id="third-person-enabled" class="viewer-toggle-input" type="checkbox" />
+        </div>
+        <div class="viewer-settings-toggle-section">
+          <button id="frame-mode-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="frame-mode-enabled" aria-pressed="false" aria-label="Frame Mode (Show Boundaries)">Frame</button>
+          <input id="frame-mode-enabled" class="viewer-toggle-input" type="checkbox" />
+        </div>
+        <div class="viewer-settings-toggle-section">
+          <button id="asset-bbox-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="asset-bbox-enabled" aria-pressed="false" aria-label="Asset BBoxes">BBoxes</button>
+          <input id="asset-bbox-enabled" class="viewer-toggle-input" type="checkbox" />
+        </div>
+        <div class="viewer-settings-toggle-section">
+          <button id="asset-move-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="asset-move-enabled" aria-pressed="false" aria-label="Asset Move Mode">Move</button>
+          <input id="asset-move-enabled" class="viewer-toggle-input" type="checkbox" />
+        </div>
+        <div class="viewer-settings-toggle-section">
+          <button id="laser-pointer-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="laser-pointer-enabled" aria-pressed="false" aria-label="Laser Pointer">Laser</button>
+          <input id="laser-pointer-enabled" class="viewer-toggle-input" type="checkbox" />
+        </div>
+        <div class="viewer-settings-toggle-section">
+          <button id="graph-overlay-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="graph-overlay-enabled" aria-pressed="false" aria-label="Graph Overlay">Graph</button>
+          <input id="graph-overlay-enabled" class="viewer-toggle-input" type="checkbox" />
+        </div>
+        <div class="viewer-settings-toggle-section">
+          <button id="layout-overlay-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="layout-overlay-enabled" aria-pressed="false" aria-label="Scene Overlay">Scene</button>
+          <input id="layout-overlay-enabled" class="viewer-toggle-input" type="checkbox" />
+        </div>
+        <div class="viewer-settings-toggle-section">
+          <button id="analysis-overlay-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="analysis-overlay-enabled" aria-pressed="false" aria-label="Analysis Overlay">Analysis</button>
+          <input id="analysis-overlay-enabled" class="viewer-toggle-input" type="checkbox" />
+        </div>
+        <div class="viewer-settings-toggle-section">
+          <button id="diorama-finish-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="diorama-finish-enabled" aria-pressed="false" aria-label="Diorama Finish">Diorama</button>
+          <input id="diorama-finish-enabled" class="viewer-toggle-input" type="checkbox" />
+        </div>
+        <div class="viewer-settings-toggle-section">
+          <button id="audio-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="audio-enabled" aria-pressed="false" aria-label="Ambient Audio">Audio</button>
+          <input id="audio-enabled" class="viewer-toggle-input" type="checkbox" />
+        </div>
       </div>
     </aside>
   `;

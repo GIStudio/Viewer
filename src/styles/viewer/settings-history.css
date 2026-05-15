@@ -17,6 +17,20 @@
   margin-top: 0.95rem;
 }
 
+.viewer-settings-toggle-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.42rem;
+  margin-top: 0.75rem;
+  padding-top: 0.72rem;
+}
+
+.viewer-settings-toggle-section {
+  display: inline-flex;
+  margin: 0;
+}
+
 .viewer-lang-switcher {
   display: flex;
   gap: 0.5rem;
@@ -61,6 +75,18 @@
   text-align: left;
   cursor: pointer;
   transition: all 150ms ease;
+}
+
+.viewer-settings-toggle-section .viewer-toggle-button {
+  width: auto;
+  min-height: 28px;
+  padding: 0.32rem 0.58rem;
+  font-size: 0.72rem;
+  line-height: 1;
+  border-radius: 999px;
+  box-shadow: none;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .viewer-toggle-button:hover {
