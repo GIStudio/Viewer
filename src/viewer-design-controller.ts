@@ -60,12 +60,15 @@ type BranchRunListPayload = {
 type BenchmarkExplorerView = "overview" | "correlation";
 type BenchmarkOutcomeKey = "walkability" | "safety" | "beauty" | "overall";
 type BenchmarkGenerationMethodFilter = "all" | "llm_assisted" | "pure_llm" | "parametric" | "unknown_legacy";
+type BenchmarkExplorerLoadOptions = {
+  refresh?: boolean;
+};
 
 export type ViewerDesignController = {
   runDesignGeneration: () => Promise<void>;
   runBranchGeneration: () => Promise<void>;
   loadBranchRunHistory: () => Promise<void>;
-  loadBenchmarkExplorer: () => Promise<void>;
+  loadBenchmarkExplorer: (options?: BenchmarkExplorerLoadOptions) => Promise<void>;
   loadLatestScoreResults: () => Promise<void>;
   isDesignGenerating: () => boolean;
   isBranchRunGenerating: () => boolean;
@@ -330,7 +333,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     return `/api/design/benchmark-analysis?${params.toString()}`;
   }
 
-  function benchmarkSamplesUrl(refresh = true): string {
+  function benchmarkSamplesUrl(refresh = false): string {
     const params = new URLSearchParams({ limit: "10000", refresh: refresh ? "true" : "false" });
     return `/api/design/benchmark-samples?${params.toString()}`;
   }
@@ -694,7 +697,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       });
     });
     deps.designResultEl.querySelector<HTMLButtonElement>("[data-benchmark-refresh]")?.addEventListener("click", () => {
-      void loadBenchmarkExplorer();
+      void loadBenchmarkExplorer({ refresh: true });
     });
     deps.designResultEl.querySelector<HTMLButtonElement>("[data-benchmark-start]")?.addEventListener("click", () => {
       void runBenchmarkBatch();
@@ -809,12 +812,13 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     }
   }
 
-  async function loadBenchmarkExplorer(): Promise<void> {
+  async function loadBenchmarkExplorer(options: BenchmarkExplorerLoadOptions = {}): Promise<void> {
     if (designIsGenerating || branchRunIsGenerating) return;
+    const refresh = Boolean(options.refresh);
     deps.designBenchmarkEl.disabled = true;
-    deps.updateDesignStatus("Loading persistent benchmark samples...");
+    deps.updateDesignStatus(refresh ? "Refreshing benchmark store..." : "Loading cached benchmark scores...");
     try {
-      benchmarkPayload = await apiJson<BenchmarkSamplesPayload>(benchmarkSamplesUrl(true));
+      benchmarkPayload = await apiJson<BenchmarkSamplesPayload>(benchmarkSamplesUrl(refresh));
       benchmarkAnalysisPayload = null;
       benchmarkSelectedFeature = "";
       if ((benchmarkPayload.items || []).length === 0) {
@@ -825,20 +829,24 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
               <span>暂无评分结果</span>
             </div>
             <div class="viewer-benchmark-actions">
+              <button class="viewer-nav-button viewer-nav-button-secondary" type="button" data-benchmark-refresh>Refresh Store</button>
               <button class="viewer-nav-button viewer-nav-button-secondary" type="button" data-benchmark-start>Run 6×100 Presets</button>
             </div>
           </div>
         `;
+        deps.designResultEl.querySelector<HTMLButtonElement>("[data-benchmark-refresh]")?.addEventListener("click", () => {
+          void loadBenchmarkExplorer({ refresh: true });
+        });
         deps.designResultEl.querySelector<HTMLButtonElement>("[data-benchmark-start]")?.addEventListener("click", () => {
           void runBenchmarkBatch();
         });
-        deps.updateDesignStatus("暂无评分结果。可前往 Benchmark Store 或 Run 6×100 Presets 进行生成。", "warning");
+        deps.updateDesignStatus("暂无缓存评分。可点击 Refresh Store 导入历史 branch runs，或 Run 6×100 Presets 新建样本。", "warning");
         return;
       }
       renderBenchmarkExplorerResult();
       deps.setSelectedBranchNodeId(null);
       deps.renderBranchWorkspace(benchmarkSyntheticPayload(benchmarkPayload));
-      deps.updateDesignStatus("Persistent benchmark samples loaded.", "success");
+      deps.updateDesignStatus(refresh ? "Benchmark store refreshed." : "Cached benchmark scores loaded.", "success");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load benchmark samples.";
       deps.designResultEl.innerHTML = `<div class="viewer-design-error">${escapeHtml(message)}</div>`;
@@ -853,9 +861,9 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     if (designIsGenerating || branchRunIsGenerating || loadingLatestScores) return;
     loadingLatestScores = true;
     deps.designBranchRunEl.disabled = true;
-    deps.updateDesignStatus("Loading latest benchmark scores...");
+    deps.updateDesignStatus("Loading cached benchmark scores...");
     try {
-      await loadBenchmarkExplorer();
+      await loadBenchmarkExplorer({ refresh: false });
     } finally {
       loadingLatestScores = false;
       deps.designBranchRunEl.disabled = false;
@@ -883,7 +891,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       });
       deps.updateDesignStatus(`Benchmark batch ${batch.batch_id.slice(0, 8)} submitted.`, "success");
       branchRunIsGenerating = false;
-      await loadBenchmarkExplorer();
+      await loadBenchmarkExplorer({ refresh: false });
       scheduleBenchmarkBatchPoll(batch.batch_id);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to submit benchmark batch.";
@@ -911,7 +919,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
           benchmarkBatchPollHandle = window.setTimeout(tick, 5000);
         } else {
           benchmarkBatchPollHandle = null;
-          await loadBenchmarkExplorer();
+          await loadBenchmarkExplorer({ refresh: false });
         }
       } catch {
         benchmarkBatchPollHandle = window.setTimeout(tick, 10000);

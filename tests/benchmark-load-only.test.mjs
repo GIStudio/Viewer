@@ -34,8 +34,8 @@ const nextFuncIdx = controllerSrc.indexOf("  async function runBenchmarkBatch():
 const latestScoreBody = controllerSrc.slice(latestScoreStart, nextFuncIdx >= 0 ? nextFuncIdx : undefined);
 
 assert.ok(
-  latestScoreBody.includes("await loadBenchmarkExplorer();"),
-  "loadLatestScoreResults should reuse existing benchmark explorer GET path.",
+  latestScoreBody.includes("await loadBenchmarkExplorer({ refresh: false });"),
+  "loadLatestScoreResults should reuse the cached benchmark explorer GET path.",
 );
 assert.ok(
   !/postApiJson/.test(latestScoreBody),
@@ -44,11 +44,24 @@ assert.ok(
 
 assert.ok(
   (
-    controllerSrc.includes("function benchmarkSamplesUrl(refresh = true): string") &&
+    controllerSrc.includes("function benchmarkSamplesUrl(refresh = false): string") &&
     controllerSrc.includes("`/api/design/benchmark-samples?${params.toString()}`") &&
     controllerSrc.includes('limit: "10000"')
   ),
-  "Benchmark explorer should query persisted benchmark samples with limit=10000.",
+  "Benchmark explorer should query persisted benchmark samples with limit=10000 and cached loading by default.",
+);
+
+assert.ok(
+  controllerSrc.includes("void loadBenchmarkExplorer({ refresh: true });"),
+  "Refresh Store should explicitly refresh the persisted benchmark sample store.",
+);
+assert.ok(
+  controllerSrc.includes("Refreshing benchmark store..."),
+  "Refresh Store should expose a distinct refresh status.",
+);
+assert.ok(
+  controllerSrc.includes("Loading cached benchmark scores..."),
+  "Load Latest Scores should expose a distinct cached-load status.",
 );
 
 assert.ok(
