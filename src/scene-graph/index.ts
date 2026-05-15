@@ -17,3 +17,28 @@ export {
   hitFromTarget,
   laneHitFromTarget,
 } from "./hitTest";
+export {
+  createEmptyAnnotation,
+  getFeatureCount,
+  getSelectedFeature,
+  nextFeatureId,
+  stringifyAnnotation,
+} from "./annotationModel";
+export {
+  buildBuildingRegionInspectorMarkup,
+  buildFunctionalZoneInspectorMarkup,
+  buildJunctionInspectorMarkup,
+  buildRegionInspectorMarkup,
+  buildSurfaceAnnotationInspectorMarkup,
+} from "./inspector";
+export {
+  buildLaneElementInspectorMarkup,
+  buildRoadCollectionInspectorMarkup,
+} from "./inspectorLaneRoad";
+export {
+  buildBuildingRegionOverlayMarkup,
+  buildFunctionalZoneOverlayMarkup,
+  buildRegionOverlayMarkup,
+  buildStationStripPatchOverlayMarkup,
+  buildSurfaceAnnotationOverlayMarkup,
+} from "./overlay";

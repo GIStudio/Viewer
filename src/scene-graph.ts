@@ -207,10 +207,27 @@ import {
   buildAnnotationSummaryMarkup,
   buildFeatureTableMarkup,
   buildGraphSummaryMarkup,
+  buildBuildingRegionInspectorMarkup,
+  buildFunctionalZoneInspectorMarkup,
+  buildJunctionInspectorMarkup,
+  buildLaneElementInspectorMarkup,
+  buildRegionInspectorMarkup,
+  buildRoadCollectionInspectorMarkup,
+  buildSurfaceAnnotationInspectorMarkup,
+  buildBuildingRegionOverlayMarkup,
+  buildFunctionalZoneOverlayMarkup,
+  buildRegionOverlayMarkup,
+  buildStationStripPatchOverlayMarkup,
+  buildSurfaceAnnotationOverlayMarkup,
   buildingRegionHandleFromTarget,
+  createEmptyAnnotation,
   featureHitFromTarget,
+  getFeatureCount,
+  getSelectedFeature,
   hitFromTarget,
   laneHitFromTarget,
+  nextFeatureId,
+  stringifyAnnotation,
 } from "./scene-graph/index";
 import { applyViewerTranslations, loadViewerLanguage, translateViewerKey, translateViewerLiteral } from "./viewer-i18n";
 import type { ScenarioDesign, ScenarioDesignCatalogPayload } from "./viewer-types";
@@ -572,56 +589,7 @@ function stripVisualSurfaceFillColor(kind: StripKind): string {
   }
 }
 
-function surfaceAnnotationFillColor(role: SurfaceRole): string {
-  switch (role) {
-    case "bus_lane":
-      return "rgba(64, 148, 92, 0.58)";
-    case "bike_lane":
-      return "rgba(50, 126, 86, 0.50)";
-    case "parking_lane":
-      return "rgba(156, 126, 84, 0.46)";
-    case "median":
-    case "median_green":
-    case "grass_belt":
-      return "rgba(98, 145, 80, 0.52)";
-    case "safety_island":
-      return "rgba(228, 220, 202, 0.68)";
-    case "shared_street_surface":
-      return "rgba(180, 160, 140, 0.48)";
-    case "transit_pad":
-      return "rgba(110, 134, 164, 0.52)";
-    case "sidewalk":
-      return "rgba(235, 224, 206, 0.52)";
-    case "furnishing":
-      return "rgba(126, 101, 71, 0.42)";
-    case "context_ground":
-      return "rgba(183, 212, 230, 0.40)";
-    case "crossing":
-      return "rgba(245, 245, 245, 0.62)";
-    case "carriageway":
-      return "rgba(66, 74, 87, 0.42)";
-    case "colored_pavement":
-    default:
-      return "rgba(207, 156, 96, 0.52)";
-  }
-}
 
-function surfaceAnnotationStrokeColor(role: SurfaceRole): string {
-  switch (role) {
-    case "safety_island":
-      return "rgba(112, 104, 92, 0.86)";
-    case "bus_lane":
-      return "rgba(38, 112, 70, 0.88)";
-    case "transit_pad":
-      return "rgba(78, 100, 130, 0.86)";
-    case "shared_street_surface":
-      return "rgba(132, 111, 88, 0.82)";
-    case "colored_pavement":
-      return "rgba(158, 103, 54, 0.86)";
-    default:
-      return "rgba(80, 84, 88, 0.78)";
-  }
-}
 
 function buildMetaurbanAssetBadgeMarkup(
   kind: StripKind,
@@ -684,27 +652,6 @@ async function readApiErrorDetail(response: Response): Promise<string> {
   }
 }
 
-function createEmptyAnnotation(planId = "", imagePath = "", imageWidthPx = 0, imageHeightPx = 0): ReferenceAnnotation {
-  return {
-    version: ANNOTATION_SCHEMA_VERSION,
-    plan_id: planId,
-    image_path: imagePath,
-    image_width_px: imageWidthPx,
-    image_height_px: imageHeightPx,
-    pixels_per_meter: DEFAULT_PIXELS_PER_METER,
-    centerlines: [],
-    junctions: [],
-    roundabouts: [],
-    control_points: [],
-    regions: [],
-    derived_regions: [],
-    building_regions: [],
-    functional_zones: [],
-    surface_annotations: [],
-    station_strip_patches: [],
-    junction_compositions: [],
-  };
-}
 
 function normalizePoint(value: unknown): AnnotationPoint {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -1191,9 +1138,6 @@ function normalizeAnnotation(value: unknown): ReferenceAnnotation {
   };
 }
 
-function stringifyAnnotation(annotation: ReferenceAnnotation): string {
-  return JSON.stringify(annotation, null, 2);
-}
 
 function cloneAnnotation(annotation: ReferenceAnnotation): ReferenceAnnotation {
   return normalizeAnnotation(JSON.parse(stringifyAnnotation(annotation)));
@@ -1259,184 +1203,15 @@ function setStatus(element: HTMLElement, message: SceneGraphStatusText, tone: St
   }
 }
 
-function nextFeatureId(annotation: ReferenceAnnotation, prefix: string): string {
-  const ids = new Set<string>();
-  for (const item of annotation.centerlines) {
-    ids.add(item.id);
-  }
-  for (const item of annotation.junctions) {
-    ids.add(item.id);
-  }
-  for (const item of annotation.roundabouts) {
-    ids.add(item.id);
-  }
-  for (const item of annotation.control_points) {
-    ids.add(item.id);
-  }
-  for (const item of annotation.building_regions) {
-    ids.add(item.id);
-  }
-  for (const item of annotation.regions) {
-    ids.add(item.id);
-  }
-  for (const item of annotation.derived_regions ?? []) {
-    ids.add(item.id);
-  }
-  for (const item of annotation.functional_zones) {
-    ids.add(item.id);
-  }
-  for (const item of annotation.surface_annotations) {
-    ids.add(item.id);
-  }
-  for (const item of annotation.station_strip_patches) {
-    ids.add(item.id);
-  }
-  let counter = 1;
-  while (true) {
-    const candidate = `${prefix}_${String(counter).padStart(2, "0")}`;
-    if (!ids.has(candidate)) {
-      return candidate;
-    }
-    counter += 1;
-  }
-}
 
-function getFeatureCount(annotation: ReferenceAnnotation): number {
-  return (
-    annotation.centerlines.length +
-    annotation.junctions.length +
-    annotation.roundabouts.length +
-    annotation.control_points.length +
-    annotation.regions.length +
-    (annotation.derived_regions?.length ?? 0) +
-    annotation.building_regions.length +
-    annotation.functional_zones.length +
-    annotation.surface_annotations.length +
-    annotation.station_strip_patches.length
-  );
-}
 
-function getSelectedFeature(annotation: ReferenceAnnotation, selection: Selection):
-  | AnnotatedCenterline
-  | AnnotatedBuildingRegion
-  | AnnotatedFunctionalZone
-  | AnnotatedRegion
-  | AnnotatedSurfaceAnnotation
-  | AnnotatedJunction
-  | AnnotatedMarker
-  | AnnotatedRoundabout
-  | DerivedJunctionOverlay
-  | LaneElementSelection
-  | null {
-  if (!selection) {
-    return null;
-  }
-  if (selection.kind === "lane_element") {
-    return selection;
-  }
-  if (selection.kind === "road_collection") {
-    return null;
-  }
-  if (selection.kind === "centerline") {
-    return annotation.centerlines.find((item) => item.id === selection.id) ?? null;
-  }
-  if (selection.kind === "junction") {
-    return annotation.junctions.find((item) => item.id === selection.id) ?? null;
-  }
-  if (selection.kind === "roundabout") {
-    return annotation.roundabouts.find((item) => item.id === selection.id) ?? null;
-  }
-  if (selection.kind === "building_region") {
-    return annotation.building_regions.find((item) => item.id === selection.id) ?? null;
-  }
-  if (selection.kind === "region") {
-    return (
-      annotation.regions.find((item) => item.id === selection.id) ??
-      (annotation.derived_regions ?? []).find((item) => item.id === selection.id) ??
-      null
-    );
-  }
-  if (selection.kind === "functional_zone") {
-    return annotation.functional_zones.find((item) => item.id === selection.id) ?? null;
-  }
-  if (selection.kind === "surface_annotation") {
-    return annotation.surface_annotations.find((item) => item.id === selection.id) ?? null;
-  }
-  if (selection.kind === "derived_junction") {
-    return getJunctionOverlay(annotation, selection.id);
-  }
-  return annotation.control_points.find((item) => item.id === selection.id) ?? null;
-}
 
 function centerlineLengthM(centerline: AnnotatedCenterline, pixelsPerMeter: number): number {
   return polylineLength(centerline.points) / Math.max(pixelsPerMeter, 1e-6);
 }
 
-function polylinePointsBetweenStations(
-  points: AnnotationPoint[],
-  stationStartPx: number,
-  stationEndPx: number,
-): AnnotationPoint[] {
-  if (points.length < 2) {
-    return points.map((point) => ({ ...point }));
-  }
-  const startPx = clamp(stationStartPx, 0, polylineLength(points));
-  const endPx = clamp(stationEndPx, startPx, polylineLength(points));
-  const result: AnnotationPoint[] = [stationToPolylinePoint(points, startPx).point];
-  let accumulated = 0;
-  for (let index = 0; index < points.length - 1; index += 1) {
-    accumulated += pointDistance(points[index], points[index + 1]);
-    if (startPx < accumulated && accumulated < endPx) {
-      result.push(clonePoint(points[index + 1]));
-    }
-  }
-  result.push(stationToPolylinePoint(points, endPx).point);
-  return result.filter((point, index, list) => index === 0 || pointDistance(point, list[index - 1]) > 1e-3);
-}
 
-function surfaceAnnotationPolygonPoints(
-  annotation: ReferenceAnnotation,
-  surface: AnnotatedSurfaceAnnotation,
-): AnnotationPoint[] {
-  const centerline = annotation.centerlines.find((item) => item.id === surface.centerline_id) ?? null;
-  if (!centerline || centerline.points.length < 2) {
-    return [];
-  }
-  const ppm = Math.max(annotation.pixels_per_meter, 1e-6);
-  const spine = polylinePointsBetweenStations(
-    centerline.points,
-    surface.station_start_m * ppm,
-    surface.station_end_m * ppm,
-  );
-  if (spine.length < 2) {
-    return [];
-  }
-  const edgeA = offsetPolyline(spine, surface.lateral_start_m * ppm);
-  const edgeB = offsetPolyline(spine, surface.lateral_end_m * ppm);
-  return [...edgeA, ...edgeB.slice().reverse()];
-}
 
-function stationStripPatchPolylinePoints(
-  annotation: ReferenceAnnotation,
-  patch: AnnotatedStationStripPatch,
-): AnnotationPoint[] {
-  const centerline = annotation.centerlines.find((item) => item.id === patch.centerline_id) ?? null;
-  if (!centerline || centerline.points.length < 2) {
-    return [];
-  }
-  const ppm = Math.max(annotation.pixels_per_meter, 1e-6);
-  const spine = polylinePointsBetweenStations(
-    centerline.points,
-    patch.station_start_m * ppm,
-    patch.station_end_m * ppm,
-  );
-  if (spine.length < 2) {
-    return [];
-  }
-  const offsets = stripCenterOffsetMeters(centerline);
-  const stripOffset = offsets[patch.strip_id]?.centerOffsetM ?? 0;
-  return offsetPolyline(spine, stripOffset * ppm);
-}
 
 function normalizeAngleDeg(value: number): number {
   let normalized = value % 360;
@@ -1892,583 +1667,14 @@ function buildFurnitureMarkup(
   `;
 }
 
-function buildBuildingRegionInspectorMarkup(region: AnnotatedBuildingRegion): string {
-  const widthM = region.width_px;
-  const heightM = region.height_px;
-  return `
-    <section class="annotation-cross-preview-section">
-      <div class="annotation-cross-preview-header">
-        <div>
-          <h3>Building Region</h3>
-          <div class="scene-micro-note">Rotated rectangle for building generation and orientation override.</div>
-        </div>
-        <div class="annotation-cross-preview-stats">
-          <span class="annotation-cross-preview-stat">${widthM.toFixed(0)}px × ${heightM.toFixed(0)}px</span>
-          <span class="annotation-cross-preview-stat">${region.yaw_deg.toFixed(0)}°</span>
-        </div>
-      </div>
-      <div class="scene-inspector-grid">
-        <label class="scene-form-field">
-          <span>ID</span>
-          <input id="annotation-region-id" type="text" value="${escapeHtml(region.id)}" />
-        </label>
-        <label class="scene-form-field scene-form-field-wide">
-          <span>Label</span>
-          <input id="annotation-region-label" type="text" value="${escapeHtml(region.label)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>Center X</span>
-          <input id="annotation-region-center-x" type="number" step="1" value="${region.center_px.x.toFixed(0)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>Center Y</span>
-          <input id="annotation-region-center-y" type="number" step="1" value="${region.center_px.y.toFixed(0)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>Width (px)</span>
-          <input id="annotation-region-width" type="number" min="${BUILDING_REGION_MIN_SIZE_PX}" step="1" value="${region.width_px.toFixed(0)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>Height (px)</span>
-          <input id="annotation-region-height" type="number" min="${BUILDING_REGION_MIN_SIZE_PX}" step="1" value="${region.height_px.toFixed(0)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>Yaw (deg)</span>
-          <input id="annotation-region-yaw" type="number" step="1" value="${region.yaw_deg.toFixed(0)}" />
-        </label>
-        <div class="scene-fact-card scene-form-field-wide">
-          <span class="scene-fact-label">Generation Rule</span>
-          <strong>Buildings intersecting this region use its orientation. Later regions override earlier ones.</strong>
-        </div>
-      </div>
-    </section>
-  `;
-}
 
-function buildFunctionalZoneInspectorMarkup(zone: AnnotatedFunctionalZone): string {
-  const pointCount = zone.points.length;
-  const centroid = functionalZoneCentroid(zone);
-  return `
-    <section class="annotation-cross-preview-section">
-      <div class="annotation-cross-preview-header">
-        <div>
-          <h3>Functional Zone</h3>
-          <div class="scene-micro-note">Polygon zone for special functional areas like plazas, gardens, and playgrounds.</div>
-        </div>
-        <div class="annotation-cross-preview-stats">
-          <span class="annotation-cross-preview-stat">${pointCount} pts</span>
-        </div>
-      </div>
-      <div class="scene-inspector-grid">
-        <label class="scene-form-field">
-          <span>ID</span>
-          <input id="annotation-zone-id" type="text" value="${escapeHtml(zone.id)}" />
-        </label>
-        <label class="scene-form-field scene-form-field-wide">
-          <span>Label</span>
-          <input id="annotation-zone-label" type="text" value="${escapeHtml(zone.label)}" />
-        </label>
-        <label class="scene-form-field scene-form-field-wide">
-          <span>Kind</span>
-          <select id="annotation-zone-kind">
-            ${buildSelectOptions(FUNCTIONAL_ZONE_KINDS, zone.kind, FUNCTIONAL_ZONE_KIND_LABELS)}
-          </select>
-        </label>
-        <label class="scene-form-field">
-          <span>Centroid X</span>
-          <input id="annotation-zone-center-x" type="number" step="1" value="${centroid.x.toFixed(0)}" readonly />
-        </label>
-        <label class="scene-form-field">
-          <span>Centroid Y</span>
-          <input id="annotation-zone-center-y" type="number" step="1" value="${centroid.y.toFixed(0)}" readonly />
-        </label>
-        <div class="scene-fact-card scene-form-field-wide">
-          <span class="scene-fact-label">Hint</span>
-          <strong>Double-click the canvas to finish drawing a polygon zone. Minimum 3 points required.</strong>
-        </div>
-      </div>
-      ${zone.furniture_instances.length > 0 ? `
-        <div class="annotation-furniture-section" style="margin-top:0.75rem">
-          <div class="annotation-strip-section-header">
-            <h3>Zone Furniture</h3>
-            <span class="scene-micro-note">${zone.furniture_instances.length} items</span>
-          </div>
-          <div class="annotation-furniture-list">
-            ${zone.furniture_instances.map((instance) => `
-              <div class="annotation-furniture-row">
-                <div class="annotation-furniture-row-header">
-                  <strong>${escapeHtml(instance.instance_id)}</strong>
-                  <span class="scene-micro-note">${escapeHtml(FURNITURE_KIND_LABELS[instance.kind])} · (${instance.x_px.toFixed(0)}, ${instance.y_px.toFixed(0)})</span>
-                  <button type="button" class="scene-icon-button" data-action="delete-zone-furniture" data-zone-id="${escapeHtml(zone.id)}" data-instance-id="${escapeHtml(instance.instance_id)}">×</button>
-                </div>
-              </div>
-            `).join("")}
-          </div>
-        </div>
-      ` : ""}
-    </section>
-  `;
-}
 
-function buildRegionInspectorMarkup(region: AnnotatedRegion): string {
-  const pointCount = region.points.length;
-  const centroid = regionCentroid(region);
-  const areaLabel = region.area_m2 !== undefined && Number.isFinite(region.area_m2)
-    ? `${region.area_m2.toFixed(1)} m²`
-    : "editable polygon";
-  const hint = region.region_role === "scene_region"
-    ? "Roads, junctions, and design surfaces will cut this boundary into derived building regions."
-    : region.derived
-      ? "Derived from Scene Region. Materialize it if you want to keep and edit it as an explicit building region."
-      : "Explicit region saved in the unified regions[] model.";
-  return `
-    <section class="annotation-cross-preview-section">
-      <div class="annotation-cross-preview-header">
-        <div>
-          <h3>${escapeHtml(regionRoleLabel(region.region_role))}</h3>
-          <div class="scene-micro-note">${escapeHtml(hint)}</div>
-        </div>
-        <div class="annotation-cross-preview-stats">
-          <span class="annotation-cross-preview-stat">${pointCount} pts</span>
-          <span class="annotation-cross-preview-stat">${escapeHtml(areaLabel)}</span>
-        </div>
-      </div>
-      <div class="scene-inspector-grid">
-        <label class="scene-form-field">
-          <span>ID</span>
-          <input id="annotation-unified-region-id" type="text" value="${escapeHtml(region.id)}" ${region.derived ? "readonly" : ""} />
-        </label>
-        <label class="scene-form-field scene-form-field-wide">
-          <span>Label</span>
-          <input id="annotation-unified-region-label" type="text" value="${escapeHtml(region.label)}" ${region.derived ? "readonly" : ""} />
-        </label>
-        <label class="scene-form-field">
-          <span>Role</span>
-          <select id="annotation-unified-region-role" ${region.derived ? "disabled" : ""}>
-            <option value="scene_region" ${region.region_role === "scene_region" ? "selected" : ""}>Scene Region</option>
-            <option value="building_region" ${region.region_role === "building_region" ? "selected" : ""}>Building Region</option>
-            <option value="functional_zone" ${region.region_role === "functional_zone" ? "selected" : ""}>Functional Region</option>
-          </select>
-        </label>
-        <label class="scene-form-field">
-          <span>Centroid X</span>
-          <input type="number" step="1" value="${centroid.x.toFixed(0)}" readonly />
-        </label>
-        <label class="scene-form-field">
-          <span>Centroid Y</span>
-          <input type="number" step="1" value="${centroid.y.toFixed(0)}" readonly />
-        </label>
-        <label class="scene-form-field">
-          <span>Side</span>
-          <input type="text" value="${escapeHtml(region.side || "")}" readonly />
-        </label>
-        ${region.derived ? `
-          <div class="annotation-detail-actions scene-form-field-wide">
-            <button type="button" class="scene-toolbar-button" data-action="materialize-derived-region">Materialize</button>
-          </div>
-        ` : ""}
-        <div class="scene-fact-card scene-form-field-wide">
-          <span class="scene-fact-label">Region-first</span>
-          <strong>${escapeHtml(hint)}</strong>
-        </div>
-      </div>
-    </section>
-  `;
-}
 
-function buildSurfaceAnnotationInspectorMarkup(
-  annotation: ReferenceAnnotation,
-  surface: AnnotatedSurfaceAnnotation,
-): string {
-  const centerline = annotation.centerlines.find((item) => item.id === surface.centerline_id) ?? null;
-  const centerlineLength = centerline ? centerlineLengthM(centerline, annotation.pixels_per_meter) : 0;
-  const widthM = surface.lateral_end_m - surface.lateral_start_m;
-  const lengthM = surface.station_end_m - surface.station_start_m;
-  return `
-    <section class="annotation-cross-preview-section">
-      <div class="annotation-cross-preview-header">
-        <div>
-          <h3>Design Surface</h3>
-          <div class="scene-micro-note">Station-bound surface patch for lane changes, islands, pads, and paving.</div>
-        </div>
-        <div class="annotation-cross-preview-stats">
-          <span class="annotation-cross-preview-stat">${lengthM.toFixed(1)}m long</span>
-          <span class="annotation-cross-preview-stat">${widthM.toFixed(1)}m wide</span>
-        </div>
-      </div>
-      <div class="annotation-detail-actions scene-form-field-wide" style="margin-bottom:0.75rem">
-        ${SURFACE_ANNOTATION_KINDS.map((kind) => `
-          <button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="apply-surface-preset" data-surface-kind="${kind}">
-            ${escapeHtml(SURFACE_ANNOTATION_KIND_LABELS[kind])}
-          </button>
-        `).join("")}
-      </div>
-      <div class="scene-inspector-grid">
-        <label class="scene-form-field">
-          <span>ID</span>
-          <input id="annotation-surface-id" type="text" value="${escapeHtml(surface.id)}" />
-        </label>
-        <label class="scene-form-field scene-form-field-wide">
-          <span>Label</span>
-          <input id="annotation-surface-label" type="text" value="${escapeHtml(surface.label)}" />
-        </label>
-        <label class="scene-form-field scene-form-field-wide">
-          <span>Kind</span>
-          <select id="annotation-surface-kind">
-            ${buildSelectOptions(SURFACE_ANNOTATION_KINDS, surface.kind, SURFACE_ANNOTATION_KIND_LABELS)}
-          </select>
-        </label>
-        <label class="scene-form-field scene-form-field-wide">
-          <span>Surface Role</span>
-          <select id="annotation-surface-role">
-            ${buildSelectOptions(SURFACE_ROLES, surface.surface_role, SURFACE_ROLE_LABELS)}
-          </select>
-        </label>
-        <label class="scene-form-field scene-form-field-wide">
-          <span>Centerline</span>
-          <select id="annotation-surface-centerline">
-            ${annotation.centerlines.map((centerlineOption) => `
-              <option value="${escapeHtml(centerlineOption.id)}"${centerlineOption.id === surface.centerline_id ? " selected" : ""}>${escapeHtml(centerlineOption.label || centerlineOption.id)}</option>
-            `).join("")}
-          </select>
-        </label>
-        <label class="scene-form-field">
-          <span>Start Station (m)</span>
-          <input id="annotation-surface-station-start" type="number" min="0" max="${centerlineLength.toFixed(3)}" step="0.5" value="${surface.station_start_m.toFixed(2)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>End Station (m)</span>
-          <input id="annotation-surface-station-end" type="number" min="0" max="${centerlineLength.toFixed(3)}" step="0.5" value="${surface.station_end_m.toFixed(2)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>Lateral Start (m)</span>
-          <input id="annotation-surface-lateral-start" type="number" step="0.25" value="${surface.lateral_start_m.toFixed(2)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>Lateral End (m)</span>
-          <input id="annotation-surface-lateral-end" type="number" step="0.25" value="${surface.lateral_end_m.toFixed(2)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>Material Preset</span>
-          <input id="annotation-surface-material-preset" type="text" value="${escapeHtml(surface.material.preset)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>Color Hex</span>
-          <input id="annotation-surface-color-hex" type="text" placeholder="#RRGGBB" value="${escapeHtml(surface.material.color_hex ?? "")}" />
-        </label>
-        <div class="scene-fact-card scene-form-field-wide">
-          <span class="scene-fact-label">Road Length</span>
-          <strong>${centerline ? `${centerlineLength.toFixed(1)}m on ${escapeHtml(centerline.id)}` : "Missing centerline"}</strong>
-        </div>
-      </div>
-    </section>
-  `;
-}
 
-function buildJunctionInspectorMarkup(
-  junction: AnnotatedJunction,
-  overlay: DerivedJunctionOverlay | null,
-): string {
-  if (!overlay) {
-    return `
-      <div class="scene-inspector-grid">
-        <label class="scene-form-field">
-          <span>ID</span>
-          <input id="annotation-inspector-id" type="text" value="${escapeHtml(junction.id)}" />
-        </label>
-        <label class="scene-form-field scene-form-field-wide">
-          <span>Label</span>
-          <input id="annotation-inspector-label" type="text" value="${escapeHtml(junction.label)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>X</span>
-          <input id="annotation-inspector-x" type="number" step="1" value="${junction.x.toFixed(0)}" />
-        </label>
-        <label class="scene-form-field">
-          <span>Y</span>
-          <input id="annotation-inspector-y" type="number" step="1" value="${junction.y.toFixed(0)}" />
-        </label>
-        <label class="scene-form-field scene-form-field-wide">
-          <span>Kind</span>
-          <input id="annotation-inspector-kind" type="text" value="${escapeHtml(junction.kind)}" />
-        </label>
-      </div>
-    `;
-  }
-  const groupedControlPoints = overlay.subLaneControlPoints.reduce<Record<string, number>>((acc, item) => {
-    const key = `${item.stripKind}:${item.pointKind}`;
-    acc[key] = (acc[key] ?? 0) + 1;
-    return acc;
-  }, {});
-  const ownershipLabel = overlay.sourceMode === "explicit" ? "explicit junction" : "derived topology overlay";
-  return `
-    <section class="annotation-cross-preview-section">
-      <div class="annotation-cross-preview-header">
-        <div>
-          <h3>${escapeHtml(derivedJunctionKindLabel(overlay.kind))}</h3>
-          <div class="scene-micro-note">${escapeHtml(junction.id)} · ${escapeHtml(ownershipLabel)}</div>
-        </div>
-        <div class="annotation-cross-preview-stats">
-          <span class="annotation-cross-preview-stat">${overlay.armCount} arms</span>
-          <span class="annotation-cross-preview-stat">${overlay.crosswalks.length} crossings</span>
-        </div>
-      </div>
-      ${overlay.kind === "cross_junction" ? `
-        <div style="margin:0.5rem 0 0.25rem">
-          <button id="annotation-open-junction-composer" class="scene-toolbar-button" type="button">Edit Junction Corners</button>
-        </div>
-      ` : ""}
-      <div class="scene-inspector-grid">
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Anchor</span>
-          <strong>${junction.x.toFixed(0)}, ${junction.y.toFixed(0)}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Crosswalk Depth</span>
-          <strong>${junction.crosswalk_depth_m.toFixed(1)}m</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Connected Arms</span>
-          <strong>${overlay.connectedCenterlineIds.length}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Approach Splits</span>
-          <strong>${overlay.approachBoundaries.length}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Zebra Boundary Feet</span>
-          <strong>${overlay.skeletonFootPoints.length}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Corner Focuses</span>
-          <strong>${overlay.cornerFocusPoints.length}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Sub-lane Control Points</span>
-          <strong>${overlay.subLaneControlPoints.length}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Boundary Extensions</span>
-          <strong>${overlay.boundaryExtensionLines.length}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Focus Guides</span>
-          <strong>${overlay.focusGuideLines.length}</strong>
-        </div>
-        <div class="scene-fact-card scene-form-field-wide">
-          <span class="scene-fact-label">Connected Centerlines</span>
-          <strong>${escapeHtml(overlay.connectedCenterlineIds.join(" · "))}</strong>
-        </div>
-        <div class="scene-fact-card scene-form-field-wide">
-          <span class="scene-fact-label">Owned Geometry</span>
-          <strong>Rectangular carriageway core, zebra boundaries, sidewalk corners, near-road corners, frontage corners.</strong>
-        </div>
-      </div>
-      <div class="annotation-junction-control-list">
-        ${Object.keys(groupedControlPoints).length > 0
-          ? Object.entries(groupedControlPoints)
-              .map(
-                ([key, count]) => `
-                  <div class="scene-fact-card">
-                    <span class="scene-fact-label">${escapeHtml(key)}</span>
-                    <strong>${count}</strong>
-                  </div>
-                `,
-              )
-              .join("")
-          : `<div class="scene-empty-note">No derived control points for this junction.</div>`}
-      </div>
-    </section>
-  `;
-}
 
-function laneElementKindLabel(kind: LaneElementKind): string {
-  if (kind === "road_strip") {
-    return "Road Strip";
-  }
-  if (kind === "junction_turn_patch") {
-    return "Junction Turn Patch";
-  }
-  if (kind === "junction_connector") {
-    return "Junction Connector";
-  }
-  return "Junction Side Patch";
-}
 
-function laneFactMarkup(label: string, value: string | number | null | undefined): string {
-  const text = value === null || value === undefined || value === "" ? "—" : String(value);
-  return `
-    <div class="scene-fact-card">
-      <span class="scene-fact-label">${escapeHtml(label)}</span>
-      <strong>${escapeHtml(text)}</strong>
-    </div>
-  `;
-}
 
-function buildLaneElementInspectorMarkup(annotation: ReferenceAnnotation, selection: LaneElementSelection): string {
-  const centerline = selection.centerlineId
-    ? annotation.centerlines.find((item) => item.id === selection.centerlineId) ?? null
-    : null;
-  const strip = centerline && selection.stripId
-    ? centerline.cross_section_strips.find((item) => item.strip_id === selection.stripId) ?? null
-    : null;
-  const junctionOverlays = deriveJunctionOverlayGeometries(annotation);
-  const cornerFamilyTargets = selection.elementKind === "road_strip" && selection.centerlineId && selection.stripId
-    ? selectedStripCornerFamilyTargets(junctionOverlays, selection.centerlineId, selection.stripId)
-    : [];
-  const fromLabel = selection.fromCenterlineId && selection.fromStripId
-    ? `${selection.fromCenterlineId} · ${selection.fromStripId}`
-    : "";
-  const toLabel = selection.toCenterlineId && selection.toStripId
-    ? `${selection.toCenterlineId} · ${selection.toStripId}`
-    : "";
-  const stripKind = strip?.kind ?? selection.stripKind;
-  const stripZone = strip?.zone ?? selection.stripZone;
-  const stripDirection = strip?.direction ?? selection.stripDirection;
-  const widthM = strip?.width_m ?? selection.widthM;
-  const ownerLabel = `${selection.ownerKind} · ${selection.ownerId}`;
-  return `
-    <section class="annotation-lane-inspect-section">
-      <div class="annotation-cross-preview-header">
-        <div>
-          <h3>${escapeHtml(laneElementKindLabel(selection.elementKind))}</h3>
-          <div class="scene-micro-note">${escapeHtml(selection.id)}</div>
-        </div>
-        <div class="annotation-cross-preview-stats">
-          <span class="annotation-cross-preview-stat">read-only</span>
-          ${selection.pointsCount !== undefined ? `<span class="annotation-cross-preview-stat">${selection.pointsCount} pts</span>` : ""}
-        </div>
-      </div>
-      <div class="scene-inspector-grid">
-        ${laneFactMarkup("Owner", ownerLabel)}
-        ${laneFactMarkup("Element", laneElementKindLabel(selection.elementKind))}
-        ${laneFactMarkup("Centerline", selection.centerlineId)}
-        ${laneFactMarkup("Strip", selection.stripId)}
-        ${laneFactMarkup("Strip Kind", stripKind ? metaurbanStripLabel(stripKind) : "")}
-        ${laneFactMarkup("Zone", stripZone ? stripZoneSideLabel(stripZone) : "")}
-        ${laneFactMarkup("Direction", stripDirection ? stripDirectionChip({ direction: stripDirection } as AnnotatedCrossSectionStrip) : "")}
-        ${laneFactMarkup("Width", widthM !== undefined ? `${widthM.toFixed(2)}m` : selection.widthPx !== undefined ? `${selection.widthPx.toFixed(1)}px` : "")}
-        ${laneFactMarkup("Junction", selection.junctionId)}
-        ${laneFactMarkup("Patch", selection.patchId)}
-        ${laneFactMarkup("Patch Role", selection.patchRole)}
-        ${laneFactMarkup("Paired Connector", selection.pairedConnectorId)}
-        ${laneFactMarkup("Endpoint", selection.endpointRole)}
-        ${laneFactMarkup("Connector", selection.connectorId)}
-        ${laneFactMarkup("Link", selection.linkId)}
-        ${laneFactMarkup("Quadrant", selection.quadrantId)}
-        ${laneFactMarkup("Kernel", selection.kernelId)}
-        ${laneFactMarkup("From", fromLabel)}
-        ${laneFactMarkup("To", toLabel)}
-        ${laneFactMarkup("Points", selection.pointsCount)}
-        <div class="scene-fact-card scene-form-field-wide">
-          <span class="scene-fact-label">Editing</span>
-          <strong>This lane element is diagnostic geometry. Select its owning road or junction to edit source data.</strong>
-        </div>
-      </div>
-      ${
-        cornerFamilyTargets.length > 0
-          ? `
-            <div class="annotation-corner-link-section">
-              <div class="annotation-corner-link-header">
-                <div>
-                  <strong>Corner Family</strong>
-                  <div class="scene-micro-note">${escapeHtml(selection.centerlineId ?? "")} · ${escapeHtml(selection.stripId ?? "")}</div>
-                </div>
-                <span class="annotation-cross-preview-stat">${cornerFamilyTargets.length} linked</span>
-              </div>
-              <div class="annotation-corner-link-list">
-                ${cornerFamilyTargets.map((target) => buildCornerConnectionCardMarkup(target)).join("")}
-              </div>
-            </div>
-          `
-          : ""
-      }
-    </section>
-  `;
-}
 
-function buildRoadCollectionInspectorMarkup(annotation: ReferenceAnnotation): string {
-  const roads = annotation.centerlines;
-  const ppm = Math.max(annotation.pixels_per_meter, 1e-6);
-  const junctionOverlays = deriveJunctionOverlayGeometries(annotation);
-  const totalLengthM = roads.reduce((sum, centerline) => {
-    return (
-      sum +
-      (clippedCenterlineDisplaySegments(centerline, junctionOverlays, ppm).reduce(
-        (segmentSum, segment) => segmentSum + polylineLength(segment.points),
-        0,
-      ) /
-        ppm)
-    );
-  }, 0);
-  const detailedRoadCount = roads.filter((item) => resolvedCrossSectionMode(item) === CROSS_SECTION_MODE_DETAILED).length;
-  const coarseRoadCount = roads.length - detailedRoadCount;
-  const averageWidthM =
-    roads.length > 0
-      ? roads.reduce((sum, centerline) => sum + getCenterlineCrossSectionWidth(centerline), 0) / roads.length
-      : 0;
-  const averageDriveLanes =
-    roads.length > 0
-      ? roads.reduce((sum, centerline) => sum + deriveLaneProfile(centerline).total_drive_lane_count, 0) / roads.length
-      : 0;
-  const roadList = roads
-    .slice()
-    .sort((a, b) => a.id.localeCompare(b.id))
-    .map((centerline) => escapeHtml(centerline.id))
-    .join(" · ");
-  return `
-    <section class="annotation-cross-preview-section">
-      <div class="annotation-cross-preview-header">
-        <div>
-          <h3>All Roads</h3>
-          <div class="scene-micro-note">aggregated road selection</div>
-        </div>
-        <div class="annotation-cross-preview-stats">
-          <span class="annotation-cross-preview-stat">${roads.length} roads</span>
-          <span class="annotation-cross-preview-stat">${detailedRoadCount} detailed</span>
-        </div>
-      </div>
-      <div class="scene-inspector-grid">
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Road Count</span>
-          <strong>${roads.length}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Detailed</span>
-          <strong>${detailedRoadCount}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Coarse</span>
-          <strong>${coarseRoadCount}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Total Length</span>
-          <strong>${totalLengthM.toFixed(1)}m</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Average Width</span>
-          <strong>${averageWidthM.toFixed(2)}m</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Average Drive Lanes</span>
-          <strong>${averageDriveLanes.toFixed(1)}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Total Strips</span>
-          <strong>${roads.reduce((sum, centerline) => sum + centerline.cross_section_strips.length, 0)}</strong>
-        </div>
-        <div class="scene-fact-card">
-          <span class="scene-fact-label">Total Furniture</span>
-          <strong>${roads.reduce((sum, centerline) => sum + centerline.street_furniture_instances.length, 0)}</strong>
-        </div>
-        <div class="scene-fact-card scene-form-field-wide">
-          <span class="scene-fact-label">Road IDs</span>
-          <strong>${roadList || "No roads yet."}</strong>
-        </div>
-      </div>
-    </section>
-  `;
-}
 
 function buildInspectorMarkup(
   annotation: ReferenceAnnotation,
@@ -2481,10 +1687,10 @@ function buildInspectorMarkup(
     return `<div class="scene-empty-note">选择一条中心线、路口、环岛、控制点或建筑区域后，可以在这里编辑属性。</div>`;
   }
   if (selection.kind === "lane_element") {
-    return buildLaneElementInspectorMarkup(annotation, selection);
+    return buildLaneElementInspectorMarkup(annotation, selection, buildCornerConnectionCardMarkup);
   }
   if (selection.kind === "road_collection") {
-    return buildRoadCollectionInspectorMarkup(annotation);
+    return buildRoadCollectionInspectorMarkup(annotation, clippedCenterlineDisplaySegments);
   }
   const feature = getSelectedFeature(annotation, selection);
   if (!feature) {
@@ -3251,127 +2457,8 @@ function buildCenterlineOverlayMarkup(
   `;
 }
 
-function buildSurfaceAnnotationOverlayMarkup(
-  annotation: ReferenceAnnotation,
-  surface: AnnotatedSurfaceAnnotation,
-  isSelected: boolean,
-): string {
-  const polygon = surfaceAnnotationPolygonPoints(annotation, surface);
-  if (polygon.length < 3) {
-    return "";
-  }
-  const polygonPoints = polygon.map((point) => `${point.x},${point.y}`).join(" ");
-  const labelPoint = polygon.reduce(
-    (sum, point) => ({ x: sum.x + point.x / polygon.length, y: sum.y + point.y / polygon.length }),
-    { x: 0, y: 0 },
-  );
-  return `
-    <g class="annotation-feature-group">
-      <polygon
-        class="annotation-surface-annotation${isSelected ? " annotation-feature-selected" : ""}"
-        points="${polygonPoints}"
-        style="fill:${surfaceAnnotationFillColor(surface.surface_role)};stroke:${surfaceAnnotationStrokeColor(surface.surface_role)}"
-        data-feature-kind="surface_annotation"
-        data-feature-id="${escapeHtml(surface.id)}"
-      />
-      <text class="annotation-label" x="${labelPoint.x + 8}" y="${labelPoint.y - 8}">
-        ${escapeHtml(surface.label || SURFACE_ANNOTATION_KIND_LABELS[surface.kind])}
-      </text>
-    </g>
-  `;
-}
 
-function buildStationStripPatchOverlayMarkup(
-  annotation: ReferenceAnnotation,
-  patch: AnnotatedStationStripPatch,
-): string {
-  const centerline = annotation.centerlines.find((item) => item.id === patch.centerline_id) ?? null;
-  const polyline = stationStripPatchPolylinePoints(annotation, patch);
-  if (!centerline || polyline.length < 2) {
-    return "";
-  }
-  const targetStrip = centerline.cross_section_strips.find((strip) => strip.strip_id === patch.strip_id) ?? null;
-  const kind = patch.updates.kind ?? targetStrip?.kind ?? "median";
-  const widthM = patch.updates.width_m ?? targetStrip?.width_m ?? 0.5;
-  return `
-    <g class="annotation-feature-group">
-      <polyline
-        class="annotation-cross-strip annotation-station-strip-patch"
-        points="${polyline.map((point) => `${point.x},${point.y}`).join(" ")}"
-        style="stroke:${stripStrokeColor(kind)};stroke-width:${Math.max(2, widthM * annotation.pixels_per_meter)}px;stroke-linecap:butt;opacity:0.92"
-        data-feature-kind="station_strip_patch"
-        data-feature-id="${escapeHtml(patch.id)}"
-        data-centerline-id="${escapeHtml(patch.centerline_id)}"
-        data-strip-id="${escapeHtml(patch.strip_id)}"
-      />
-    </g>
-  `;
-}
 
-function buildBuildingRegionOverlayMarkup(
-  region: AnnotatedBuildingRegion,
-  isSelected: boolean,
-): string {
-  const polygon = buildingRegionPolygonPoints(region);
-  const polygonPoints = polygon.map((point) => `${point.x},${point.y}`).join(" ");
-  const labelPoint = polygon[3] ?? region.center_px;
-  const resizeHandles: BuildingRegionResizeHandle[] = ["nw", "ne", "se", "sw"];
-  const resizeHandleMarkup = isSelected
-    ? resizeHandles
-        .map((handle) => {
-          const point = buildingRegionResizeHandlePoint(region, handle);
-          return `
-            <circle
-              class="annotation-building-region-handle"
-              cx="${point.x}"
-              cy="${point.y}"
-              r="${BUILDING_REGION_HANDLE_RADIUS_PX}"
-              data-feature-kind="building_region"
-              data-feature-id="${escapeHtml(region.id)}"
-              data-region-handle-kind="resize"
-              data-region-resize-handle="${handle}"
-            />
-          `;
-        })
-        .join("")
-    : "";
-  const rotateHandlePoint = buildingRegionRotateHandlePoint(region);
-  const rotateGuideMarkup = isSelected
-    ? `
-        <line
-          class="annotation-building-region-rotate-guide"
-          x1="${region.center_px.x}"
-          y1="${region.center_px.y}"
-          x2="${rotateHandlePoint.x}"
-          y2="${rotateHandlePoint.y}"
-        />
-        <circle
-          class="annotation-building-region-rotate-handle"
-          cx="${rotateHandlePoint.x}"
-          cy="${rotateHandlePoint.y}"
-          r="${BUILDING_REGION_HANDLE_RADIUS_PX}"
-          data-feature-kind="building_region"
-          data-feature-id="${escapeHtml(region.id)}"
-          data-region-handle-kind="rotate"
-        />
-      `
-    : "";
-  return `
-    <g class="annotation-feature-group">
-      <polygon
-        class="annotation-building-region${isSelected ? " annotation-building-region-selected" : ""}"
-        points="${polygonPoints}"
-        data-feature-kind="building_region"
-        data-feature-id="${escapeHtml(region.id)}"
-      />
-      <text class="annotation-label" x="${labelPoint.x}" y="${labelPoint.y - 10}">
-        ${escapeHtml(region.label || region.id)}
-      </text>
-      ${resizeHandleMarkup}
-      ${rotateGuideMarkup}
-    </g>
-  `;
-}
 
 function buildBuildingRegionDraftMarkup(drag: Extract<DragState, { kind: "building_region_draw" }> | null): string {
   if (!drag) {
@@ -3427,33 +2514,6 @@ function regionRoleLabel(role: RegionRole): string {
   return "Functional Region";
 }
 
-function buildRegionOverlayMarkup(region: AnnotatedRegion, isSelected: boolean): string {
-  const polygon = regionPolygonPoints(region);
-  if (polygon.length < 3) {
-    return "";
-  }
-  const polygonPoints = polygon.map((point) => `${point.x},${point.y}`).join(" ");
-  const labelPoint = polygon[0] ?? regionCentroid(region);
-  const className = [
-    "annotation-region",
-    `annotation-region-${region.region_role.replace(/_/g, "-")}`,
-    region.derived ? "annotation-region-derived" : "",
-    isSelected ? "annotation-region-selected" : "",
-  ].filter(Boolean).join(" ");
-  return `
-    <g class="annotation-feature-group">
-      <polygon
-        class="${className}"
-        points="${polygonPoints}"
-        data-feature-kind="region"
-        data-feature-id="${escapeHtml(region.id)}"
-      />
-      <text class="annotation-label" x="${labelPoint.x}" y="${labelPoint.y - 10}">
-        ${escapeHtml(region.label || regionRoleLabel(region.region_role))}
-      </text>
-    </g>
-  `;
-}
 
 function buildRegionDraftMarkup(drag: Extract<DragState, { kind: "region_draw" | "region_box_draw" }> | null): string {
   if (!drag) {
@@ -3489,59 +2549,6 @@ function buildRegionDraftMarkup(drag: Extract<DragState, { kind: "region_draw" |
   `;
 }
 
-function buildFunctionalZoneOverlayMarkup(
-  zone: AnnotatedFunctionalZone,
-  isSelected: boolean,
-): string {
-  const polygon = functionalZonePolygonPoints(zone);
-  const polygonPoints = polygon.map((point) => `${point.x},${point.y}`).join(" ");
-  const labelPoint = polygon[0] ?? functionalZoneCentroid(zone);
-  const vertexMarkup = isSelected
-    ? zone.points
-        .map(
-          (point, index) => `
-            <circle
-              class="annotation-functional-zone-vertex"
-              cx="${point.x}"
-              cy="${point.y}"
-              r="5"
-              data-feature-kind="functional_zone"
-              data-feature-id="${escapeHtml(zone.id)}"
-              data-zone-vertex-index="${index}"
-            />
-          `,
-        )
-        .join("")
-    : "";
-
-  // Render furniture instances inside the zone
-  const furnitureMarkup = zone.furniture_instances
-    .map((instance) => `
-      <g class="annotation-feature-group">
-        <circle class="annotation-furniture-point annotation-furniture-zone-point" cx="${instance.x_px}" cy="${instance.y_px}" r="6" />
-        <text class="annotation-furniture-label" x="${instance.x_px + 10}" y="${instance.y_px - 8}">
-          ${escapeHtml(FURNITURE_KIND_LABELS[instance.kind])}
-        </text>
-      </g>
-    `)
-    .join("");
-
-  return `
-    <g class="annotation-feature-group">
-      <polygon
-        class="annotation-functional-zone${isSelected ? " annotation-functional-zone-selected" : ""}"
-        points="${polygonPoints}"
-        data-feature-kind="functional_zone"
-        data-feature-id="${escapeHtml(zone.id)}"
-      />
-      <text class="annotation-label" x="${labelPoint.x}" y="${labelPoint.y - 10}">
-        ${escapeHtml(zone.label || zone.id)}
-      </text>
-      ${vertexMarkup}
-      ${furnitureMarkup}
-    </g>
-  `;
-}
 
 function buildFunctionalZoneDraftMarkup(drag: Extract<DragState, { kind: "functional_zone_draw" }> | null): string {
   if (!drag) {
