@@ -70,10 +70,11 @@
 
 .viewer-overlay {
   position: absolute;
-  left: 50%;
-  top: 50%;
+  left: 1rem;
+  bottom: 1rem;
   z-index: 15;
-  transform: translate(-50%, -50%);
+  max-width: min(26rem, calc(100% - 2rem));
+  transform: none;
   padding: 0.85rem 1.15rem;
   border-radius: 0.75rem;
   background: rgba(17, 24, 39, 0.8);
