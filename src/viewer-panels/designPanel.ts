@@ -44,7 +44,7 @@ export function renderDesignPanelHtml(): string {
             A 骨架功能：自动解析（人工标注 > LLM 标注 > OSM/POI）
           </div>
           <div class="viewer-design-scenario-actions">
-            <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled title="Open the structure preview through the buildings step. It shows roads, functional zones, and building massing without street furniture.">Preview Structure + Buildings / 预览结构+建筑</button>
+            <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled title="Open the full structure preview. It shows roads, functional zones, and building massing without street furniture.">Preview Structure + Buildings / 预览结构+建筑</button>
             <button id="viewer-design-scenario-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled title="Open annotation in a new tab">Open Annotation</button>
           </div>
           <details class="viewer-design-advanced-details viewer-design-structure-draft">

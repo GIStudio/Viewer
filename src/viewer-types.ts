@@ -593,6 +593,7 @@ export const SKELETON_DESIGN_PROFILE_OPTIONS = [
 ] as const;
 
 export const STREET_FURNITURE_PROFILE_OPTIONS = [
+  { id: "none", label: "无家具 / No Furniture" },
   { id: "balanced_complete", label: "平衡完整 / Balanced Complete" },
   { id: "pedestrian_friendly", label: "步行友好 / Pedestrian Friendly" },
   { id: "commercial_vitality", label: "商业活力 / Commercial Vitality" },

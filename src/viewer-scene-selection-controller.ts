@@ -24,7 +24,25 @@ export function createViewerSceneSelectionController(
   deps: ViewerSceneSelectionControllerDeps,
 ): ViewerSceneSelectionController {
   const optionsByKey = new Map<string, SceneOption>();
-  const structurePreviewFallbackKeys = ["land_use_zoning", "road_base", "final_scene"];
+  const structurePreviewFallbackKeys = ["buildings", "poi_context", "land_use_zoning", "road_base", "final_scene"];
+  const structurePreviewRequestedKeys = new Set(["scene_preview", "buildings", "land_use_zoning", "road_base", "poi_context"]);
+
+  function manifestHasStreetFurniture(manifest: ViewerManifest): boolean {
+    return Object.values(manifest.instances ?? {}).some((instance) => {
+      const placementGroup = String(instance.placement_group ?? "").trim().toLowerCase();
+      const category = String(instance.category ?? "").trim().toLowerCase();
+      return placementGroup === "street_furniture" || [
+        "bench",
+        "bollard",
+        "bus_stop",
+        "hydrant",
+        "lamp",
+        "mailbox",
+        "tree",
+        "trash",
+      ].includes(category);
+    });
+  }
 
   function populateSceneOptions(manifest: ViewerManifest): SceneOption[] {
     optionsByKey.clear();
@@ -52,6 +70,8 @@ export function createViewerSceneSelectionController(
   ): { key: string; fallbackMessage: string } {
     const requestedKey = String(manifestOptions.defaultSceneOptionKey ?? "").trim();
     if (requestedKey) {
+      const requestedStructurePreview = structurePreviewRequestedKeys.has(requestedKey);
+      const finalSceneHasFurniture = manifestHasStreetFurniture(manifest);
       const candidates = [
         requestedKey,
         ...structurePreviewFallbackKeys,
@@ -62,10 +82,16 @@ export function createViewerSceneSelectionController(
         if (!optionsByKey.has(candidate)) {
           continue;
         }
+        if (candidate === "final_scene" && requestedStructurePreview && finalSceneHasFurniture) {
+          continue;
+        }
         const fallbackMessage = candidate === requestedKey
           ? ""
           : `Preview step "${requestedKey}" is unavailable; loaded ${optionsByKey.get(candidate)?.label ?? candidate}.`;
         return { key: candidate, fallbackMessage };
+      }
+      if (requestedStructurePreview && finalSceneHasFurniture) {
+        throw new Error(`Preview step "${requestedKey}" is unavailable and the final scene contains street furniture.`);
       }
     }
 

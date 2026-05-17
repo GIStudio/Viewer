@@ -28,7 +28,7 @@ export type ViewerScenarioDesignsControllerDeps = {
 };
 
 const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "partial", "empty"]);
-const STRUCTURE_PREVIEW_DEFAULT_STEP_KEY = "buildings";
+const STRUCTURE_PREVIEW_DEFAULT_STEP_KEY = "scene_preview";
 
 export function createViewerScenarioDesignsController(
   deps: ViewerScenarioDesignsControllerDeps,
@@ -47,7 +47,7 @@ export function createViewerScenarioDesignsController(
     const target = event.target as HTMLElement | null;
     const previewButton = target?.closest<HTMLButtonElement>("[data-scenario-preview]");
     if (previewButton) {
-      void loadLayout(previewButton.dataset.scenarioPreview || "", "Structure + buildings preview loaded.", {
+      void loadLayout(previewButton.dataset.scenarioPreview || "", "Structure preview loaded.", {
         defaultSceneOptionKey: STRUCTURE_PREVIEW_DEFAULT_STEP_KEY,
       });
       return;

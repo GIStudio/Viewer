@@ -168,7 +168,7 @@ import { captureEvaluationViews, captureGalleryViews, type GalleryCaptureTarget 
 import { createViewerPresetsController } from "./viewer-presets-controller";
 import type { DesktopShell, ShellI18nText } from "./desktop-shell";
 
-const STRUCTURE_PREVIEW_DEFAULT_STEP_KEY = "buildings";
+const STRUCTURE_PREVIEW_DEFAULT_STEP_KEY = "scene_preview";
 
 type RecentLayoutsPayload = {
   results?: RecentLayout[];
@@ -973,13 +973,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   async function loadSelectedDesignScenarioPreview(): Promise<void> {
     const scenario = selectedScenarioDesign();
     if (!scenario?.preview_layout_path) return;
-    setStatus(`Loading structure + buildings preview: ${scenario.title_zh || scenario.scenario_id}...`);
+    setStatus(`Loading structure preview: ${scenario.title_zh || scenario.scenario_id}...`);
     await sceneSelectionController.loadLayoutSelection(scenario.preview_layout_path, {
       defaultSceneOptionKey: STRUCTURE_PREVIEW_DEFAULT_STEP_KEY,
     });
     const recent = await loadRecentLayouts(50, false);
     populateRecentLayoutOptions(recent, scenario.preview_layout_path);
-    flashStatus(`Structure + buildings preview loaded: ${scenario.title_zh || scenario.scenario_id}.`);
+    flashStatus(`Structure preview loaded: ${scenario.title_zh || scenario.scenario_id}.`);
   }
 
   function openSelectedDesignScenarioAnnotation(): void {
