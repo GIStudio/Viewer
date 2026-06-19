@@ -119,6 +119,7 @@ import {
   makeDirectLayoutLabel,
   turnLanePatchSvgClass,
 } from "./viewer-scene-options";
+import { createRecentLayoutSelectorController, type RecentLayoutSelectorController } from "./viewer-recent-layouts";
 import { createViewerSceneSelectionController } from "./viewer-scene-selection-controller";
 import {
   completeLightingValues,
@@ -157,15 +158,11 @@ import {
 import { createFloatingLaneSystem } from "./viewer-floating-lane";
 import { createHistoryPanelController } from "./viewer-history-panel";
 import {
-  enforceVisualEvaluationAvailability,
   renderMetricsPanel,
-  renderEvaluationResultHtml,
-  renderEvaluationViewsPreview,
-  requestUnifiedEvaluation,
-  type RenderedEvaluationView,
 } from "./viewer-evaluation";
-import { captureEvaluationViews, captureGalleryViews, type GalleryCaptureTarget } from "./viewer-evaluation-capture";
+import { captureGalleryViews, type GalleryCaptureTarget } from "./viewer-evaluation-capture";
 import { createViewerPresetsController } from "./viewer-presets-controller";
+import { createViewerEvaluationRunner } from "./viewer-evaluation-runner";
 import type { DesktopShell, ShellI18nText } from "./desktop-shell";
 
 const STRUCTURE_PREVIEW_DEFAULT_STEP_KEY = "scene_preview";
@@ -977,7 +974,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     await sceneSelectionController.loadLayoutSelection(scenario.preview_layout_path, {
       defaultSceneOptionKey: STRUCTURE_PREVIEW_DEFAULT_STEP_KEY,
     });
-    const recent = await loadRecentLayouts(50, false);
+    const recent = await loadRecentLayouts(50);
     populateRecentLayoutOptions(recent, scenario.preview_layout_path);
     flashStatus(`Structure preview loaded: ${scenario.title_zh || scenario.scenario_id}.`);
   }
@@ -1176,7 +1173,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let lastDesignRunSnapshot: DesignRunSnapshot | null = null;
   let graphOverlayActive = false;
   const graphOverlayMarkers: THREE.Object3D[] = [];
-  const recentLayoutsByPath = new Map<string, RecentLayout>();
 
   const lightingState: LightingState = {
     ...DEFAULT_LIGHTING_STATE,
@@ -1187,6 +1183,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   let environmentController: ViewerEnvironmentController;
 
   let panelController: ViewerPanelController;
+  let recentLayoutSelector: RecentLayoutSelectorController;
   const floatingLaneSystem = createFloatingLaneSystem({
     scene,
     camera,
@@ -1261,6 +1258,17 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     },
   });
 
+  recentLayoutSelector = createRecentLayoutSelectorController({
+    selectEl: layoutSelectEl,
+    loadRecentLayouts,
+    setRecentLayouts: schemeCompareController.setRecentLayouts,
+    shouldStopHydration: () => destroyed,
+    isCompareOpen: () => panelController.isOpen("compare"),
+    refreshCompareSelectors: populateCompareSelectors,
+    backgroundLimit: RECENT_LAYOUT_BACKGROUND_LIMIT,
+    backgroundBatch: RECENT_LAYOUT_BACKGROUND_BATCH,
+  });
+
   const sceneSelectionController = createViewerSceneSelectionController({
     selectEl,
     errorEl,
@@ -1292,6 +1300,23 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       applyAudioProfile();
       scheduleDesignMatrixRefresh();
     },
+  });
+
+  const evaluationRunner = createViewerEvaluationRunner({
+    contentEl: evaluateContentEl,
+    runButtonEl: evaluateRunEl,
+    scene,
+    renderer,
+    cameraForwardHorizontal,
+    avatarEyeHeightM: AVATAR_EYE_HEIGHT_M,
+    getCurrentRoot: () => currentRoot,
+    getCurrentSpawn: () => currentSpawn,
+    getCurrentForward: () => currentForward,
+    getCurrentLayoutPath: () => currentLayoutPath,
+    getCurrentManifest: () => currentManifest,
+    getSelectedPresetId: () => selectedDesignPreset()?.id || "custom",
+    setStatus,
+    flashStatus,
   });
 
   const designController = createViewerDesignController({
@@ -1405,7 +1430,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         layoutPath,
         sceneGlbPath ? { sceneGlbPath } : {},
       );
-      const recent = await loadRecentLayouts(50, false);
+      const recent = await loadRecentLayouts(50);
       populateRecentLayoutOptions(recent, layoutPath);
       flashStatus(successMessage);
       hideDesignWorkspace();
@@ -2005,9 +2030,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     syncLightingUi();
     setStatus(`Viewing ${option.label}`);
     console.info(`[viewer-timing] loadScene.total (${option.label}): ${(performance.now() - loadStart).toFixed(1)} ms`);
-
-    // 清除 manifest 缓存，确保 History Analysis 重新加载最新数据
-    clearManifestCache();
   }
 
   window.__roadgen3dCaptureGallery = async (request: RoadGen3DCaptureGalleryRequest) => {
@@ -2051,102 +2073,11 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   };
 
   function populateRecentLayoutOptions(layouts: RecentLayout[], selectedPath: string): void {
-    recentLayoutsByPath.clear();
-    layoutSelectEl.innerHTML = "";
-    for (const layout of layouts) {
-      recentLayoutsByPath.set(layout.layout_path, layout);
-      const optionEl = document.createElement("option");
-      optionEl.value = layout.layout_path;
-      optionEl.textContent = compactUiLabel(layout.label);
-      optionEl.title = layout.label;
-      layoutSelectEl.appendChild(optionEl);
-    }
-    if (selectedPath && !recentLayoutsByPath.has(selectedPath)) {
-      const optionEl = document.createElement("option");
-      optionEl.value = selectedPath;
-      const directLabel = makeDirectLayoutLabel(selectedPath);
-      optionEl.textContent = compactUiLabel(directLabel);
-      optionEl.title = directLabel;
-      layoutSelectEl.appendChild(optionEl);
-    }
-    layoutSelectEl.disabled = layoutSelectEl.options.length === 0;
-    if (selectedPath) {
-      layoutSelectEl.value = selectedPath;
-      const selectedLayout = recentLayoutsByPath.get(selectedPath);
-      layoutSelectEl.title = selectedLayout?.label ?? makeDirectLayoutLabel(selectedPath);
-    }
-    schemeCompareController.setRecentLayouts(Array.from(recentLayoutsByPath.values()), selectedPath);
-  }
-
-  function recentLayoutDirectOptionExists(layoutPath: string): boolean {
-    return Array.from(layoutSelectEl.options).some((option) => option.value === layoutPath);
-  }
-
-  function appendRecentLayoutOptions(layouts: RecentLayout[], selectedPath: string): void {
-    for (const layout of layouts) {
-      if (recentLayoutsByPath.has(layout.layout_path)) {
-        continue;
-      }
-      recentLayoutsByPath.set(layout.layout_path, layout);
-      const optionEl = document.createElement("option");
-      optionEl.value = layout.layout_path;
-      optionEl.textContent = compactUiLabel(layout.label);
-      optionEl.title = layout.label;
-      layoutSelectEl.appendChild(optionEl);
-    }
-    if (selectedPath) {
-      const selectedLayout = recentLayoutsByPath.get(selectedPath);
-      if (selectedLayout) {
-        layoutSelectEl.value = selectedPath;
-        layoutSelectEl.title = selectedLayout.label;
-      } else if (!recentLayoutDirectOptionExists(selectedPath)) {
-        const directOption = document.createElement("option");
-        const directLabel = makeDirectLayoutLabel(selectedPath);
-        directOption.value = selectedPath;
-        directOption.textContent = compactUiLabel(directLabel);
-        directOption.title = directLabel;
-        layoutSelectEl.appendChild(directOption);
-        layoutSelectEl.value = selectedPath;
-        layoutSelectEl.title = directLabel;
-      } else {
-        layoutSelectEl.title = makeDirectLayoutLabel(selectedPath);
-      }
-    }
-    layoutSelectEl.disabled = layoutSelectEl.options.length === 0;
-    schemeCompareController.setRecentLayouts(Array.from(recentLayoutsByPath.values()), selectedPath);
+    recentLayoutSelector.populate(layouts, selectedPath);
   }
 
   function scheduleRecentLayoutHydration(selectedPath: string, initialLoaded: number): void {
-    const startOffset = Math.max(0, Math.min(initialLoaded, RECENT_LAYOUT_BACKGROUND_LIMIT));
-    void (async () => {
-      try {
-        if (startOffset >= RECENT_LAYOUT_BACKGROUND_LIMIT) {
-          return;
-        }
-        let nextOffset = startOffset;
-        while (!destroyed && nextOffset < RECENT_LAYOUT_BACKGROUND_LIMIT) {
-          const batch = Math.min(RECENT_LAYOUT_BACKGROUND_BATCH, RECENT_LAYOUT_BACKGROUND_LIMIT - nextOffset);
-          const pageLayouts = await loadRecentLayouts(batch, false, nextOffset);
-          if (destroyed) {
-            return;
-          }
-          if (pageLayouts.length === 0) {
-            return;
-          }
-          appendRecentLayoutOptions(pageLayouts, selectedPath);
-          if (panelController && panelController.isOpen("compare")) {
-            populateCompareSelectors();
-          }
-          nextOffset += pageLayouts.length;
-          if (pageLayouts.length < batch) {
-            return;
-          }
-          await new Promise<void>((resolve) => setTimeout(resolve, 120));
-        }
-      } catch (error) {
-        console.warn("Failed to hydrate full recent-layouts list:", error);
-      }
-    })();
+    recentLayoutSelector.hydrate(selectedPath, initialLoaded);
   }
 
   function populateDesignPresets(): void {
@@ -2341,72 +2272,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
 
-  /* ── Evaluate ────────────────────────────────────────────── */
-
-  async function runEvaluation(): Promise<void> {
-    if (!currentLayoutPath) {
-      evaluateContentEl.innerHTML = `<div class="viewer-evaluate-empty">No layout loaded.</div>`;
-      return;
-    }
-    evaluateContentEl.innerHTML = `<div class="viewer-evaluate-loading">Capturing evaluation views...</div>`;
-    evaluateRunEl.disabled = true;
-
-    try {
-      setStatus("Capturing evaluation views...");
-      let renderedViews: RenderedEvaluationView[] = [];
-      try {
-        renderedViews = await captureEvaluationViews({
-          scene,
-          renderer,
-          cameraForwardHorizontal,
-          currentRoot,
-          currentSpawn,
-          currentForward,
-          avatarEyeHeightM: AVATAR_EYE_HEIGHT_M,
-        });
-      } catch (captureError) {
-        console.warn("Visual evaluation screenshots failed:", captureError);
-        renderedViews = [];
-      }
-      const coreEvaluationViews = renderedViews.filter((view) => view.view_id !== "child_forward");
-      if (coreEvaluationViews.length >= 3) {
-        evaluateContentEl.innerHTML = `
-          <div class="viewer-evaluate-loading">Running visual evaluation from ${renderedViews.length} rendered views...</div>
-          ${renderEvaluationViewsPreview(renderedViews)}
-        `;
-        setStatus("Running visual evaluation from captured views...");
-      } else {
-        evaluateContentEl.innerHTML = `
-          <div class="viewer-evaluate-loading">Visual capture unavailable. Requesting walkability with Safety/Beauty as N/A...</div>
-          ${renderEvaluationViewsPreview(renderedViews)}
-        `;
-        setStatus("Visual evaluation unavailable; requesting walkability only.");
-      }
-
-      const manifestSummary = (currentManifest?.summary || {}) as Record<string, unknown>;
-      const result = await requestUnifiedEvaluation(currentLayoutPath, renderedViews, {
-        presetId: String(manifestSummary.preset_id || manifestSummary.benchmark_preset_id || selectedDesignPreset()?.id || "custom"),
-        persistToBenchmark: true,
-        evaluationProfile: "local_segment_v1",
-      });
-      const evalResult = enforceVisualEvaluationAvailability(result);
-      evaluateContentEl.innerHTML = renderEvaluationResultHtml(evalResult, renderedViews);
-      flashStatus(
-        coreEvaluationViews.length >= 3
-          ? "Visual evaluation complete."
-          : "Walkability complete; visual scores unavailable.",
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Evaluation request failed.";
-      evaluateContentEl.innerHTML = `<div class="viewer-evaluate-error">${escapeHtml(message)}</div>`;
-      setStatus(`Evaluation failed: ${message}`);
-    } finally {
-      evaluateRunEl.disabled = false;
-    }
-  }
-
   function populateCompareSelectors(): void {
-    const layouts = Array.from(recentLayoutsByPath.values());
+    const layouts = recentLayoutSelector.currentLayouts();
     const optionsHtml = layouts
       .map(l => `<option value="${escapeHtml(l.layout_path)}">${escapeHtml(compactUiLabel(l.label))}</option>`)
       .join("");
@@ -2736,7 +2603,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   evaluateToggleEl.addEventListener("click", () => panelController.setOpen("evaluate", !panelController.isOpen("evaluate")), { signal });
   evaluateCloseEl.addEventListener("click", () => panelController.setOpen("evaluate", false), { signal });
-  evaluateRunEl.addEventListener("click", () => void runEvaluation(), { signal });
+  evaluateRunEl.addEventListener("click", () => void evaluationRunner.run(), { signal });
 
   compareToggleEl.addEventListener("click", () => panelController.setOpen("compare", !panelController.isOpen("compare")), { signal });
   compareCloseEl.addEventListener("click", () => panelController.setOpen("compare", false), { signal });
@@ -3076,8 +2943,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       }
       try {
         await sceneSelectionController.loadLayoutSelection(nextLayoutPath);
-        layoutSelectEl.title = recentLayoutsByPath.get(nextLayoutPath)?.label ?? makeDirectLayoutLabel(nextLayoutPath);
-        schemeCompareController.setRecentLayouts(Array.from(recentLayoutsByPath.values()), nextLayoutPath);
+        recentLayoutSelector.setSelectedPath(nextLayoutPath);
+        schemeCompareController.setRecentLayouts(recentLayoutSelector.currentLayouts(), nextLayoutPath);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to load scene layout.";
         setError(errorEl, message);
@@ -3206,7 +3073,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
       // If user passed ?layout=... and it failed, fallback to latest recent layouts.
       if (requestedLayoutPath && lastLayoutError) {
-        recentLayouts = await loadRecentLayouts(RECENT_LAYOUT_BACKGROUND_LIMIT, false);
+        recentLayouts = await loadRecentLayouts(RECENT_LAYOUT_BACKGROUND_LIMIT);
         const fallbackCandidates = recentLayouts
           .map((item) => item.layout_path)
           .filter((item) => item !== requestedLayoutPath);

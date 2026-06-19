@@ -565,7 +565,11 @@ function buildRecentLayoutCandidates(roots: string[]): {
 function getRecentLayoutCache(roots: string[], forceRefresh: boolean): RecentLayoutCacheState {
   const now = performance.now();
   const rootsSignature = buildRecentLayoutRootsSignature(roots);
-  if (!forceRefresh && !recentLayoutCache && fs.existsSync(RECENT_LAYOUT_INDEX_PATH)) {
+  if (!forceRefresh && fs.existsSync(RECENT_LAYOUT_INDEX_PATH)) {
+    if (recentLayoutCache && recentLayoutCache.rootsSignature === rootsSignature) {
+      return recentLayoutCache;
+    }
+    if (!recentLayoutCache) {
       return {
         builtAtMs: now,
         rootsSignature,
@@ -574,6 +578,7 @@ function getRecentLayoutCache(roots: string[], forceRefresh: boolean): RecentLay
         discoveryMs: 0,
         viewStateByPath: new Map(),
       };
+    }
   }
   const needsRebuild =
     !recentLayoutCache
@@ -610,7 +615,7 @@ async function buildRecentLayoutsPayload(
   limit: number,
   forceRefresh: boolean,
   offsetRows: number = 0,
-): Promise<{ results: Array<Record<string, unknown>> }> {
+): Promise<{ results: Array<Record<string, unknown>>; cache: Record<string, unknown> }> {
   const buildStart = performance.now();
   const roots = allowedRoots();
   const safeLimit = Math.max(1, Number.isFinite(limit) ? Math.trunc(limit) : RECENT_LAYOUT_LIMIT);
@@ -639,7 +644,17 @@ async function buildRecentLayoutsPayload(
       console.info(
         `[viewer-api-timing] buildRecentLayoutsPayload limit=${safeLimit} roots=${roots.length} discovered=${discoveredCount} checked=${checkedCount} return=${results.length} elapsed=${buildMs}ms`,
       );
-      return { results };
+      return {
+        results,
+        cache: {
+          source: "index",
+          ttl_ms: RECENT_LAYOUT_DISCOVERY_CACHE_TTL_MS,
+          force_refresh: forceRefresh,
+          discovered: discoveredCount,
+          checked: checkedCount,
+          offset: safeOffset,
+        },
+      };
     }
 
     if (cache.candidates.length === 0 || cache.discovered <= 0) {
@@ -677,7 +692,17 @@ async function buildRecentLayoutsPayload(
   console.info(
     `[viewer-api-timing] buildRecentLayoutsPayload limit=${safeLimit} roots=${roots.length} discovered=${discoveredCount} checked=${checkedCount} return=${results.length} elapsed=${buildMs}ms`,
   );
-  return { results };
+  return {
+    results,
+    cache: {
+      source: indexSeen.size > 0 ? "index+scan" : "scan",
+      ttl_ms: RECENT_LAYOUT_DISCOVERY_CACHE_TTL_MS,
+      force_refresh: forceRefresh,
+      discovered: discoveredCount,
+      checked: checkedCount,
+      offset: safeOffset,
+    },
+  };
 }
 
 function asNumber(value: unknown, fallback: number): number {

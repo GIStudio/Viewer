@@ -8,10 +8,16 @@ import * as THREE from "three";
 import type { ViewerManifest, RecentLayout } from "./viewer-types";
 
 const API_BASE = (import.meta.env.VITE_ROADGEN_API_BASE as string | undefined) || "http://127.0.0.1:8010";
+const RECENT_LAYOUTS_CACHE_TTL_MS = 30_000;
 
-// Manifest cache
-const manifestCache = new Map<string, ViewerManifest>();
-const recentLayoutsCache = new Map<string, RecentLayout[]>();
+type CacheEntry<T> = {
+  value: T;
+  createdAtMs: number;
+  lastAccessedMs: number;
+};
+
+const manifestCache = new Map<string, CacheEntry<ViewerManifest>>();
+const recentLayoutsCache = new Map<string, CacheEntry<RecentLayout[]>>();
 
 export type LoadManifestOptions = {
   sceneGlbPath?: string;
@@ -30,9 +36,10 @@ export async function loadManifest(
   const cacheKey = manifestCacheKey(manifestUrl, options);
   if (useCache && manifestCache.has(cacheKey)) {
     const cached = manifestCache.get(cacheKey)!;
+    cached.lastAccessedMs = performance.now();
     const cacheMs = (performance.now() - manifestStart).toFixed(1);
-    console.info(`[viewer-timing] loadManifest cache hit: ${manifestUrl} (${cacheMs} ms)`);
-    return cached;
+    console.info(`[viewer-timing] loadManifest cache hit: ${cacheKey} (${cacheMs} ms)`);
+    return cached.value;
   }
 
   const fetchStart = performance.now();
@@ -80,7 +87,8 @@ export async function loadManifest(
   const parseMs = (performance.now() - parseStart).toFixed(1);
   console.info(`[viewer-timing] loadManifest parse: ${manifestUrl} (${parseMs} ms)`);
   if (useCache) {
-    manifestCache.set(cacheKey, manifest);
+    const now = performance.now();
+    manifestCache.set(cacheKey, { value: manifest, createdAtMs: now, lastAccessedMs: now });
   }
   console.info(`[viewer-timing] loadManifest total: ${manifestUrl} (${(performance.now() - manifestStart).toFixed(1)} ms)`);
   return manifest;
@@ -90,7 +98,13 @@ export async function loadManifest(
  * Clear manifest cache.
  */
 export function clearManifestCache(): void {
+  clearManifestCacheWithReason("manual");
+}
+
+export function clearManifestCacheWithReason(reason: string): void {
+  const count = manifestCache.size;
   manifestCache.clear();
+  console.info(`[viewer-cache] manifest cleared reason=${reason} entries=${count}`);
 }
 
 /**
@@ -106,7 +120,16 @@ export async function loadRecentLayouts(
   const cacheKey = `${safeLimit}:${safeOffset}`;
   if (useCache) {
     const cached = recentLayoutsCache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      const ageMs = performance.now() - cached.createdAtMs;
+      if (ageMs <= RECENT_LAYOUTS_CACHE_TTL_MS) {
+        cached.lastAccessedMs = performance.now();
+        console.info(`[viewer-timing] loadRecentLayouts cache hit: ${cacheKey} age=${ageMs.toFixed(1)}ms`);
+        return cached.value;
+      }
+      recentLayoutsCache.delete(cacheKey);
+      console.info(`[viewer-timing] loadRecentLayouts cache expired: ${cacheKey} age=${ageMs.toFixed(1)}ms`);
+    }
   }
   const refreshParam = useCache ? "" : "&refresh=1";
   const offsetParam = safeOffset > 0 ? `&offset=${safeOffset}` : "";
@@ -145,7 +168,8 @@ export async function loadRecentLayouts(
   }
 
   if (useCache) {
-    recentLayoutsCache.set(cacheKey, result);
+    const now = performance.now();
+    recentLayoutsCache.set(cacheKey, { value: result, createdAtMs: now, lastAccessedMs: now });
   }
   return result;
 }
@@ -154,7 +178,21 @@ export async function loadRecentLayouts(
  * Clear recent layouts cache.
  */
 export function clearRecentLayoutsCache(): void {
+  clearRecentLayoutsCacheWithReason("manual");
+}
+
+export function clearRecentLayoutsCacheWithReason(reason: string): void {
+  const count = recentLayoutsCache.size;
   recentLayoutsCache.clear();
+  console.info(`[viewer-cache] recent-layouts cleared reason=${reason} entries=${count}`);
+}
+
+export function viewerApiCacheStats(): Record<string, unknown> {
+  return {
+    manifest_entries: manifestCache.size,
+    recent_layout_entries: recentLayoutsCache.size,
+    recent_layout_ttl_ms: RECENT_LAYOUTS_CACHE_TTL_MS,
+  };
 }
 
 /**

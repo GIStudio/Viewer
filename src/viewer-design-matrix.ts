@@ -1,4 +1,11 @@
-import { apiJson, clearManifestCache, clearRecentLayoutsCache, loadRecentLayouts, postApiJson } from "./viewer-api";
+import {
+  apiJson,
+  clearManifestCacheWithReason,
+  clearRecentLayoutsCacheWithReason,
+  loadRecentLayouts,
+  postApiJson,
+} from "./viewer-api";
+import type { LoadManifestOptions } from "./viewer-api";
 import type {
   DesignMatrixCell,
   DesignMatrixGeneratePayload,
@@ -27,7 +34,7 @@ export type ViewerDesignMatrixControllerDeps = {
   getLatestDraftScenario: () => ScenarioDesign | null;
   getDesignSemanticConfigPatch: () => Record<string, unknown>;
   getCurrentLayoutPath: () => string;
-  loadLayoutSelection: (layoutPath: string) => Promise<void>;
+  loadLayoutSelection: (layoutPath: string, options?: LoadManifestOptions) => Promise<void>;
   populateRecentLayoutOptions: (layouts: RecentLayout[], selectedPath: string) => void;
   setStatus: (message: string) => void;
   setError: (element: HTMLElement, message: string) => void;
@@ -136,7 +143,7 @@ export function createViewerDesignMatrixController(
       return;
     }
     deps.setStatus("Loading matrix preview...");
-    await deps.loadLayoutSelection(layoutPath);
+    await deps.loadLayoutSelection(layoutPath, matrixLoadOptions(cell));
     const recent = await loadRecentLayouts(50, false);
     deps.populateRecentLayoutOptions(recent, layoutPath);
     deps.flashStatus("Matrix preview loaded.");
@@ -166,17 +173,19 @@ export function createViewerDesignMatrixController(
         force,
       });
       let layoutPath = payload.layout_path || payload.scene_layout_path || payload.cell?.layout_path || "";
+      let sceneGlbPath = payload.scene_glb_path || payload.cell?.scene_glb_path || "";
       if (payload.mode === "job" && payload.job_id) {
         deps.updateDesignStatus(`Matrix job ${payload.job_id} submitted.`, "neutral");
         const result = await waitForMatrixJob(payload.job_id);
         layoutPath = result.result?.scene_layout_path || layoutPath;
+        sceneGlbPath = result.result?.scene_glb_path || sceneGlbPath;
       }
       if (!layoutPath) {
         throw new Error("Matrix generation finished without a scene_layout_path.");
       }
-      clearRecentLayoutsCache();
-      clearManifestCache();
-      await deps.loadLayoutSelection(layoutPath);
+      clearRecentLayoutsCacheWithReason("design-matrix-cell-generated");
+      clearManifestCacheWithReason("design-matrix-cell-generated");
+      await deps.loadLayoutSelection(layoutPath, matrixLoadOptions({ scene_glb_path: sceneGlbPath }));
       const recent = await loadRecentLayouts(50, false);
       deps.populateRecentLayoutOptions(recent, layoutPath);
       deps.updateDesignStatus("Matrix cell generated and loaded.", "success");
@@ -288,6 +297,11 @@ export function createViewerDesignMatrixController(
 
   function cellForKeys(structureKey: string, furnitureKey: string): DesignMatrixCell | null {
     return inventory?.cells.find((cell) => cell.structure_key === structureKey && cell.furniture_key === furnitureKey) ?? null;
+  }
+
+  function matrixLoadOptions(cell: Pick<DesignMatrixCell, "scene_glb_path">): LoadManifestOptions {
+    const sceneGlbPath = String(cell.scene_glb_path || "").trim();
+    return sceneGlbPath ? { sceneGlbPath, defaultSceneOptionKey: "final_scene" } : { defaultSceneOptionKey: "final_scene" };
   }
 
   function buildMatrixRequest(): Record<string, unknown> {

@@ -25,7 +25,13 @@ import {
   DESIGN_SCHEME_VARIANTS,
   VIEWER_DESIGN_PRESETS,
 } from "./viewer-types";
-import { apiJson, clearManifestCache, clearRecentLayoutsCache, loadRecentLayouts, postApiJson } from "./viewer-api";
+import {
+  apiJson,
+  clearManifestCacheWithReason,
+  clearRecentLayoutsCacheWithReason,
+  loadRecentLayouts,
+  postApiJson,
+} from "./viewer-api";
 import { describeDesignJobProgress, effectiveDesignPrompt, submitDesignJob } from "./viewer-design";
 import {
   DESIGN_GENERATION_STEPS,
@@ -788,8 +794,8 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       deps.renderBranchRunResults(payload);
       const best = branchNodes(payload).find((node) => node.node_id === payload.best_node_id);
       if (best?.scene_layout_path) {
-        clearRecentLayoutsCache();
-        clearManifestCache();
+        clearRecentLayoutsCacheWithReason("branch-run-best-loaded");
+        clearManifestCacheWithReason("branch-run-best-loaded");
         await deps.loadLayoutSelection(best.scene_layout_path);
         const recent = await loadRecentLayouts(50, false);
         deps.populateRecentLayoutOptions(recent, best.scene_layout_path);
@@ -1157,8 +1163,8 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       if (!firstReady) {
         throw new Error("No schemes were generated successfully.");
       }
-      clearRecentLayoutsCache();
-      clearManifestCache();
+      clearRecentLayoutsCacheWithReason("design-generation-complete");
+      clearManifestCacheWithReason("design-generation-complete");
       await deps.loadLayoutSelection(firstReady.layoutPath);
       const recent = await loadRecentLayouts(50, false);
       deps.populateRecentLayoutOptions(recent, firstReady.layoutPath);

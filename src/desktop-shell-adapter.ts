@@ -202,13 +202,19 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
   }
 
   function activateRightTab(id: string | null): void {
-    activeRightTab = id;
+    const nextActiveTab = id ?? rightTabButtons.querySelector<HTMLButtonElement>("[data-shell-tab]")?.dataset.shellTab ?? null;
+    activeRightTab = nextActiveTab;
     rightTabButtons.querySelectorAll<HTMLButtonElement>("[data-shell-tab]").forEach((button) => {
-      button.classList.toggle("active", button.dataset.shellTab === id);
+      const isActive = button.dataset.shellTab === nextActiveTab;
+      button.classList.toggle("active", isActive);
+      button.dataset.open = isActive ? "true" : "false";
+      button.setAttribute("aria-expanded", isActive ? "true" : "false");
     });
     rightTabPanels.querySelectorAll<HTMLElement>("[data-shell-tab-panel]").forEach((panel) => {
-      panel.hidden = panel.dataset.shellTabPanel !== id;
-      panel.classList.toggle("active", panel.dataset.shellTabPanel === id);
+      const isActive = panel.dataset.shellTabPanel === nextActiveTab;
+      panel.hidden = !isActive;
+      panel.classList.toggle("active", isActive);
+      panel.dataset.open = isActive ? "true" : "false";
     });
   }
 
@@ -242,23 +248,31 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     rightTabButtons.innerHTML = "";
     rightTabPanels.innerHTML = "";
     tabs.forEach((tab) => {
+      const panelId = `desktop-shell-tab-panel-${tab.id}`;
       const button = document.createElement("button");
       button.type = "button";
       button.className = "desktop-shell-tab-button";
       button.dataset.shellTab = tab.id;
       button.dataset.i18nSourceText = tab.label;
+      button.dataset.open = "false";
+      button.setAttribute("aria-controls", panelId);
+      button.setAttribute("aria-expanded", "false");
       button.textContent = tab.label;
       button.addEventListener("click", () => activateRightTab(tab.id));
       rightTabButtons.appendChild(button);
 
       const panel = document.createElement("section");
+      panel.id = panelId;
       panel.className = "desktop-shell-tab-panel";
       panel.dataset.shellTabPanel = tab.id;
+      panel.dataset.open = "false";
       panel.dataset.i18nScope = "literal";
+      panel.setAttribute("role", "tabpanel");
+      panel.hidden = true;
       renderSectionContent(panel, tab.content);
       rightTabPanels.appendChild(panel);
     });
-    activateRightTab(activeId);
+    activateRightTab(activeId ?? tabs[0]?.id ?? null);
     applyViewerTranslations(root, currentLanguage);
   }
 
