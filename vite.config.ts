@@ -760,6 +760,93 @@ function cleanForJson(value: unknown): unknown {
   return value;
 }
 
+function buildRoadCenterlines(layoutPayload: JsonRecord): Array<JsonRecord> {
+  const sceneGraph = (layoutPayload.scene_graph ?? null) as JsonRecord | null;
+  if (!sceneGraph || typeof sceneGraph !== "object") {
+    return [];
+  }
+
+  const segmentRoadIds = new Map<string, unknown>();
+  if (Array.isArray(layoutPayload.segment_semantic_profiles)) {
+    for (const rawProfile of layoutPayload.segment_semantic_profiles) {
+      const profile = rawProfile as JsonRecord;
+      const segmentId = String(profile.segment_id ?? "").trim();
+      if (segmentId) {
+        segmentRoadIds.set(segmentId, profile.road_id);
+      }
+    }
+  }
+
+  const groups = new Map<string, { roadId: unknown; points: Array<[number, number]> }>();
+  const nodes = Array.isArray(sceneGraph.nodes) ? sceneGraph.nodes : [];
+  for (const rawNode of nodes) {
+    const node = rawNode as JsonRecord;
+    if (String(node.node_type ?? "") !== "road_segment") {
+      continue;
+    }
+    const x = asNumber(node.x, Number.NaN);
+    const z = asNumber(node.z, Number.NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+      continue;
+    }
+    const segmentId = String(node.segment_id ?? "").trim();
+    let roadId = node.road_id;
+    if ((roadId === null || roadId === undefined || roadId === "") && segmentId) {
+      roadId = segmentRoadIds.get(segmentId);
+    }
+    const groupKey = String(
+      roadId !== null && roadId !== undefined && roadId !== ""
+        ? roadId
+        : node.centerline_id ?? segmentId,
+    ).trim();
+    if (!groupKey) {
+      continue;
+    }
+    const group = groups.get(groupKey) ?? { roadId: roadId ?? groupKey, points: [] };
+    group.points.push([x, z]);
+    groups.set(groupKey, group);
+  }
+
+  const result: Array<JsonRecord> = [];
+  for (const group of groups.values()) {
+    const points = [...group.points];
+    if (points.length < 2) {
+      continue;
+    }
+    const xs = points.map((point) => point[0]);
+    const zs = points.map((point) => point[1]);
+    const xRange = Math.max(...xs) - Math.min(...xs);
+    const zRange = Math.max(...zs) - Math.min(...zs);
+    points.sort((left, right) => (
+      xRange >= zRange
+        ? left[0] - right[0] || left[1] - right[1]
+        : left[1] - right[1] || left[0] - right[0]
+    ));
+
+    const deduped: Array<[number, number]> = [];
+    for (const point of points) {
+      const previous = deduped[deduped.length - 1];
+      if (previous && Math.abs(previous[0] - point[0]) < 0.05 && Math.abs(previous[1] - point[1]) < 0.05) {
+        continue;
+      }
+      deduped.push([Number(point[0].toFixed(3)), Number(point[1].toFixed(3))]);
+    }
+    if (deduped.length >= 2) {
+      result.push({ road_id: group.roadId, points_xz: deduped });
+    }
+  }
+
+  result.sort((left, right) => {
+    const leftId = Number(left.road_id);
+    const rightId = Number(right.road_id);
+    if (Number.isFinite(leftId) && Number.isFinite(rightId)) {
+      return leftId - rightId;
+    }
+    return String(left.road_id ?? "").localeCompare(String(right.road_id ?? ""));
+  });
+  return result;
+}
+
 function loadAssetDescriptionIndex(): Map<string, JsonRecord> {
   if (cachedAssetDescriptionIndex) {
     return cachedAssetDescriptionIndex;
@@ -1274,6 +1361,7 @@ function viewerApiPlugin(): Plugin {
               comparison_metadata: buildComparisonMetadata(layoutPayload, productionSteps as Array<Record<string, unknown>>),
               layout_overlay: {
                 bands: cleanForJson(layoutBands),
+                road_centerlines: cleanForJson(buildRoadCenterlines(layoutPayload)),
                 building_footprints: cleanForJson(buildingFootprints),
                 generated_lots: cleanForJson(generatedLots),
                 building_regions: cleanForJson(buildingRegions),

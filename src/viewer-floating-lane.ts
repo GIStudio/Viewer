@@ -78,6 +78,35 @@ type InstanceOrientationInfo = {
   previewYawDeg: number;
 };
 
+type RoadCenterlineOverlay = {
+  roadId: string;
+  points: Array<[number, number]>;
+};
+
+type FloatingBandOverlay = {
+  sourceIndex: number;
+  kind: string;
+  name: string;
+  side: string;
+  widthM: number;
+  zCenterM: number;
+};
+
+const ROAD_CENTERLINE_END_EXTENSION_M = 5.5;
+
+function finiteNumber(value: unknown): number | null {
+  if (typeof value === "boolean") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function pointXz(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const x = finiteNumber(value[0]);
+  const z = finiteNumber(value[1]);
+  return x === null || z === null ? null : [x, z];
+}
+
 // ── Factory ────────────────────────────────────────────────────
 
 export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSystem {
@@ -265,6 +294,159 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
 
   function shouldRenderTurnLanePatch(patch: Record<string, unknown>, hasCornerSurface: boolean): boolean {
     return isVehicleTurnLanePatch(patch) || !hasCornerSurface;
+  }
+
+  function normalizeFloatingBandKind(rawKind: unknown): string {
+    const kind = String(rawKind ?? "").trim().toLowerCase();
+    if (kind === "frontage_reserve" || kind === "frontage") return "frontage";
+    if (kind === "nearroad_furnishing" || kind === "transit_edge") return "furnishing";
+    if (kind === "clear_sidewalk" || kind === "clear_path") return "clear_path";
+    if (kind === "grass_belt" || kind === "greenzone") return "greenzone";
+    return kind || "default";
+  }
+
+  function collectFloatingBands(overlay: Record<string, unknown>): FloatingBandOverlay[] {
+    const bands = Array.isArray(overlay.bands) ? overlay.bands : [];
+    const seen = new Set<string>();
+    const result: FloatingBandOverlay[] = [];
+    for (const [sourceIndex, rawBand] of bands.entries()) {
+      const band = rawBand as Record<string, unknown>;
+      const widthM = finiteNumber(band.width_m);
+      if (widthM === null || widthM <= 0) continue;
+      const kind = normalizeFloatingBandKind(band.kind ?? band.role ?? band.surface_role ?? band.name);
+      if (!visibleLaneKinds.has(kind) && kind !== "default") continue;
+      const zCenterM = finiteNumber(band.z_center_m) ?? 0;
+      const name = String(band.name ?? kind);
+      const side = String(band.side ?? "");
+      const key = `${kind}|${side}|${name}|${widthM.toFixed(3)}|${zCenterM.toFixed(3)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push({ sourceIndex, kind, name, side, widthM, zCenterM });
+    }
+    return result;
+  }
+
+  function collectRoadCenterlines(overlay: Record<string, unknown>): RoadCenterlineOverlay[] {
+    const rawCenterlines = Array.isArray(overlay.road_centerlines) ? overlay.road_centerlines : [];
+    const result: RoadCenterlineOverlay[] = [];
+    for (const [index, rawCenterline] of rawCenterlines.entries()) {
+      const centerline = rawCenterline as Record<string, unknown>;
+      const rawPoints = Array.isArray(centerline.points_xz) ? centerline.points_xz : [];
+      const points = rawPoints.map(pointXz).filter((point): point is [number, number] => point !== null);
+      if (points.length < 2) continue;
+      result.push({
+        roadId: String(centerline.road_id ?? centerline.centerline_id ?? `road_${index}`),
+        points,
+      });
+    }
+    return result;
+  }
+
+  function bandPolygonForCenterline(
+    centerline: RoadCenterlineOverlay,
+    zCenterM: number,
+    widthM: number,
+  ): Array<[number, number]> | null {
+    const first = centerline.points[0];
+    const last = centerline.points[centerline.points.length - 1];
+    const dx = last[0] - first[0];
+    const dz = last[1] - first[1];
+    const length = Math.hypot(dx, dz);
+    if (!Number.isFinite(length) || length < 0.5) return null;
+
+    const tangentX = dx / length;
+    const tangentZ = dz / length;
+    const normalX = tangentZ;
+    const normalZ = -tangentX;
+    const extension = Math.min(ROAD_CENTERLINE_END_EXTENSION_M, Math.max(0.5, length * 0.08));
+    const start: [number, number] = [first[0] - tangentX * extension, first[1] - tangentZ * extension];
+    const end: [number, number] = [last[0] + tangentX * extension, last[1] + tangentZ * extension];
+    const leftOffset = zCenterM - widthM / 2;
+    const rightOffset = zCenterM + widthM / 2;
+    return [
+      [start[0] + normalX * leftOffset, start[1] + normalZ * leftOffset],
+      [end[0] + normalX * leftOffset, end[1] + normalZ * leftOffset],
+      [end[0] + normalX * rightOffset, end[1] + normalZ * rightOffset],
+      [start[0] + normalX * rightOffset, start[1] + normalZ * rightOffset],
+    ];
+  }
+
+  function addFlatPolygonOverlay(
+    ring: Array<[number, number]>,
+    y: number,
+    color: THREE.ColorRepresentation,
+    opacity: number,
+    userData: Record<string, unknown>,
+  ): void {
+    const mesh = new THREE.Mesh(
+      new THREE.ShapeGeometry(buildPolygonShape(ring.map(point => [point[0], -point[1]]))),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(0, y, 0);
+    Object.assign(mesh.userData, userData, { isFloatingLane: true });
+    scene.add(mesh);
+    floatingLaneObjects.push(mesh);
+  }
+
+  function addFlatPolygonEdge(
+    ring: Array<[number, number]>,
+    y: number,
+    color: THREE.ColorRepresentation,
+    opacity: number,
+  ): void {
+    const pts = ring.map(point => new THREE.Vector3(point[0], y, point[1]));
+    pts.push(pts[0].clone());
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color, transparent: true, opacity }),
+    );
+    line.userData.isFloatingLane = true;
+    scene.add(line);
+    floatingLaneObjects.push(line);
+  }
+
+  function drawRoadCenterlineBands(overlay: Record<string, unknown>, y: number): boolean {
+    const centerlines = collectRoadCenterlines(overlay);
+    const bands = collectFloatingBands(overlay);
+    if (!centerlines.length || !bands.length) return false;
+
+    let drew = false;
+    for (const [roadIndex, centerline] of centerlines.entries()) {
+      for (const [bandIndex, band] of bands.entries()) {
+        const ring = bandPolygonForCenterline(centerline, band.zCenterM, band.widthM);
+        if (!ring) continue;
+        const selected = (floatingLaneConfig.selectedLaneIndex ?? -1) === band.sourceIndex
+          || (floatingLaneConfig.selectedLaneIndex ?? -1) === bandIndex;
+        const opacity = selected
+          ? Math.min(floatingLaneConfig.opacity! * 1.5, 0.9)
+          : floatingLaneConfig.opacity! * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
+        const color = band.kind === "drive_lane" ? PER_LANE_COLORS.drive_lane : getFloatingLaneColor(band.kind);
+
+        addFlatPolygonOverlay(ring, y, color, opacity * 0.7, {
+          bandIndex: band.sourceIndex,
+          bandKind: band.kind,
+          bandName: band.name,
+          roadId: centerline.roadId,
+          overlayType: band.kind === "drive_lane" ? "lane" : "band",
+        });
+        if (floatingLaneConfig.showEdgeLines) {
+          addFlatPolygonEdge(ring, y + 0.002, selected ? 0xffffff : color, opacity * 0.85);
+        }
+        if (floatingLaneConfig.showLabels && bandIndex < 8 && roadIndex % 2 === 0) {
+          const cx = ring.reduce((sum, point) => sum + point[0], 0) / ring.length;
+          const cz = ring.reduce((sum, point) => sum + point[1], 0) / ring.length;
+          const sp = createFloatingLaneLabel(band.kind, cx, y + 1.5, cz);
+          sp.userData.isFloatingLane = true;
+          sp.userData.bandIndex = band.sourceIndex;
+          sp.userData.roadId = centerline.roadId;
+          scene.add(sp);
+          floatingLaneObjects.push(sp);
+        }
+        drew = true;
+      }
+    }
+    return drew;
   }
 
   function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
@@ -639,123 +821,63 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
 
     {
       const bh = h + 0.02;
-      let rMinX: number, rMaxX: number, rCenterZ = 0;
+      if (!drawRoadCenterlineBands(ov as Record<string, unknown>, bh)) {
+        let rMinX: number, rMaxX: number, rCenterZ = 0;
 
-      if (cwRings.length > 0) {
-        let rmi = Infinity, rma = -Infinity, zmi = Infinity, zma = -Infinity;
-        for (const ring of cwRings) for (const p of ring) { rmi = Math.min(rmi, p[0]); rma = Math.max(rma, p[0]); zmi = Math.min(zmi, p[1]); zma = Math.max(zma, p[1]); }
-        for (const j of jns) for (const ring of (j.carriageway_core_rings ?? []) as number[][][]) for (const p of ring) { rmi = Math.min(rmi, p[0]); rma = Math.max(rma, p[0]); zmi = Math.min(zmi, p[1]); zma = Math.max(zma, p[1]); }
-        rMinX = rmi; rMaxX = rma; rCenterZ = (zmi + zma) / 2;
-      } else if (manifest?.scene_bounds) {
-        const sb = manifest.scene_bounds;
-        rMinX = sb.center[0] - sb.size[0] / 2; rMaxX = sb.center[0] + sb.size[0] / 2; rCenterZ = sb.center[2];
-      } else {
-        const half = (ov.length_m || 100) / 2;
-        rMinX = -half; rMaxX = half; rCenterZ = 0;
-      }
-
-      const lc = Math.max(1, ov.lane_count ?? 1);
-      const rcX = (rMinX + rMaxX) / 2;
-      const len = rMaxX - rMinX;
-
-      const addLine = (x1: number, z1: number, x2: number, z2: number, color: number, op: number, dashed = false) => {
-        const mat = dashed ? new THREE.LineDashedMaterial({ color, transparent: true, opacity: op, dashSize: 1.5, gapSize: 1.0 }) : new THREE.LineBasicMaterial({ color, transparent: true, opacity: op });
-        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x1, bh, z1), new THREE.Vector3(x2, bh, z2)]), mat);
-        if (dashed) line.computeLineDistances();
-        line.userData.isFloatingLane = true;
-        scene.add(line); floatingLaneObjects.push(line);
-      };
-
-      for (let bi = 0; bi < (ov.bands ?? []).length; bi++) {
-        const band = ov.bands![bi];
-        if (!band.width_m || !Number.isFinite(band.width_m)) continue;
-        if (!visibleLaneKinds.has(band.kind as string) && band.kind !== "default") continue;
-
-        const bZ = rCenterZ + ((band.z_center_m as number) ?? 0);
-        const sel = (floatingLaneConfig.selectedLaneIndex ?? -1) === bi;
-        const op = sel ? Math.min(floatingLaneConfig.opacity! * 1.5, 0.9) : floatingLaneConfig.opacity! * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
-
-        if ((band.kind as string) === "carriageway" && lc > 0) {
-          const lw = (band.width_m as number) / lc;
-          const zSt = bZ - (band.width_m as number) / 2;
-          const ck = Object.keys(PER_LANE_COLORS);
-
-          for (let i = 0; i < lc; i++) {
-            const lzC = zSt + lw * (i + 0.5);
-            const lCol = PER_LANE_COLORS[ck[i % ck.length]] as unknown as number;
-
-            const mesh = new THREE.Mesh(
-              new THREE.PlaneGeometry(len, lw),
-              new THREE.MeshBasicMaterial({ color: lCol, transparent: true, opacity: op * 0.7, depthWrite: false, side: THREE.DoubleSide }),
-            );
-            mesh.rotation.x = -Math.PI / 2; mesh.position.set(rcX, bh, lzC);
-            mesh.userData.isFloatingLane = true; mesh.userData.bandIndex = bi;
-            mesh.userData.bandKind = "drive_lane"; mesh.userData.laneIndex = i;
-            mesh.userData.overlayType = "lane";
-            scene.add(mesh); floatingLaneObjects.push(mesh);
-
-            if (floatingLaneConfig.showEdgeLines) {
-              const lL = lzC - lw / 2, lR = lzC + lw / 2;
-              if (i === 0) addLine(rMinX, lL, rMaxX, lL, sel ? 0xffffff : lCol, op * 0.9);
-              if (i === lc - 1) addLine(rMinX, lR, rMaxX, lR, sel ? 0xffffff : lCol, op * 0.9);
-              if (i > 0) addLine(rMinX, lL, rMaxX, lL, 0xffffff, op * 0.7, true);
-            }
-
-            if (floatingLaneConfig.showLabels) {
-              const sp = createFloatingLaneLabel("drive_lane", rcX, bh + 1.5, lzC, `车道 ${i + 1}`);
-              sp.userData.isFloatingLane = true; sp.userData.bandIndex = bi; sp.userData.laneIndex = i;
-              scene.add(sp); floatingLaneObjects.push(sp);
-            }
-          }
-
-          if (floatingLaneConfig.showEdgeLines) {
-            addLine(rMinX, zSt, rMinX, zSt + (band.width_m as number), sel ? 0xffffff : (PER_LANE_COLORS[0] as unknown as number), op * 0.9);
-            addLine(rMaxX, zSt, rMaxX, zSt + (band.width_m as number), sel ? 0xffffff : (PER_LANE_COLORS[0] as unknown as number), op * 0.9);
-          }
-
-          if (sel) {
-            const glow = new THREE.Mesh(
-              new THREE.PlaneGeometry(len + 0.5, (band.width_m as number) + 0.5),
-              new THREE.MeshBasicMaterial({ color: PER_LANE_COLORS[0], transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide }),
-            );
-            glow.rotation.x = -Math.PI / 2; glow.position.set(rcX, bh - 0.01, bZ);
-            glow.userData.isFloatingLane = true;
-            scene.add(glow); floatingLaneObjects.push(glow);
-          }
+        if (cwRings.length > 0) {
+          let rmi = Infinity, rma = -Infinity, zmi = Infinity, zma = -Infinity;
+          for (const ring of cwRings) for (const p of ring) { rmi = Math.min(rmi, p[0]); rma = Math.max(rma, p[0]); zmi = Math.min(zmi, p[1]); zma = Math.max(zma, p[1]); }
+          for (const j of jns) for (const ring of (j.carriageway_core_rings ?? []) as number[][][]) for (const p of ring) { rmi = Math.min(rmi, p[0]); rma = Math.max(rma, p[0]); zmi = Math.min(zmi, p[1]); zma = Math.max(zma, p[1]); }
+          rMinX = rmi; rMaxX = rma; rCenterZ = (zmi + zma) / 2;
+        } else if (manifest?.scene_bounds) {
+          const sb = manifest.scene_bounds;
+          rMinX = sb.center[0] - sb.size[0] / 2; rMaxX = sb.center[0] + sb.size[0] / 2; rCenterZ = sb.center[2];
         } else {
-          const bCol = getFloatingLaneColor(band.kind as string);
+          const half = (finiteNumber(ov.length_m) ?? 100) / 2;
+          rMinX = -half; rMaxX = half; rCenterZ = 0;
+        }
 
-          const mesh = new THREE.Mesh(
-            new THREE.PlaneGeometry(len, band.width_m as number),
-            new THREE.MeshBasicMaterial({ color: bCol, transparent: true, opacity: op * 0.7, depthWrite: false, side: THREE.DoubleSide }),
-          );
-          mesh.rotation.x = -Math.PI / 2; mesh.position.set(rcX, bh, bZ);
-          mesh.userData.isFloatingLane = true; mesh.userData.bandIndex = bi;
-          mesh.userData.bandKind = band.kind; mesh.userData.overlayType = "band";
-          scene.add(mesh); floatingLaneObjects.push(mesh);
+        const laneCount = Math.max(1, Math.round(finiteNumber(ov.lane_count) ?? 1));
+        const fallbackBands = collectFloatingBands(ov as Record<string, unknown>);
+        for (const band of fallbackBands) {
+          const selected = (floatingLaneConfig.selectedLaneIndex ?? -1) === band.sourceIndex;
+          const opacity = selected
+            ? Math.min(floatingLaneConfig.opacity! * 1.5, 0.9)
+            : floatingLaneConfig.opacity! * (floatingLaneConfig.animated ? 0.7 + 0.3 * Math.sin(floatingLaneAnimTime * 3) : 1);
+          const laneSplits = band.kind === "carriageway" && laneCount > 1
+            ? Array.from({ length: laneCount }, (_, index) => ({
+                kind: "drive_lane",
+                widthM: band.widthM / laneCount,
+                zCenterM: band.zCenterM - band.widthM / 2 + (band.widthM / laneCount) * (index + 0.5),
+                label: `车道 ${index + 1}`,
+              }))
+            : [{ kind: band.kind, widthM: band.widthM, zCenterM: band.zCenterM, label: undefined }];
 
-          if (floatingLaneConfig.showEdgeLines) {
-            const hw = (band.width_m as number) / 2;
-            addLine(rMinX, bZ - hw, rMaxX, bZ - hw, sel ? 0xffffff : bCol, op * 0.9);
-            addLine(rMinX, bZ + hw, rMaxX, bZ + hw, sel ? 0xffffff : bCol, op * 0.9);
-            addLine(rMinX, bZ - hw, rMinX, bZ + hw, sel ? 0xffffff : bCol, op * 0.9);
-            addLine(rMaxX, bZ - hw, rMaxX, bZ + hw, sel ? 0xffffff : bCol, op * 0.9);
-          }
-
-          if (floatingLaneConfig.showLabels) {
-            const sp = createFloatingLaneLabel(band.kind as string, rcX, bh + 1.5, bZ);
-            sp.userData.isFloatingLane = true; sp.userData.bandIndex = bi;
-            scene.add(sp); floatingLaneObjects.push(sp);
-          }
-
-          if (sel) {
-            const glow = new THREE.Mesh(
-              new THREE.PlaneGeometry(len + 0.5, (band.width_m as number) + 0.5),
-              new THREE.MeshBasicMaterial({ color: bCol, transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide }),
-            );
-            glow.rotation.x = -Math.PI / 2; glow.position.set(rcX, bh - 0.01, bZ);
-            glow.userData.isFloatingLane = true;
-            scene.add(glow); floatingLaneObjects.push(glow);
+          for (const split of laneSplits) {
+            const bZ = rCenterZ + split.zCenterM;
+            const halfWidth = split.widthM / 2;
+            const ring: Array<[number, number]> = [
+              [rMinX, bZ - halfWidth],
+              [rMaxX, bZ - halfWidth],
+              [rMaxX, bZ + halfWidth],
+              [rMinX, bZ + halfWidth],
+            ];
+            const color = split.kind === "drive_lane" ? PER_LANE_COLORS.drive_lane : getFloatingLaneColor(split.kind);
+            addFlatPolygonOverlay(ring, bh, color, opacity * 0.7, {
+              bandIndex: band.sourceIndex,
+              bandKind: split.kind,
+              overlayType: split.kind === "drive_lane" ? "lane" : "band",
+            });
+            if (floatingLaneConfig.showEdgeLines) {
+              addFlatPolygonEdge(ring, bh + 0.002, selected ? 0xffffff : color, opacity * 0.85);
+            }
+            if (floatingLaneConfig.showLabels) {
+              const sp = createFloatingLaneLabel(split.kind, (rMinX + rMaxX) / 2, bh + 1.5, bZ, split.label);
+              sp.userData.isFloatingLane = true;
+              sp.userData.bandIndex = band.sourceIndex;
+              scene.add(sp);
+              floatingLaneObjects.push(sp);
+            }
           }
         }
       }

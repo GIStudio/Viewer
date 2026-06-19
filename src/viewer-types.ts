@@ -68,6 +68,10 @@ export type ViewerManifest = {
   };
   layout_overlay?: {
     bands?: Array<Record<string, unknown>>;
+    road_centerlines?: Array<{
+      road_id?: string | number;
+      points_xz?: Array<[number, number]>;
+    }>;
     building_footprints?: Array<Record<string, unknown>>;
     generated_lots?: Array<Record<string, unknown>>;
     building_regions?: Array<Record<string, unknown>>;

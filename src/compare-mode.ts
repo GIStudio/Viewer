@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { ViewerComparisonMetadata, ViewerManifest } from "./viewer-types";
 import { viewerText, type ViewerLanguage } from "./viewer-i18n";
+import { isEnvironmentSkyDomeObject, prepareEnvironmentSkyDomes } from "./viewer-scene-bounds";
 
 export type CompareSceneSetItem = {
   id: string;
@@ -362,9 +363,10 @@ export function createCompareMode(deps: CompareModeDependencies) {
         glbUrl,
         (gltf) => {
           const root = gltf.scene;
+          prepareEnvironmentSkyDomes(root);
           root.traverse((child) => {
             const mesh = child as THREE.Mesh;
-            if (mesh.isMesh) {
+            if (mesh.isMesh && !isEnvironmentSkyDomeObject(mesh)) {
               mesh.castShadow = true;
               mesh.receiveShadow = true;
             }
@@ -753,7 +755,9 @@ export function createCompareMode(deps: CompareModeDependencies) {
       if (currentRoot) currentRoot.visible = false;
       deps.exitCompare3dEl.hidden = false;
       renderCompareLabels(compareSceneItems, compareStepLabel);
-      deps.flashStatus(t("Split-screen mode active. WASD moves all views.", "分屏模式已开启，WASD 会同步移动所有视图。"));
+      const activeMessage = t("Split-screen mode active. WASD moves all views.", "分屏模式已开启，WASD 会同步移动所有视图。");
+      deps.setStatus(activeMessage);
+      deps.flashStatus(activeMessage);
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("Failed to load scenes.", "场景加载失败。");
       deps.flashStatus(msg);
@@ -790,21 +794,33 @@ export function createCompareMode(deps: CompareModeDependencies) {
       const height = deps.renderer.domElement.clientHeight;
       const count = Math.max(1, compareRoots.length);
       const columnWidth = width / count;
+      const previousAutoClear = deps.renderer.autoClear;
+      deps.renderer.autoClear = false;
       deps.renderer.setScissorTest(true);
 
-      for (let index = 0; index < count; index += 1) {
-        const left = Math.round(index * columnWidth);
-        const right = Math.round((index + 1) * columnWidth);
-        deps.renderer.setViewport(left, 0, right - left, height);
-        deps.renderer.setScissor(left, 0, right - left, height);
-        compareRoots.forEach((root, rootIndex) => {
-          root.visible = rootIndex === index;
-        });
-        deps.renderer.render(deps.scene, compareCameras[index] ?? deps.camera);
+      try {
+        for (let index = 0; index < count; index += 1) {
+          const left = Math.round(index * columnWidth);
+          const right = Math.round((index + 1) * columnWidth);
+          const paneWidth = Math.max(1, right - left);
+          const paneHeight = Math.max(1, height);
+          const paneCamera = compareCameras[index] ?? deps.camera;
+          paneCamera.aspect = paneWidth / paneHeight;
+          paneCamera.updateProjectionMatrix();
+          deps.renderer.setViewport(left, 0, paneWidth, paneHeight);
+          deps.renderer.setScissor(left, 0, paneWidth, paneHeight);
+          deps.renderer.clear(true, true, true);
+          compareRoots.forEach((root, rootIndex) => {
+            root.visible = rootIndex === index;
+          });
+          deps.renderer.render(deps.scene, paneCamera);
+        }
+      } finally {
+        deps.renderer.setScissorTest(false);
+        deps.renderer.setViewport(0, 0, width, height);
+        deps.renderer.autoClear = previousAutoClear;
       }
 
-      deps.renderer.setScissorTest(false);
-      deps.renderer.setViewport(0, 0, width, height);
       return true;
     }
     for (const root of compareRoots) {
