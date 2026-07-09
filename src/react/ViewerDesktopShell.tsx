@@ -27,6 +27,33 @@ export function ViewerDesktopShell({ route, hostRef }: ViewerDesktopShellProps) 
   const [language, setLanguage] = useState<ViewerLanguage>(() => loadViewerLanguage());
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [enabledActions, setEnabledActions] = useState<Set<ShellMenuActionId>>(() => new Set());
+  const leftRail = route === "scene-graph"
+    ? {
+      kicker: "ANNOTATE",
+      title: "Tools & Features",
+      kickerKey: "shell.scene-graph.left.kicker",
+      titleKey: "shell.scene-graph.left.title",
+    }
+    : {
+      kicker: "BROWSE",
+      title: "Layouts & Objects",
+      kickerKey: "shell.browse.kicker",
+      titleKey: "shell.browse.title",
+    };
+  const rightRail = route === "scene-graph"
+    ? {
+      kicker: "INSPECT",
+      title: "View / Inspector / Data",
+      kickerKey: "shell.scene-graph.right.kicker",
+      titleKey: "shell.scene-graph.right.title",
+    }
+    : {
+      kicker: "ANALYZE",
+      title: "Evaluate, Compare & History",
+      kickerKey: "shell.analyze.kicker",
+      titleKey: "shell.analyze.title",
+    };
+
 
   useEffect(() => {
     const handleLanguageChange = (event: Event) => {
@@ -133,14 +160,14 @@ export function ViewerDesktopShell({ route, hostRef }: ViewerDesktopShellProps) 
         </Layout.Header>
 
         <div className="desktop-shell-main">
-          <aside className="desktop-shell-rail desktop-shell-rail-left" data-shell-region="left" aria-label="Browse">
+          <aside className="desktop-shell-rail desktop-shell-rail-left" data-shell-region="left" aria-label={leftRail.title}>
             <div className="desktop-shell-rail-header">
               <div>
-                <div className="desktop-shell-rail-kicker" data-i18n-key="shell.browse.kicker">
-                  BROWSE
+                <div className="desktop-shell-rail-kicker" data-i18n-key={leftRail.kickerKey}>
+                  {leftRail.kicker}
                 </div>
-                <div className="desktop-shell-rail-title" data-i18n-key="shell.browse.title">
-                  Layouts & Objects
+                <div className="desktop-shell-rail-title" data-i18n-key={leftRail.titleKey}>
+                  {leftRail.title}
                 </div>
               </div>
               <Button className="desktop-shell-rail-pin" type="default" data-shell-left-pin aria-pressed="false">
@@ -154,14 +181,14 @@ export function ViewerDesktopShell({ route, hostRef }: ViewerDesktopShellProps) 
             <div id="desktop-shell-center-stage" className="desktop-shell-center-stage" />
           </section>
 
-          <aside className="desktop-shell-rail desktop-shell-rail-right" data-shell-region="right" aria-label="Analyze">
+          <aside className="desktop-shell-rail desktop-shell-rail-right" data-shell-region="right" aria-label={rightRail.title}>
             <div className="desktop-shell-rail-header">
               <div>
-                <div className="desktop-shell-rail-kicker" data-i18n-key="shell.analyze.kicker">
-                  ANALYZE
+                <div className="desktop-shell-rail-kicker" data-i18n-key={rightRail.kickerKey}>
+                  {rightRail.kicker}
                 </div>
-                <div className="desktop-shell-rail-title" data-i18n-key="shell.analyze.title">
-                  Evaluate, Compare & History
+                <div className="desktop-shell-rail-title" data-i18n-key={rightRail.titleKey}>
+                  {rightRail.title}
                 </div>
               </div>
               <Button className="desktop-shell-rail-pin" type="default" data-shell-right-pin aria-pressed="false">
