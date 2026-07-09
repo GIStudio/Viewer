@@ -1,0 +1,132 @@
+.desktop-shell-section[data-section-id="annotation-tools"] {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] > .desktop-shell-section-summary {
+  display: none;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] > .desktop-shell-section-body {
+  padding: 0.25rem 0.45rem 0.7rem;
+  max-height: none;
+  overflow: visible;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-bottom-toolbar-shell {
+  display: grid;
+  gap: 0.42rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-tool-group {
+  display: grid;
+  gap: 0.22rem;
+  padding: 0;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-tool-group + .scene-tool-group {
+  margin-top: 0.1rem;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-tool-group-label {
+  padding: 0;
+  color: rgba(15, 23, 42, 0.48);
+  font-size: 0.6rem;
+  font-weight: 850;
+  letter-spacing: 0.075em;
+  line-height: 1.1;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-tool-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.28rem;
+  padding: 0;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-tool-button,
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-toolbar-button {
+  justify-content: center;
+  width: 100%;
+  min-height: 1.72rem;
+  padding: 0.26rem 0.42rem;
+  border-radius: 0.55rem;
+  font-size: 0.69rem;
+  font-weight: 820;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: inset 0 0 0 1px rgba(0, 83, 159, 0.18);
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-tool-button[data-active="true"],
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-toolbar-button[data-active="true"] {
+  box-shadow: 0 5px 12px rgba(0, 83, 159, 0.22);
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .tool-label-zh {
+  margin-left: 0.22em;
+  font-size: 0.68em;
+  opacity: 0.72;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] #annotation-tool-control-point,
+.desktop-shell-section[data-section-id="annotation-tools"] #annotation-tool-scene-region,
+.desktop-shell-section[data-section-id="annotation-tools"] #annotation-tool-functional-zone,
+.desktop-shell-section[data-section-id="annotation-tools"] #annotation-tool-surface,
+.desktop-shell-section[data-section-id="annotation-tools"] #annotation-tool-building-region,
+.desktop-shell-section[data-section-id="annotation-tools"] #annotation-tool-bus-stop {
+  grid-column: span 2;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-layer-toolbar-secondary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.28rem;
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] #annotation-delete-selected,
+.desktop-shell-section[data-section-id="annotation-tools"] #annotation-reset,
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-layer-toggle {
+  grid-column: span 2;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-layer-toggle {
+  justify-content: flex-start;
+  min-height: 1.65rem;
+  padding: 0.3rem 0.42rem;
+  gap: 0.36rem;
+  border-radius: 0.55rem;
+  background: rgba(239, 246, 255, 0.78);
+  color: var(--color-primary-dark);
+  font-size: 0.68rem;
+  line-height: 1.15;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-layer-toggle input {
+  width: 0.82rem;
+  height: 0.82rem;
+  flex: 0 0 auto;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-image-meta {
+  margin-top: 0.2rem !important;
+  padding: 0.42rem 0.48rem;
+  border-radius: 0.55rem;
+  background: rgba(248, 250, 252, 0.84);
+  color: rgba(15, 23, 42, 0.56);
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
