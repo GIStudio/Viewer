@@ -516,6 +516,10 @@ export type GenerationTrace = {
     rag_queries?: string[];
     citations_by_field?: Record<string, string[]>;
     parameter_sources_by_field?: Record<string, string>;
+    parameter_decisions_by_field?: Record<string, Record<string, unknown>>;
+    scenario_parameter_patch?: Record<string, unknown>;
+    scenario_parameter_candidates?: Array<Record<string, unknown>>;
+    llm_citations_by_field?: Record<string, string[]>;
     knowledge_source?: KnowledgeSourceKey | string;
     evidence_count?: number;
     generation_method?: string;
@@ -529,6 +533,8 @@ export type GenerationTrace = {
     overridden_fields?: string[];
     risk_notes?: string[];
     derivation_status?: string;
+    parameter_decisions_by_field?: Record<string, Record<string, unknown>>;
+    llm_citations_by_field?: Record<string, string[]>;
     generation_method?: string;
   };
   process?: {

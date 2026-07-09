@@ -117,6 +117,9 @@ export async function submitDesignJob(
     }, variant),
     ...semanticConfigPatch,
   };
+  const presetConfigPatchFields = Object.keys(preset?.configPatch ?? {});
+  const scenarioComposePatchFields = Object.keys(scenarioPatch);
+  const explicitOverrideFields = Object.keys(semanticConfigPatch);
   const scenarioId = scenario?.scenario_id || "";
   const normalizedPrompt = effectiveDesignPrompt(preset, prompt, scenario);
   const scenarioContext = scenarioId ? {
@@ -150,9 +153,14 @@ export async function submitDesignJob(
       random_seed: variant.seed,
       design_variant_id: variant.id,
       design_variant_name: variant.name,
+      preset_config_patch_fields: presetConfigPatchFields,
+      course_delivery_config_fields: Object.keys(COURSE_DELIVERY_CONFIG_PATCH),
+      design_variant_adjusted_fields: ["density", "road_width_m"],
+      explicit_override_fields: explicitOverrideFields,
       ...(scenarioId ? {
         scenario_id: scenarioId,
         scenario_compose_patch_applied: true,
+        scenario_compose_patch_fields: scenarioComposePatchFields,
       } : {}),
     },
   });

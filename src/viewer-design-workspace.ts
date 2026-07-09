@@ -467,6 +467,31 @@ function renderTraceCitations(citations: Record<string, unknown>, sources: Recor
   `;
 }
 
+function renderTraceParameterDecisions(decisionsValue: unknown): string {
+  const decisions = asRecord(decisionsValue);
+  const rows = Object.entries(decisions).sort(([left], [right]) => left.localeCompare(right)).map(([field, value]) => {
+    const decision = asRecord(value);
+    const overridden = asRecords(decision.overridden_candidates).map((item) => `${item.source}: ${formatDesignDetailValue(item.value)}`);
+    const rejected = asRecords(decision.rejected_candidates).map((item) => `${item.source}: ${formatDesignDetailValue(item.value)}`);
+    return {
+      field,
+      value: decision.value,
+      source: decision.source,
+      citations: decision.citations,
+      overridden: overridden.join(" / "),
+      rejected: rejected.join(" / "),
+    };
+  });
+  return renderDiagnosticTable(rows, [
+    ["field", "字段"],
+    ["value", "最终值"],
+    ["source", "决策来源"],
+    ["citations", "证据"],
+    ["overridden", "被覆盖候选"],
+    ["rejected", "低优先级候选"],
+  ], "暂无字段级参数决策。");
+}
+
 function renderTraceProcess(trace: Record<string, unknown>): string {
   const process = asRecord(trace.process);
   const stageTree = asRecords(process.stage_tree);
@@ -557,6 +582,9 @@ export function renderGenerationTracePanel(traceValue: unknown, options: { embed
       ${renderDiagnosticSection("字段引用", renderTraceCitations(
         asRecord(provenance.citations_by_field),
         asRecord(provenance.parameter_sources_by_field),
+      ))}
+      ${renderDiagnosticSection("最终字段决策", renderTraceParameterDecisions(
+        provenance.parameter_decisions_by_field || llm.parameter_decisions_by_field,
       ))}
       ${renderDiagnosticSection("普通 RAG Evidence", renderTraceEvidenceTable(regularRows, "本次没有普通 PDF/GraphRAG 证据。"))}
       ${renderDiagnosticSection("结构化参数三元组", renderTraceScenarioTable(structuredRows))}
