@@ -17,7 +17,7 @@ import "./style-scene-compare.css";
 import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { renderStageTree as renderG6StageTree, StageNode } from "./g6-visualization";
+import { disposeStageTree, renderStageTree as renderG6StageTree, StageNode } from "./g6-visualization";
 import { AudioManager, type AudioProfile } from "./audio-manager";
 import { createCompareMode } from "./compare-mode";
 import {
@@ -2199,15 +2199,19 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     minimapEl.hidden = true; // Hide minimap when design workspace is visible
     designWorkspaceEl.innerHTML = rendered.html;
     
-    // Render G6 stage tree after DOM is updated
-    requestAnimationFrame(() => {
-      renderDesignStageTree(payload, rendered.stage, rendered.failed);
-    });
+    if (rendered.treeReady) {
+      requestAnimationFrame(() => {
+        renderDesignStageTree(payload, rendered.stage, rendered.failed);
+      });
+    } else {
+      disposeStageTree();
+    }
   }
 
   function hideDesignWorkspace(): void {
     designWorkspaceEl.hidden = true;
     minimapEl.hidden = false; // Show minimap when design workspace is hidden
+    disposeStageTree();
     designWorkspaceEl.innerHTML = "";
   }
 

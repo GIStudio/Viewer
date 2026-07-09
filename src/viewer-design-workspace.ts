@@ -1268,15 +1268,17 @@ export function renderDesignWorkspaceHtml(
   graphTemplateId: string,
   structureSource = graphTemplateId,
   semanticSummary?: DesignSemanticSummary,
-): { html: string; stage: string; failed: boolean } {
+): { html: string; stage: string; failed: boolean; treeReady: boolean } {
   const { progress, message, stage } = describeDesignJobProgress(payload);
   const failed = payload.status === "failed";
+  const treeReady = payload.status === "succeeded" || payload.status === "failed";
   const step = stepForStage(stage);
   const presetLabel = preset ? `${preset.nameEn}` : "Custom";
   const boundedProgress = clamp(progress, 0, 100);
   return {
     stage,
     failed,
+    treeReady,
     html: `
       <div class="viewer-design-workspace-shell">
         <header class="viewer-design-workspace-header">
@@ -1302,7 +1304,14 @@ export function renderDesignWorkspaceHtml(
           ${renderGenerationTracePanel(payload.trace)}
           <section class="viewer-design-workspace-panel">
             <div class="viewer-design-workspace-panel-title">场景生长树</div>
-            <div id="viewer-g6-stage-tree"></div>
+            <div id="viewer-g6-stage-tree" data-tree-ready="${treeReady ? "true" : "false"}" aria-busy="${treeReady ? "false" : "true"}">
+              ${treeReady ? "" : `
+                <div class="viewer-g6-stage-tree-placeholder">
+                  <strong>正在生成，完成后展示稳定生长树</strong>
+                  <span>实时进度保留在上方进度条和下方阶段卡片；G6 树不再轮询重绘，避免闪烁。</span>
+                </div>
+              `}
+            </div>
           </section>
           <section class="viewer-design-workspace-panel">
             <div class="viewer-design-workspace-panel-title">当前阶段在做什么</div>

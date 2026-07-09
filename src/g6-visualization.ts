@@ -43,6 +43,10 @@ function destroyCurrentGraph(): void {
   }
 }
 
+export function disposeStageTree(): void {
+  destroyCurrentGraph();
+}
+
 function resolveContainerElement(container: string | HTMLElement): HTMLElement | null {
   if (typeof container !== 'string') {
     return container;
