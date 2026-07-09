@@ -5,4 +5,5 @@
 @import "./scene-graph/annotation-lanes.css";
 @import "./scene-graph/annotation-inspector.css";
 @import "./scene-graph/junction-overlay.css";
+@import "./scene-graph/junction-composer.css";
 @import "./scene-graph/drafts-responsive.css";

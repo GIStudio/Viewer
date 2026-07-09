@@ -106,6 +106,5 @@ export function resolveRoute(): AppRoute {
   const hash = window.location.hash;
   if (hash === "#scene-graph") return "scene-graph";
   if (hash === "#asset-editor") return "asset-editor";
-  if (hash === "#junction-editor") return "junction-editor";
   return "viewer";
 }

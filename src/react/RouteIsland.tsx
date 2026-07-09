@@ -31,9 +31,6 @@ export function RouteIsland({ route }: RouteIslandProps) {
         case "asset-editor":
           routeTeardown = (await import("../asset-editor")).mountAssetEditor(shell);
           break;
-        case "junction-editor":
-          routeTeardown = (await import("../junction-editor")).mountJunctionEditor(shell);
-          break;
         default:
           routeTeardown = await (await import("../app")).mountViewer(shell);
           break;

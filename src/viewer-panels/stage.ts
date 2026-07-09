@@ -6,7 +6,6 @@ export function createViewerStageHtml(): string {
         <div id="viewer-menu-dropdown" hidden></div>
         <button id="viewer-scene-graph-link" type="button">Annotation</button>
         <button id="viewer-asset-editor-link" type="button">Asset Editor</button>
-        <button id="viewer-junction-editor-link" type="button">Junction Editor</button>
         <button id="viewer-settings-toggle" type="button" aria-expanded="false">Settings</button>
         <button id="viewer-design-toggle" type="button">Design</button>
         <button id="viewer-compare-toggle" type="button">Compare</button>

@@ -475,7 +475,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     schemeCompareEl,
     sceneGraphLinkEl,
     assetEditorLinkEl,
-    junctionEditorLinkEl,
     menuToggleEl,
     menuDropdownEl,
     settingsToggleEl,
@@ -2335,14 +2334,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     "click",
     () => {
       window.location.hash = "#asset-editor";
-    },
-    { signal },
-  );
-
-  junctionEditorLinkEl.addEventListener(
-    "click",
-    () => {
-      window.location.hash = "#junction-editor";
     },
     { signal },
   );

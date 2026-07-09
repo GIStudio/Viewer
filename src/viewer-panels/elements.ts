@@ -13,7 +13,6 @@ export function collectViewerPanelElements(root: HTMLElement | Document): Viewer
     schemeCompareEl: requireElement<HTMLElement>(root, "#viewer-scheme-compare"),
     sceneGraphLinkEl: requireElement<HTMLButtonElement>(root, "#viewer-scene-graph-link"),
     assetEditorLinkEl: requireElement<HTMLButtonElement>(root, "#viewer-asset-editor-link"),
-    junctionEditorLinkEl: requireElement<HTMLButtonElement>(root, "#viewer-junction-editor-link"),
     menuToggleEl: requireElement<HTMLButtonElement>(root, "#viewer-menu-toggle"),
     menuDropdownEl: requireElement<HTMLElement>(root, "#viewer-menu-dropdown"),
     settingsToggleEl: requireElement<HTMLButtonElement>(root, "#viewer-settings-toggle"),

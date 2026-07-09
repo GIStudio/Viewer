@@ -25,7 +25,6 @@ export type ViewerPanelElements = {
   schemeCompareEl: HTMLElement;
   sceneGraphLinkEl: HTMLButtonElement;
   assetEditorLinkEl: HTMLButtonElement;
-  junctionEditorLinkEl: HTMLButtonElement;
   menuToggleEl: HTMLButtonElement;
   menuDropdownEl: HTMLElement;
   settingsToggleEl: HTMLButtonElement;
