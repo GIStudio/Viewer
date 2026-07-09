@@ -121,6 +121,38 @@
   z-index: 4;
 }
 
+.desktop-shell-left-auto-collapse.desktop-shell-left-retracting:not(.desktop-shell-left-pinned):not(.desktop-shell-left-collapsed) .desktop-shell-rail-left,
+.desktop-shell-right-auto-collapse.desktop-shell-right-retracting:not(.desktop-shell-right-pinned):not(.desktop-shell-right-collapsed) .desktop-shell-rail-right {
+  inline-size: 3.25rem;
+  box-shadow: none;
+}
+
+.desktop-shell-left-auto-collapse.desktop-shell-left-retracting:not(.desktop-shell-left-pinned):not(.desktop-shell-left-collapsed) .desktop-shell-rail-left .desktop-shell-rail-header,
+.desktop-shell-right-auto-collapse.desktop-shell-right-retracting:not(.desktop-shell-right-pinned):not(.desktop-shell-right-collapsed) .desktop-shell-rail-right .desktop-shell-rail-header {
+  align-items: center;
+  justify-content: center;
+  padding: 0.85rem 0.35rem;
+}
+
+.desktop-shell-left-auto-collapse.desktop-shell-left-retracting:not(.desktop-shell-left-pinned):not(.desktop-shell-left-collapsed) .desktop-shell-rail-left .desktop-shell-rail-kicker,
+.desktop-shell-right-auto-collapse.desktop-shell-right-retracting:not(.desktop-shell-right-pinned):not(.desktop-shell-right-collapsed) .desktop-shell-rail-right .desktop-shell-rail-kicker {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 0.08em;
+}
+
+.desktop-shell-left-auto-collapse.desktop-shell-left-retracting:not(.desktop-shell-left-pinned):not(.desktop-shell-left-collapsed) .desktop-shell-rail-left .desktop-shell-rail-title,
+.desktop-shell-left-auto-collapse.desktop-shell-left-retracting:not(.desktop-shell-left-pinned):not(.desktop-shell-left-collapsed) .desktop-shell-rail-left .desktop-shell-rail-pin,
+.desktop-shell-left-auto-collapse.desktop-shell-left-retracting:not(.desktop-shell-left-pinned):not(.desktop-shell-left-collapsed) .desktop-shell-rail-left .desktop-shell-rail-body,
+.desktop-shell-right-auto-collapse.desktop-shell-right-retracting:not(.desktop-shell-right-pinned):not(.desktop-shell-right-collapsed) .desktop-shell-rail-right .desktop-shell-rail-title,
+.desktop-shell-right-auto-collapse.desktop-shell-right-retracting:not(.desktop-shell-right-pinned):not(.desktop-shell-right-collapsed) .desktop-shell-rail-right .desktop-shell-rail-pin,
+.desktop-shell-right-auto-collapse.desktop-shell-right-retracting:not(.desktop-shell-right-pinned):not(.desktop-shell-right-collapsed) .desktop-shell-rail-right .desktop-shell-tab-list,
+.desktop-shell-right-auto-collapse.desktop-shell-right-retracting:not(.desktop-shell-right-pinned):not(.desktop-shell-right-collapsed) .desktop-shell-rail-right .desktop-shell-right-panels {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
 .desktop-shell-rail-kicker {
   font-size: 0.68rem;
   font-weight: 700;

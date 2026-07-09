@@ -197,10 +197,20 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     summaryToggle.setAttribute("aria-expanded", open ? "true" : "false");
   }
 
+  function requestRailRetract(side: "left" | "right", trigger: HTMLButtonElement | null): void {
+    const retractClass = side === "left" ? "desktop-shell-left-retracting" : "desktop-shell-right-retracting";
+    shellRoot.classList.add(retractClass);
+    trigger?.blur();
+    window.setTimeout(() => shellRoot.classList.remove(retractClass), 220);
+  }
+
   function setRightPinned(pinned: boolean): void {
     shellRoot.classList.toggle("desktop-shell-right-pinned", pinned);
     const rightPinButton = root.querySelector<HTMLButtonElement>("[data-shell-right-pin]");
     rightPinButton?.setAttribute("aria-pressed", pinned ? "true" : "false");
+    if (!pinned) {
+      requestRailRetract("right", rightPinButton ?? null);
+    }
     updatePinButtonText(rightPinButton, pinned, "right");
   }
 
@@ -392,6 +402,9 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
   leftPinButton?.addEventListener("click", () => {
     const pinned = shellRoot.classList.toggle("desktop-shell-left-pinned");
     leftPinButton.setAttribute("aria-pressed", pinned ? "true" : "false");
+    if (!pinned) {
+      requestRailRetract("left", leftPinButton);
+    }
     updatePinButtonText(leftPinButton, pinned, "left");
   });
 
