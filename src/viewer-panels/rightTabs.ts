@@ -25,6 +25,15 @@ export function createViewerRightTabs(
     { id: "compare", label: t("Compare", "对比"), content: reactContent(ComparePanelShell, registerCleanup) },
     { id: "history", label: t("History", "历史"), content: reactContent(HistoryPanelShell, registerCleanup) },
     {
+      id: "floating-lane",
+      label: t("Overlay", "叠加"),
+      content: `
+        <div id="viewer-floating-lane-panel-host" class="viewer-slide-panel-body">
+          <div class="viewer-consistency-empty">Use Floating Lane in Browse to inspect semantic overlays.</div>
+        </div>
+      `,
+    },
+    {
       id: "consistency",
       label: t("Consistency", "一致性"),
       content: `

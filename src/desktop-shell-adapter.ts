@@ -257,12 +257,20 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     });
   }
 
+  const viewerTabButtonIds: Record<string, string> = {
+    evaluate: "viewer-evaluate-toggle",
+    history: "viewer-history-analysis-toggle",
+  };
+
   function setRightTabs(tabs: ShellTab[], activeId: string | null = tabs[0]?.id ?? null): void {
     rightTabButtons.innerHTML = "";
     rightTabPanels.innerHTML = "";
     tabs.forEach((tab) => {
       const panelId = `desktop-shell-tab-panel-${tab.id}`;
       const button = document.createElement("button");
+      if (tab.id in viewerTabButtonIds) {
+        button.id = viewerTabButtonIds[tab.id];
+      }
       button.type = "button";
       button.className = "desktop-shell-tab-button";
       button.dataset.shellTab = tab.id;
