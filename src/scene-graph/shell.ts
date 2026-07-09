@@ -6,6 +6,26 @@ import {
   DEFAULT_SIDEWALK_WIDTH_M,
 } from "../sg-constants";
 
+function createSceneGraphActionToolbarHtml(): string {
+  return `
+    <div class="scene-stage-action-bar" aria-label="Annotation actions">
+      <div class="scene-tool-group-label">操作 / Action</div>
+      <div class="scene-stage-action-row">
+        <button id="annotation-finish-centerline" class="scene-toolbar-button" type="button">Finish Centerline<span class="tool-label-zh">完成中心线</span></button>
+        <button id="annotation-select-all-roads" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">All Roads<span class="tool-label-zh">全部道路</span></button>
+        <button id="annotation-undo-point" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Undo Point<span class="tool-label-zh">撤销节点</span></button>
+        <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary scene-toolbar-button-danger" type="button">Delete Selected<span class="tool-label-zh">删除选中</span></button>
+        <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary scene-toolbar-button-danger" type="button">Reset Annotation<span class="tool-label-zh">重置标注</span></button>
+        <label class="scene-layer-toggle scene-stage-snap-toggle">
+          <input id="annotation-snap-to-road" type="checkbox" checked />
+          <span>Snap to Road<span class="tool-label-zh">吸附到道路</span></span>
+        </label>
+      </div>
+    </div>
+  `;
+}
+
+
 export function createSceneGraphLeftSections(): ShellSection[] {
   return [
     {
@@ -53,20 +73,6 @@ export function createSceneGraphLeftSections(): ShellSection[] {
               <button id="annotation-tool-mailbox" class="scene-tool-button" data-tool="mailbox" type="button">Mailbox<span class="tool-label-zh">邮筒</span></button>
               <button id="annotation-tool-hydrant" class="scene-tool-button" data-tool="hydrant" type="button">Hydrant<span class="tool-label-zh">消防栓</span></button>
               <button id="annotation-tool-sign" class="scene-tool-button" data-tool="sign" type="button">Sign<span class="tool-label-zh">标识牌</span></button>
-            </div>
-          </div>
-          <div class="scene-tool-group">
-            <div class="scene-tool-group-label">操作 / Action</div>
-            <div class="scene-layer-toolbar scene-layer-toolbar-secondary" style="padding:0;background:transparent;box-shadow:none">
-              <button id="annotation-finish-centerline" class="scene-toolbar-button" type="button">Finish Centerline<span class="tool-label-zh">完成中心线</span></button>
-              <button id="annotation-select-all-roads" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">All Roads<span class="tool-label-zh">全部道路</span></button>
-              <button id="annotation-undo-point" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Undo Point<span class="tool-label-zh">撤销节点</span></button>
-              <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary scene-toolbar-button-danger" type="button">Delete Selected<span class="tool-label-zh">删除选中</span></button>
-              <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary scene-toolbar-button-danger" type="button">Reset Annotation<span class="tool-label-zh">重置标注</span></button>
-              <label class="scene-layer-toggle" style="margin-left:0.5rem;gap:0.35rem;">
-                <input id="annotation-snap-to-road" type="checkbox" checked />
-                <span>Snap to Road<span class="tool-label-zh">吸附到道路</span></span>
-              </label>
             </div>
           </div>
           <div id="annotation-image-meta" class="scene-image-meta" style="margin:0">
@@ -199,6 +205,7 @@ export function createSceneGraphRightTabs(): ShellTab[] {
 export function createSceneGraphStageHtml(): string {
   return `
     <div class="scene-shell-stage">
+      ${createSceneGraphActionToolbarHtml()}
       <div id="annotation-stage" class="scene-layer-stage scene-canvas-stage" data-has-image="false" data-loading="true" data-empty-state="loading">
         <div id="annotation-stage-empty" class="scene-image-empty" data-i18n-key="sceneGraph.status.loadingDefaultPlan">Loading default reference plan...</div>
         <div id="annotation-board" class="scene-board" hidden>
