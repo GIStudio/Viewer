@@ -475,8 +475,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     schemeCompareEl,
     sceneGraphLinkEl,
     assetEditorLinkEl,
-    menuToggleEl,
-    menuDropdownEl,
     settingsToggleEl,
     settingsPanelEl,
     settingsCloseEl,
@@ -505,6 +503,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     laserToggleEl,
     designToggleEl,
     designPanelEl,
+    generationDialogEl,
     designReviewRunEl,
     designCloseEl,
     designPresetEl,
@@ -547,6 +546,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     historyAnalysisPanelEl,
     historyAnalysisCloseEl,
     historyAnalysisContentEl,
+    consistencyPanelEl,
+    consistencyCloseEl,
+    consistencyContentEl,
     exportTopdownMapEl,
     exportTopdownSvgEl,
     presetsToggleEl,
@@ -564,6 +566,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     audioToggleEl,
     floatingLanePanelHost,
     floatingLaneToggleEl,
+    generationOpenEl,
+    generationRunEl,
+    syncCameraEl,
+    mode3dEl,
+    mode2dEl,
+    modeGraphEl,
   } = collectViewerPanelElements(root);
 
   const historyPanelController = createHistoryPanelController({
@@ -1214,12 +1222,13 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     canvasHost,
     panels: {
       settings: settingsPanelEl,
-      design: designPanelEl,
+      design: generationDialogEl,
       evaluate: evaluatePanelEl,
       compare: comparePanelEl,
       presets: presetsPanelEl,
       help: helpPanelEl,
       history: historyAnalysisPanelEl,
+      consistency: consistencyPanelEl,
     },
     settingsToggleEl,
     onSettingsOpen: () => {
@@ -1244,6 +1253,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     onCompareOpen: populateCompareSelectors,
     onPresetsOpen: () => presetsController.populatePresetsGrid(),
     onHistoryOpen: () => void historyPanelController.loadAndRenderHistory(),
+    onConsistencyOpen: () => renderConsistencyPanel(),
     onCloseAllOverlays: () => {
       if (graphOverlayActive) {
         clearGraphOverlay();
@@ -1284,6 +1294,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     loadScene,
     afterLayoutLoaded: () => {
       updateMetricsPanel();
+      renderConsistencyPanel();
       if (graphOverlayActive) {
         setToggleInput(graphOverlayToggleEl, false);
         graphOverlayActive = false;
@@ -2302,6 +2313,46 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   /* ── Metrics Panel in Info Card ──────────────────────────── */
 
+  function renderConsistencyPanel(): void {
+    if (!consistencyContentEl) return;
+    const summary = currentManifest?.summary as Record<string, unknown> | undefined;
+    const solverMetrics = (currentManifest?.solver_metrics ?? {}) as Record<string, unknown>;
+    const formatBool = (value: unknown): string => {
+      if (typeof value === "boolean") return value ? "true" : "false";
+      return value == null ? "—" : String(value);
+    };
+    const formatNum = (value: unknown, digits = 2): string => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n.toFixed(digits) : "—";
+    };
+    const rows = [
+      ["conversion_ok", formatBool(summary?.conversion_ok ?? solverMetrics.conversion_ok)],
+      ["geo_delta", formatNum(summary?.geo_delta ?? solverMetrics.geo_delta, 2)],
+      ["node_recall", formatNum(summary?.node_recall ?? solverMetrics.node_recall, 2)],
+      ["edge_recall", formatNum(summary?.edge_recall ?? solverMetrics.edge_recall, 2)],
+      ["topology_ok", formatBool(summary?.topology_ok ?? solverMetrics.topology_ok)],
+      ["topology_validity", formatNum(summary?.topology_validity ?? solverMetrics.topology_validity, 2)],
+      ["rule_satisfaction_rate", formatNum(summary?.rule_satisfaction_rate ?? solverMetrics.rule_satisfaction_rate, 2)],
+      ["cross_section_feasibility", formatNum(summary?.cross_section_feasibility ?? solverMetrics.cross_section_feasibility, 2)],
+    ];
+    consistencyContentEl.innerHTML = `
+      <div class="viewer-consistency-stack">
+        ${rows.map(([label, value]) => `
+          <div class="viewer-consistency-row">
+            <span class="viewer-consistency-label">${label}</span>
+            <strong class="viewer-consistency-value">${value}</strong>
+          </div>
+        `).join("")}
+      </div>
+      <details class="viewer-consistency-details">
+        <summary>loss_digest / 容差说明</summary>
+        <div class="viewer-consistency-details-body">
+          ${escapeHtml(String(summary?.loss_digest ?? solverMetrics.loss_digest ?? "Geometry positions may shift within tolerance; road topology remains consistent."))}
+        </div>
+      </details>
+    `;
+  }
+
   function updateMetricsPanel(): void {
     const metricsHost = document.getElementById("viewer-metrics-dashboard");
     if (!metricsHost) return;
@@ -2340,27 +2391,10 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   exportTopdownMapEl.addEventListener("click", () => {
     exportTopDownMapPng(scene, currentRoot);
-    menuDropdownEl.hidden = true;
-    menuToggleEl.setAttribute("aria-expanded", "false");
   }, { signal });
 
   exportTopdownSvgEl.addEventListener("click", () => {
     exportTopDownMapSvg(currentRoot);
-    menuDropdownEl.hidden = true;
-    menuToggleEl.setAttribute("aria-expanded", "false");
-  }, { signal });
-
-  menuToggleEl.addEventListener("click", () => {
-    const willOpen = menuDropdownEl.hidden;
-    menuDropdownEl.hidden = !willOpen;
-    menuToggleEl.setAttribute("aria-expanded", willOpen ? "true" : "false");
-  }, { signal });
-
-  document.addEventListener("click", (event) => {
-    if (!menuDropdownEl.hidden && !menuToggleEl.contains(event.target as Node) && !menuDropdownEl.contains(event.target as Node)) {
-      menuDropdownEl.hidden = true;
-      menuToggleEl.setAttribute("aria-expanded", "false");
-    }
   }, { signal });
 
   settingsToggleEl.addEventListener("click", () => {
@@ -2461,12 +2495,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     },
   });
 
-  root.querySelector<HTMLButtonElement>('[data-shell-tab="settings"]')?.addEventListener("click", () => {
-    panelController.setOpen("settings", true);
-  }, { signal });
-  root.querySelector<HTMLButtonElement>('[data-shell-tab="design"]')?.addEventListener("click", () => {
-    panelController.setOpen("design", true);
-  }, { signal });
   root.querySelector<HTMLButtonElement>('[data-shell-tab="evaluate"]')?.addEventListener("click", () => {
     panelController.setOpen("evaluate", true);
   }, { signal });
@@ -2476,18 +2504,18 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   root.querySelector<HTMLButtonElement>('[data-shell-tab="history"]')?.addEventListener("click", () => {
     panelController.setOpen("history", true);
   }, { signal });
-  root.querySelector<HTMLButtonElement>('[data-shell-tab="presets"]')?.addEventListener("click", () => {
-    panelController.setOpen("presets", true);
-  }, { signal });
-  root.querySelector<HTMLButtonElement>('[data-shell-tab="floating-lane"]')?.addEventListener("click", () => {
-    if (!floatingLaneSystem.config.enabled) {
-      floatingLaneSystem.toggleOverlay();
-    }
-    floatingLaneSystem.mountControlPanel();
-    shell.activateRightTab("floating-lane");
+  root.querySelector<HTMLButtonElement>('[data-shell-tab="consistency"]')?.addEventListener("click", () => {
+    panelController.setOpen("consistency", true);
   }, { signal });
 
   designToggleEl.addEventListener("click", () => panelController.setOpen("design", !panelController.isOpen("design")), { signal });
+  generationOpenEl.addEventListener("click", () => panelController.setOpen("design", true), { signal });
+  generationRunEl.addEventListener("click", () => {
+    void designController.runDesignGeneration().finally(scheduleDesignMatrixRefresh);
+  }, { signal });
+  root.querySelectorAll<HTMLElement>("[data-close-generation]").forEach((el) => {
+    el.addEventListener("click", () => panelController.setOpen("design", false), { signal });
+  });
   designReviewRunEl.addEventListener("click", reviewLastDesignRun, { signal });
   designCloseEl.addEventListener("click", () => panelController.setOpen("design", false), { signal });
   designPresetEl.addEventListener("change", () => {
@@ -2604,6 +2632,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   historyAnalysisToggleEl.addEventListener("click", () => panelController.setOpen("history", !panelController.isOpen("history")), { signal });
   historyAnalysisCloseEl.addEventListener("click", () => panelController.setOpen("history", false), { signal });
 
+  consistencyCloseEl.addEventListener("click", () => panelController.setOpen("consistency", false), { signal });
+
   presetsToggleEl.addEventListener("click", () => panelController.setOpen("presets", !panelController.isOpen("presets")), { signal });
   presetsCloseEl.addEventListener("click", () => panelController.setOpen("presets", false), { signal });
   presetsGridEl.addEventListener("click", presetsController.handleGridClick, { signal });
@@ -2648,6 +2678,41 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   // Floating Lane Overlay toggle
   floatingLaneToggleEl.addEventListener("click", () => {
     floatingLaneSystem.toggleOverlay();
+  }, { signal });
+
+  // Stage toolbar view modes and actions
+  syncCameraEl.addEventListener("click", () => {
+    resetView();
+    flashStatus("Camera reset to spawn.");
+  }, { signal });
+
+  mode3dEl.addEventListener("click", () => {
+    if (graphOverlayActive) {
+      setToggleInput(graphOverlayToggleEl, false);
+      graphOverlayActive = false;
+      clearGraphOverlay();
+      currentCameraMode = thirdPersonToggleEl.checked ? "third_person" : "first_person";
+      syncCameraRig();
+    }
+    mode3dEl.setAttribute("aria-pressed", "true");
+    mode2dEl.setAttribute("aria-pressed", "false");
+    modeGraphEl.setAttribute("aria-pressed", "false");
+  }, { signal });
+
+  mode2dEl.addEventListener("click", () => {
+    expandedMapController.open();
+    mode3dEl.setAttribute("aria-pressed", "false");
+    mode2dEl.setAttribute("aria-pressed", "true");
+    modeGraphEl.setAttribute("aria-pressed", "false");
+  }, { signal });
+
+  modeGraphEl.addEventListener("click", () => {
+    if (!graphOverlayActive) {
+      setToggleInput(graphOverlayToggleEl, true);
+    }
+    mode3dEl.setAttribute("aria-pressed", "false");
+    mode2dEl.setAttribute("aria-pressed", "false");
+    modeGraphEl.setAttribute("aria-pressed", "true");
   }, { signal });
 
   minimapExpandEl.addEventListener("click", (event) => {

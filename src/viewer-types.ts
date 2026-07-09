@@ -46,6 +46,7 @@ export type ViewerManifest = {
   static_object_descriptions?: Record<string, StaticObjectDescription>;
   summary?: ViewerSummary;
   visual_style?: Record<string, unknown>;
+  solver_metrics?: Record<string, unknown>;
   final_scene: {
     glb_url: string;
     label: string;

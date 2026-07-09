@@ -67,10 +67,12 @@ export function ViewerDesktopShell({ route, hostRef }: ViewerDesktopShellProps) 
         className="desktop-shell desktop-shell-left-auto-collapse desktop-shell-right-auto-collapse roadgen-ant-shell"
         data-route={route}
       >
-        <Layout.Header className="desktop-shell-menu roadgen-ant-header">
+        <Layout.Header className="desktop-shell-topbar roadgen-ant-header">
           <div className="desktop-shell-brand">
-            <div className="desktop-shell-kicker" data-i18n-key={`shell.${route}.kicker`}>
-              {routeConfig.kicker}
+            <div className="desktop-shell-traffic-lights" aria-hidden="true">
+              <i />
+              <i />
+              <i />
             </div>
             <div className="desktop-shell-title-wrap">
               <h1 className="desktop-shell-title" data-i18n-key={`shell.${route}.title`}>
@@ -82,37 +84,63 @@ export function ViewerDesktopShell({ route, hostRef }: ViewerDesktopShellProps) 
                 </p>
               ) : null}
             </div>
+            <Menu
+              className="desktop-shell-route-switch roadgen-ant-route-menu"
+              mode="horizontal"
+              selectedKeys={[route]}
+              items={routeItems}
+              onClick={({ key }) => navigateTo(key as AppRoute)}
+            />
           </div>
-          <Menu
-            className="desktop-shell-route-switch roadgen-ant-route-menu"
-            mode="horizontal"
-            selectedKeys={[route]}
-            items={routeItems}
-            onClick={({ key }) => navigateTo(key as AppRoute)}
-          />
-          <Select
-            className="desktop-shell-language-select"
-            aria-label="Language"
-            value={language}
-            options={languageOptions}
-            onChange={(nextLanguage) => setViewerLanguage(nextLanguage)}
-          />
-          <ShellMenus
-            enabledActions={enabledActions}
-            hostRef={hostRef}
-            onOpenShortcuts={() => setShortcutsOpen(true)}
-          />
+          <div className="desktop-shell-topbar-actions">
+            <Select
+              className="desktop-shell-language-select"
+              aria-label="Language"
+              value={language}
+              options={languageOptions}
+              onChange={(nextLanguage) => setViewerLanguage(nextLanguage)}
+            />
+            <ShellMenus
+              enabledActions={enabledActions}
+              hostRef={hostRef}
+              onOpenShortcuts={() => setShortcutsOpen(true)}
+            />
+            <Button
+              className="desktop-shell-topbar-button"
+              type="default"
+              data-shell-action="tools-open-history"
+              data-i18n-key="topbar.history"
+            >
+              History
+            </Button>
+            <Button
+              className="desktop-shell-topbar-button"
+              type="default"
+              data-shell-toggle="right"
+              data-i18n-key="topbar.analyze"
+            >
+              Analyze
+            </Button>
+            <Button
+              className="desktop-shell-topbar-button desktop-shell-topbar-button-primary"
+              type="primary"
+              data-shell-action="tools-open-design"
+              data-i18n-key="topbar.generate"
+            >
+              Generate & Load
+            </Button>
+          </div>
         </Layout.Header>
 
         <div className="desktop-shell-main">
-          <aside className="desktop-shell-rail desktop-shell-rail-left" data-shell-region="left">
+          <aside className="desktop-shell-rail desktop-shell-rail-left" data-shell-region="left" aria-label="Browse">
             <div className="desktop-shell-rail-header">
               <div>
-                <div className="desktop-shell-rail-kicker" data-i18n-key="shell.navigation">
-                  Navigation
+                <div className="desktop-shell-rail-kicker" data-i18n-key="shell.browse.kicker">
+                  BROWSE
                 </div>
-                <div className="desktop-shell-rail-title" data-i18n-key="shell.leftSidebar">
-                  Left Sidebar
+                <div className="desktop-shell-rail-title" data-i18n-key="shell.browse.title">
+                  Layouts & Objects
                 </div>
               </div>
               <Button className="desktop-shell-rail-pin" type="default" data-shell-left-pin aria-pressed="false">
@@ -122,18 +150,18 @@ export function ViewerDesktopShell({ route, hostRef }: ViewerDesktopShellProps) 
             <div id="desktop-shell-left-rail" className="desktop-shell-rail-body" />
           </aside>
 
-          <section className="desktop-shell-center">
+          <section className="desktop-shell-center" aria-label="Stage">
             <div id="desktop-shell-center-stage" className="desktop-shell-center-stage" />
           </section>
 
-          <aside className="desktop-shell-rail desktop-shell-rail-right" data-shell-region="right">
+          <aside className="desktop-shell-rail desktop-shell-rail-right" data-shell-region="right" aria-label="Analyze">
             <div className="desktop-shell-rail-header">
               <div>
-                <div className="desktop-shell-rail-kicker" data-i18n-key="shell.inspector">
-                  Inspector
+                <div className="desktop-shell-rail-kicker" data-i18n-key="shell.analyze.kicker">
+                  ANALYZE
                 </div>
-                <div className="desktop-shell-rail-title" data-i18n-key="shell.rightSidebar">
-                  Right Sidebar
+                <div className="desktop-shell-rail-title" data-i18n-key="shell.analyze.title">
+                  Evaluate, Compare & History
                 </div>
               </div>
               <Button className="desktop-shell-rail-pin" type="default" data-shell-right-pin aria-pressed="false">
@@ -145,15 +173,15 @@ export function ViewerDesktopShell({ route, hostRef }: ViewerDesktopShellProps) 
           </aside>
         </div>
 
-        <section className="desktop-shell-status" data-open="false">
+        <section className="desktop-shell-status desktop-shell-task-tray" data-open="false" aria-label="Task tray">
           <Button
             className="desktop-shell-status-summary"
             type="text"
             id="desktop-shell-status-summary-toggle"
             aria-expanded="false"
           >
-            <span className="desktop-shell-status-summary-label" data-i18n-key="shell.statusWorkbench">
-              Status Workbench
+            <span className="desktop-shell-status-summary-label" data-i18n-key="shell.taskTray">
+              Task Tray
             </span>
             <span id="desktop-shell-status-summary-text" data-i18n-key="shell.status.ready">
               Ready.
@@ -166,6 +194,9 @@ export function ViewerDesktopShell({ route, hostRef }: ViewerDesktopShellProps) 
               </button>
               <button className="desktop-shell-status-tab" type="button" data-shell-status-tab="activity">
                 Activity
+              </button>
+              <button className="desktop-shell-status-tab" type="button" data-shell-status-tab="artifacts">
+                Artifacts
               </button>
               <button className="desktop-shell-status-tab" type="button" data-shell-status-tab="hints">
                 Hints
@@ -186,6 +217,12 @@ export function ViewerDesktopShell({ route, hostRef }: ViewerDesktopShellProps) 
                   label: <span data-i18n-key="shell.activity">Activity</span>,
                   forceRender: true,
                   children: <div id="desktop-shell-activity-host" className="desktop-shell-status-stack" />,
+                },
+                {
+                  key: "artifacts",
+                  label: <span data-i18n-key="shell.artifacts">Artifacts</span>,
+                  forceRender: true,
+                  children: <div id="desktop-shell-artifacts-host" className="desktop-shell-status-stack" />,
                 },
                 {
                   key: "hints",

@@ -9,14 +9,16 @@
     linear-gradient(180deg, rgba(248, 250, 252, 0.96) 0%, rgba(255, 255, 255, 0.98) 100%);
 }
 
+.desktop-shell-topbar,
 .desktop-shell-menu {
   display: grid;
-  grid-template-columns: minmax(16rem, 26rem) minmax(18rem, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 1rem;
   height: auto;
+  min-height: 0;
   line-height: normal;
-  padding: 0.9rem 1.1rem;
+  padding: 0.85rem 1.1rem;
   border-bottom: 1px solid var(--color-border-light);
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(14px);
@@ -25,8 +27,44 @@
   z-index: 20;
 }
 
+.desktop-shell-topbar.ant-layout-header,
+.roadgen-ant-header.ant-layout-header {
+  height: auto;
+  line-height: normal;
+  padding: 0.85rem 1.1rem;
+  background: rgba(255, 255, 255, 0.94);
+}
+
 .desktop-shell-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
   min-width: 0;
+}
+
+.desktop-shell-traffic-lights {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.42rem;
+}
+
+.desktop-shell-traffic-lights i {
+  display: block;
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 999px;
+}
+
+.desktop-shell-traffic-lights i:nth-child(1) {
+  background: #ff5f57;
+}
+
+.desktop-shell-traffic-lights i:nth-child(2) {
+  background: #ffbd2e;
+}
+
+.desktop-shell-traffic-lights i:nth-child(3) {
+  background: #28c840;
 }
 
 .desktop-shell-kicker {
@@ -38,28 +76,51 @@
 }
 
 .desktop-shell-title-wrap {
-  min-width: 0;
+  display: grid;
+  flex: 0 1 auto;
+  min-width: 10rem;
 }
 
 .desktop-shell-title {
-  margin: 0.15rem 0 0;
+  margin: 0;
   font-size: 1.15rem;
   font-weight: 700;
+  line-height: 1.18;
   color: var(--color-text);
 }
 
 .desktop-shell-subtitle {
-  margin: 0.2rem 0 0;
+  margin: 0.18rem 0 0;
   font-size: 0.8rem;
-  line-height: 1.4;
+  line-height: 1.35;
   color: var(--color-text-secondary);
 }
 
 .desktop-shell-route-switch {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: flex-start;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(32rem, 42vw);
+  gap: 0.35rem;
   flex-wrap: wrap;
+}
+
+.desktop-shell-topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.desktop-shell-topbar-button.ant-btn {
+  height: auto;
+  min-height: 2.3rem;
+  border-radius: var(--radius-full);
+  line-height: 1.2;
 }
 
 .desktop-shell-route-button {

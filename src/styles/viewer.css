@@ -1,4 +1,5 @@
 @import "./viewer/shell-canvas.css";
+@import "./viewer/stage-console.css";
 @import "./viewer/menus-overlays.css";
 @import "./viewer/minimap-modal.css";
 @import "./viewer/expanded-map-controls.css";

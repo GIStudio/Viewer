@@ -21,7 +21,7 @@
 }
 
 .roadgen-ant-route-menu.ant-menu-horizontal {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .roadgen-ant-route-menu .ant-menu-item {

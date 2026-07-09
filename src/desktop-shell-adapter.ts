@@ -63,6 +63,7 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
   const summaryTextNode = root.querySelector<HTMLElement>("#desktop-shell-status-summary-text");
   const statusHostNode = root.querySelector<HTMLElement>("#desktop-shell-status-host");
   const activityHostNode = root.querySelector<HTMLElement>("#desktop-shell-activity-host");
+  const artifactsHostNode = root.querySelector<HTMLElement>("#desktop-shell-artifacts-host");
   const hintsHostNode = root.querySelector<HTMLElement>("#desktop-shell-hints-host");
   const statusWorkbenchNode = root.querySelector<HTMLElement>(".desktop-shell-status");
 
@@ -77,6 +78,7 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     !summaryTextNode ||
     !statusHostNode ||
     !activityHostNode ||
+    !artifactsHostNode ||
     !hintsHostNode ||
     !statusWorkbenchNode
   ) {
@@ -93,6 +95,7 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
   const summaryText = summaryTextNode;
   const statusHost = statusHostNode;
   const activityHost = activityHostNode;
+  const artifactsHost = artifactsHostNode;
   const hintsHost = hintsHostNode;
   const statusWorkbench = statusWorkbenchNode;
   let currentLanguage: ViewerLanguage = loadViewerLanguage();
@@ -466,6 +469,7 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     statusSummary: summaryText,
     statusStatusHost: statusHost,
     statusActivityHost: activityHost,
+    statusArtifactsHost: artifactsHost,
     statusHintsHost: hintsHost,
     setLeftSections,
     setRightTabs,

@@ -14,7 +14,7 @@ function profileOptionsHtml(options: ReadonlyArray<{ id: string; label: string }
 
 export function renderDesignPanelHtml(): string {
   return `
-    <aside id="viewer-design-panel" class="viewer-slide-panel" data-open="false">
+    <aside id="viewer-design-panel" class="viewer-slide-panel">
       <div class="viewer-slide-panel-header">
         <div>
           <div class="viewer-slide-panel-title" data-i18n-key="viewer.design.title">Design Assistant</div>

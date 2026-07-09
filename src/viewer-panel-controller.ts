@@ -14,6 +14,7 @@ type ViewerPanelControllerDeps = {
   onCompareOpen: () => void;
   onPresetsOpen: () => void;
   onHistoryOpen: () => void;
+  onConsistencyOpen: () => void;
   onCloseAllOverlays: () => void;
 };
 
@@ -37,6 +38,7 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     presets: false,
     help: false,
     history: false,
+    consistency: false,
   };
 
   function updateCanvasSlideOpenState(): void {
@@ -52,7 +54,7 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
   }
 
   function activeNonSettingsPanel(): ViewerPanelKey | null {
-    for (const panel of ["design", "evaluate", "compare", "presets", "help", "history"] as ViewerPanelKey[]) {
+    for (const panel of ["design", "evaluate", "compare", "presets", "help", "history", "consistency"] as ViewerPanelKey[]) {
       if (state[panel]) return panel;
     }
     return null;
@@ -94,6 +96,7 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
       if (panel === "design") deps.onDesignOpen();
       if (panel === "compare") deps.onCompareOpen();
       if (panel === "presets") deps.onPresetsOpen();
+      if (panel === "consistency") deps.onConsistencyOpen();
     }
 
     if (!nextOpen) {

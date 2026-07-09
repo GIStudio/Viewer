@@ -156,8 +156,8 @@
   margin-right: 0;
 }
 
-.desktop-shell .viewer-settings-panel,
-.desktop-shell .viewer-slide-panel {
+.desktop-shell #desktop-shell-right-panels .viewer-settings-panel,
+.desktop-shell #desktop-shell-right-panels .viewer-slide-panel {
   position: relative;
   top: auto;
   right: auto;
@@ -171,13 +171,13 @@
   overflow: visible;
 }
 
-.desktop-shell .viewer-settings-panel[data-open="true"],
-.desktop-shell .viewer-slide-panel[data-open="true"] {
+.desktop-shell #desktop-shell-right-panels .viewer-settings-panel[data-open="true"],
+.desktop-shell #desktop-shell-right-panels .viewer-slide-panel[data-open="true"] {
   transform: none;
 }
 
-.desktop-shell .viewer-slide-panel-body,
-.desktop-shell .viewer-settings-panel {
+.desktop-shell #desktop-shell-right-panels .viewer-slide-panel-body,
+.desktop-shell #desktop-shell-right-panels .viewer-settings-panel {
   max-height: none;
 }
 

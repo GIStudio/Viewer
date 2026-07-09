@@ -7,7 +7,8 @@ export type ViewerPanelKey =
   | "compare"
   | "presets"
   | "help"
-  | "history";
+  | "history"
+  | "consistency";
 
 export type ViewerPanelText = (en: string, zh: string) => string;
 
@@ -25,8 +26,6 @@ export type ViewerPanelElements = {
   schemeCompareEl: HTMLElement;
   sceneGraphLinkEl: HTMLButtonElement;
   assetEditorLinkEl: HTMLButtonElement;
-  menuToggleEl: HTMLButtonElement;
-  menuDropdownEl: HTMLElement;
   settingsToggleEl: HTMLButtonElement;
   settingsPanelEl: HTMLElement;
   settingsCloseEl: HTMLButtonElement;
@@ -55,6 +54,7 @@ export type ViewerPanelElements = {
   laserToggleEl: HTMLInputElement;
   designToggleEl: HTMLButtonElement;
   designPanelEl: HTMLElement;
+  generationDialogEl: HTMLElement;
   designReviewRunEl: HTMLButtonElement;
   designCloseEl: HTMLButtonElement;
   designPresetEl: HTMLSelectElement;
@@ -97,6 +97,9 @@ export type ViewerPanelElements = {
   historyAnalysisPanelEl: HTMLElement;
   historyAnalysisCloseEl: HTMLButtonElement;
   historyAnalysisContentEl: HTMLElement;
+  consistencyPanelEl: HTMLElement;
+  consistencyCloseEl: HTMLButtonElement;
+  consistencyContentEl: HTMLElement;
   exportTopdownMapEl: HTMLButtonElement;
   exportTopdownSvgEl: HTMLButtonElement;
   presetsToggleEl: HTMLButtonElement;
@@ -114,4 +117,10 @@ export type ViewerPanelElements = {
   audioToggleEl: HTMLInputElement;
   floatingLanePanelHost: HTMLElement;
   floatingLaneToggleEl: HTMLButtonElement;
+  generationOpenEl: HTMLButtonElement;
+  generationRunEl: HTMLButtonElement;
+  syncCameraEl: HTMLButtonElement;
+  mode3dEl: HTMLButtonElement;
+  mode2dEl: HTMLButtonElement;
+  modeGraphEl: HTMLButtonElement;
 };

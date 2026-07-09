@@ -31,6 +31,7 @@ export interface DesktopShell {
   statusSummary: HTMLElement;
   statusStatusHost: HTMLElement;
   statusActivityHost: HTMLElement;
+  statusArtifactsHost: HTMLElement;
   statusHintsHost: HTMLElement;
   setLeftSections: (sections: ShellSection[]) => void;
   setRightTabs: (tabs: ShellTab[], activeId?: string | null) => void;

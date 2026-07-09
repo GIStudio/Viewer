@@ -54,7 +54,9 @@ export function ShellMenus({ enabledActions, hostRef, onOpenShortcuts }: ShellMe
                 items,
                 onClick: ({ key }) => {
                   const action = group.actions.find((item) => (item.id ?? `toggle-${item.toggle}`) === key);
-                  if (action?.id) {
+                  if (action?.link) {
+                    window.location.assign(action.link);
+                  } else if (action?.id) {
                     dispatchShellAction(action.id);
                   } else if (action?.toggle) {
                     dispatchShellToggle(action.toggle);

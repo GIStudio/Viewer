@@ -3,6 +3,7 @@ import {
   EyeOutlined,
   FileSearchOutlined,
   QuestionCircleOutlined,
+  RocketOutlined,
   SaveOutlined,
   SlidersOutlined,
   ToolOutlined,
@@ -20,6 +21,7 @@ export type MenuGroupId = "file" | "view" | "tools" | "help";
 export type ShellMenuAction = {
   id?: ShellMenuActionId;
   toggle?: ShellToggleTarget;
+  link?: string;
   labelKey: string;
   fallback: string;
   icon?: ReactNode;
@@ -91,6 +93,7 @@ export const menuGroups: ShellMenuGroup[] = [
       { id: "tools-open-history", labelKey: "menu.tools.history", fallback: "History" },
       { id: "tools-open-presets", labelKey: "menu.tools.presets", fallback: "Presets" },
       { id: "tools-open-floating-lane", labelKey: "menu.tools.floatingLane", fallback: "Floating Lane" },
+      { link: "/new-ui/index.html", labelKey: "menu.tools.newUi", fallback: "New UI Prototype", icon: <RocketOutlined /> },
     ],
   },
   {

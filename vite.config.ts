@@ -2325,4 +2325,14 @@ function readRequestBody(req: any): Promise<string> {
 export default defineConfig({
   base: "/",
   plugins: [react(), viewerApiPlugin()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(viewerRoot, "index.html"),
+        "ui/index": path.resolve(viewerRoot, "new-ui", "index.html"),
+        "ui/control-panel": path.resolve(viewerRoot, "new-ui", "optimized-control-panel.html"),
+        "ui/analysis-report": path.resolve(viewerRoot, "new-ui", "analysis-report.html"),
+      },
+    },
+  },
 });
