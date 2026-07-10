@@ -24,8 +24,8 @@ export function createViewerStageHtml(): string {
           <button class="stage-toolbar-button" type="button" id="viewer-settings-toggle">Settings</button>
         </div>
         <div class="stage-toolbar-group" data-od-id="toolbar-right">
-          <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-map">Export PNG</button>
-          <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-svg">Export SVG</button>
+          <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-map" data-shell-action="file-export-png">Export PNG</button>
+          <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-svg" data-shell-action="file-export-svg">Export SVG</button>
           <span class="stage-pill" data-tone="ok" id="viewer-topology-pill">topology_ok</span>
           <span class="stage-pill" id="viewer-geo-pill">geo_delta —</span>
         </div>

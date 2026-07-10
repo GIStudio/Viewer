@@ -1931,6 +1931,62 @@ function drawPlanViewport(
   ctx.restore();
 }
 
+export type PlanMapCanvasOptions = {
+  manifest: ViewerManifest;
+  bounds: SceneBounds;
+  avatarPosition: THREE.Vector3;
+  forward: THREE.Vector3;
+  text: (en: string, zh: string) => string;
+  width?: number;
+  height?: number;
+};
+
+/**
+ * Render the canonical Scene Map plan view to a standalone canvas.
+ *
+ * Toolbar exports use this compositor so exported files contain the same
+ * manifest-driven roads, surfaces, buildings, furniture, tags, and scale as
+ * the interactive Plan mode instead of a separate Three.js approximation.
+ */
+export function renderPlanMapCanvas({
+  manifest,
+  bounds,
+  avatarPosition,
+  forward,
+  text,
+  width = 2400,
+  height = 1500,
+}: PlanMapCanvasOptions): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width));
+  canvas.height = Math.max(1, Math.round(height));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Canvas 2D is unavailable; cannot render the plan map.");
+  }
+  const layerState: Record<ExpandedMapLayerKey, boolean> = {
+    roads: true,
+    surfaces: true,
+    buildings: true,
+    furniture: true,
+    viewpoint: true,
+  };
+  const viewports = buildPlanViewports(
+    manifest,
+    null,
+    bounds,
+    canvas.width,
+    canvas.height,
+    text,
+  );
+  ctx.fillStyle = "#f7f6f3";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (const viewport of viewports) {
+    drawPlanViewport(ctx, viewport, layerState, "none", avatarPosition, forward, text);
+  }
+  return canvas;
+}
+
 function drawPlanOverlay(
   canvas: HTMLCanvasElement,
   mode: ExpandedMapMode,

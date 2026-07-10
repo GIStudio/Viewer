@@ -2393,13 +2393,21 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     { signal },
   );
 
-  exportTopdownMapEl.addEventListener("click", () => {
-    exportTopDownMapPng(scene, currentRoot);
-  }, { signal });
+  function exportCurrentPlan(format: "png" | "svg"): void {
+    const context = {
+      manifest: currentManifest,
+      bounds: currentSceneBounds,
+      avatarPosition: currentAvatarPosition,
+      forward: cameraForwardHorizontal(),
+      text: t,
+    };
+    if (format === "png") {
+      exportTopDownMapPng(context);
+    } else {
+      exportTopDownMapSvg(context);
+    }
+  }
 
-  exportTopdownSvgEl.addEventListener("click", () => {
-    exportTopDownMapSvg(currentRoot);
-  }, { signal });
 
   settingsToggleEl.addEventListener("click", () => {
     if (panelController.isOpen("settings")) {
@@ -2470,8 +2478,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       root.querySelector<HTMLElement>(".desktop-shell")?.classList.remove("desktop-shell-left-collapsed");
       layoutSelectEl.focus();
     },
-    "file-export-png": () => exportTopdownMapEl.click(),
-    "file-export-svg": () => exportTopdownSvgEl.click(),
+    "file-export-png": () => exportCurrentPlan("png"),
+    "file-export-svg": () => exportCurrentPlan("svg"),
     "view-reset-view": () => resetView(),
     "tools-open-settings": () => {
       if (panelController.isOpen("settings")) {

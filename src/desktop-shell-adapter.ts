@@ -345,20 +345,25 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     });
   });
 
-  root.querySelectorAll<HTMLElement>("[data-shell-action]").forEach((element) => {
-    element.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const actionId = element.dataset.shellAction as ShellMenuActionId | undefined;
-      if (!actionId) {
-        return;
-      }
-      const handler = menuActionHandlers[actionId];
-      if (!handler) {
-        return;
-      }
-      handler();
-      closeMenus();
-    });
+  root.addEventListener("click", (event) => {
+    const source = event.target;
+    const element = source instanceof Element
+      ? source.closest<HTMLElement>("[data-shell-action]")
+      : null;
+    if (!element || !root.contains(element)) {
+      return;
+    }
+    event.stopPropagation();
+    const actionId = element.dataset.shellAction as ShellMenuActionId | undefined;
+    if (!actionId) {
+      return;
+    }
+    const handler = menuActionHandlers[actionId];
+    if (!handler) {
+      return;
+    }
+    handler();
+    closeMenus();
   });
 
   const triggerShellAction = (actionId: ShellMenuActionId): void => {

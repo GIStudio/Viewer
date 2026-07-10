@@ -1,140 +1,91 @@
 /**
- * Top-down map export utilities for the RoadGen3D Viewer.
- * 
- * Handles PNG and SVG export of scene top-down views.
+ * Scene Map plan export utilities for the RoadGen3D Viewer.
+ *
+ * Both file formats are produced from the canonical manifest-driven Plan
+ * compositor used by the expanded Scene Map. The SVG intentionally embeds
+ * that exact rasterized plan so PNG and SVG cannot drift visually.
  */
 
 import * as THREE from "three";
-import { sceneContentBounds } from "./viewer-scene-bounds";
+import { renderPlanMapCanvas } from "./viewer-expanded-map";
+import type { SceneBounds } from "./viewer-minimap";
+import type { ViewerManifest } from "./viewer-types";
 
-export const EXPORT_COLORS = {
-  carriageway: "#424a57",
-  drive_lane: "#424a57",
-  bus_lane: "#b7483a",
-  bike_lane: "#39875a",
-  parking_lane: "#a68256",
-  median: "#6e7a5f",
-  nearroad_buffer: "#c4c4c4",
-  nearroad_furnishing: "#b5a28a",
-  clear_sidewalk: "#d4d0c8",
-  sidewalk: "#d4d0c8",
-  frontage_reserve: "#b7d4e6",
-  grass_belt: "#8cb369",
-  shared_street: "#c9b896",
-  colored_pavement: "#e8dcc8",
-  zebra_stripe: "#ffffff",
-  zebra_stripe_dark: "#424a57",
+export type TopDownMapExportContext = {
+  manifest: ViewerManifest | null;
+  bounds: SceneBounds | null;
+  avatarPosition: THREE.Vector3;
+  forward: THREE.Vector3;
+  text: (en: string, zh: string) => string;
 };
 
-/**
- * Export top-down map as PNG.
- */
+function renderExportCanvas(context: TopDownMapExportContext): HTMLCanvasElement | null {
+  if (!context.manifest || !context.bounds) {
+    alert(context.text("No scene loaded. Please load a layout first.", "未加载场景，请先加载布局。"));
+    return null;
+  }
+  try {
+    return renderPlanMapCanvas({
+      manifest: context.manifest,
+      bounds: context.bounds,
+      avatarPosition: context.avatarPosition,
+      forward: context.forward,
+      text: context.text,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    alert(context.text(`Unable to export plan map: ${message}`, `无法导出平面图：${message}`));
+    return null;
+  }
+}
+
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
+/** Export the current Scene Map Plan as a high-resolution PNG. */
 export function exportTopDownMapPng(
-  scene: THREE.Scene,
-  root: THREE.Object3D | null,
-  fileName: string = "scene_topdown",
+  context: TopDownMapExportContext,
+  fileName: string = "scene_map_plan",
 ): void {
-  if (!root) {
-    alert("No scene loaded. Please load a layout first.");
+  const canvas = renderExportCanvas(context);
+  if (!canvas) {
     return;
   }
-
-  const bbox = sceneContentBounds(root);
-  const center = bbox.getCenter(new THREE.Vector3());
-  const size = bbox.getSize(new THREE.Vector3());
-  const maxExtent = Math.max(size.x, size.z);
-
-  if (!isFinite(maxExtent) || maxExtent <= 0) {
-    alert("Scene bounds are too small to export.");
-    return;
-  }
-
-  const padding = maxExtent * 0.15;
-  const viewSize = maxExtent + padding * 2;
-
-  const camera = new THREE.OrthographicCamera(
-    -viewSize / 2,
-    viewSize / 2,
-    viewSize / 2,
-    -viewSize / 2,
-    0.1,
-    5000,
-  );
-  camera.position.set(center.x, center.y + size.y * 0.5 + viewSize * 1.2, center.z);
-  camera.lookAt(center.x, center.y, center.z);
-  camera.updateProjectionMatrix();
-
-  const resolution = 4096;
-  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-  renderer.setSize(resolution, resolution);
-  renderer.setPixelRatio(1);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled = false;
-  renderer.toneMapping = THREE.NoToneMapping;
-  renderer.setClearColor(0xf7f6f3);
-  renderer.clear();
-  renderer.render(scene, camera);
-
-  const canvas = renderer.domElement;
   canvas.toBlob((blob) => {
     if (blob) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${fileName}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `${fileName}.png`);
     }
   }, "image/png");
-
-  renderer.dispose();
 }
 
 /**
- * Export top-down map as SVG.
+ * Export the current Scene Map Plan as SVG.
+ *
+ * The SVG wraps the exact canonical Plan canvas in an image element. This
+ * preserves the Scene Map's labels, symbols, compositing, and layer order in
+ * SVG-capable tools without maintaining a second geometry renderer.
  */
 export function exportTopDownMapSvg(
-  root: THREE.Object3D | null,
-  fileName: string = "scene_topdown",
+  context: TopDownMapExportContext,
+  fileName: string = "scene_map_plan",
 ): void {
-  if (!root) {
-    alert("No scene loaded. Please load a layout first.");
+  const canvas = renderExportCanvas(context);
+  if (!canvas) {
     return;
   }
-
-  const bbox = sceneContentBounds(root);
-  const size = bbox.getSize(new THREE.Vector3());
-  const maxExtent = Math.max(size.x, size.z);
-
-  if (!isFinite(maxExtent) || maxExtent <= 0) {
-    alert("Scene bounds are too small to export.");
-    return;
-  }
-
-  const padding = maxExtent * 0.15;
-  const width = maxExtent + padding * 2;
-  const height = maxExtent + padding * 2;
-
+  const dataUrl = canvas.toDataURL("image/png");
   const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
-  <rect width="100%" height="100%" fill="#f7f6f3"/>
-  <g transform="translate(${padding}, ${padding})">
-    <rect x="0" y="0" width="${maxExtent}" height="${maxExtent}" fill="#e2e8f0" stroke="#94a3b8" stroke-width="2"/>
-    <text x="${maxExtent / 2}" y="${maxExtent / 2}" text-anchor="middle" font-size="24" fill="#475569">
-      Scene Top-Down View
-    </text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${canvas.width} ${canvas.height}" width="${canvas.width}" height="${canvas.height}">
+  <title>RoadGen3D Scene Map Plan</title>
+  <image href="${dataUrl}" x="0" y="0" width="${canvas.width}" height="${canvas.height}" preserveAspectRatio="none"/>
 </svg>`;
-
-  const blob = new Blob([svgContent], { type: "image/svg+xml" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${fileName}.svg`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  downloadBlob(new Blob([svgContent], { type: "image/svg+xml;charset=utf-8" }), `${fileName}.svg`);
 }
