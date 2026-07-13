@@ -235,8 +235,24 @@ import {
   stripStrokeColor,
   stringifyAnnotation,
 } from "./scene-graph/index";
-import { applyViewerTranslations, loadViewerLanguage, translateViewerKey, translateViewerLiteral } from "./viewer-i18n";
+import { sleep } from "./viewer-api";
+import { VIEWER_LANGUAGE_EVENT, applyViewerTranslations, loadViewerLanguage, translateViewerKey, translateViewerLiteral } from "./viewer-i18n";
 import type { ScenarioDesign, ScenarioDesignCatalogPayload } from "./viewer-types";
+import type { WorkflowController } from "./workflow-controller";
+import {
+  extractSceneSource,
+  loadOsmBuildings,
+  loadSceneJob,
+  loadWorkflowCapabilities,
+  normalizeSceneSource,
+  submitWorkflowSceneJob,
+  toNormalizedSceneSource,
+} from "./workflow-api";
+import type {
+  NormalizedSceneSourceResponse,
+  SourceImageReference,
+  Wgs84Bbox,
+} from "./workflow-api";
 
 const DEFAULT_REFERENCE_IMAGE_LOADING_MESSAGE = "Loading default reference plan...";
 
@@ -2318,7 +2334,34 @@ function downloadText(filename: string, text: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function mountSceneGraphPage(shell: DesktopShell): () => void {
+function parseExplicitWgs84Bbox(value: string): Wgs84Bbox | null {
+  const coordinates = value.split(",").map((item) => Number(item.trim()));
+  if (
+    coordinates.length !== 4
+    || coordinates.some((item) => !Number.isFinite(item))
+    || coordinates[0]! < -180
+    || coordinates[2]! > 180
+    || coordinates[1]! < -90
+    || coordinates[3]! > 90
+    || coordinates[0]! >= coordinates[2]!
+    || coordinates[1]! >= coordinates[3]!
+  ) {
+    return null;
+  }
+  return [coordinates[0]!, coordinates[1]!, coordinates[2]!, coordinates[3]!];
+}
+
+async function readImageFileDataUrl(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
+  }
+  return `data:${file.type || "application/octet-stream"};base64,${window.btoa(binary)}`;
+}
+
+export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowController): () => void {
   const root = shell.root;
   const eventController = new AbortController();
   const { signal } = eventController;
@@ -2328,7 +2371,7 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     { key: "sceneGraph.hints.statusFeedback" },
   ]);
   shell.setLeftSections(createSceneGraphLeftSections());
-  shell.setRightTabs(createSceneGraphRightTabs(), "view");
+  shell.setRightTabs(createSceneGraphRightTabs(), "source");
   shell.setMenuActions({
     "file-export-json": () => root.querySelector<HTMLButtonElement>("#annotation-download-json")?.click(),
     "tools-open-settings": () => shell.activateRightTab("view"),
@@ -2394,6 +2437,24 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     graphTextarea,
     featureTableEl,
     assetEditorButton,
+    sourceWorkflowEl,
+    sourceImageImportButton,
+    sourceGeojsonInput,
+    sourceCoordinateSpaceSelect,
+    sourceBboxInput,
+    sourceAiPrompt,
+    sourceAiExtractButton,
+    sourceAiStatusEl,
+    sourceOsmImportButton,
+    sourceNormalizeButton,
+    sourceStatusEl,
+    sourceProvenanceEl,
+    sourceCountsEl,
+    sourceWarningsEl,
+    sourceBackButton,
+    sourceApproveButton,
+    sourceGenerateButton,
+    sourceReviewStatusEl,
   } = collectSceneGraphElements(root);
 
   const toolButtons = Array.from(root.querySelectorAll<HTMLButtonElement>(".scene-tool-button"));
@@ -2453,6 +2514,291 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     crossDraft: null as CrossDraft | null,
     snapToRoadEnabled: true,
   };
+
+  const retainedNormalizedSource = workflow.getSnapshot().normalized;
+  let pendingOsmNormalization: NormalizedSceneSourceResponse | null = retainedNormalizedSource?.sourceContext.aligned_buildings?.length
+    ? {
+        annotation: retainedNormalizedSource.referenceAnnotation,
+        graph: retainedNormalizedSource.graph as ConvertedGraphPayload["graph"],
+        summary: { ...retainedNormalizedSource.featureCounts },
+        source: retainedNormalizedSource.source as NormalizedSceneSourceResponse["source"],
+        geojson: retainedNormalizedSource.geojson as Record<string, unknown> | null,
+        warnings: [...retainedNormalizedSource.warnings],
+        aligned_buildings: [...retainedNormalizedSource.sourceContext.aligned_buildings] as NormalizedSceneSourceResponse["aligned_buildings"],
+        source_alignment: retainedNormalizedSource.sourceContext.source_alignment as NormalizedSceneSourceResponse["source_alignment"],
+      }
+    : null;
+  let uploadedImageDataUrl = workflow.getSnapshot().sourceImageDataUrl ?? "";
+
+  function sourceImageReference(requireBbox: boolean): SourceImageReference {
+    const bbox = parseExplicitWgs84Bbox(sourceBboxInput.value);
+    if (requireBbox && !bbox) {
+      throw new Error("Enter an explicit valid WGS84 bbox [west, south, east, north].");
+    }
+    const image: SourceImageReference = {
+      width_px: Math.max(1, state.annotation.image_width_px || originalImageEl.naturalWidth),
+      height_px: Math.max(1, state.annotation.image_height_px || originalImageEl.naturalHeight),
+      pixels_per_meter: Math.max(0.1, state.annotation.pixels_per_meter),
+    };
+    if (bbox) image.bbox_wgs84 = bbox;
+    return image;
+  }
+
+  function combineWithOsmContext(
+    payload: NormalizedSceneSourceResponse,
+    osmPayload: NormalizedSceneSourceResponse | null,
+  ): NormalizedSceneSourceResponse {
+    if (!osmPayload) return payload;
+    return {
+      ...payload,
+      geojson: osmPayload.geojson ?? payload.geojson,
+      warnings: [...new Set([...payload.warnings, ...osmPayload.warnings])],
+      aligned_buildings: osmPayload.aligned_buildings,
+      source_alignment: osmPayload.source_alignment,
+    };
+  }
+
+  function renderSourceWorkflow(): void {
+    const snapshot = workflow.getSnapshot();
+    const reviewVisible = snapshot.step === "review" && Boolean(snapshot.normalized);
+    sourceWorkflowEl.dataset.step = reviewVisible ? "review" : "source";
+    const sourcePanel = sourceWorkflowEl.querySelector<HTMLElement>('[data-workflow-panel="source"]');
+    const reviewPanel = sourceWorkflowEl.querySelector<HTMLElement>('[data-workflow-panel="review"]');
+    if (sourcePanel) sourcePanel.hidden = reviewVisible;
+    if (reviewPanel) reviewPanel.hidden = !reviewVisible;
+
+    const normalized = snapshot.normalized;
+    if (normalized) {
+      const source = normalized.source;
+      sourceProvenanceEl.innerHTML = `
+        <strong>${escapeHtml(String(source.source_id ?? (state.annotation.plan_id || "source")))}</strong>
+        <span>${escapeHtml(String(source.kind ?? "reference_annotation"))} · ${escapeHtml(String(source.producer ?? "manual"))}</span>
+        <span>annotation ${escapeHtml(String(source.normalized_annotation_version ?? state.annotation.version))} · normalized ${escapeHtml(normalized.normalizedAt)}</span>
+        <span>alignment ${escapeHtml(String((normalized.sourceContext.source_alignment as Record<string, unknown> | null)?.status ?? "n/a"))}</span>
+      `;
+      sourceCountsEl.innerHTML = Object.entries(normalized.featureCounts)
+        .map(([label, count]) => `<div class="scene-metric-card"><span>${escapeHtml(label.replace(/_/g, " "))}</span><strong>${count}</strong></div>`)
+        .join("");
+      sourceWarningsEl.innerHTML = normalized.warnings.length
+        ? normalized.warnings.map((warning) => `<div class="scene-source-warning">${escapeHtml(warning)}</div>`).join("")
+        : '<div class="scene-source-warning" data-tone="ok">No normalization warnings.</div>';
+      sourceReviewStatusEl.textContent = snapshot.approvedSourceRevision === snapshot.sourceRevision
+        ? "Approved. Generate & Load will submit the inline annotation and aligned context."
+        : "Review is ready for approval.";
+      sourceReviewStatusEl.dataset.tone = snapshot.approvedSourceRevision === snapshot.sourceRevision ? "success" : "neutral";
+    }
+
+    const llm = snapshot.capabilities?.llm as Record<string, unknown> | undefined;
+    const vision = llm?.vision as Record<string, unknown> | undefined;
+    const visionConfigured = vision?.configured === true;
+    sourceAiExtractButton.disabled = !visionConfigured || Boolean(snapshot.busy.extract);
+    sourceAiStatusEl.textContent = visionConfigured
+      ? `${String(llm?.provider ?? "configured")} · ${String(vision?.model ?? "vision model")} · credentials remain server-side`
+      : "Vision extraction is not configured. Manual tracing and imports remain available.";
+    sourceAiStatusEl.dataset.tone = visionConfigured ? "success" : "neutral";
+
+    sourceNormalizeButton.disabled = Boolean(snapshot.busy.normalize);
+    sourceOsmImportButton.disabled = Boolean(snapshot.busy.osm);
+    sourceApproveButton.disabled = !normalized || Boolean(snapshot.busy.generate);
+    sourceGenerateButton.disabled = !normalized || Boolean(snapshot.busy.generate);
+    if (snapshot.lastError && root.isConnected) {
+      sourceStatusEl.textContent = snapshot.lastError;
+      sourceStatusEl.dataset.tone = "error";
+    }
+  }
+
+  function applyNormalizedSourcePayload(payload: NormalizedSceneSourceResponse, status: string): void {
+    state.annotation = normalizeAnnotation(payload.annotation);
+    state.graphResult = {
+      ...payload,
+      annotation: cloneAnnotation(state.annotation),
+    };
+    state.selectedScenarioId = "";
+    clearAnnotationEditingState();
+    updateCleanAnnotationSnapshot();
+    workflow.setNormalizedSource(toNormalizedSceneSource(payload));
+    setStatus(sourceStatusEl, status, "success");
+    setStatus(graphStatusEl, "Graph conversion complete through the shared source normalizer.", "success");
+    renderScenarioDesignOptions();
+    renderAll();
+    renderSourceWorkflow();
+  }
+
+  async function normalizeCurrentSceneSource(): Promise<void> {
+    const token = workflow.beginRequest("normalize");
+    workflow.clearError();
+    setStatus(sourceStatusEl, "Normalizing source into ReferenceAnnotation…", "neutral");
+    try {
+      const sourceSnapshot = workflow.getSnapshot();
+      let payload: NormalizedSceneSourceResponse;
+      if (sourceSnapshot.sourceGeojson) {
+        const coordinateSpace = sourceCoordinateSpaceSelect.value === "EPSG:4326" ? "EPSG:4326" : "image_px";
+        payload = await normalizeSceneSource({
+          source: {
+            kind: "geojson",
+            source_id: sourceSnapshot.sourceFileName || "imported_geojson",
+            producer: "import",
+            coordinate_space: coordinateSpace,
+            geojson: sourceSnapshot.sourceGeojson as Record<string, unknown>,
+            image: sourceImageReference(coordinateSpace === "EPSG:4326"),
+          },
+        }, token.signal);
+      } else {
+        payload = await normalizeSceneSource({
+          source: {
+            kind: "reference_annotation",
+            source_id: state.annotation.plan_id || "manual_reference_annotation",
+            producer: sourceSnapshot.sourceKind === "ai_extraction" ? "ai" : sourceSnapshot.sourceKind === "scenario_design" ? "catalog" : sourceSnapshot.sourceKind === "annotation_json" ? "import" : "manual",
+            annotation: cloneAnnotation(state.annotation),
+          },
+          compose_config: {
+            sidewalk_width_m: Math.max(1, asNumber(sidewalkWidthInput.value, DEFAULT_SIDEWALK_WIDTH_M)),
+            segment_length_m: Math.max(4, asNumber(segmentLengthInput.value, DEFAULT_SEGMENT_LENGTH_M)),
+          },
+        }, token.signal);
+      }
+      if (!token.isCurrent()) return;
+      applyNormalizedSourcePayload(combineWithOsmContext(payload, pendingOsmNormalization), "Source normalized. Review provenance and warnings.");
+      workflow.endRequest(token);
+    } catch (error) {
+      if (workflow.endRequest(token, error)) {
+        setStatus(sourceStatusEl, error instanceof Error ? error.message : "Source normalization failed.", "error");
+        renderSourceWorkflow();
+      }
+    }
+  }
+
+  async function currentImageDataUrl(token: { signal: AbortSignal }): Promise<string> {
+    if (uploadedImageDataUrl.startsWith("data:image/")) return uploadedImageDataUrl;
+    if (!state.currentImageUrl) throw new Error("Load a reference image before AI extraction.");
+    const response = await fetch(state.currentImageUrl, { signal: token.signal });
+    if (!response.ok) throw new Error(`Failed to read the reference image (${response.status}).`);
+    return readImageFileDataUrl(new File([await response.blob()], state.annotation.image_path || "reference.png"));
+  }
+
+  async function extractCurrentReferenceImage(): Promise<void> {
+    const token = workflow.beginRequest("extract");
+    workflow.clearError();
+    setStatus(sourceStatusEl, "Extracting annotation with the configured vision model…", "neutral");
+    try {
+      const imageDataUrl = await currentImageDataUrl(token);
+      const payload = await extractSceneSource({
+        source_id: state.annotation.plan_id || "vision_reference",
+        image_data_url: imageDataUrl,
+        prompt: sourceAiPrompt.value.trim() || undefined,
+        image: sourceImageReference(false),
+      }, token.signal);
+      if (!token.isCurrent()) return;
+      workflow.setSourceDraft({
+        kind: "ai_extraction",
+        imageDataUrl,
+        fileName: state.annotation.image_path || "reference.png",
+        geojson: null,
+      });
+      uploadedImageDataUrl = imageDataUrl;
+      applyNormalizedSourcePayload(combineWithOsmContext(payload, pendingOsmNormalization), "AI extraction normalized. Review before generation.");
+      workflow.endRequest(token);
+    } catch (error) {
+      if (workflow.endRequest(token, error)) {
+        setStatus(sourceStatusEl, error instanceof Error ? error.message : "AI extraction failed.", "error");
+        renderSourceWorkflow();
+      }
+    }
+  }
+
+  async function importOsmContext(): Promise<void> {
+    const bbox = parseExplicitWgs84Bbox(sourceBboxInput.value);
+    if (!bbox) {
+      setStatus(sourceStatusEl, "OSM import requires an explicit valid WGS84 bbox.", "error");
+      return;
+    }
+    const token = workflow.beginRequest("osm");
+    workflow.clearError();
+    setStatus(sourceStatusEl, "Loading and aligning OSM building context…", "neutral");
+    try {
+      const osm = await loadOsmBuildings({
+        source_id: `${state.annotation.plan_id || "source"}_osm_context`,
+        aoi_bbox: bbox,
+      }, token.signal);
+      const osmNormalized = await normalizeSceneSource({
+        source: {
+          kind: "geojson",
+          source_id: String(osm.source.source_id ?? `${state.annotation.plan_id || "source"}_osm_context`),
+          producer: "import",
+          coordinate_space: "EPSG:4326",
+          geojson: osm.geojson,
+          image: sourceImageReference(true),
+        },
+      }, token.signal);
+      if (!token.isCurrent()) return;
+      pendingOsmNormalization = osmNormalized;
+      const primary = await normalizeSceneSource({
+        source: {
+          kind: "reference_annotation",
+          source_id: state.annotation.plan_id || "manual_reference_annotation",
+          producer: "manual",
+          annotation: cloneAnnotation(state.annotation),
+        },
+      }, token.signal);
+      if (!token.isCurrent()) return;
+      applyNormalizedSourcePayload(
+        combineWithOsmContext(primary, osmNormalized),
+        `OSM context aligned as ${osmNormalized.aligned_buildings.length} non-editable white masses.`,
+      );
+      workflow.endRequest(token);
+    } catch (error) {
+      if (workflow.endRequest(token, error)) {
+        setStatus(sourceStatusEl, error instanceof Error ? error.message : "OSM building import failed.", "error");
+        renderSourceWorkflow();
+      }
+    }
+  }
+
+  async function generateApprovedScene(): Promise<void> {
+    const beforeApproval = workflow.getSnapshot();
+    if (!beforeApproval.normalized) {
+      setStatus(sourceReviewStatusEl, "Normalize and review a source first.", "error");
+      return;
+    }
+    if (beforeApproval.approvedSourceRevision !== beforeApproval.sourceRevision) {
+      workflow.transition("review");
+      setStatus(sourceReviewStatusEl, "Approve the reviewed source before generation.", "error");
+      return;
+    }
+    const normalized = workflow.getSnapshot().normalized;
+    if (!normalized || !workflow.setGenerationStarted().ok) return;
+    const token = workflow.beginRequest("generate");
+    try {
+      const created = await submitWorkflowSceneJob({
+        normalized,
+        prompt: "Generate and load the approved student reference annotation.",
+        presetId: "custom",
+        signal: token.signal,
+      });
+      for (let attempt = 0; attempt < 360; attempt += 1) {
+        if (!token.isCurrent()) return;
+        const payload = await loadSceneJob(created.job_id, token.signal);
+        if (payload.status === "succeeded" && payload.result?.scene_layout_path) {
+          workflow.setGeneratedScene({
+            layoutPath: payload.result.scene_layout_path,
+            contextMassing: {
+              aligned_building_count: normalized.sourceContext.aligned_buildings?.length ?? 0,
+              source_alignment: normalized.sourceContext.source_alignment ?? null,
+            },
+          });
+          workflow.endRequest(token);
+          return;
+        }
+        if (payload.status === "failed") throw new Error(payload.error || "Scene generation failed.");
+        await sleep(1000);
+      }
+      throw new Error("Scene generation timed out.");
+    } catch (error) {
+      workflow.endRequest(token, error);
+    }
+  }
+
+  const unsubscribeWorkflow = workflow.subscribe(renderSourceWorkflow);
 
   let cleanAnnotationSnapshot = comparableAnnotationSnapshot(state.annotation);
   let autoGraphTimer: number | null = null;
@@ -2678,6 +3024,13 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
   function markAnnotationChanged(statusMessage?: string): void {
     state.derivedRegionsStale = true;
     clearGraphResult("Annotation changed. Road graph will refresh automatically.");
+    workflow.setSourceDraft({
+      kind: "manual_annotation",
+      imageDataUrl: uploadedImageDataUrl || undefined,
+      fileName: state.annotation.image_path || undefined,
+      geojson: null,
+    });
+    renderSourceWorkflow();
     if (statusMessage) {
       setStatus(statusEl, statusMessage, "success");
     }
@@ -3821,6 +4174,13 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
       state.selectedScenarioId = "";
       updateCleanAnnotationSnapshot();
       renderScenarioDesignOptions();
+      workflow.setSourceDraft({
+        kind: "reference_image",
+        imageDataUrl: null,
+        fileName: planId,
+        geojson: null,
+      });
+      renderSourceWorkflow();
       setStatus(statusEl, `Selected reference plan ${planId}, but no image URL was provided.`, "neutral");
       renderAll();
       return;
@@ -3829,6 +4189,15 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     state.selectedScenarioId = "";
     updateCleanAnnotationSnapshot();
     renderScenarioDesignOptions();
+    uploadedImageDataUrl = "";
+    pendingOsmNormalization = null;
+    workflow.setSourceDraft({
+      kind: "reference_image",
+      imageDataUrl: null,
+      fileName: plan.image_url,
+      geojson: null,
+    });
+    renderSourceWorkflow();
   }
 
   async function loadReferencePlans(options: { silent?: boolean } = {}): Promise<void> {
@@ -3849,7 +4218,7 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
       mergeReferencePlans(Array.isArray(payload.items) ? payload.items : []);
       const defaultPlan = state.referencePlans.find((item) => item.plan_id === "hkust_gz_gate") ?? state.referencePlans[0];
       renderReferencePlanOptions(defaultPlan?.plan_id);
-      if (!state.currentImageUrl && defaultPlan) {
+      if (!state.currentImageUrl && !workflow.getSnapshot().normalized && defaultPlan) {
         await applyReferencePlan(defaultPlan.plan_id);
         return;
       }
@@ -3882,27 +4251,14 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
       state.scenarioDesigns = Array.isArray(catalogPayload.items) ? catalogPayload.items : [];
       state.scenarioDesignsError = "";
       renderScenarioDesignOptions(state.selectedScenarioId);
-      const pendingDraftAnnotation = window.localStorage.getItem("roadgen3d.pendingScenarioDraftAnnotation") || "";
-      if (pendingDraftAnnotation) {
-        window.localStorage.removeItem("roadgen3d.pendingScenarioDraftAnnotation");
-        try {
-          const payload = JSON.parse(pendingDraftAnnotation) as {
-            scenario_id?: string;
-            title_zh?: string;
-            annotation?: unknown;
-          };
-          if (payload.annotation) {
-            void applyScenarioDraftAnnotation(payload);
-            return;
-          }
-        } catch {
-          setStatus(statusEl, "Failed to parse draft scenario annotation.", "error");
-        }
-      }
-      const pendingScenarioId = window.localStorage.getItem("roadgen3d.pendingScenarioDesignId") || "";
-      if (pendingScenarioId && state.scenarioDesigns.some((item) => item.scenario_id === pendingScenarioId && item.enabled !== false)) {
-        window.localStorage.removeItem("roadgen3d.pendingScenarioDesignId");
-        void applyScenarioDesignAnnotation(pendingScenarioId);
+      const pendingScenario = workflow.getSnapshot();
+      if (
+        pendingScenario.sourceKind === "scenario_design"
+        && !pendingScenario.normalized
+        && pendingScenario.sourceFileName
+        && state.scenarioDesigns.some((item) => item.scenario_id === pendingScenario.sourceFileName && item.enabled !== false)
+      ) {
+        void applyScenarioDesignAnnotation(pendingScenario.sourceFileName);
       }
     } catch (error) {
       state.scenarioDesigns = [];
@@ -3966,6 +4322,13 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
       updateCleanAnnotationSnapshot();
       renderReferencePlanOptions(annotation.plan_id);
       renderScenarioDesignOptions(scenarioId);
+      workflow.setSourceDraft({
+        kind: "scenario_design",
+        imageDataUrl: uploadedImageDataUrl || undefined,
+        fileName: scenarioId,
+        geojson: null,
+      });
+      renderSourceWorkflow();
       if (state.annotation.regions.some((region) => region.region_role === "scene_region")) {
         await deriveBuildingRegions();
         updateCleanAnnotationSnapshot();
@@ -5094,6 +5457,55 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     { signal },
   );
 
+  sourceImageImportButton.addEventListener("click", () => imageInput.click(), { signal });
+  sourceGeojsonInput.addEventListener(
+    "change",
+    async () => {
+      const file = sourceGeojsonInput.files?.[0];
+      if (!file) return;
+      try {
+        const geojson = JSON.parse(await file.text()) as Record<string, unknown>;
+        if (geojson.type !== "FeatureCollection" && geojson.type !== "Feature") {
+          throw new Error("GeoJSON must be a FeatureCollection or Feature.");
+        }
+        workflow.setSourceDraft({
+          kind: "geojson",
+          fileName: file.name,
+          geojson,
+        });
+        pendingOsmNormalization = null;
+        setStatus(sourceStatusEl, `Loaded ${file.name}. Normalize it before review.`, "success");
+        renderSourceWorkflow();
+      } catch (error) {
+        setStatus(sourceStatusEl, error instanceof Error ? error.message : "Failed to import GeoJSON.", "error");
+      } finally {
+        sourceGeojsonInput.value = "";
+      }
+    },
+    { signal },
+  );
+  sourceNormalizeButton.addEventListener("click", () => void normalizeCurrentSceneSource(), { signal });
+  sourceAiExtractButton.addEventListener("click", () => void extractCurrentReferenceImage(), { signal });
+  sourceOsmImportButton.addEventListener("click", () => void importOsmContext(), { signal });
+  sourceBackButton.addEventListener(
+    "click",
+    () => {
+      workflow.transition("source");
+      shell.activateRightTab("source");
+      renderSourceWorkflow();
+    },
+    { signal },
+  );
+  sourceApproveButton.addEventListener(
+    "click",
+    () => {
+      const result = workflow.approveReview();
+      if (!result.ok) setStatus(sourceReviewStatusEl, result.reason, "error");
+    },
+    { signal },
+  );
+  sourceGenerateButton.addEventListener("click", () => void generateApprovedScene(), { signal });
+
   imageInput.addEventListener(
     "change",
     async () => {
@@ -5102,14 +5514,23 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
         return;
       }
       try {
+        uploadedImageDataUrl = await readImageFileDataUrl(file);
         revokeCurrentObjectUrl();
         state.currentObjectUrl = URL.createObjectURL(file);
         await loadImageFromUrl(state.currentObjectUrl, { planId: "custom_upload", preserveFeatures: false });
         state.annotation.image_path = file.name;
         state.selectedScenarioId = "";
         planSelect.value = "";
+        workflow.setSourceDraft({
+          kind: "reference_image",
+          imageDataUrl: uploadedImageDataUrl,
+          fileName: file.name,
+          geojson: null,
+        });
+        pendingOsmNormalization = null;
         updateCleanAnnotationSnapshot();
         renderScenarioDesignOptions();
+        renderSourceWorkflow();
       } catch (error) {
         setStatus(
           statusEl,
@@ -5136,6 +5557,15 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
       renderScenarioDesignOptions();
       setStatus(statusEl, "Reference image cleared.", "neutral");
       renderAll();
+      uploadedImageDataUrl = "";
+      pendingOsmNormalization = null;
+      workflow.setSourceDraft({
+        kind: "manual_annotation",
+        imageDataUrl: null,
+        fileName: null,
+        geojson: null,
+      });
+      renderSourceWorkflow();
     },
     { signal },
   );
@@ -5839,6 +6269,7 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
         }
         state.drag = null;
         syncSelectionAfterMutation();
+        markAnnotationChanged();
         renderAll();
       }
     },
@@ -5862,6 +6293,13 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
         await reconcileImportedAnnotationReferenceImage("Imported", fallbackImagePath);
         updateCleanAnnotationSnapshot();
         renderScenarioDesignOptions();
+        workflow.setSourceDraft({
+          kind: "annotation_json",
+          imageDataUrl: uploadedImageDataUrl || undefined,
+          fileName: file.name,
+          geojson: null,
+        });
+        renderSourceWorkflow();
       } catch (error) {
         setStatus(statusEl, error instanceof Error ? error.message : "Failed to import annotation JSON.", "error");
       } finally {
@@ -5883,6 +6321,13 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
         await reconcileImportedAnnotationReferenceImage("Applied", fallbackImagePath);
         updateCleanAnnotationSnapshot();
         renderScenarioDesignOptions();
+        workflow.setSourceDraft({
+          kind: "annotation_json",
+          imageDataUrl: uploadedImageDataUrl || undefined,
+          fileName: state.annotation.image_path || "annotation.json",
+          geojson: null,
+        });
+        renderSourceWorkflow();
       } catch (error) {
         setStatus(statusEl, error instanceof Error ? error.message : "Failed to apply annotation JSON.", "error");
       }
@@ -5962,20 +6407,60 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
 
   renderReferencePlanOptions(FALLBACK_REFERENCE_PLAN.plan_id);
   renderScenarioDesignOptions();
+  const initialWorkflowSnapshot = workflow.getSnapshot();
+  if (initialWorkflowSnapshot.normalized) {
+    state.annotation = normalizeAnnotation(initialWorkflowSnapshot.normalized.referenceAnnotation);
+    if (initialWorkflowSnapshot.normalized.graph) {
+      state.graphResult = {
+        annotation: cloneAnnotation(state.annotation),
+        graph: initialWorkflowSnapshot.normalized.graph as ConvertedGraphPayload["graph"],
+        summary: { ...initialWorkflowSnapshot.normalized.featureCounts },
+      };
+    }
+    updateCleanAnnotationSnapshot();
+    const retainedImage = initialWorkflowSnapshot.sourceImageDataUrl || state.annotation.image_path;
+    if (retainedImage) {
+      void loadImageFromUrl(retainedImage, {
+        planId: state.annotation.plan_id,
+        preserveFeatures: true,
+        preserveCurrentOnError: true,
+      }).catch((error) => {
+        state.isReferenceImageLoading = false;
+        setStatus(statusEl, statusTextFromImageLoadError(error, "sceneGraph.status.failedLoadReferencePlan", "Failed to restore the workflow reference image."), "error");
+        renderAll();
+      });
+    } else {
+      state.isReferenceImageLoading = false;
+    }
+  } else {
+    void applyReferencePlan(FALLBACK_REFERENCE_PLAN.plan_id).catch((error) => {
+      state.isReferenceImageLoading = false;
+      renderAll();
+      setStatus(
+        statusEl,
+        statusTextFromImageLoadError(
+          error,
+          "sceneGraph.status.failedLoadReferencePlan",
+          `Failed to load default reference plan ${FALLBACK_REFERENCE_PLAN.plan_id}.`,
+        ),
+        "error",
+      );
+    });
+  }
   renderAll();
-  void applyReferencePlan(FALLBACK_REFERENCE_PLAN.plan_id).catch((error) => {
-    state.isReferenceImageLoading = false;
-    renderAll();
-    setStatus(
-      statusEl,
-      statusTextFromImageLoadError(
-        error,
-        "sceneGraph.status.failedLoadReferencePlan",
-        `Failed to load default reference plan ${FALLBACK_REFERENCE_PLAN.plan_id}.`,
-      ),
-      "error",
-    );
-  });
+  renderSourceWorkflow();
+  const capabilityToken = workflow.beginRequest("capabilities");
+  void loadWorkflowCapabilities(capabilityToken.signal)
+    .then((capabilities) => {
+      if (!capabilityToken.isCurrent()) return;
+      workflow.setCapabilities(capabilities);
+      workflow.endRequest(capabilityToken);
+      renderSourceWorkflow();
+    })
+    .catch((error) => {
+      workflow.endRequest(capabilityToken, error);
+      renderSourceWorkflow();
+    });
   void loadScenarioDesigns({ silent: true });
   void loadReferencePlans({ silent: true }).catch((error) => {
     setStatus(
@@ -5987,12 +6472,23 @@ export function mountSceneGraphPage(shell: DesktopShell): () => void {
     );
   });
 
+  function refreshSceneGraphLanguage(): void {
+    const language = loadViewerLanguage();
+    applyViewerTranslations(root, language);
+    renderAll();
+    renderSourceWorkflow();
+    renderInspector();
+    applyViewerTranslations(root, language);
+  }
+
+  window.addEventListener(VIEWER_LANGUAGE_EVENT, refreshSceneGraphLanguage, { signal });
   return () => {
     if (autoGraphTimer !== null) {
       window.clearTimeout(autoGraphTimer);
       autoGraphTimer = null;
     }
     revokeCurrentObjectUrl();
+    unsubscribeWorkflow();
     eventController.abort();
   };
 }

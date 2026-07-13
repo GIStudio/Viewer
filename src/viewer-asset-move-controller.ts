@@ -28,6 +28,11 @@ export type AssetMoveControllerDeps = {
   setLaserCopyText: (text: string) => void;
   flashStatus: (message: string) => void;
   updateAssetBboxHelpers: () => void;
+  persistMove: (move: {
+    instanceId: string;
+    before: [number, number, number];
+    position: [number, number, number];
+  }) => Promise<void>;
 };
 
 function escapeHtml(value: unknown): string {
@@ -39,10 +44,14 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, "&#039;");
 }
 
-function objectInstanceId(object: THREE.Object3D, root: THREE.Object3D): string {
+function objectInstanceId(
+  object: THREE.Object3D,
+  root: THREE.Object3D,
+  manifest: ViewerManifest | null,
+): string {
   let cursor: THREE.Object3D | null = object;
   while (cursor) {
-    const instanceId = resolveInstanceIdFromName(cursor.name || "");
+    const instanceId = resolveInstanceIdFromName(cursor.name || "", manifest ?? undefined);
     if (instanceId) return instanceId;
     if (cursor === root) break;
     cursor = cursor.parent;
@@ -59,10 +68,14 @@ function isAncestor(candidate: THREE.Object3D, object: THREE.Object3D): boolean 
   return false;
 }
 
-function collectInstanceObjects(root: THREE.Object3D, instanceId: string): THREE.Object3D[] {
+function collectInstanceObjects(
+  root: THREE.Object3D,
+  instanceId: string,
+  manifest: ViewerManifest | null,
+): THREE.Object3D[] {
   const matches: THREE.Object3D[] = [];
   root.traverse((child) => {
-    if (resolveInstanceIdFromName(child.name || "") === instanceId) matches.push(child);
+    if (resolveInstanceIdFromName(child.name || "", manifest ?? undefined) === instanceId) matches.push(child);
   });
   return matches.filter((object) => !matches.some((candidate) => candidate !== object && isAncestor(candidate, object)));
 }
@@ -82,6 +95,24 @@ function formatMovePayload(instanceId: string, position: [number, number, number
   }, null, 2);
 }
 
+function isEditablePlacement(info: Record<string, unknown> | null): boolean {
+  if (!info) return false;
+  const category = String(info.category ?? "").toLowerCase();
+  const placementGroup = String(info.placement_group ?? "").toLowerCase();
+  const placementFurniture = placementGroup === "street_furniture" || [
+    "bench",
+    "bollard",
+    "bus_stop",
+    "hydrant",
+    "lamp",
+    "mailbox",
+    "sign",
+    "trash",
+    "tree",
+  ].includes(category);
+  return info.editable === false ? false : placementFurniture;
+}
+
 export function createAssetMoveController(deps: AssetMoveControllerDeps): AssetMoveController {
   const {
     camera,
@@ -94,6 +125,7 @@ export function createAssetMoveController(deps: AssetMoveControllerDeps): AssetM
     setLaserCopyText,
     flashStatus,
     updateAssetBboxHelpers,
+    persistMove,
   } = deps;
 
   const raycaster = new THREE.Raycaster();
@@ -101,6 +133,7 @@ export function createAssetMoveController(deps: AssetMoveControllerDeps): AssetM
   const planeHit = new THREE.Vector3();
   let enabled = false;
   let drag: DragState | null = null;
+  let saving = false;
 
   function intersectGround(event: PointerEvent): THREE.Vector3 | null {
     raycaster.setFromCamera(pointerToNdc(event, renderer.domElement), camera);
@@ -109,15 +142,16 @@ export function createAssetMoveController(deps: AssetMoveControllerDeps): AssetM
 
   function pickAsset(event: PointerEvent): { instanceId: string; objects: THREE.Object3D[]; point: THREE.Vector3 } | null {
     const root = getCurrentRoot();
-    if (!root) return null;
+    const manifest = getManifest();
+    if (!root || !manifest) return null;
     raycaster.setFromCamera(pointerToNdc(event, renderer.domElement), camera);
     const hit = raycaster
       .intersectObject(root, true)
-      .find((item) => objectInstanceId(item.object, root));
+      .find((item) => objectInstanceId(item.object, root, manifest));
     if (!hit) return null;
-    const instanceId = objectInstanceId(hit.object, root);
-    if (!instanceId) return null;
-    const objects = collectInstanceObjects(root, instanceId);
+    const instanceId = objectInstanceId(hit.object, root, manifest);
+    if (!instanceId || !isEditablePlacement(findInstanceRecord(instanceId))) return null;
+    const objects = collectInstanceObjects(root, instanceId, manifest);
     return { instanceId, objects: objects.length ? objects : [hit.object], point: hit.point.clone() };
   }
 
@@ -159,7 +193,7 @@ export function createAssetMoveController(deps: AssetMoveControllerDeps): AssetM
   }
 
   function onPointerDown(event: PointerEvent): void {
-    if (!enabled || event.button !== 0) return;
+    if (!enabled || saving || event.button !== 0) return;
     if (controlsAreLocked()) unlockControls();
     const picked = pickAsset(event);
     const startPoint = intersectGround(event);
@@ -205,28 +239,67 @@ export function createAssetMoveController(deps: AssetMoveControllerDeps): AssetM
     updateAssetBboxHelpers();
   }
 
-  function onPointerUp(event: PointerEvent): void {
+  async function onPointerUp(event: PointerEvent): Promise<void> {
     if (!drag || event.pointerId !== drag.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
     renderer.domElement.releasePointerCapture(event.pointerId);
-    const finalPosition = instancePosition(drag.instanceId);
-    if (finalPosition) {
-      renderMoveInfo(drag.instanceId, finalPosition);
-      flashStatus(`Moved asset ${drag.instanceId}. Copy params from the info card if you want to persist it.`);
-    }
+    const completed = drag;
     drag = null;
+    const finalPosition = instancePosition(completed.instanceId);
+    if (!finalPosition || !completed.startManifestPosition) return;
+    const changed = finalPosition.some(
+      (value, index) => Math.abs(value - completed.startManifestPosition![index]) > 1e-6,
+    );
+    if (!changed) return;
+    renderMoveInfo(completed.instanceId, finalPosition);
+    saving = true;
+    renderer.domElement.style.cursor = "wait";
+    flashStatus(`Saving asset ${completed.instanceId}…`);
+    try {
+      const info = findInstanceRecord(completed.instanceId);
+      await persistMove({
+        instanceId: String(info?.instance_id ?? completed.instanceId),
+        before: completed.startManifestPosition,
+        position: finalPosition,
+      });
+      renderMoveInfo(completed.instanceId, finalPosition);
+      flashStatus(`Saved asset ${completed.instanceId}. Press Cmd/Ctrl+Z to undo.`);
+    } catch (error) {
+      for (const item of completed.startPositions) {
+        item.object.position.copy(item.position);
+      }
+      updateManifestPosition(completed.instanceId, completed.startManifestPosition);
+      updateAssetBboxHelpers();
+      flashStatus(error instanceof Error ? error.message : "Scene edit could not be saved.");
+    } finally {
+      saving = false;
+      renderer.domElement.style.cursor = enabled ? "grab" : "";
+    }
+  }
+
+  function onPointerCancel(event: PointerEvent): void {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const cancelled = drag;
+    drag = null;
+    for (const item of cancelled.startPositions) {
+      item.object.position.copy(item.position);
+    }
+    if (cancelled.startManifestPosition) {
+      updateManifestPosition(cancelled.instanceId, cancelled.startManifestPosition);
+    }
+    updateAssetBboxHelpers();
   }
 
   renderer.domElement.addEventListener("pointerdown", onPointerDown);
   renderer.domElement.addEventListener("pointermove", onPointerMove);
   renderer.domElement.addEventListener("pointerup", onPointerUp);
-  renderer.domElement.addEventListener("pointercancel", onPointerUp);
+  renderer.domElement.addEventListener("pointercancel", onPointerCancel);
 
   return {
     setEnabled(nextEnabled: boolean): void {
       enabled = nextEnabled;
-      if (!enabled) drag = null;
+      if (!enabled && !saving) drag = null;
       renderer.domElement.style.cursor = enabled ? "grab" : "";
       if (enabled && controlsAreLocked()) unlockControls();
     },
@@ -235,7 +308,7 @@ export function createAssetMoveController(deps: AssetMoveControllerDeps): AssetM
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
-      renderer.domElement.removeEventListener("pointercancel", onPointerUp);
+      renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
       renderer.domElement.style.cursor = "";
     },
   };

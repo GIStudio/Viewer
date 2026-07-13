@@ -235,6 +235,63 @@ export async function rebuildLayoutGlb(layoutPath: string, force: boolean = fals
   });
 }
 
+export type SceneMoveInstanceCommand = {
+  command_id: string;
+  op: "move_instance";
+  instance_id: string;
+  position_xyz: [number, number, number];
+};
+
+export type SceneLayoutEditResponse = {
+  source: {
+    layout_path: string;
+    scene_glb_path: string;
+    lineage_id: string;
+    revision: number;
+    sha256: string;
+  };
+  revision: {
+    layout_path: string;
+    scene_glb_path: string;
+    lineage_id: string;
+    revision: number;
+    sha256: string;
+  };
+  applied_commands: Array<Record<string, unknown>>;
+  undo: {
+    base: { revision: number; sha256: string };
+    commands: SceneMoveInstanceCommand[];
+  };
+};
+
+export async function saveSceneLayoutEdits(
+  layoutPath: string,
+  base: { revision: number; sha256: string },
+  commands: SceneMoveInstanceCommand[],
+): Promise<SceneLayoutEditResponse> {
+  const response = await fetch(resolveApiUrl("/api/design/scene-layout-edits"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      layout_path: layoutPath,
+      base,
+      commands,
+    }),
+  });
+  const payload = await response.json().catch(() => ({})) as Record<string, any>;
+  if (!response.ok) {
+    const detail = payload.detail;
+    const message = typeof detail === "string"
+      ? detail
+      : String(detail?.message ?? payload.error ?? `${response.status} ${response.statusText}`);
+    const error = new Error(message) as Error & { status?: number; detail?: unknown };
+    error.status = response.status;
+    error.detail = detail;
+    throw error;
+  }
+  return payload as SceneLayoutEditResponse;
+}
+
 /**
  * Update query string with layout parameter.
  */

@@ -1,4 +1,4 @@
-export type ViewerLanguage = "en" | "zh" | "mixed";
+export type ViewerLanguage = "en" | "zh";
 
 export const VIEWER_LANGUAGE_EVENT = "roadgen3d:viewer-language-change";
 const VIEWER_LANGUAGE_STORAGE_KEY = "viewer-lang";
@@ -23,10 +23,14 @@ const TRANSLATIONS: Record<string, Translation> = {
   "shell.asset-editor.kicker": { en: "Viewer / 3D Assets", zh: "查看器 / 3D 资产" },
   "shell.asset-editor.title": { en: "3D Asset Editor", zh: "3D 资产编辑器" },
   "shell.asset-editor.subtitle": { en: "Browse, inspect, and manage project 3D assets", zh: "浏览、检查并管理项目 3D 资产" },
-  "shell.browse.kicker": { en: "BROWSE", zh: "浏览" },
-  "shell.browse.title": { en: "Layouts & Objects", zh: "布局与对象" },
-  "shell.analyze.kicker": { en: "ANALYZE", zh: "分析" },
-  "shell.analyze.title": { en: "Evaluate, Compare & History", zh: "评估、对比与历史" },
+  "shell.controls.kicker": { en: "PANELS", zh: "面板" },
+  "shell.controls.title": { en: "Control Menu", zh: "控制菜单" },
+  "shell.asset-browser.kicker": { en: "ASSETS", zh: "资产" },
+  "shell.asset-browser.title": { en: "Asset Library", zh: "资产库" },
+  "shell.live.kicker": { en: "LIVE", zh: "实时" },
+  "shell.live.title": { en: "Adjust, Render & Analyze", zh: "调整、渲染与分析" },
+  "shell.asset-inspect.kicker": { en: "INSPECT", zh: "检查" },
+  "shell.asset-inspect.title": { en: "Asset Properties & Preview", zh: "资产属性与预览" },
   "shell.scene-graph.left.kicker": { en: "ANNOTATE", zh: "标注" },
   "shell.scene-graph.left.title": { en: "Tools & Features", zh: "工具与要素" },
   "shell.scene-graph.right.kicker": { en: "INSPECT", zh: "检查" },
@@ -55,14 +59,152 @@ const TRANSLATIONS: Record<string, Translation> = {
   "language.group": { en: "Language", zh: "语言" },
   "language.en": { en: "English", zh: "英文" },
   "language.zh": { en: "Chinese", zh: "中文" },
-  "language.mixed": { en: "Bilingual", zh: "中英混合" },
+  "topbar.history": { en: "History", zh: "历史" },
+  "topbar.analyze": { en: "Analyze", zh: "分析" },
+  "topbar.generate": { en: "Generate & Load", zh: "生成并加载" },
+  "shell.taskTray": { en: "Task Tray", zh: "任务栏" },
+  "shell.artifacts": { en: "Artifacts", zh: "产物" },
+  "shell.shortcuts.tooltip": { en: "Shortcut modal", zh: "快捷键窗口" },
+  "shell.shortcuts.open": { en: "Open shortcut modal", zh: "打开快捷键窗口" },
+  "viewer.shortcuts.title": { en: "Viewer shortcuts", zh: "查看器快捷键" },
+  "viewer.shortcuts.capture": { en: "Click scene to capture mouse", zh: "点击场景以捕获鼠标" },
+  "viewer.shortcuts.move": { en: "WASD to move, Shift to sprint, Esc to unlock", zh: "WASD 移动，Shift 冲刺，Esc 解锁鼠标" },
+  "viewer.shortcuts.tools": { en: "Use Tools or the right inspector tabs for design, evaluation, comparison, history, and presets", zh: "使用工具菜单或右侧检查器标签进入设计、评估、对比、历史和预设" },
+  "viewer.status.initializationFailed": { en: "Viewer initialization failed: {reason}", zh: "查看器初始化失败：{reason}" },
+  "viewer.status.initializationFailedSummary": { en: "Viewer initialization failed.", zh: "查看器初始化失败。" },
+  "workflow.revision": { en: "rev {revision}", zh: "版本 {revision}" },
+  "workflow.sourceWarning.one": { en: "{count} source warning", zh: "{count} 条输入警告" },
+  "workflow.sourceWarning.other": { en: "{count} source warnings", zh: "{count} 条输入警告" },
+  "workflow.step.source": { en: "Source", zh: "输入" },
+  "workflow.step.review": { en: "Review", zh: "审阅" },
+  "workflow.step.generate": { en: "Generate", zh: "生成" },
+  "workflow.step.edit": { en: "Edit", zh: "编辑" },
+  "workflow.step.evaluate": { en: "Evaluate", zh: "评估" },
+  "workflow.context.source": {
+    en: "Import a map, image, annotation, or GeoJSON; trace manually or use configured vision; then normalize.",
+    zh: "导入地图、图片、标注或 GeoJSON；手工描绘或使用已配置的视觉模型，然后标准化。",
+  },
+  "workflow.context.review": {
+    en: "Inspect provenance, warnings, feature counts, and the converted road graph before explicit approval.",
+    zh: "检查来源、警告、要素数量及转换后的道路图，再显式批准。",
+  },
+  "workflow.context.generate": {
+    en: "Generate from the approved inline reference annotation and aligned context, then load the durable layout.",
+    zh: "依据已批准的参考标注与对齐上下文生成，并加载可持久编辑的布局。",
+  },
+  "workflow.context.edit": {
+    en: "Move placement furniture or submit the same focused JSON command. Road geometry returns to Source.",
+    zh: "移动街道家具或提交等价的定向 JSON 命令；道路几何修改返回输入阶段。",
+  },
+  "workflow.context.evaluate": {
+    en: "Run diagnostic geometry proxies, generation QA, and declared visual-model evidence with explicit missingness.",
+    zh: "运行诊断性几何代理、生成质量检查与明确声明的视觉模型，然后明确缺失信息。",
+  },
+  "workflow.navigation": { en: "RoadGen3D student workflow", zh: "RoadGen3D 学生工作流" },
+  "workflow.undoPlacement": { en: "Undo placement", zh: "撤销放置" },
+  "route.model-input-browser.label": { en: "Model Input Browser", zh: "模型输入浏览器" },
+  "shell.model-input-browser.kicker": { en: "Viewer / Raw Evidence", zh: "查看器 / 原始证据" },
+  "shell.model-input-browser.title": { en: "Model Input Browser", zh: "模型输入浏览器" },
+  "shell.model-input-browser.subtitle": {
+    en: "Read-only audit of the exact raw GeoJSON prompt supplied to the model.",
+    zh: "只读核验发送给模型的原始 GeoJSON 提示词。",
+  },
+  "shell.model-input-browser.left.kicker": { en: "EVIDENCE", zh: "证据" },
+  "shell.model-input-browser.left.title": { en: "Input Corpus", zh: "输入语料库" },
+  "shell.model-input-browser.right.kicker": { en: "AUDIT", zh: "核验" },
+  "shell.model-input-browser.right.title": { en: "Raw Input Evidence", zh: "原始输入证据" },
+  "modelInput.title": { en: "Model Input Browser", zh: "模型输入浏览器" },
+  "modelInput.subtitle": {
+    en: "Read-only evidence audit. This page never renders a map or sends a mutation request.",
+    zh: "只读证据核验。此页面不会渲染地图，也不会发送修改请求。",
+  },
+  "modelInput.immutableCorpus": { en: "Immutable corpus", zh: "不可变语料库" },
+  "modelInput.auditFilter": { en: "Audit filter", zh: "核验筛选" },
+  "modelInput.filterPlaceholder": {
+    en: "split, question type, geometry pair, tier, policy",
+    zh: "数据划分、问题类型、几何对、难度、策略",
+  },
+  "common.load": { en: "Load", zh: "加载" },
+  "common.failed": { en: "Failed", zh: "失败" },
+  "common.generationFailed": { en: "Generation failed", zh: "生成失败" },
+  "common.loading": { en: "Loading...", zh: "正在加载..." },
+  "common.noData": { en: "No data available.", zh: "暂无可用数据。" },
+  "modelInput.summary": {
+    en: "{scope} · {propertyMode}\nSnapshot: {snapshot}\nChecksums: {checksums}\nEligible: {eligible} · Selected: {selected} · Loaded: {loaded}/{total}",
+    zh: "{scope} · {propertyMode}\n快照：{snapshot}\n校验和：{checksums}\n可选：{eligible} · 已选：{selected} · 已加载：{loaded}/{total}",
+  },
+  "modelInput.column.row": { en: "Row", zh: "行号" },
+  "modelInput.column.split": { en: "Split", zh: "数据划分" },
+  "modelInput.column.questionType": { en: "Question type", zh: "问题类型" },
+  "modelInput.column.geometryPair": { en: "Geometry pair", zh: "几何对" },
+  "modelInput.column.features": { en: "Features", zh: "要素数" },
+  "modelInput.column.policy": { en: "Policy", zh: "策略" },
+  "modelInput.policy.pass": { en: "pass", zh: "通过" },
+  "modelInput.policy.fail": { en: "fail", zh: "失败" },
+  "modelInput.loadMore": { en: "Load more", zh: "加载更多" },
+  "modelInput.copyExact": { en: "Copy exact model input ({length} chars · {checksum})", zh: "复制精确模型输入（{length} 个字符 · {checksum}）" },
+  "modelInput.panel.exact": { en: "Exact model input", zh: "精确模型输入" },
+  "modelInput.panel.geojson": { en: "Model-visible GeoJSON", zh: "模型可见 GeoJSON" },
+  "modelInput.panel.questionAnswer": { en: "Question and answer audit", zh: "问题与答案核验" },
+  "modelInput.panel.provenance": { en: "Provenance audit", zh: "来源核验" },
+  "modelInput.questionAnswer": {
+    en: "Question: {question}\nExpected generic answer (not model-visible target): {answer}",
+    zh: "问题：{question}\n预期通用答案（并非模型可见目标）：{answer}",
+  },
+  "modelInput.unavailable": { en: "Corpus unavailable or invalid: {reason}", zh: "语料库不可用或无效：{reason}" },
+  "modelInput.emptyCorpus": { en: "No fixed raw-evidence corpora are available", zh: "没有可用的固定原始证据语料库" },
+  "modelInput.status": { en: "Read-only raw GeoJSON evidence browser", zh: "只读原始 GeoJSON 证据浏览器" },
+  "modelInput.hint.selectCorpus": { en: "Select exactly one immutable corpus.", zh: "请选择且仅选择一个不可变语料库。" },
+  "modelInput.hint.auditInput": { en: "Copy the exact model input; audit metadata never enters it.", zh: "复制精确模型输入；核验元数据不会进入该输入。" },
+  "menu.tools.newUi": { en: "New UI", zh: "新界面" },
   "common.error.failedToFetch": { en: "Failed to fetch", zh: "请求失败。" },
   "shell.navigation": { en: "Navigation", zh: "导航" },
+  "shell.stage": { en: "Stage", zh: "画布" },
+  "viewer.stage.workflow": { en: "Generation workflow", zh: "生成工作流" },
+  "viewer.stage.canvasMode": { en: "Canvas mode", zh: "画布模式" },
+  "viewer.stage.generateLoad": { en: "Generate & Load", zh: "生成并加载" },
+  "viewer.stage.resetView": { en: "Reset View", zh: "重置视图" },
+  "viewer.sceneBrowser.kicker": { en: "SCENE", zh: "场景" },
+  "viewer.sceneBrowser.title": { en: "Scene Browser", zh: "场景浏览器" },
+  "viewer.sceneBrowser.description": { en: "Choose a generated result or scene. The 3D stage remains visible behind this panel.", zh: "选择已生成结果或场景。3D 画布会继续显示在该面板后方。" },
+  "viewer.sceneBrowser.close": { en: "Close scene browser", zh: "关闭场景浏览器" },
+  "viewer.minimap.expand": { en: "Expand Scene Map", zh: "展开场景地图" },
+  "viewer.generationDialog.title": { en: "Generation Control", zh: "生成控制" },
+  "viewer.generationDialog.subtitle": { en: "Full generation flow in a dialog; confirm to return to the stage view.", zh: "在对话框中完成完整生成流程；确认后返回画布视图。" },
+  "viewer.generationDialog.close": { en: "Close generation control", zh: "关闭生成控制" },
+  "viewer.presets.close": { en: "Close presets", zh: "关闭预设" },
+  "assetEditor.manifest": { en: "Manifest", zh: "资产清单" },
+  "assetEditor.empty.gallery": { en: "No assets match the current filters.", zh: "没有资产符合当前筛选条件。" },
+  "viewer.settings.toggleGroup": { en: "Viewer display toggles", zh: "查看器显示开关" },
+  "viewer.settings.thirdPerson": { en: "Third Person", zh: "第三人称" },
+  "viewer.settings.frame": { en: "Frame", zh: "边界框" },
+  "viewer.settings.bboxes": { en: "BBoxes", zh: "包围盒" },
+  "viewer.settings.move": { en: "Move", zh: "移动" },
+  "viewer.settings.laser": { en: "Laser", zh: "激光" },
+  "viewer.settings.graph": { en: "Graph", zh: "图形" },
+  "viewer.settings.scene": { en: "Scene", zh: "场景" },
+  "viewer.settings.analysis": { en: "Analysis", zh: "分析" },
+  "viewer.settings.diorama": { en: "Diorama", zh: "模型盒景" },
+  "viewer.settings.audio": { en: "Audio", zh: "音频" },
+  "viewer.settings.shadow": { en: "Shadow Strength", zh: "阴影强度" },
+  "viewer.settings.environment": { en: "Environment", zh: "环境" },
+  "viewer.settings.weather": { en: "Weather", zh: "天气" },
+  "viewer.settings.intensity": { en: "Intensity", zh: "强度" },
+  "viewer.settings.timeOfDay": { en: "Time of Day", zh: "日照时间" },
+  "viewer.settings.animateSun": { en: "Animate Sun", zh: "日照动画" },
+  "viewer.settings.cycleSpeed": { en: "Cycle Speed", zh: "循环速度" },
+  "viewer.overlay.empty": { en: "Use Floating Lane in Browse to inspect semantic overlays.", zh: "在浏览中使用浮动车道检查语义叠加层。" },
+  "viewer.consistency.title": { en: "Layout Consistency", zh: "布局一致性" },
+  "viewer.consistency.subtitle": { en: "Conversion and topology checks against the source graph.", zh: "针对源图的转换和拓扑检查。" },
+  "viewer.consistency.close": { en: "Close consistency", zh: "关闭一致性检查" },
+  "viewer.consistency.empty": { en: "Load a layout to see consistency metrics.", zh: "加载布局以查看一致性指标。" },
   "shell.leftSidebar": { en: "Left Sidebar", zh: "左侧栏" },
   "shell.inspector": { en: "Inspector", zh: "检查器" },
   "shell.rightSidebar": { en: "Right Sidebar", zh: "右侧栏" },
   "shell.pin": { en: "Pin", zh: "固定" },
   "shell.pinned": { en: "Pinned", zh: "已固定" },
+  "shell.unpinLeft": { en: "Unpin left sidebar", zh: "取消固定左侧栏" },
+  "assetEditor.empty.selectAsset": { en: "Select an asset from the gallery to inspect", zh: "从图库中选择资产进行检查" },
   "shell.statusWorkbench": { en: "Status Workbench", zh: "状态工作台" },
   "shell.status.ready": { en: "Ready.", zh: "就绪。" },
   "shell.status": { en: "Status", zh: "状态" },
@@ -78,8 +220,6 @@ const TRANSLATIONS: Record<string, Translation> = {
     zh: "通过顶部 Tools 或右侧标签进入评估、对比、历史、预设和场景叠加。",
   },
   "viewer.hints.captureMode": { en: "Headless capture mode is ready for scripted camera renders.", zh: "无头截图模式已就绪，可执行脚本化相机渲染。" },
-  "viewer.left.recentLayouts": { en: "Recent Layouts", zh: "最近布局" },
-  "viewer.left.entry": { en: "Layout / scene entry", zh: "布局 / 场景入口" },
   "viewer.left.recentResult": { en: "Recent Result", zh: "最近结果" },
   "viewer.left.scene": { en: "Scene", zh: "场景" },
   "viewer.tab.settings": { en: "Settings", zh: "设置" },
@@ -165,7 +305,7 @@ const TRANSLATIONS: Record<string, Translation> = {
   },
   "assetEditor.status.ready": { en: "Asset editor ready.", zh: "资产编辑器已就绪。" },
   "viewer.settings.title": { en: "Display Settings", zh: "显示设置" },
-  "viewer.settings.subtitle": { en: "Light, weather, sun, shadows, and laser pointer", zh: "光照、天气、日照、阴影和激光指示器" },
+  "viewer.settings.subtitle": { en: "Light presets, shadows, and laser pointer", zh: "光照预设、阴影和激光指示器" },
   "viewer.settings.close": { en: "Close settings", zh: "关闭设置" },
   "viewer.settings.lightingPreset": { en: "Lighting Preset", zh: "光照预设" },
   "viewer.settings.exposure": { en: "Exposure", zh: "曝光" },
@@ -178,7 +318,40 @@ const TRANSLATIONS: Record<string, Translation> = {
     zh: "先选街道结构，再选街道家具设计目标，一键生成 3D 场景",
   },
   "viewer.evaluate.title": { en: "Design Evaluation", zh: "设计评估" },
-  "viewer.evaluate.subtitle": { en: "AI-driven layout assessment and suggestions", zh: "AI 驱动的布局评估与建议" },
+  "viewer.evaluate.subtitle": {
+    en: "Engineering proxies, generation QA, and declared visual evidence",
+    zh: "工程代理指标、生成质量检查与明确声明的视觉证据",
+  },
+  "viewer.evaluate.scopeTitle": { en: "Diagnostic scope", zh: "诊断范围" },
+  "viewer.evaluate.scopeBody": {
+    en: "Scores are comparative proxies, not validated safety, beauty, accessibility, or planning outcomes. Missing evidence remains N/A.",
+    zh: "分数仅用于方案间诊断比较，不代表经验证的安全、美观、可达性或规划绩效；证据缺失时保持 N/A。",
+  },
+  "viewer.evaluate.parameters.title": { en: "Evaluation parameters", zh: "评估参数" },
+  "viewer.evaluate.parameters.advanced": { en: "Advanced", zh: "高级" },
+  "viewer.evaluate.parameters.note": {
+    en: "Raw composite weights normalize automatically. These parameters are diagnostic defaults, not validated outcomes.",
+    zh: "原始综合权重会自动归一化。这些参数是诊断性默认值，不代表经验证的结果。",
+  },
+  "viewer.evaluate.parameters.weights": { en: "Composite weights", zh: "综合权重" },
+  "viewer.evaluate.parameters.walkability": { en: "Walkability diagnostics", zh: "步行性诊断参数" },
+  "viewer.evaluate.parameters.walkabilityWeight": { en: "Walkability", zh: "步行性" },
+  "viewer.evaluate.parameters.safetyWeight": { en: "Safety", zh: "安全性" },
+  "viewer.evaluate.parameters.beautyWeight": { en: "Beauty", zh: "美观度" },
+  "viewer.evaluate.parameters.clearWidthMin": { en: "Clear width min", zh: "最小净宽" },
+  "viewer.evaluate.parameters.clearWidthIdeal": { en: "Clear width ideal", zh: "理想净宽" },
+  "viewer.evaluate.parameters.furnitureArea": { en: "Furniture area threshold", zh: "街具面积阈值" },
+  "viewer.evaluate.parameters.amenityCount": { en: "Amenity count density", zh: "设施数量密度" },
+  "viewer.evaluate.parameters.lampSpacing": { en: "Lamp spacing", zh: "路灯间距" },
+  "viewer.evaluate.parameters.transitSpacing": { en: "Transit stop spacing", zh: "公交站间距" },
+  "viewer.evaluate.parameters.crossingSpacing": { en: "Crossing spacing", zh: "过街设施间距" },
+  "viewer.evaluate.parameters.entranceDensity": { en: "Entrance density", zh: "入口密度" },
+  "viewer.evaluate.parameters.treeGrid": { en: "Tree grid resolution", zh: "树荫网格分辨率" },
+  "viewer.evaluate.parameters.sunAzimuth": { en: "Sun azimuth", zh: "太阳方位角" },
+  "viewer.evaluate.parameters.sunElevation": { en: "Sun elevation", zh: "太阳高度角" },
+  "viewer.evaluate.parameters.canopyCenter": { en: "Canopy center-height ratio", zh: "树冠中心高度比" },
+  "viewer.evaluate.parameters.canopyVertical": { en: "Canopy vertical ratio", zh: "树冠垂直比例" },
+  "viewer.evaluate.parameters.reset": { en: "Reset Defaults", zh: "恢复默认值" },
   "viewer.compare.title": { en: "Layout Comparison", zh: "布局对比" },
   "viewer.compare.subtitle": { en: "Compare two layouts side-by-side", zh: "对比两个布局的配置、指标和地物差异" },
   "viewer.history.title": { en: "History Analysis", zh: "历史分析" },
@@ -530,7 +703,7 @@ const TRANSLATIONS: Record<string, Translation> = {
 };
 
 export function normalizeViewerLanguage(value: unknown): ViewerLanguage {
-  return value === "zh" || value === "mixed" || value === "en" ? value : "en";
+  return value === "zh" ? "zh" : "en";
 }
 
 export function loadViewerLanguage(): ViewerLanguage {
@@ -538,14 +711,7 @@ export function loadViewerLanguage(): ViewerLanguage {
 }
 
 export function viewerText(language: ViewerLanguage, en: string, zh: string): string {
-  switch (language) {
-    case "zh":
-      return zh;
-    case "mixed":
-      return `${en} · ${zh}`;
-    default:
-      return en;
-  }
+  return language === "zh" ? zh : en;
 }
 
 export function translateViewerKey(language: ViewerLanguage, key: string): string | null {
@@ -556,14 +722,29 @@ export function translateViewerKey(language: ViewerLanguage, key: string): strin
   return viewerText(language, translation.en, translation.zh);
 }
 
+export type ViewerTranslationParams = Record<string, string | number>;
+
+export function formatViewerKey(
+  language: ViewerLanguage,
+  key: string,
+  params?: ViewerTranslationParams,
+): string | null {
+  const template = translateViewerKey(language, key);
+  if (template === null || !params) {
+    return template;
+  }
+  return template.replace(/\{([^{}]+)\}/g, (placeholder, name: string) => (
+    Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : placeholder
+  ));
+}
+
 export function translateViewerLiteral(language: ViewerLanguage, sourceText: string): string | null {
   const normalizedSource = sourceText.trim();
   if (!normalizedSource) {
     return null;
   }
   for (const translation of Object.values(TRANSLATIONS)) {
-    const mixed = viewerText("mixed", translation.en, translation.zh);
-    if (normalizedSource === translation.en || normalizedSource === translation.zh || normalizedSource === mixed) {
+    if (normalizedSource === translation.en || normalizedSource === translation.zh) {
       return viewerText(language, translation.en, translation.zh);
     }
   }
@@ -606,9 +787,12 @@ export function applyViewerTranslations(root: ParentNode, language: ViewerLangua
     "button",
     "div.scene-micro-note",
     "div.scene-empty-note",
+    "h2",
     "h3",
     "label.scene-file-button",
     "option",
+    "p",
+    "small",
     "span",
     "strong",
     "summary",
@@ -641,6 +825,13 @@ export function applyViewerTranslations(root: ParentNode, language: ViewerLangua
     const translated = translateViewerKey(language, element.dataset.i18nAriaLabelKey || "");
     if (translated !== null) {
       element.setAttribute("aria-label", translated);
+    }
+  });
+
+  root.querySelectorAll<HTMLElement>("[data-i18n-placeholder-key]").forEach((element) => {
+    const translated = translateViewerKey(language, element.dataset.i18nPlaceholderKey || "");
+    if (translated !== null) {
+      element.setAttribute("placeholder", translated);
     }
   });
 }

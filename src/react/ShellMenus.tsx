@@ -8,15 +8,18 @@ import {
   type ShellMenuActionId,
   type ShellToggleTarget,
 } from "../shell-events";
+import { translateViewerKey } from "../viewer-i18n";
+import type { ViewerLanguage } from "../viewer-i18n";
 import { menuGroups } from "./shellModel";
 
 type ShellMenusProps = {
+  language: ViewerLanguage;
   enabledActions: Set<ShellMenuActionId>;
   hostRef: RefObject<HTMLDivElement>;
   onOpenShortcuts: () => void;
 };
 
-export function ShellMenus({ enabledActions, hostRef, onOpenShortcuts }: ShellMenusProps) {
+export function ShellMenus({ language, enabledActions, hostRef, onOpenShortcuts }: ShellMenusProps) {
   function dispatchShellAction(actionId: ShellMenuActionId): void {
     hostRef.current?.dispatchEvent(new CustomEvent(SHELL_ACTION_EVENT, {
       detail: { actionId },
@@ -40,9 +43,8 @@ export function ShellMenus({ enabledActions, hostRef, onOpenShortcuts }: ShellMe
             <span
               data-shell-action={action.id}
               data-shell-toggle={action.toggle}
-              data-i18n-key={action.labelKey}
             >
-              {action.fallback}
+              {translateViewerKey(language, action.labelKey) ?? action.fallback}
             </span>
           ),
         }));
@@ -70,18 +72,18 @@ export function ShellMenus({ enabledActions, hostRef, onOpenShortcuts }: ShellMe
                 icon={group.icon}
                 data-shell-menu-toggle={group.id}
               >
-                <span data-i18n-key={`menu.${group.id}`}>{group.id[0].toUpperCase() + group.id.slice(1)}</span>
+                {translateViewerKey(language, `menu.${group.id}`) ?? `${group.id[0].toUpperCase()}${group.id.slice(1)}`}
               </Button>
             </Dropdown>
           </div>
         );
       })}
-      <Tooltip title="Shortcut modal">
+      <Tooltip title={translateViewerKey(language, "shell.shortcuts.tooltip") ?? "Shortcut modal"}>
         <Button
           className="desktop-shell-help-button"
           type="default"
           icon={<QuestionCircleOutlined />}
-          aria-label="Open shortcut modal"
+          aria-label={translateViewerKey(language, "shell.shortcuts.open") ?? "Open shortcut modal"}
           onClick={onOpenShortcuts}
         />
       </Tooltip>

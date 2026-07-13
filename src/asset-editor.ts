@@ -6,7 +6,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { CSS2DRenderer, CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import type { DesktopShell } from "./desktop-shell";
-import { applyViewerTranslations, loadViewerLanguage } from "./viewer-i18n";
+import { VIEWER_LANGUAGE_EVENT, applyViewerTranslations, loadViewerLanguage, translateViewerKey } from "./viewer-i18n";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -2218,16 +2218,17 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     modelDimensions: null,
     originalDimensions: null,
   };
-
   let previewCtx: PreviewContext | null = null;
   let destroyed = false;
+  let currentLanguage = loadViewerLanguage();
+  const languageController = new AbortController();
   const shellRoot = root.querySelector<HTMLElement>(".desktop-shell");
   shellRoot?.classList.add("desktop-shell-left-pinned");
   const leftPinButton = root.querySelector<HTMLButtonElement>("[data-shell-left-pin]");
   if (leftPinButton) {
     leftPinButton.setAttribute("aria-pressed", "true");
-    leftPinButton.textContent = "Pinned";
-    leftPinButton.title = "Unpin left sidebar";
+    leftPinButton.textContent = translateViewerKey(currentLanguage, "shell.pinned") ?? "Pinned";
+    leftPinButton.title = translateViewerKey(currentLanguage, "shell.unpinLeft") ?? "Unpin left sidebar";
   }
 
   // Build the unified header
@@ -2244,8 +2245,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       content: `
         <div class="desktop-shell-form-stack">
           <label class="desktop-shell-field">
-            <span>Manifest</span>
-            <select id="ae-manifest-select" class="ae-manifest-select">
+            <span data-i18n-key="assetEditor.manifest">Manifest</span>
+            <select id="ae-manifest-select" class="ae-manifest-select" title="Manifest" data-i18n-title-key="assetEditor.manifest">
               <option value="">-- Select Manifest --</option>
             </select>
           </label>
@@ -2377,7 +2378,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     <div class="asset-editor-shell-stage">
       <div id="ae-empty-state" class="ae-empty-state">
         <div class="ae-empty-icon">&#9881;</div>
-        <p>Select an asset from the gallery to inspect</p>
+        <p data-i18n-key="assetEditor.empty.selectAsset">Select an asset from the gallery to inspect</p>
       </div>
       <div class="ae-detail-content" id="ae-detail-content" style="display:none;">
         <div class="ae-preview-section">
@@ -2460,7 +2461,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
       ]);
     },
   });
-  applyViewerTranslations(root, loadViewerLanguage());
+  applyViewerTranslations(root, currentLanguage);
 
   function updateOrientationStatus() {
     const asset = state.assets.find((a) => a.asset_id === state.selectedAssetId);
@@ -4438,12 +4439,25 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     }
   });
 
+  function refreshAssetEditorLanguage(): void {
+    currentLanguage = loadViewerLanguage();
+    applyViewerTranslations(root, currentLanguage);
+    if (leftPinButton) {
+      leftPinButton.textContent = translateViewerKey(currentLanguage, "shell.pinned") ?? "Pinned";
+      leftPinButton.title = translateViewerKey(currentLanguage, "shell.unpinLeft") ?? "Unpin left sidebar";
+    }
+    renderGallery();
+    updateOrientationStatus();
+  }
+
+  window.addEventListener(VIEWER_LANGUAGE_EVENT, refreshAssetEditorLanguage, { signal: languageController.signal });
   /* ── Init ──────────────────────────────────────────────────────── */
   initManifests();
 
   /* ── Teardown ──────────────────────────────────────────────────── */
   return () => {
     destroyed = true;
+    languageController.abort();
     clearDimensionAutosaveTimer();
     clearCurationAutosaveTimer();
     pendingDimensionAutosave = null;

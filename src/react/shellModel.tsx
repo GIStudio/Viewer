@@ -57,7 +57,6 @@ export const antdTheme = {
 export const languageOptions: Array<{ value: ViewerLanguage; label: string }> = [
   { value: "en", label: "EN" },
   { value: "zh", label: "中文" },
-  { value: "mixed", label: "中英" },
 ];
 
 export const menuGroups: ShellMenuGroup[] = [
@@ -109,5 +108,6 @@ export function resolveRoute(): AppRoute {
   const hash = window.location.hash;
   if (hash === "#scene-graph") return "scene-graph";
   if (hash === "#asset-editor") return "asset-editor";
+  if (hash === "#model-input-browser") return "model-input-browser";
   return "viewer";
 }

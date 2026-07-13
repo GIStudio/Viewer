@@ -372,9 +372,33 @@ export function buildInfoCardContent(
   };
 }
 
-export function resolveInstanceIdFromName(name: string): string | null {
-  const match = String(name || "").match(/(inst_\d{4})/i);
-  return match ? match[1] : null;
+export function resolveInstanceIdFromName(name: string, manifest?: ViewerManifest): string | null {
+  const nodeName = String(name || "").trim();
+  if (!nodeName) return null;
+  const normalizedName = nodeName.replace(/\.\d+$/, "");
+  const mapped = manifest?.instance_name_map?.[nodeName] ?? manifest?.instance_name_map?.[normalizedName];
+  if (mapped && manifest?.instances?.[mapped]) return mapped;
+
+  for (const [stableId, rawInfo] of Object.entries(manifest?.instances ?? {})) {
+    const info = rawInfo as InstanceInfo;
+    const commandInstanceId = String(info.instance_id || "").trim();
+    const objectNames = Array.isArray(info.object_names) ? info.object_names : [];
+    if (
+      nodeName === stableId
+      || normalizedName === stableId
+      || nodeName === commandInstanceId
+      || normalizedName === commandInstanceId
+      || objectNames.includes(nodeName)
+      || objectNames.includes(normalizedName)
+      || nodeName.startsWith(`${stableId}_`)
+      || (commandInstanceId && nodeName.startsWith(`${commandInstanceId}_`))
+    ) {
+      return stableId;
+    }
+  }
+
+  const legacyMatch = nodeName.match(/(inst_\d{4})/i);
+  return legacyMatch ? legacyMatch[1] : null;
 }
 
 function staticDescriptionForNode(nodeName: string, manifest?: ViewerManifest): StaticObjectDescription | null {
@@ -414,7 +438,7 @@ export function resolveHitDescriptor(
   }
 
   for (const nodeName of names) {
-    const instanceId = resolveInstanceIdFromName(nodeName);
+    const instanceId = resolveInstanceIdFromName(nodeName, manifest);
     if (!instanceId) continue;
     const instances = manifest?.instances;
     const instanceInfo = instances?.[instanceId];

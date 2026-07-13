@@ -157,7 +157,7 @@ export function renderDesignPanelHtml(): string {
           <div id="viewer-design-status" class="viewer-design-status">Ready to generate.</div>
           <button id="viewer-design-review-run" class="viewer-design-review-run" type="button" disabled title="重新展开最近一次场景生成步骤">查看上次生成过程</button>
         </div>
-        <div id="viewer-design-result" class="viewer-design-result"></div>
+        <div id="viewer-design-result" class="viewer-design-result" data-i18n-scope="literal"></div>
       </div>
       <div class="viewer-slide-panel-footer">
         <div class="viewer-design-action-sections" aria-label="Design assistant actions">

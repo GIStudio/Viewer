@@ -2,13 +2,14 @@ import * as THREE from "three";
 
 import { escapeHtml } from "./viewer-utils";
 import type { ViewerManifest } from "./viewer-types";
+import type { WorkflowController } from "./workflow-controller";
 import {
   enforceVisualEvaluationAvailability,
   renderEvaluationResultHtml,
   renderEvaluationViewsPreview,
   requestUnifiedEvaluation,
-  type RenderedEvaluationView,
 } from "./viewer-evaluation";
+import type { EvaluationConfig, RenderedEvaluationView } from "./viewer-evaluation";
 import { captureEvaluationViews } from "./viewer-evaluation-capture";
 
 export type ViewerEvaluationRunner = {
@@ -28,17 +29,30 @@ export type ViewerEvaluationRunnerDeps = {
   getCurrentLayoutPath: () => string;
   getCurrentManifest: () => ViewerManifest | null;
   getSelectedPresetId: () => string;
+  getEvaluationConfig: () => EvaluationConfig | null;
+  workflow: WorkflowController;
   setStatus: (message: string) => void;
   flashStatus: (message: string) => void;
 };
 
 export function createViewerEvaluationRunner(deps: ViewerEvaluationRunnerDeps): ViewerEvaluationRunner {
   async function run(): Promise<void> {
+    const evaluationConfig = deps.getEvaluationConfig();
+    if (!evaluationConfig) {
+      deps.setStatus("Evaluation parameters are invalid.");
+      return;
+    }
     const currentLayoutPath = deps.getCurrentLayoutPath();
     if (!currentLayoutPath) {
       deps.contentEl.innerHTML = `<div class="viewer-evaluate-empty">No layout loaded.</div>`;
       return;
     }
+    const transition = deps.workflow.transition("evaluate");
+    if (!transition.ok) {
+      deps.contentEl.innerHTML = `<div class="viewer-evaluate-error">${escapeHtml(transition.reason)}</div>`;
+      return;
+    }
+    const requestToken = deps.workflow.beginRequest("evaluate");
     const runStart = performance.now();
     deps.contentEl.innerHTML = `<div class="viewer-evaluate-loading">Capturing evaluation views...</div>`;
     deps.runButtonEl.disabled = true;
@@ -83,22 +97,28 @@ export function createViewerEvaluationRunner(deps: ViewerEvaluationRunnerDeps): 
       const result = await requestUnifiedEvaluation(currentLayoutPath, renderedViews, {
         presetId: String(manifestSummary.preset_id || manifestSummary.benchmark_preset_id || deps.getSelectedPresetId() || "custom"),
         persistToBenchmark: true,
-        evaluationProfile: "local_segment_v1",
+        evaluationProfile: "auto",
+        evaluationConfig,
+        signal: requestToken.signal,
       });
+      if (!requestToken.isCurrent()) return;
       console.info(`[viewer-timing] evaluation.request: ${(performance.now() - requestStart).toFixed(1)} ms`);
       const evalResult = enforceVisualEvaluationAvailability(result);
       deps.contentEl.innerHTML = renderEvaluationResultHtml(evalResult, renderedViews);
+      deps.workflow.setEvaluation(evalResult);
+      deps.workflow.endRequest(requestToken);
       deps.flashStatus(
         coreEvaluationViews.length >= 3
           ? "Visual evaluation complete."
           : "Walkability complete; visual scores unavailable.",
       );
     } catch (err) {
+      if (!deps.workflow.endRequest(requestToken, err)) return;
       const message = err instanceof Error ? err.message : "Evaluation request failed.";
       deps.contentEl.innerHTML = `<div class="viewer-evaluate-error">${escapeHtml(message)}</div>`;
       deps.setStatus(`Evaluation failed: ${message}`);
     } finally {
-      deps.runButtonEl.disabled = false;
+      deps.runButtonEl.disabled = Boolean(deps.workflow.getSnapshot().busy.evaluate);
       console.info(`[viewer-timing] evaluation.total: ${(performance.now() - runStart).toFixed(1)} ms`);
     }
   }

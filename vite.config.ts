@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -24,6 +25,21 @@ const EXTRA_ASSET_MANIFEST_DIRS = [
   path.resolve(repoRoot, "data", "street_furniture"),
   path.resolve(repoRoot, "assets", "building"),
 ];
+const MODEL_INPUT_BROWSER_INDEX_PATH = process.env.ROADGEN_MODEL_INPUT_BROWSER_INDEX
+  ? path.resolve(process.env.ROADGEN_MODEL_INPUT_BROWSER_INDEX)
+  : path.resolve(repoRoot, "data", "model-input-browser", "index.json");
+const MODEL_INPUT_BROWSER_ROOT = process.env.ROADGEN_MODEL_INPUT_BROWSER_ROOT
+  ? path.resolve(process.env.ROADGEN_MODEL_INPUT_BROWSER_ROOT)
+  : path.resolve(
+    repoRoot,
+    "..",
+    "..",
+    "mappedinfo",
+    "urban-llava-suite",
+    "training",
+    "reports",
+    "raw_geojson_input_browser_20260711",
+  );
 const IGNORED_DISCOVERY_DIRS = new Set([
   ".git",
   ".venv",
@@ -393,6 +409,19 @@ function resolveLayoutReferencedPath(rawValue: unknown, layoutPath: string): str
     ? text
     : path.resolve(path.dirname(layoutPath), text);
   return resolveAllowedPath(candidate);
+}
+
+function buildLayoutRevision(layoutPath: string, rawLayoutText: string, layoutPayload: JsonRecord): JsonRecord {
+  const sha256 = crypto.createHash("sha256").update(rawLayoutText, "utf-8").digest("hex");
+  const sceneEdit = (layoutPayload.scene_edit ?? {}) as JsonRecord;
+  const lineageId = String(sceneEdit.lineage_id ?? "").trim()
+    || crypto.createHash("sha256").update(`${path.resolve(layoutPath)}\0${sha256}`, "utf-8").digest("hex").slice(0, 24);
+  const parsedRevision = Number(sceneEdit.revision ?? 0);
+  return {
+    lineage_id: lineageId,
+    revision: Number.isInteger(parsedRevision) && parsedRevision >= 0 ? parsedRevision : 0,
+    sha256,
+  };
 }
 
 function isViewableSceneLayout(layoutPath: string): boolean {
@@ -976,17 +1005,37 @@ function buildInstancePayloads(layoutPayload: JsonRecord): Record<string, JsonRe
       continue;
     }
     const row = placement as JsonRecord;
-    const instanceId = String(row.instance_id ?? "").trim();
-    if (!instanceId) {
+    const commandInstanceId = String(row.instance_id ?? "").trim();
+    const stableId = String(row.stable_id ?? commandInstanceId).trim();
+    if (!stableId || !commandInstanceId) {
       continue;
     }
     const positionXyz = asTriplet(row.position_xyz);
     const bboxXz = asQuad(row.bbox_xz);
-    instances[instanceId] = cleanForJson({
-      instance_id: instanceId,
+    const category = String(row.category ?? "").trim();
+    const placementGroup = String(row.placement_group ?? "").trim();
+    const editablePlacement = placementGroup === "street_furniture" || [
+      "bench",
+      "bollard",
+      "bus_stop",
+      "hydrant",
+      "lamp",
+      "mailbox",
+      "sign",
+      "trash",
+      "tree",
+    ].includes(category.toLowerCase());
+    const objectNames = Array.isArray(row.object_names)
+      ? row.object_names.map((name) => String(name ?? "").trim()).filter(Boolean)
+      : [];
+    instances[stableId] = cleanForJson({
+      stable_id: stableId,
+      instance_id: commandInstanceId,
+      object_names: objectNames,
+      editable: typeof row.editable === "boolean" ? row.editable && editablePlacement : editablePlacement,
       asset_id: String(row.asset_id ?? "").trim(),
-      category: String(row.category ?? "").trim(),
-      placement_group: String(row.placement_group ?? "").trim(),
+      category,
+      placement_group: placementGroup,
       theme_id: String(row.theme_id ?? "").trim(),
       selection_source: String(row.selection_source ?? "").trim(),
       position_xyz: positionXyz,
@@ -1288,6 +1337,100 @@ function viewerApiPlugin(): Plugin {
         const apiPrefix = requestUrl.pathname.startsWith("/web-viewer/")
           ? "/web-viewer/api"
           : "/api";
+        const isModelInputCorporaRoute =
+          requestUrl.pathname === "/api/model-input-corpora" ||
+          requestUrl.pathname === "/web-viewer/api/model-input-corpora";
+        const isModelInputCorpusRoute =
+          requestUrl.pathname === "/api/model-input-corpus" ||
+          requestUrl.pathname === "/web-viewer/api/model-input-corpus";
+        if (isModelInputCorporaRoute || isModelInputCorpusRoute) {
+          if (req.method !== "GET") {
+            jsonResponse(res, 405, { error: "Method not allowed. This browser is read-only." });
+            return;
+          }
+          if (!fs.existsSync(MODEL_INPUT_BROWSER_INDEX_PATH)) {
+            jsonResponse(res, 404, { error: "Fixed model-input corpus index is missing." });
+            return;
+          }
+          let index: { corpora?: Array<{ profileId?: string; jsonl?: string; manifest?: string }> };
+          try {
+            index = JSON.parse(fs.readFileSync(MODEL_INPUT_BROWSER_INDEX_PATH, "utf-8")) as typeof index;
+          } catch {
+            jsonResponse(res, 500, { error: "Fixed model-input corpus index is invalid JSON." });
+            return;
+          }
+          const entries = index.corpora ?? [];
+          const loadManifest = (entry: { profileId?: string; jsonl?: string; manifest?: string }) => {
+            if (!entry.profileId || !entry.jsonl || !entry.manifest || entry.jsonl.includes("..") || entry.manifest.includes("..")) {
+              throw new Error("Corpus index contains an invalid fixed entry.");
+            }
+            const manifestPath = path.resolve(MODEL_INPUT_BROWSER_ROOT, entry.manifest);
+            const jsonlPath = path.resolve(MODEL_INPUT_BROWSER_ROOT, entry.jsonl);
+            if (!manifestPath.startsWith(MODEL_INPUT_BROWSER_ROOT + path.sep) || !jsonlPath.startsWith(MODEL_INPUT_BROWSER_ROOT + path.sep)) {
+              throw new Error("Corpus index escapes its fixed root.");
+            }
+            if (!fs.existsSync(manifestPath) || !fs.existsSync(jsonlPath)) {
+              throw new Error(`Corpus files are missing for ${entry.profileId}.`);
+            }
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as Record<string, unknown>;
+            if (manifest.profile_id !== entry.profileId || manifest.sample_row_count !== 1000) {
+              throw new Error(`Corpus manifest is invalid for ${entry.profileId}.`);
+            }
+            return { manifest, jsonlPath };
+          };
+          try {
+            if (isModelInputCorporaRoute) {
+              const corpora = entries.map((entry) => {
+                const { manifest } = loadManifest(entry);
+                const profileParts = String(manifest.profile_id).split("_");
+                return {
+                  profileId: manifest.profile_id,
+                  evidenceScope: profileParts.slice(2, -2).join("_").replace("_native", "") || "unknown",
+                  propertyMode: String(manifest.profile_id).includes("native_properties") ? "native_properties" : "geometry_only",
+                  sourceSnapshotId: manifest.source_snapshot_id,
+                  sourceChecksumBundle: manifest.source_checksum_bundle,
+                  eligibleRowCount: manifest.eligible_row_count,
+                  selectedRowCount: manifest.sample_row_count,
+                };
+              });
+              jsonResponse(res, 200, { corpora });
+              return;
+            }
+            const profileId = requestUrl.searchParams.get("profileId") ?? "";
+            const entry = entries.find((candidate) => candidate.profileId === profileId);
+            if (!entry) {
+              jsonResponse(res, 404, { error: "Unknown fixed model-input profile." });
+              return;
+            }
+            const offsetText = requestUrl.searchParams.get("offset") ?? "0";
+            const limitText = requestUrl.searchParams.get("limit") ?? "100";
+            if (!/^\d+$/.test(offsetText) || !/^\d+$/.test(limitText)) {
+              jsonResponse(res, 400, { error: "offset and limit must be non-negative integers." });
+              return;
+            }
+            const offset = Number(offsetText);
+            const limit = Number(limitText);
+            if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(limit) || limit < 1 || limit > 1000) {
+              jsonResponse(res, 400, { error: "Paging values are out of range." });
+              return;
+            }
+            const { manifest, jsonlPath } = loadManifest(entry);
+            const records = fs.readFileSync(jsonlPath, "utf-8").split(/\r?\n/).filter(Boolean).map((line, lineIndex) => {
+              let record: Record<string, unknown>;
+              try { record = JSON.parse(line) as Record<string, unknown>; } catch { throw new Error(`Malformed JSONL at ${profileId}:${lineIndex + 1}.`); }
+              if (record.raw_evidence_policy_pass !== true || record.evidence_profile_id !== profileId) {
+                throw new Error(`Policy-failing or profile-mismatched record at ${profileId}:${lineIndex + 1}.`);
+              }
+              return record;
+            });
+            if (records.length !== 1000) throw new Error(`Corpus ${profileId} must contain exactly 1000 records.`);
+            jsonResponse(res, 200, { records: records.slice(offset, offset + limit), total: records.length, manifest });
+            return;
+          } catch (error) {
+            jsonResponse(res, 422, { error: error instanceof Error ? error.message : String(error) });
+            return;
+          }
+        }
 
         if (isLayoutRoute) {
           const layoutHandlerStart = performance.now();
@@ -1347,6 +1490,17 @@ function viewerApiPlugin(): Plugin {
             const spawnPayload = buildSpawnPayload(layoutPayload);
             const sceneBounds = buildSceneBounds(layoutPayload);
             const instances = buildInstancePayloads(layoutPayload);
+            const instanceNameMap: Record<string, string> = {};
+            for (const [stableId, instance] of Object.entries(instances)) {
+              const commandInstanceId = String(instance.instance_id ?? stableId);
+              instanceNameMap[stableId] = stableId;
+              instanceNameMap[commandInstanceId] = stableId;
+              const objectNames = Array.isArray(instance.object_names) ? instance.object_names : [];
+              for (const objectName of objectNames) {
+                const normalizedName = String(objectName ?? "").trim();
+                if (normalizedName) instanceNameMap[normalizedName] = stableId;
+              }
+            }
             const assetDescriptions = buildAssetDescriptions(layoutPayload);
             const staticObjectDescriptions = buildStaticObjectDescriptions();
             const summary = (layoutPayload.summary ?? null) as JsonRecord | null;
@@ -1365,10 +1519,17 @@ function viewerApiPlugin(): Plugin {
             const overlayLengthM = asNumber(layoutConfig.length_m, 0);
 
             const audioProfile = (summary?.audio_profile ?? null) as JsonRecord | null;
+            const contextMassing = cleanForJson({
+              editable: false,
+              summary: summary?.osm_context_massing ?? {},
+              source: summary?.scene_source ?? {},
+              source_alignment: summary?.source_alignment ?? {},
+            });
             const buildPayloadMs = (performance.now() - buildPayloadStart).toFixed(1);
 
             requestTimer.sendJson({
               layout_path: layoutPath,
+              layout_revision: buildLayoutRevision(layoutPath, rawLayoutText, layoutPayload),
               summary,
               visual_style: (layoutPayload.visual_style ?? null) as JsonRecord | null,
               final_scene: {
@@ -1381,6 +1542,8 @@ function viewerApiPlugin(): Plugin {
               forward_vector: spawnPayload.forward_vector,
               scene_bounds: sceneBounds,
               instances,
+              instance_name_map: instanceNameMap,
+              context_massing: contextMassing,
               asset_descriptions: assetDescriptions,
               static_object_descriptions: staticObjectDescriptions,
               comparison_metadata: buildComparisonMetadata(layoutPayload, productionSteps as Array<Record<string, unknown>>),

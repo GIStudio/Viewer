@@ -35,7 +35,7 @@ const SCORE_SYSTEMS: ScoreSystemDef[] = [
     labelZh: "步行性",
     color: "#1890ff",
     icon: "🚶",
-    weight: 0.45,
+    weight: 1 / 3,
     subScores: [
       { key: "protection", label: "Protection", labelZh: "保护性", color: "#1890ff" },
       { key: "comfort", label: "Comfort", labelZh: "舒适性", color: "#52c41a" },
@@ -48,7 +48,7 @@ const SCORE_SYSTEMS: ScoreSystemDef[] = [
     labelZh: "安全性",
     color: "#f5222d",
     icon: "🛡️",
-    weight: 0.35,
+    weight: 1 / 3,
     subScores: [
       { key: "safety_lighting", label: "Lighting", labelZh: "照明", color: "#f5222d" },
       { key: "safety_visibility", label: "Visibility", labelZh: "可见性", color: "#722ed1" },
@@ -62,7 +62,7 @@ const SCORE_SYSTEMS: ScoreSystemDef[] = [
     labelZh: "美观性",
     color: "#13c2c2",
     icon: "🎨",
-    weight: 0.20,
+    weight: 1 / 3,
     subScores: [
       { key: "beauty_coherence", label: "Coherence", labelZh: "一致性", color: "#52c41a" },
       { key: "beauty_human_scale", label: "Human Scale", labelZh: "人体尺度", color: "#fa8c16" },
@@ -393,7 +393,10 @@ export class ThreeSystemScorePanel {
   private renderMainScores(avgScores: { walkability: number; safety: number; beauty: number }) {
     const scoresDiv = this.container.querySelector<HTMLElement>(".viewer-three-system-scores")!;
     
-    const overall = avgScores.walkability * 0.45 + avgScores.safety * 0.35 + avgScores.beauty * 0.20;
+    const overall = SCORE_SYSTEMS.reduce(
+      (sum, system) => sum + avgScores[system.key as keyof typeof avgScores] * system.weight,
+      0,
+    );
 
     scoresDiv.innerHTML = `
       <div class="viewer-three-system-main-scores">

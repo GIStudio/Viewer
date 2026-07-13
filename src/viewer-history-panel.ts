@@ -2,23 +2,27 @@ import { HistoryFrequencyChart } from "./history-frequency-chart";
 import { HistoryScatterPlot, type SceneHistoryEntry } from "./history-scatter-plot";
 import { ThreeSystemScorePanel } from "./history-three-system-scores";
 import { HistoryTrendChart } from "./history-trend-chart";
+import { applyViewerTranslations } from "./viewer-i18n";
+import type { ViewerLanguage } from "./viewer-i18n";
 import type { RecentLayout, ViewerManifest } from "./viewer-types";
 
 type HistoryPanelDeps = {
   contentEl: HTMLElement;
+  getLanguage: () => ViewerLanguage;
   loadRecentLayouts: (limit?: number, useCache?: boolean) => Promise<RecentLayout[]>;
   loadManifest: (layoutPath: string, useCache?: boolean) => Promise<ViewerManifest>;
 };
 
 export type HistoryPanelController = {
   loadAndRenderHistory: (forceRefresh?: boolean) => Promise<void>;
+  refreshLanguage: () => Promise<void>;
   setupTabs: () => void;
 };
 
 const HISTORY_CACHE_TTL_MS = 60 * 1000;
 
 export function createHistoryPanelController(deps: HistoryPanelDeps): HistoryPanelController {
-  const { contentEl, loadRecentLayouts, loadManifest } = deps;
+  const { contentEl, getLanguage, loadRecentLayouts, loadManifest } = deps;
   let historyScatterPlot: HistoryScatterPlot | null = null;
   let historyFrequencyChart: HistoryFrequencyChart | null = null;
   let historyTrendChart: HistoryTrendChart | null = null;
@@ -154,8 +158,20 @@ export function createHistoryPanelController(deps: HistoryPanelDeps): HistoryPan
     }
   }
 
+  async function refreshLanguage(): Promise<void> {
+    const activeTab = contentEl.querySelector<HTMLElement>(".viewer-history-tab[data-active=\"true\"]")?.dataset.tab;
+    applyViewerTranslations(contentEl, getLanguage());
+    if (cachedHistoryData?.length) {
+      await renderHistoryCharts(cachedHistoryData);
+    }
+    if (activeTab) {
+      contentEl.querySelector<HTMLButtonElement>(`.viewer-history-tab[data-tab="${activeTab}"]`)?.click();
+    }
+  }
+
   return {
     loadAndRenderHistory,
+    refreshLanguage,
     setupTabs,
   };
 }

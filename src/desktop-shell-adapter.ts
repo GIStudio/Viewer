@@ -243,18 +243,27 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
 
       const summary = document.createElement("summary");
       summary.className = "desktop-shell-section-summary";
-      summary.innerHTML = `
-        <span>${section.title}</span>
-        ${section.subtitle ? `<span class="desktop-shell-section-subtitle">${section.subtitle}</span>` : ""}
-      `;
+      const title = document.createElement("span");
+      applyI18nMetadata(title, section.title);
+      title.textContent = resolveI18nText(section.title);
+      summary.appendChild(title);
+      if (section.subtitle) {
+        const subtitle = document.createElement("span");
+        subtitle.className = "desktop-shell-section-subtitle";
+        applyI18nMetadata(subtitle, section.subtitle);
+        subtitle.textContent = resolveI18nText(section.subtitle);
+        summary.appendChild(subtitle);
+      }
       wrapper.appendChild(summary);
 
       const content = document.createElement("div");
       content.className = "desktop-shell-section-body";
+      content.dataset.i18nScope = "literal";
       renderSectionContent(content, section.content);
       wrapper.appendChild(content);
       leftRail.appendChild(wrapper);
     });
+    applyViewerTranslations(root, currentLanguage);
   }
 
   const viewerTabButtonIds: Record<string, string> = {

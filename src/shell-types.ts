@@ -1,11 +1,16 @@
 import type { AppRoute } from "./ui";
 import type { ShellMenuActionId } from "./shell-events";
 
+export type ShellI18nText = string | {
+  key: string;
+  fallback?: string;
+};
+
 export interface ShellSection {
   id: string;
-  title: string;
+  title: ShellI18nText;
   content: string | HTMLElement;
-  subtitle?: string;
+  subtitle?: ShellI18nText;
   open?: boolean;
 }
 
@@ -15,10 +20,6 @@ export interface ShellTab {
   content: string | HTMLElement;
 }
 
-export type ShellI18nText = string | {
-  key: string;
-  fallback?: string;
-};
 
 export interface DesktopShell {
   root: HTMLElement;

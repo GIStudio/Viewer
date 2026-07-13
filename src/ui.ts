@@ -4,7 +4,7 @@
  */
 
 // 路由类型
-export type AppRoute = "viewer" | "scene-graph" | "asset-editor";
+export type AppRoute = "viewer" | "scene-graph" | "asset-editor" | "model-input-browser";
 
 interface RouteConfig {
   id: AppRoute;
@@ -46,12 +46,21 @@ const ROUTES: Record<AppRoute, RouteConfig> = {
     title: "3D Asset Editor",
     subtitle: "Browse, inspect, and manage project 3D assets",
   },
+  "model-input-browser": {
+    id: "model-input-browser",
+    label: "Model Input Browser",
+    path: "#model-input-browser",
+    kicker: "Viewer / Raw Evidence",
+    title: "Model Input Browser",
+    subtitle: "Read-only audit of the exact raw GeoJSON prompt supplied to the model.",
+  },
 };
 
 function getCurrentRoute(): AppRoute {
   const hash = window.location.hash;
   if (hash === "#scene-graph") return "scene-graph";
   if (hash === "#asset-editor") return "asset-editor";
+  if (hash === "#model-input-browser") return "model-input-browser";
   return "viewer";
 }
 

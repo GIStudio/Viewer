@@ -50,6 +50,24 @@ export type SceneGraphElements = {
   graphTextarea: HTMLTextAreaElement;
   featureTableEl: HTMLElement;
   assetEditorButton: HTMLButtonElement;
+  sourceWorkflowEl: HTMLElement;
+  sourceImageImportButton: HTMLButtonElement;
+  sourceGeojsonInput: HTMLInputElement;
+  sourceCoordinateSpaceSelect: HTMLSelectElement;
+  sourceBboxInput: HTMLInputElement;
+  sourceAiPrompt: HTMLTextAreaElement;
+  sourceAiExtractButton: HTMLButtonElement;
+  sourceAiStatusEl: HTMLElement;
+  sourceOsmImportButton: HTMLButtonElement;
+  sourceNormalizeButton: HTMLButtonElement;
+  sourceStatusEl: HTMLElement;
+  sourceProvenanceEl: HTMLElement;
+  sourceCountsEl: HTMLElement;
+  sourceWarningsEl: HTMLElement;
+  sourceBackButton: HTMLButtonElement;
+  sourceApproveButton: HTMLButtonElement;
+  sourceGenerateButton: HTMLButtonElement;
+  sourceReviewStatusEl: HTMLElement;
 };
 
 export function collectSceneGraphElements(root: HTMLElement | Document): SceneGraphElements {
@@ -103,5 +121,23 @@ export function collectSceneGraphElements(root: HTMLElement | Document): SceneGr
     graphTextarea: requireElement<HTMLTextAreaElement>(root, "#annotation-graph-json"),
     featureTableEl: requireElement<HTMLElement>(root, "#annotation-feature-table"),
     assetEditorButton: requireElement<HTMLButtonElement>(root, "#scene-page-asset-editor"),
+    sourceWorkflowEl: requireElement<HTMLElement>(root, "#scene-source-workflow"),
+    sourceImageImportButton: requireElement<HTMLButtonElement>(root, "#scene-source-image-import"),
+    sourceGeojsonInput: requireElement<HTMLInputElement>(root, "#scene-source-geojson-input"),
+    sourceCoordinateSpaceSelect: requireElement<HTMLSelectElement>(root, "#scene-source-coordinate-space"),
+    sourceBboxInput: requireElement<HTMLInputElement>(root, "#scene-source-bbox"),
+    sourceAiPrompt: requireElement<HTMLTextAreaElement>(root, "#scene-source-ai-prompt"),
+    sourceAiExtractButton: requireElement<HTMLButtonElement>(root, "#scene-source-ai-extract"),
+    sourceAiStatusEl: requireElement<HTMLElement>(root, "#scene-source-ai-status"),
+    sourceOsmImportButton: requireElement<HTMLButtonElement>(root, "#scene-source-osm-import"),
+    sourceNormalizeButton: requireElement<HTMLButtonElement>(root, "#scene-source-normalize"),
+    sourceStatusEl: requireElement<HTMLElement>(root, "#scene-source-status"),
+    sourceProvenanceEl: requireElement<HTMLElement>(root, "#scene-source-provenance"),
+    sourceCountsEl: requireElement<HTMLElement>(root, "#scene-source-counts"),
+    sourceWarningsEl: requireElement<HTMLElement>(root, "#scene-source-warnings"),
+    sourceBackButton: requireElement<HTMLButtonElement>(root, "#scene-source-back"),
+    sourceApproveButton: requireElement<HTMLButtonElement>(root, "#scene-source-approve"),
+    sourceGenerateButton: requireElement<HTMLButtonElement>(root, "#scene-source-generate"),
+    sourceReviewStatusEl: requireElement<HTMLElement>(root, "#scene-source-review-status"),
   };
 }

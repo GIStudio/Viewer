@@ -3,67 +3,56 @@ import type { ViewerLeftSection, ViewerPanelText } from "./types";
 export function createViewerLeftSections(t: ViewerPanelText): ViewerLeftSection[] {
   return [
     {
-      id: "viewer-recent-layouts",
-      title: t("Recent Layouts", "最近布局"),
-      subtitle: t("Layout / scene entry", "布局 / 场景入口"),
+      id: "viewer-control-menu",
+      title: t("Control Panels", "控制面板"),
+      subtitle: t("Choose one workspace", "选择一个工作区"),
       content: `
-        <div class="desktop-shell-form-stack">
-          <label class="desktop-shell-field">
-            <span data-i18n-key="viewer.left.recentResult">Recent Result</span>
-            <select id="layout-select" class="viewer-select viewer-select-inline" title="Recent Result" data-i18n-title-key="viewer.left.recentResult"></select>
-          </label>
-          <label class="desktop-shell-field">
-            <span data-i18n-key="viewer.left.scene">Scene</span>
-            <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene" data-i18n-title-key="viewer.left.scene"></select>
-          </label>
-          <div id="viewer-scheme-compare" class="viewer-scheme-compare"></div>
-        </div>
-      `,
-    },
-    {
-      id: "viewer-scene-layers",
-      title: t("Scene Layers", "场景图层"),
-      subtitle: t("Toggle object categories", "开关对象类别"),
-      open: false,
-      content: `
-        <div class="desktop-shell-form-stack">
-          <div class="viewer-layer-stack" role="group" aria-label="Scene layers">
-            <button class="viewer-layer-item is-active" type="button" data-layer="road" aria-pressed="true">
-              <strong>${t("Road Skeleton", "道路骨架")}</strong>
-              <span>roads / edges / junctions</span>
+        <nav class="viewer-control-menu" aria-label="${t("Control panels", "控制面板")}">
+          <div class="viewer-control-menu-group">
+            <span class="viewer-control-menu-label">${t("Scene", "场景")}</span>
+            <button class="viewer-control-menu-item" type="button" data-viewer-center-control="browser">
+              <span class="viewer-control-menu-code">SC</span>
+              <span><strong>${t("Scene Browser", "场景浏览")}</strong><small>${t("Layouts and generated scenes", "布局与已生成场景")}</small></span>
             </button>
-            <button class="viewer-layer-item" type="button" data-layer="surface" aria-pressed="false">
-              <strong>${t("Design Surfaces", "设计面")}</strong>
-              <span>sidewalk / furnishing / crossing</span>
+            <button class="viewer-control-menu-item" type="button" id="viewer-scene-graph-link">
+              <span class="viewer-control-menu-code">AN</span>
+              <span><strong>${t("Annotation", "标注")}</strong><small>${t("Reference geometry workspace", "参考几何工作区")}</small></span>
             </button>
-            <button class="viewer-layer-item" type="button" data-layer="assets" aria-pressed="false">
-              <strong>${t("Street Furniture", "街道家具")}</strong>
-              <span>tree / lamp / bench / bus_stop</span>
-            </button>
-            <button class="viewer-layer-item" type="button" data-layer="annotation" aria-pressed="false">
-              <strong>${t("Annotation & Patches", "标注与修补")}</strong>
-              <span>annotation / patch / control_point</span>
+            <button class="viewer-control-menu-item" type="button" id="viewer-asset-editor-link">
+              <span class="viewer-control-menu-code">AS</span>
+              <span><strong>${t("Asset Library", "资产库")}</strong><small>${t("Inspect and prepare 3D assets", "检查与准备 3D 资产")}</small></span>
             </button>
           </div>
-        </div>
-      `,
-    },
-    {
-      id: "viewer-tools",
-      title: t("Tools", "辅助入口"),
-      subtitle: t("Quick access to editors and helpers", "快速打开编辑器与辅助工具"),
-      open: false,
-      content: `
-        <div class="desktop-shell-form-stack">
-          <div class="desktop-shell-chip-list">
-            <button class="desktop-shell-chip" type="button" id="viewer-scene-graph-link">${t("Annotation", "标注")}</button>
-            <button class="desktop-shell-chip" type="button" id="viewer-asset-editor-link">${t("Asset Editor", "资产编辑器")}</button>
-            <button class="desktop-shell-chip" type="button" id="viewer-settings-toggle">${t("Settings", "设置")}</button>
-            <button class="desktop-shell-chip" type="button" id="viewer-presets-toggle">${t("Presets", "预设")}</button>
-            <button class="desktop-shell-chip" type="button" id="viewer-floating-lane-toggle">${t("Floating Lane", "浮动车道")}</button>
-            <button class="desktop-shell-chip" type="button" id="viewer-help-toggle">${t("Help", "帮助")}</button>
+          <div class="viewer-control-menu-group">
+            <span class="viewer-control-menu-label">${t("Create", "生成")}</span>
+            <button class="viewer-control-menu-item" type="button" id="viewer-design-toggle">
+              <span class="viewer-control-menu-code">GN</span>
+              <span><strong>${t("Generation", "场景生成")}</strong><small>${t("Configure and run generation", "配置并运行场景生成")}</small></span>
+            </button>
+            <button class="viewer-control-menu-item" type="button" id="viewer-presets-toggle">
+              <span class="viewer-control-menu-code">PR</span>
+              <span><strong>${t("Presets", "预设")}</strong><small>${t("Reusable scene configurations", "可复用场景配置")}</small></span>
+            </button>
           </div>
-        </div>
+          <div class="viewer-control-menu-group">
+            <span class="viewer-control-menu-label">${t("Adjust", "调整")}</span>
+            <button class="viewer-control-menu-item" type="button" id="viewer-floating-lane-toggle">
+              <span class="viewer-control-menu-code">OV</span>
+              <span><strong>${t("Live Overlay", "实时叠加")}</strong><small>${t("Open live controls on the right", "在右侧打开实时控制")}</small></span>
+            </button>
+          </div>
+          <div class="viewer-control-menu-group">
+            <span class="viewer-control-menu-label">${t("System", "系统")}</span>
+            <button class="viewer-control-menu-item" type="button" id="viewer-settings-toggle">
+              <span class="viewer-control-menu-code">ST</span>
+              <span><strong>${t("Settings", "设置")}</strong><small>${t("Rendering and runtime options", "渲染与运行选项")}</small></span>
+            </button>
+            <button class="viewer-control-menu-item" type="button" id="viewer-help-toggle">
+              <span class="viewer-control-menu-code">?</span>
+              <span><strong>${t("Help", "帮助")}</strong><small>${t("Commands and interface guidance", "命令与界面说明")}</small></span>
+            </button>
+          </div>
+        </nav>
       `,
     },
   ];

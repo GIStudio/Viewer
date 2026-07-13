@@ -1171,11 +1171,11 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       renderGeneratedDesignSchemes(generatedSchemes);
       const readyCount = generatedSchemes.filter((scheme) => scheme.status === "ready").length;
       deps.updateDesignStatus(
-        `${readyCount}/${variants.length} schemes generated. Select results in Recent Layouts to compare.`,
+        `${readyCount}/${variants.length} schemes generated. Open Scene Browser from the left menu to compare.`,
         "success",
       );
       deps.flashStatus(
-        `${firstReady.name} loaded in Viewer${scenario ? ` · ${scenario.scenario_id}` : ""}. Results are available in Recent Layouts for manual comparison.`,
+        `${firstReady.name} loaded in Viewer${scenario ? ` · ${scenario.scenario_id}` : ""}. Results are available in Scene Browser for manual comparison.`,
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Design generation failed.";

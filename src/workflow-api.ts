@@ -1,0 +1,246 @@
+import type { ConvertedGraphPayload, ReferenceAnnotation } from "./sg-types";
+import type {
+  LayoutEditCommand,
+  NormalizedSceneSource,
+  SceneRevision,
+  WorkflowCapabilities,
+  WorkflowSourceDescriptor,
+} from "./workflow-controller";
+import type { SceneJobCreatePayload, SceneJobStatusPayload } from "./viewer-types";
+import { apiJson, postApiJson } from "./viewer-api";
+
+export type Wgs84Bbox = readonly [number, number, number, number];
+export type SourceProducer = "manual" | "ai" | "import" | "catalog";
+
+export type SourceImageReference = {
+  width_px: number;
+  height_px: number;
+  pixels_per_meter: number;
+  bbox_wgs84?: Wgs84Bbox;
+};
+
+export type NormalizeReferenceAnnotationRequest = {
+  source: {
+    kind: "reference_annotation";
+    source_id: string;
+    producer: SourceProducer;
+    annotation: ReferenceAnnotation;
+  };
+  compose_config?: Record<string, unknown>;
+};
+
+export type NormalizeGeoJsonRequest = {
+  source: {
+    kind: "geojson";
+    source_id: string;
+    producer: SourceProducer;
+    coordinate_space: "image_px" | "EPSG:4326";
+    geojson: Record<string, unknown>;
+    image: SourceImageReference;
+  };
+  compose_config?: Record<string, unknown>;
+};
+
+export type NormalizeSceneSourceRequest = NormalizeReferenceAnnotationRequest | NormalizeGeoJsonRequest;
+
+export type AlignedBuilding = {
+  osm_id: string;
+  polygon_xz: Array<[number, number]>;
+  tags: Record<string, unknown>;
+};
+
+export type SourceAlignment = Record<string, unknown> & {
+  status: "aligned" | "n/a";
+  reason?: string;
+};
+
+export type NormalizedSceneSourceResponse = ConvertedGraphPayload & {
+  source: {
+    schema_version: "roadgen3d_scene_source_v1";
+    source_id: string;
+    kind: string;
+    producer: SourceProducer;
+    normalized_annotation_version: string;
+  };
+  geojson: Record<string, unknown> | null;
+  warnings: string[];
+  aligned_buildings: AlignedBuilding[];
+  source_alignment: SourceAlignment;
+  llm?: {
+    provider?: string;
+    protocol?: string;
+    model?: string;
+  };
+};
+
+export type ExtractSceneSourceRequest = {
+  source_id: string;
+  image_data_url: string;
+  prompt?: string;
+  image: SourceImageReference;
+};
+
+export type OsmBuildingsRequest = {
+  source_id: string;
+  aoi_bbox: Wgs84Bbox;
+};
+
+export type OsmBuildingsResponse = {
+  source: WorkflowSourceDescriptor;
+  geojson: Record<string, unknown>;
+  warnings: string[];
+  summary: Record<string, unknown>;
+};
+
+export type HealthResponse = {
+  capabilities?: WorkflowCapabilities;
+};
+
+export type SceneLayoutEditRequest = {
+  layout_path: string;
+  base: {
+    revision: number;
+    sha256: string;
+  };
+  commands: LayoutEditCommand[];
+};
+
+export type SceneLayoutEditResponse = {
+  source: SceneRevision;
+  revision: SceneRevision & {
+    layout_path: string;
+    scene_glb_path: string;
+    lineage_id: string;
+  };
+  applied_commands: Array<Record<string, unknown>>;
+  undo: {
+    base: {
+      revision: number;
+      sha256: string;
+    };
+    commands: LayoutEditCommand[];
+  };
+};
+
+function countNormalizedFeatures(payload: NormalizedSceneSourceResponse): Record<string, number> {
+  const annotation = payload.annotation;
+  return {
+    roads: annotation.centerlines.length,
+    junctions: annotation.junctions.length,
+    regions: annotation.regions.length + (annotation.derived_regions?.length ?? 0),
+    buildings: annotation.building_regions.length + payload.aligned_buildings.length,
+    functional_zones: annotation.functional_zones.length,
+    furniture: annotation.centerlines.reduce(
+      (total, centerline) => total + centerline.street_furniture_instances.length,
+      annotation.functional_zones.reduce((total, zone) => total + zone.furniture_instances.length, 0),
+    ),
+  };
+}
+
+export function toNormalizedSceneSource(payload: NormalizedSceneSourceResponse): NormalizedSceneSource {
+  return {
+    referenceAnnotation: payload.annotation,
+    graph: payload.graph,
+    source: payload.source,
+    geojson: payload.geojson,
+    warnings: payload.warnings,
+    sourceContext: {
+      source: payload.source,
+      aligned_buildings: payload.aligned_buildings,
+      source_alignment: payload.source_alignment,
+    },
+    featureCounts: countNormalizedFeatures(payload),
+    normalizedAt: new Date().toISOString(),
+  };
+}
+
+export async function normalizeSceneSource(
+  request: NormalizeSceneSourceRequest,
+  signal?: AbortSignal,
+): Promise<NormalizedSceneSourceResponse> {
+  return apiJson<NormalizedSceneSourceResponse>("/api/scene-sources/normalize", {
+    method: "POST",
+    body: JSON.stringify(request),
+    signal,
+  });
+}
+
+export async function extractSceneSource(
+  request: ExtractSceneSourceRequest,
+  signal?: AbortSignal,
+): Promise<NormalizedSceneSourceResponse> {
+  return apiJson<NormalizedSceneSourceResponse>("/api/scene-sources/extract", {
+    method: "POST",
+    body: JSON.stringify(request),
+    signal,
+  });
+}
+
+export async function loadOsmBuildings(
+  request: OsmBuildingsRequest,
+  signal?: AbortSignal,
+): Promise<OsmBuildingsResponse> {
+  return apiJson<OsmBuildingsResponse>("/api/scene-sources/osm-buildings", {
+    method: "POST",
+    body: JSON.stringify(request),
+    signal,
+  });
+}
+
+export async function loadWorkflowCapabilities(signal?: AbortSignal): Promise<WorkflowCapabilities> {
+  const response = await apiJson<HealthResponse>("/api/health", { signal });
+  return response.capabilities ?? {};
+}
+
+export async function submitWorkflowSceneJob(input: {
+  normalized: NormalizedSceneSource;
+  prompt: string;
+  presetId: string;
+  randomSeed?: number;
+  signal?: AbortSignal;
+}): Promise<SceneJobCreatePayload> {
+  const normalizedPrompt = input.prompt.trim() || "Generate the approved reference annotation as a reviewable street scene.";
+  return apiJson<SceneJobCreatePayload>("/api/scene/jobs", {
+    method: "POST",
+    body: JSON.stringify({
+      draft: {
+        normalized_scene_query: normalizedPrompt,
+        compose_config_patch: {},
+        citations_by_field: {},
+        design_summary: normalizedPrompt,
+        risk_notes: input.normalized.warnings,
+        parameter_sources_by_field: {},
+      },
+      scene_context: {
+        layout_mode: "reference_annotation",
+        reference_annotation: input.normalized.referenceAnnotation,
+        source_context: {
+          source: input.normalized.sourceContext.source ?? input.normalized.source,
+          aligned_buildings: input.normalized.sourceContext.aligned_buildings ?? [],
+          source_alignment: input.normalized.sourceContext.source_alignment ?? { status: "n/a" },
+        },
+      },
+      patch_overrides: {},
+      generation_options: {
+        preset_id: input.presetId || "custom",
+        random_seed: input.randomSeed ?? 20260710,
+      },
+    }),
+    signal: input.signal,
+  });
+}
+
+export async function loadSceneJob(jobId: string, signal?: AbortSignal): Promise<SceneJobStatusPayload> {
+  return apiJson<SceneJobStatusPayload>(`/api/scene/jobs/${encodeURIComponent(jobId)}`, { signal });
+}
+
+export async function submitSceneLayoutEdits(
+  request: SceneLayoutEditRequest,
+  signal?: AbortSignal,
+): Promise<SceneLayoutEditResponse> {
+  return apiJson<SceneLayoutEditResponse>("/api/design/scene-layout-edits", {
+    method: "POST",
+    body: JSON.stringify(request),
+    signal,
+  });
+}

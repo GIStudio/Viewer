@@ -88,6 +88,78 @@ export function createSceneGraphLeftSections(): ShellSection[] {
 export function createSceneGraphRightTabs(): ShellTab[] {
   return [
     {
+      id: "source",
+      label: "Source / Review",
+      content: `
+        <div id="scene-source-workflow" class="scene-source-workflow" data-step="source">
+          <section class="scene-source-step" data-workflow-panel="source">
+            <div class="scene-source-heading">
+              <div>
+                <span>STEP 1</span>
+                <strong>Source & Normalize</strong>
+              </div>
+              <p>All manual, imported, and AI-assisted inputs converge to one ReferenceAnnotation normalizer.</p>
+            </div>
+            <div class="scene-import-toolbar scene-import-toolbar-compact">
+              <button id="scene-source-image-import" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Reference Image</button>
+              <label class="scene-file-button" for="scene-source-geojson-input">GeoJSON</label>
+              <input id="scene-source-geojson-input" class="scene-file-input" type="file" accept=".geojson,.json,application/geo+json,application/json" />
+            </div>
+            <label class="scene-form-field">
+              <span>GeoJSON coordinate space</span>
+              <select id="scene-source-coordinate-space" class="scene-select">
+                <option value="image_px">Image pixels (x right, y down)</option>
+                <option value="EPSG:4326">EPSG:4326 (longitude, latitude)</option>
+              </select>
+            </label>
+            <label class="scene-form-field">
+              <span>Image bbox WGS84 [west, south, east, north]</span>
+              <input id="scene-source-bbox" type="text" inputmode="decimal" placeholder="114.16, 22.29, 114.18, 22.31" />
+              <small>Required for EPSG:4326 alignment and OSM massing. Never inferred from an ungeoreferenced screenshot.</small>
+            </label>
+            <details class="scene-collapsible-panel">
+              <summary class="scene-collapsible-summary">AI extraction (advanced)</summary>
+              <div class="scene-collapsible-body">
+                <label class="scene-form-field">
+                  <span>Extraction guidance</span>
+                  <textarea id="scene-source-ai-prompt" class="scene-json-input" rows="3" placeholder="Trace visible road centerlines, junctions, and scene boundary."></textarea>
+                </label>
+                <button id="scene-source-ai-extract" class="scene-toolbar-button" type="button" disabled>Extract with configured vision model</button>
+                <div id="scene-source-ai-status" class="scene-status" data-tone="neutral">Checking vision capability…</div>
+              </div>
+            </details>
+            <details class="scene-collapsible-panel">
+              <summary class="scene-collapsible-summary">OSM white massing (advanced)</summary>
+              <div class="scene-collapsible-body">
+                <p class="scene-micro-note">Requires the explicit WGS84 bbox above. Imported buildings are white, non-editable context massing.</p>
+                <button id="scene-source-osm-import" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Import OSM buildings</button>
+              </div>
+            </details>
+            <button id="scene-source-normalize" class="scene-toolbar-button" type="button">Normalize & Review</button>
+            <div id="scene-source-status" class="scene-status" data-tone="neutral">Trace manually, import annotation JSON/GeoJSON, or use configured AI extraction.</div>
+          </section>
+          <section class="scene-source-step" data-workflow-panel="review" hidden>
+            <div class="scene-source-heading">
+              <div>
+                <span>STEP 2</span>
+                <strong>Review normalized source</strong>
+              </div>
+              <p>Approve only after checking coordinate provenance, warnings, feature counts, and converted graph.</p>
+            </div>
+            <div id="scene-source-provenance" class="scene-source-provenance"></div>
+            <div id="scene-source-counts" class="scene-metric-grid scene-metric-grid-compact"></div>
+            <div id="scene-source-warnings" class="scene-source-warnings"></div>
+            <div class="scene-import-toolbar scene-import-toolbar-compact">
+              <button id="scene-source-back" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Back to Source</button>
+              <button id="scene-source-approve" class="scene-toolbar-button" type="button">Approve & Continue</button>
+              <button id="scene-source-generate" class="scene-toolbar-button" type="button">Generate & Load</button>
+            </div>
+            <div id="scene-source-review-status" class="scene-status" data-tone="neutral">Normalize a source to begin review.</div>
+          </section>
+        </div>
+      `,
+    },
+    {
       id: "view",
       label: "View",
       content: `

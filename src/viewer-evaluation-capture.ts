@@ -133,28 +133,58 @@ export async function captureEvaluationViews(
     throw new Error("No scene loaded for visual evaluation.");
   }
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-  const views: RenderedEvaluationView[] = [
+  const width = 960;
+  const height = 540;
+  const cameras = [
     {
-      view_id: "pedestrian_forward",
+      view_id: "pedestrian_forward" as const,
       label: "Pedestrian forward view",
-      image_data_url: renderEvaluationCameraToDataUrl(deps, makePedestrianEvaluationCamera(deps, 1)),
+      kind: "street_level" as const,
+      camera: makePedestrianEvaluationCamera(deps, 1),
     },
     {
-      view_id: "pedestrian_reverse",
+      view_id: "pedestrian_reverse" as const,
       label: "Pedestrian reverse view",
-      image_data_url: renderEvaluationCameraToDataUrl(deps, makePedestrianEvaluationCamera(deps, -1)),
+      kind: "street_level" as const,
+      camera: makePedestrianEvaluationCamera(deps, -1),
     },
     {
-      view_id: "overview_topdown",
+      view_id: "overview_topdown" as const,
       label: "Overview top-down view",
-      image_data_url: renderEvaluationCameraToDataUrl(deps, makeOverviewEvaluationCamera(deps)),
+      kind: "overview" as const,
+      camera: makeOverviewEvaluationCamera(deps, width, height),
     },
     {
-      view_id: "child_forward",
+      view_id: "child_forward" as const,
       label: "Child forward view",
-      image_data_url: renderEvaluationCameraToDataUrl(deps, makePedestrianEvaluationCamera(deps, 1, 1.1)),
+      kind: "street_level" as const,
+      camera: makePedestrianEvaluationCamera(deps, 1, 1.1),
     },
   ];
+  const views: RenderedEvaluationView[] = cameras.map((item) => {
+    const direction = item.camera.getWorldDirection(new THREE.Vector3());
+    const target = item.camera.position.clone().add(direction.multiplyScalar(12));
+    const perspectiveCamera = item.camera instanceof THREE.PerspectiveCamera ? item.camera : null;
+    const verticalFov = perspectiveCamera?.fov;
+    const horizontalFov = perspectiveCamera
+      ? THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(perspectiveCamera.fov) / 2) * perspectiveCamera.aspect))
+      : undefined;
+    return {
+      view_id: item.view_id,
+      label: item.label,
+      image_data_url: renderEvaluationCameraToDataUrl(deps, item.camera, width, height),
+      kind: item.kind,
+      camera: item.camera.position.toArray() as [number, number, number],
+      target: target.toArray() as [number, number, number],
+      width,
+      height,
+      source: "viewer_webgl_capture",
+      projection: perspectiveCamera ? "perspective" : "orthographic",
+      horizontal_fov_deg: horizontalFov,
+      vertical_fov_deg: verticalFov,
+      content_origin: "roadgen3d_synthetic_render",
+    };
+  });
   return views.every((view) => view.image_data_url.startsWith("data:image/")) ? views : [];
 }
 

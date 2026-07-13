@@ -37,8 +37,23 @@ export type ViewerSummary = Record<string, unknown> & {
   osm_geometry?: Record<string, unknown>;
 };
 
+export type ViewerLayoutRevision = {
+  lineage_id: string;
+  revision: number;
+  sha256: string;
+};
+
+
 export type ViewerManifest = {
   layout_path?: string;
+  layout_revision?: ViewerLayoutRevision;
+  instance_name_map?: Record<string, string>;
+  context_massing?: {
+    editable: false;
+    summary?: Record<string, unknown>;
+    source?: Record<string, unknown>;
+    source_alignment?: Record<string, unknown>;
+  };
   lighting_preset?: string;
   lighting_params?: Record<string, unknown>;
   environment_state?: Record<string, unknown> | null;
@@ -125,6 +140,9 @@ export type ComparisonGroup = {
 
 export type InstanceInfo = {
   instance_id: string;
+  stable_id?: string;
+  object_names?: string[];
+  editable?: boolean;
   asset_id: string;
   category: string;
   placement_group?: string;

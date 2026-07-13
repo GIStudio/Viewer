@@ -62,6 +62,11 @@ import {
   clearRecentLayoutsCache,
   parseQueryLayoutPath,
   inferSpawnFromBbox,
+  saveSceneLayoutEdits,
+} from "./viewer-api";
+import type {
+  SceneLayoutEditResponse,
+  SceneMoveInstanceCommand,
 } from "./viewer-api";
 import {
   categoryLabel,
@@ -152,18 +157,36 @@ import {
   applyViewerTranslations,
   loadViewerLanguage,
   normalizeViewerLanguage,
+  translateViewerKey,
   viewerText,
   type ViewerLanguage,
 } from "./viewer-i18n";
 import { createFloatingLaneSystem } from "./viewer-floating-lane";
 import { createHistoryPanelController } from "./viewer-history-panel";
 import {
+  DEFAULT_EVALUATION_CONFIG,
+  EVALUATION_CONFIG_STORAGE_KEY,
+  cloneEvaluationConfig,
+  loadEvaluationConfig,
   renderMetricsPanel,
+  validateEvaluationConfig,
+  type EvaluationConfig,
+  type EvaluationConfigField,
 } from "./viewer-evaluation";
 import { captureGalleryViews, type GalleryCaptureTarget } from "./viewer-evaluation-capture";
 import { createViewerPresetsController } from "./viewer-presets-controller";
 import { createViewerEvaluationRunner } from "./viewer-evaluation-runner";
 import type { DesktopShell, ShellI18nText } from "./desktop-shell";
+import { WORKFLOW_UNDO_EVENT } from "./workflow-controller";
+import type { WorkflowController } from "./workflow-controller";
+import { loadWorkflowCapabilities, normalizeSceneSource, toNormalizedSceneSource } from "./workflow-api";
+import { createViewerWorkflowBridge } from "./viewer-workflow-bridge";
+import { renderWorkflowCapabilities } from "./viewer-capabilities";
+import {
+  parseSceneCommandEnvelope,
+  sceneCommandEnvelopeTemplate,
+} from "./viewer-scene-command-editor";
+import type { ReferenceAnnotation } from "./sg-types";
 
 const STRUCTURE_PREVIEW_DEFAULT_STEP_KEY = "scene_preview";
 
@@ -436,19 +459,17 @@ function createAvatarFigure(): THREE.Group {
   return avatar;
 }
 
-function mountViewer(shell: DesktopShell): Promise<() => void> {
-  return mountViewerImpl(shell);
+function mountViewer(shell: DesktopShell, workflow: WorkflowController): Promise<() => void> {
+  return mountViewerImpl(shell, workflow);
 }
 
-async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
+async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController): Promise<() => void> {
   const root = shell.root;
+  const eventController = new AbortController();
+  const { signal } = eventController;
   const captureMode = isHeadlessCaptureRequest();
   let currentLang: ViewerLanguage = loadViewerLanguage();
   const t = (en: string, zh: string): string => viewerText(currentLang, en, zh);
-  const shellReactPanelCleanups: Array<() => void> = [];
-  const registerShellReactPanelCleanup = (cleanup: () => void): void => {
-    shellReactPanelCleanups.push(cleanup);
-  };
   document.body.classList.toggle("roadgen-capture-mode", captureMode);
   shell.setHints(captureMode
     ? [{ key: "viewer.hints.captureMode" }]
@@ -458,7 +479,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
         { key: "viewer.hints.tools" },
       ]);
   shell.setLeftSections(createViewerLeftSections(t));
-  shell.setRightTabs(createViewerRightTabs(t, registerShellReactPanelCleanup), null);
+  shell.setRightTabs(createViewerRightTabs(t), null);
   shell.statusStatusHost.innerHTML = `<div id="viewer-status" class="desktop-shell-inline-status" data-i18n-key="viewer.status.loading">${t("Loading viewer...", "正在加载查看器...")}</div>`;
   shell.setStatusSummary({ key: "viewer.status.loading" });
   shell.statusActivityHost.innerHTML = `<div class="desktop-shell-log-entry" data-tone="neutral" data-i18n-key="viewer.status.initialized">${t("Viewer shell initialized.", "查看器框架已初始化。")}</div>`;
@@ -535,7 +556,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     evaluateCloseEl,
     evaluateRunEl,
     evaluateContentEl,
-    compareToggleEl,
+    evaluationConfigInputs,
+    evaluationConfigErrorEl,
+    evaluationConfigResetEl,
     comparePanelEl,
     compareCloseEl,
     compareSelectAEl,
@@ -564,18 +587,39 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     analysisOverlayToggleEl,
     dioramaFinishToggleEl,
     audioToggleEl,
+    capabilityStatusEl,
+    sceneCommandJsonEl,
+    sceneCommandSubmitEl,
+    sceneCommandUndoEl,
+    sceneCommandStatusEl,
     floatingLanePanelHost,
     floatingLaneToggleEl,
-    generationOpenEl,
     generationRunEl,
     syncCameraEl,
     mode3dEl,
     mode2dEl,
     modeGraphEl,
   } = collectViewerPanelElements(root);
+  const renderCapabilityStatus = (): void => {
+    const capabilities = workflow.getSnapshot().capabilities;
+    capabilityStatusEl.innerHTML = renderWorkflowCapabilities(capabilities);
+  };
+  const unsubscribeCapabilityStatus = workflow.subscribe(renderCapabilityStatus);
+  renderCapabilityStatus();
+  if (!workflow.getSnapshot().capabilities && !workflow.getSnapshot().busy.capabilities) {
+    const capabilityToken = workflow.beginRequest("capabilities");
+    void loadWorkflowCapabilities(capabilityToken.signal)
+      .then((capabilities) => {
+        if (!capabilityToken.isCurrent()) return;
+        workflow.setCapabilities(capabilities);
+        workflow.endRequest(capabilityToken);
+      })
+      .catch((error) => workflow.endRequest(capabilityToken, error));
+  }
 
   const historyPanelController = createHistoryPanelController({
     contentEl: historyAnalysisContentEl,
+    getLanguage: () => currentLang,
     loadRecentLayouts,
     loadManifest,
   });
@@ -986,23 +1030,38 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     flashStatus(`Structure preview loaded: ${scenario.title_zh || scenario.scenario_id}.`);
   }
 
-  function openSelectedDesignScenarioAnnotation(): void {
+  async function openSelectedDesignScenarioAnnotation(): Promise<void> {
     const scenario = selectedScenarioDesign();
-    if (scenario) {
-      if (scenario.annotation) {
-        window.localStorage.setItem("roadgen3d.pendingScenarioDraftAnnotation", JSON.stringify({
-          scenario_id: scenario.scenario_id,
-          title_zh: scenario.title_zh,
-          annotation: scenario.annotation,
-        }));
-      } else {
-        window.localStorage.setItem("roadgen3d.pendingScenarioDesignId", scenario.scenario_id);
-      }
-      flashStatus(`Opening annotation for ${scenario.title_zh || scenario.scenario_id}...`);
+    if (!scenario) {
+      window.location.hash = "scene-graph";
+      return;
     }
-    const sceneGraphUrl = new URL(window.location.href);
-    sceneGraphUrl.hash = "scene-graph";
-    window.open(sceneGraphUrl.toString(), "_blank", "noopener");
+    flashStatus(`Opening annotation for ${scenario.title_zh || scenario.scenario_id}...`);
+    workflow.setSourceDraft({
+      kind: "scenario_design",
+      fileName: scenario.scenario_id,
+      geojson: null,
+    });
+    if (scenario.annotation) {
+      const token = workflow.beginRequest("normalize");
+      try {
+        const payload = await normalizeSceneSource({
+          source: {
+            kind: "reference_annotation",
+            source_id: scenario.scenario_id,
+            producer: "catalog",
+            annotation: scenario.annotation as unknown as ReferenceAnnotation,
+          },
+        }, token.signal);
+        if (token.isCurrent()) {
+          workflow.setNormalizedSource(toNormalizedSceneSource(payload));
+          workflow.endRequest(token);
+        }
+      } catch (error) {
+        workflow.endRequest(token, error);
+      }
+    }
+    window.location.hash = "scene-graph";
   }
 
   const scene = new THREE.Scene();
@@ -1129,8 +1188,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
 
   const raycaster = new THREE.Raycaster();
   const clock = new THREE.Clock();
-  const eventController = new AbortController();
-  const { signal } = eventController;
   let animationFrameId = 0;
   let destroyed = false;
   const moveState: MovementState = {
@@ -1266,6 +1323,39 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       }
     },
   });
+  const centerControlsEl = root.querySelector<HTMLElement>("#viewer-center-controls");
+  const centerControlsCloseEl = root.querySelector<HTMLButtonElement>("#viewer-center-controls-close");
+  const centerControlButtons = Array.from(
+    root.querySelectorAll<HTMLButtonElement>("[data-viewer-center-control]"),
+  );
+  if (!centerControlsEl || !centerControlsCloseEl || centerControlButtons.length === 0) {
+    throw new Error("Viewer center control surface is incomplete.");
+  }
+  const setCenterControlsOpen = (open: boolean): void => {
+    centerControlsEl.dataset.open = open ? "true" : "false";
+    centerControlButtons.forEach((button) => {
+      const isActive = open && button.dataset.viewerCenterControl === "browser";
+      button.dataset.active = isActive ? "true" : "false";
+      button.setAttribute("aria-expanded", isActive ? "true" : "false");
+    });
+  };
+  centerControlButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      setCenterControlsOpen(centerControlsEl.dataset.open !== "true");
+    }, { signal });
+  });
+  centerControlsCloseEl.addEventListener("click", () => setCenterControlsOpen(false), { signal });
+  [
+    designToggleEl,
+    settingsToggleEl,
+    sceneGraphLinkEl,
+    assetEditorLinkEl,
+    presetsToggleEl,
+    floatingLaneToggleEl,
+    helpToggleEl,
+  ].forEach((button) => {
+    button.addEventListener("click", () => setCenterControlsOpen(false), { signal });
+  });
 
   recentLayoutSelector = createRecentLayoutSelectorController({
     selectEl: layoutSelectEl,
@@ -1309,8 +1399,129 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       }
       applyAudioProfile();
       scheduleDesignMatrixRefresh();
+      syncSceneCommandEditor();
+      const workflowSnapshot = workflow.getSnapshot();
+      const standaloneLayout = new URLSearchParams(window.location.search).has("layout");
+      if (
+        currentManifest?.layout_revision
+        && (
+          standaloneLayout
+          || workflowSnapshot.sceneLayoutPath === currentLayoutPath
+          || workflowSnapshot.step === "edit"
+          || workflowSnapshot.step === "evaluate"
+        )
+      ) {
+        workflow.setSceneRevision({
+          revision: currentManifest.layout_revision.revision,
+          sha256: currentManifest.layout_revision.sha256,
+          layout_path: currentLayoutPath || currentManifest.layout_path,
+        }, workflowSnapshot.undoCommand);
+      }
     },
   });
+
+  const workflowBridge = createViewerWorkflowBridge({
+    workflow,
+    getPrompt: () => designPromptEl.value,
+    getPresetId: () => selectedDesignPreset()?.id || "custom",
+    getCurrentLayoutPath: () => currentLayoutPath,
+    getCurrentManifest: () => currentManifest,
+    loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
+    setStatus,
+    flashStatus,
+  });
+
+  const evaluationFields: Record<EvaluationConfigField, HTMLInputElement> = {
+    "aggregation.dimension_weights.walkability": evaluationConfigInputs.walkabilityWeight,
+    "aggregation.dimension_weights.safety": evaluationConfigInputs.safetyWeight,
+    "aggregation.dimension_weights.beauty": evaluationConfigInputs.beautyWeight,
+    "walkability.clear_width_min": evaluationConfigInputs.clearWidthMin,
+    "walkability.clear_width_ideal": evaluationConfigInputs.clearWidthIdeal,
+    "walkability.amenity_density_ideal": evaluationConfigInputs.furnitureArea,
+    "walkability.amenity_count_density_ideal": evaluationConfigInputs.amenityCount,
+    "walkability.lamp_spacing_m": evaluationConfigInputs.lampSpacing,
+    "walkability.transit_stop_spacing_m": evaluationConfigInputs.transitSpacing,
+    "walkability.crossing_spacing_m": evaluationConfigInputs.crossingSpacing,
+    "walkability.entrance_density_ideal": evaluationConfigInputs.entranceDensity,
+    "walkability.tree_shade_grid_resolution_m": evaluationConfigInputs.treeGrid,
+    "walkability.tree_sun_azimuth_deg": evaluationConfigInputs.sunAzimuth,
+    "walkability.tree_sun_elevation_deg": evaluationConfigInputs.sunElevation,
+    "walkability.tree_canopy_center_height_ratio": evaluationConfigInputs.canopyCenter,
+    "walkability.tree_canopy_vertical_ratio": evaluationConfigInputs.canopyVertical,
+  };
+
+  const applyEvaluationConfigToInputs = (config: EvaluationConfig): void => {
+    evaluationConfigInputs.walkabilityWeight.value = String(config.aggregation.dimension_weights.walkability);
+    evaluationConfigInputs.safetyWeight.value = String(config.aggregation.dimension_weights.safety);
+    evaluationConfigInputs.beautyWeight.value = String(config.aggregation.dimension_weights.beauty);
+    evaluationConfigInputs.clearWidthMin.value = String(config.walkability.clear_width_min);
+    evaluationConfigInputs.clearWidthIdeal.value = String(config.walkability.clear_width_ideal);
+    evaluationConfigInputs.furnitureArea.value = String(config.walkability.amenity_density_ideal);
+    evaluationConfigInputs.amenityCount.value = String(config.walkability.amenity_count_density_ideal);
+    evaluationConfigInputs.lampSpacing.value = String(config.walkability.lamp_spacing_m);
+    evaluationConfigInputs.transitSpacing.value = String(config.walkability.transit_stop_spacing_m);
+    evaluationConfigInputs.crossingSpacing.value = String(config.walkability.crossing_spacing_m);
+    evaluationConfigInputs.entranceDensity.value = String(config.walkability.entrance_density_ideal);
+    evaluationConfigInputs.treeGrid.value = String(config.walkability.tree_shade_grid_resolution_m);
+    evaluationConfigInputs.sunAzimuth.value = String(config.walkability.tree_sun_azimuth_deg);
+    evaluationConfigInputs.sunElevation.value = String(config.walkability.tree_sun_elevation_deg);
+    evaluationConfigInputs.canopyCenter.value = String(config.walkability.tree_canopy_center_height_ratio);
+    evaluationConfigInputs.canopyVertical.value = String(config.walkability.tree_canopy_vertical_ratio);
+  };
+
+
+  const resolveEvaluationConfigInputs = (persist: boolean): EvaluationConfig | null => {
+    const candidate: EvaluationConfig = {
+      aggregation: {
+        dimension_weights: {
+          walkability: evaluationConfigInputs.walkabilityWeight.valueAsNumber,
+          safety: evaluationConfigInputs.safetyWeight.valueAsNumber,
+          beauty: evaluationConfigInputs.beautyWeight.valueAsNumber,
+        },
+      },
+      walkability: {
+        clear_width_min: evaluationConfigInputs.clearWidthMin.valueAsNumber,
+        clear_width_ideal: evaluationConfigInputs.clearWidthIdeal.valueAsNumber,
+        amenity_density_ideal: evaluationConfigInputs.furnitureArea.valueAsNumber,
+        amenity_count_density_ideal: evaluationConfigInputs.amenityCount.valueAsNumber,
+        lamp_spacing_m: evaluationConfigInputs.lampSpacing.valueAsNumber,
+        transit_stop_spacing_m: evaluationConfigInputs.transitSpacing.valueAsNumber,
+        crossing_spacing_m: evaluationConfigInputs.crossingSpacing.valueAsNumber,
+        entrance_density_ideal: evaluationConfigInputs.entranceDensity.valueAsNumber,
+        tree_shade_grid_resolution_m: evaluationConfigInputs.treeGrid.valueAsNumber,
+        tree_sun_azimuth_deg: evaluationConfigInputs.sunAzimuth.valueAsNumber,
+        tree_sun_elevation_deg: evaluationConfigInputs.sunElevation.valueAsNumber,
+        tree_canopy_center_height_ratio: evaluationConfigInputs.canopyCenter.valueAsNumber,
+        tree_canopy_vertical_ratio: evaluationConfigInputs.canopyVertical.valueAsNumber,
+      },
+    };
+    const issues = validateEvaluationConfig(candidate);
+    for (const input of Object.values(evaluationFields)) {
+      input.removeAttribute("aria-invalid");
+    }
+    for (const issue of issues) {
+      evaluationFields[issue.field].setAttribute("aria-invalid", "true");
+    }
+    evaluationConfigErrorEl.hidden = issues.length === 0;
+    evaluationConfigErrorEl.textContent = issues.map((issue) => issue.message).join(" ");
+    if (issues.length > 0) return null;
+    if (persist) {
+      window.localStorage.setItem(EVALUATION_CONFIG_STORAGE_KEY, JSON.stringify(candidate));
+    }
+    return candidate;
+  };
+
+  applyEvaluationConfigToInputs(loadEvaluationConfig(window.localStorage));
+  resolveEvaluationConfigInputs(false);
+  for (const input of Object.values(evaluationFields)) {
+    input.addEventListener("input", () => {
+      resolveEvaluationConfigInputs(true);
+    }, { signal });
+  }
+  evaluationConfigResetEl.addEventListener("click", () => {
+    applyEvaluationConfigToInputs(cloneEvaluationConfig(DEFAULT_EVALUATION_CONFIG));
+    resolveEvaluationConfigInputs(true);
+  }, { signal });
 
   const evaluationRunner = createViewerEvaluationRunner({
     contentEl: evaluateContentEl,
@@ -1325,6 +1536,14 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     getCurrentLayoutPath: () => currentLayoutPath,
     getCurrentManifest: () => currentManifest,
     getSelectedPresetId: () => selectedDesignPreset()?.id || "custom",
+    getEvaluationConfig: () => {
+      const config = resolveEvaluationConfigInputs(true);
+      if (!config) {
+        root.querySelector<HTMLDetailsElement>("#viewer-evaluation-parameters")?.setAttribute("open", "");
+      }
+      return config;
+    },
+    workflow,
     setStatus,
     flashStatus,
   });
@@ -1681,6 +1900,112 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     infoCardEl.hidden = false;
   }
 
+  let lastSceneEditUndo: SceneLayoutEditResponse["undo"] & { layoutPath: string } | null = null;
+
+  function syncSceneCommandEditor(): void {
+    const layoutPath = currentLayoutPath || currentManifest?.layout_path || "";
+    sceneCommandJsonEl.value = sceneCommandEnvelopeTemplate(currentManifest, layoutPath);
+    sceneCommandSubmitEl.disabled = !layoutPath || !currentManifest?.layout_revision || workflow.getSnapshot().editPending;
+    sceneCommandUndoEl.disabled = !lastSceneEditUndo || workflow.getSnapshot().editPending;
+    sceneCommandStatusEl.textContent = currentManifest?.layout_revision
+      ? `Revision ${currentManifest.layout_revision.revision} · ${currentManifest.layout_revision.sha256.slice(0, 12)}…`
+      : "Load a durable generated layout to edit.";
+  }
+
+  async function loadSceneEditRevision(result: SceneLayoutEditResponse): Promise<void> {
+    clearManifestCache();
+    clearRecentLayoutsCache();
+    await sceneSelectionController.loadLayoutSelection(result.revision.layout_path, {
+      sceneGlbPath: result.revision.scene_glb_path,
+    });
+    const recent = await loadRecentLayouts(20, false).catch(() => []);
+    recentLayoutSelector.populate(recent, result.revision.layout_path);
+    workflow.setSceneRevision({
+      revision: result.revision.revision,
+      sha256: result.revision.sha256,
+      layout_path: result.revision.layout_path,
+    }, result.undo.commands[0] ?? null);
+    syncSceneCommandEditor();
+  }
+
+  async function saveFocusedSceneCommands(
+    layoutPath: string,
+    base: { revision: number; sha256: string },
+    commands: SceneMoveInstanceCommand[],
+  ): Promise<void> {
+    workflow.setEditPending(true);
+    syncSceneCommandEditor();
+    try {
+      const result = await saveSceneLayoutEdits(layoutPath, base, commands);
+      lastSceneEditUndo = { ...result.undo, layoutPath: result.revision.layout_path };
+      await loadSceneEditRevision(result);
+      sceneCommandStatusEl.textContent = `Saved immutable revision ${result.revision.revision}.`;
+    } catch (error) {
+      workflow.setEditPending(false);
+      workflow.reportError(error);
+      syncSceneCommandEditor();
+      throw error;
+    }
+  }
+
+  async function persistSceneMove(move: {
+    instanceId: string;
+    before: [number, number, number];
+    position: [number, number, number];
+  }): Promise<void> {
+    const revision = currentManifest?.layout_revision;
+    const layoutPath = currentLayoutPath || currentManifest?.layout_path || "";
+    if (!layoutPath || !revision) {
+      throw new Error("This scene has no durable revision metadata. Reload it before editing.");
+    }
+    await saveFocusedSceneCommands(
+      layoutPath,
+      { revision: revision.revision, sha256: revision.sha256 },
+      [{
+        command_id: globalThis.crypto?.randomUUID?.() ?? `move-${Date.now()}`,
+        op: "move_instance",
+        instance_id: move.instanceId,
+        position_xyz: move.position,
+      }],
+    );
+  }
+
+  async function undoLastSceneEdit(): Promise<void> {
+    const pending = lastSceneEditUndo;
+    if (!pending) {
+      flashStatus("No persisted scene edit to undo.");
+      return;
+    }
+    lastSceneEditUndo = null;
+    try {
+      await saveFocusedSceneCommands(pending.layoutPath, pending.base, pending.commands);
+      flashStatus("Scene edit undone. Press Cmd/Ctrl+Z again to redo.");
+    } catch (error) {
+      lastSceneEditUndo = pending;
+      syncSceneCommandEditor();
+      flashStatus(error instanceof Error ? error.message : "Scene edit undo failed.");
+    }
+  }
+
+  async function submitSceneCommandEditor(): Promise<void> {
+    if (!currentManifest) {
+      sceneCommandStatusEl.textContent = "Load a durable generated layout before editing.";
+      return;
+    }
+    try {
+      const envelope = parseSceneCommandEnvelope(
+        sceneCommandJsonEl.value,
+        currentManifest,
+        currentLayoutPath || currentManifest.layout_path || "",
+      );
+      await saveFocusedSceneCommands(envelope.layout_path, envelope.base, envelope.commands);
+      flashStatus("JSON move command persisted.");
+    } catch (error) {
+      sceneCommandStatusEl.textContent = error instanceof Error ? error.message : "Command failed.";
+      workflow.reportError(error);
+    }
+  }
+
   const assetMoveController = createAssetMoveController({
     scene,
     camera,
@@ -1693,6 +2018,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     setLaserCopyText: (text) => { currentLaserCopyText = text; },
     flashStatus,
     updateAssetBboxHelpers: () => updateAssetBboxHelpers(scene),
+    persistMove: persistSceneMove,
   });
 
   async function copyCurrentLaserTargetDetails(): Promise<void> {
@@ -1715,6 +2041,20 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   function handleKey(event: KeyboardEvent, active: boolean): void {
+    if (
+      active
+      && !event.repeat
+      && event.code === "KeyZ"
+      && (event.ctrlKey || event.metaKey)
+      && !event.altKey
+      && !event.shiftKey
+      && !isEditableTarget(event.target)
+      && lastSceneEditUndo
+    ) {
+      event.preventDefault();
+      void undoLastSceneEdit();
+      return;
+    }
     const movementKey = isRoamMovementKey(event.code);
     const sceneRoamActive = isPointerLookActive() || isThirdPersonKeyboardRoamActive();
     if (
@@ -2418,6 +2758,9 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
   }, { signal });
   settingsCloseEl.addEventListener("click", () => panelController.setOpen("settings", false), { signal });
+  sceneCommandSubmitEl.addEventListener("click", () => void submitSceneCommandEditor(), { signal });
+  sceneCommandUndoEl.addEventListener("click", () => void undoLastSceneEdit(), { signal });
+  window.addEventListener(WORKFLOW_UNDO_EVENT, () => void undoLastSceneEdit(), { signal });
 
   function localizedViewerHints(): ShellI18nText[] {
     return captureMode
@@ -2430,30 +2773,21 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }
 
   function updateShellSectionTexts(): void {
-    const recentSection = root.querySelector<HTMLElement>('[data-section-id="viewer-recent-layouts"]');
-    const recentTitle = recentSection?.querySelector<HTMLElement>(".desktop-shell-section-summary > span:first-child");
-    const recentSubtitle = recentSection?.querySelector<HTMLElement>(".desktop-shell-section-subtitle");
-    if (recentTitle) {
-      recentTitle.textContent = t("Recent Layouts", "最近布局");
-    }
-    if (recentSubtitle) {
-      recentSubtitle.textContent = t("Layout / scene entry", "布局 / 场景入口");
-    }
-
-    const tabLabels: Array<[string, string, string]> = [
-      ["settings", "Settings", "设置"],
-      ["design", "Design", "设计"],
-      ["evaluate", "Evaluate", "评估"],
-      ["compare", "Compare", "对比"],
-      ["history", "History", "历史"],
-      ["presets", "Presets", "预设"],
-      ["floating-lane", "Floating Lane", "浮动车道"],
-      ["help", "Help", "帮助"],
+    const tabLabels: Array<[string, string]> = [
+      ["settings", "viewer.tab.settings"],
+      ["design", "viewer.tab.design"],
+      ["evaluate", "viewer.tab.evaluate"],
+      ["compare", "viewer.tab.compare"],
+      ["history", "viewer.tab.history"],
+      ["presets", "viewer.tab.presets"],
+      ["floating-lane", "viewer.tab.floatingLane"],
+      ["help", "viewer.tab.help"],
     ];
-    for (const [tabId, en, zh] of tabLabels) {
+    for (const [tabId, key] of tabLabels) {
       const button = root.querySelector<HTMLButtonElement>(`[data-shell-tab="${tabId}"]`);
       if (button) {
-        button.textContent = t(en, zh);
+        button.dataset.i18nKey = key;
+        button.textContent = translateViewerKey(currentLang, key) ?? `[missing ${key}]`;
       }
     }
   }
@@ -2465,6 +2799,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     updateShellSectionTexts();
     shell.setHints(localizedViewerHints());
     compareMode.refreshLanguage();
+    void historyPanelController.refreshLanguage();
   }
 
   window.addEventListener(VIEWER_LANGUAGE_EVENT, (event) => {
@@ -2521,9 +2856,12 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   }, { signal });
 
   designToggleEl.addEventListener("click", () => panelController.setOpen("design", !panelController.isOpen("design")), { signal });
-  generationOpenEl.addEventListener("click", () => panelController.setOpen("design", true), { signal });
   generationRunEl.addEventListener("click", () => {
-    void designController.runDesignGeneration().finally(scheduleDesignMatrixRefresh);
+    const workflowSnapshot = workflow.getSnapshot();
+    const run = workflowSnapshot.normalized
+      ? workflowBridge.runGeneration()
+      : designController.runDesignGeneration().finally(scheduleDesignMatrixRefresh);
+    void run;
   }, { signal });
   root.querySelectorAll<HTMLElement>("[data-close-generation]").forEach((el) => {
     el.addEventListener("click", () => panelController.setOpen("design", false), { signal });
@@ -2564,7 +2902,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       setStatus("Scenario preview failed.");
     });
   }, { signal });
-  designScenarioAnnotationEl.addEventListener("click", openSelectedDesignScenarioAnnotation, { signal });
+  designScenarioAnnotationEl.addEventListener("click", () => void openSelectedDesignScenarioAnnotation(), { signal });
   designGenerateEl.addEventListener("click", () => {
     void designController.runDesignGeneration().finally(scheduleDesignMatrixRefresh);
   }, { signal });
@@ -2636,7 +2974,6 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
   evaluateCloseEl.addEventListener("click", () => panelController.setOpen("evaluate", false), { signal });
   evaluateRunEl.addEventListener("click", () => void evaluationRunner.run(), { signal });
 
-  compareToggleEl.addEventListener("click", () => panelController.setOpen("compare", !panelController.isOpen("compare")), { signal });
   compareCloseEl.addEventListener("click", () => panelController.setOpen("compare", false), { signal });
   compareSelectAEl.addEventListener("change", () => void compareMode.runComparison(), { signal });
   compareSelectBEl.addEventListener("change", () => void compareMode.runComparison(), { signal });
@@ -2687,9 +3024,14 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     }
   }, { signal });
 
-  // Floating Lane Overlay toggle
+  // Live overlay is selected from the left menu and adjusted in the right rail.
   floatingLaneToggleEl.addEventListener("click", () => {
-    floatingLaneSystem.toggleOverlay();
+    shell.setRightPinned(true);
+    shell.activateRightTab("floating-lane");
+    if (!floatingLaneSystem.config.enabled) {
+      floatingLaneSystem.toggleOverlay();
+    }
+    floatingLaneSystem.mountControlPanel();
   }, { signal });
 
   // Stage toolbar view modes and actions
@@ -3009,6 +3351,7 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       if (!nextLayoutPath || nextLayoutPath === currentLayoutPath) {
         return;
       }
+      lastSceneEditUndo = null;
       try {
         await sceneSelectionController.loadLayoutSelection(nextLayoutPath);
         recentLayoutSelector.setSelectedPath(nextLayoutPath);
@@ -3177,6 +3520,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
     setStatus("Viewer unavailable");
   }
 
+  void workflowBridge.syncGeneratedLayout();
+
   return () => {
     destroyed = true;
     if (window.__roadgen3dCaptureGallery) {
@@ -3193,7 +3538,8 @@ async function mountViewerImpl(shell: DesktopShell): Promise<() => void> {
       minimapClickHandle = null;
     }
     eventController.abort();
-    shellReactPanelCleanups.splice(0).forEach((cleanup) => cleanup());
+    workflowBridge.dispose();
+    unsubscribeCapabilityStatus();
     controls.removeEventListener("lock", handleControlsLock);
     controls.removeEventListener("unlock", handleControlsUnlock);
     if (controls.isLocked) {
