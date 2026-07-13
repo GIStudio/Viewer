@@ -74,6 +74,19 @@ export function CourseScenePreview({ api, artifactId, label }: { api: CourseApi;
           if (name.includes("sky_dome") || name.includes("sky-dome") || name.includes("environment_default_sky")) {
             environmentNodes.push(object);
           }
+          const mesh = object as THREE.Mesh;
+          const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
+          for (const material of materials) {
+            if (!material.name.toLowerCase().includes("roadgen3d_transparent_massing")) continue;
+            const massing = material as THREE.MeshStandardMaterial;
+            massing.transparent = true;
+            massing.opacity = 0.42;
+            massing.depthWrite = false;
+            massing.roughness = 1;
+            massing.metalness = 0;
+            massing.needsUpdate = true;
+            mesh.renderOrder = 2;
+          }
         });
         for (const object of environmentNodes) object.parent?.remove(object);
         scene.add(root);

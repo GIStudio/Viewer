@@ -7,7 +7,21 @@ export type SceneSource = { id: string; kind: string; quality_report: Record<str
 export type SceneRevision = { id: string; revision_number: number; branch_kind: string; label: string; parent_id?: string; layout_artifact_id?: string; glb_artifact_id?: string; evaluation_status: string; provenance?: Record<string, any>; auto_evaluation?: EvaluationRun | null };
 export type EvaluationRun = { id: string; revision_id: string; status: string; weights: Record<string, number>; result: Record<string, unknown>; error: string };
 export type EvaluationProfile = { id: string; name: string; weights: Record<string, number>; is_default: boolean };
-export type PlatformJob = { id: string; kind: string; status: string; progress: number; result: Record<string, any>; error: string };
+export type JobOperation = { timestamp: string; stage: string; progress: number; message: string; detail: Record<string, unknown> };
+export type PlatformJob = {
+  id: string;
+  kind: string;
+  status: string;
+  progress: number;
+  stage: string;
+  message: string;
+  detail: Record<string, unknown>;
+  operations: JobOperation[];
+  result: Record<string, any>;
+  error: string;
+  created_at: string;
+  updated_at: string;
+};
 export type PlatformCapabilities = { llm: { configured: boolean; provider?: string; text?: { configured: boolean; model?: string } }; design_generation: { baseline: string; redesign_default: "llm" | "parametric"; parametric_fallback: boolean } };
 
 export class CourseApi {
