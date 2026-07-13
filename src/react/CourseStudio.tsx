@@ -12,11 +12,13 @@ import {
   type EvaluationProfile,
   type EvaluationRun,
   type PlatformJob,
+  type PlatformCapabilities,
   type SceneRevision,
   type SceneSource,
 } from "../course-api";
 import type { ViewerLanguage } from "../viewer-i18n";
 import { AoiMap } from "./AoiMap";
+import { CourseScenePreview } from "./CourseScenePreview";
 import {
   ReferenceReviewMap,
   type ReviewFeature,
@@ -61,20 +63,23 @@ export function CourseStudio({ language }: { language: ViewerLanguage }) {
   const [evaluations, setEvaluations] = useState<EvaluationRun[]>([]);
   const [profiles, setProfiles] = useState<EvaluationProfile[]>([]);
   const [comparison, setComparison] = useState<Record<string, any> | null>(null);
+  const [capabilities, setCapabilities] = useState<PlatformCapabilities | null>(null);
   const [step, setStep] = useState<StepId>("area");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const zh = language === "zh";
 
   const refreshProjects = useCallback(async () => {
-    const [me, coursePayload, projectPayload] = await Promise.all([
+    const [me, coursePayload, projectPayload, capabilityPayload] = await Promise.all([
       api.request<CourseUser>("/api/v1/me"),
       api.request<{ items: Course[] }>("/api/v1/courses"),
       api.request<{ items: CourseProject[] }>("/api/v1/projects"),
+      api.request<PlatformCapabilities>("/api/v1/capabilities"),
     ]);
     setUser(me);
     setCourses(coursePayload.items);
     setProjects(projectPayload.items);
+    setCapabilities(capabilityPayload);
     setProject((current) => projectPayload.items.find((item) => item.id === current?.id) ?? projectPayload.items[0] ?? null);
   }, [api]);
 
@@ -166,7 +171,7 @@ export function CourseStudio({ language }: { language: ViewerLanguage }) {
             {step === "area" ? <AreaStage project={project} language={language} /> : null}
             {step === "data" ? <DataStage api={api} project={project} latestSource={latestSource} language={language} act={act} onRefresh={() => refreshProjectData(project.id)} onNext={() => selectStep("annotation")} /> : null}
             {step === "annotation" ? <AnnotationStage api={api} project={project} source={latestSource} language={language} act={act} onRefresh={() => refreshProjectData(project.id)} onNext={() => selectStep("design")} /> : null}
-            {step === "design" ? <DesignStage api={api} project={project} source={latestSource} revisions={revisions} language={language} act={act} onRefresh={() => refreshProjectData(project.id)} /> : null}
+            {step === "design" ? <DesignStage api={api} project={project} source={latestSource} revisions={revisions} evaluations={evaluations} profiles={profiles} capabilities={capabilities} language={language} act={act} onRefresh={() => refreshProjectData(project.id)} onNext={() => selectStep("evaluation")} /> : null}
             {step === "evaluation" ? <EvaluationStage api={api} project={project} revision={latestRevision} evaluations={evaluations} profiles={profiles} language={language} act={act} onRefresh={() => refreshProjectData(project.id)} /> : null}
             {step === "compare_export" ? <CompareStage api={api} project={project} revisions={revisions} comparison={comparison} setComparison={setComparison} language={language} act={act} /> : null}
           </>
@@ -352,16 +357,55 @@ function AnnotationStage({ api, project, source, language, act, onRefresh, onNex
         {selectedFeature ? <><strong>{String(selectedFeature.properties.name ?? selectedFeature.id)}</strong><code>{selectedFeature.geometry.type} · {selectedFeature.id}</code><label>{zh ? "标注类别" : "Annotation role"}<Select value={String(selectedFeature.properties.role ?? "")} options={REVIEW_ROLES.map((role) => ({ value: role, label: role }))} onChange={changeRole} /></label><Button danger onClick={deleteSelected}>{zh ? "删除这个要素" : "Delete feature"}</Button></> : <p>{zh ? "从地图上选择道路、建筑、区域或点。" : "Select a road, building, zone or point on the map."}</p>}
       </div>
       <label className="course-review-notes">{zh ? "审核说明" : "Review notes"}<Input.TextArea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder={zh ? "记录无法判断或需要教师复核的内容" : "Record ambiguity or items requiring teacher review"} /></label>
-      <div className="course-review-actions"><Button onClick={() => void api.downloadArtifact(source.normalized_artifact_id, "review-draft.geojson")}>{zh ? "下载当前输入" : "Download input"}</Button><Button type="primary" disabled={mapState.status === "loading"} onClick={() => void act(zh ? "正在保存审核版本…" : "Saving reviewed version…", async () => { await api.post(`/api/v1/projects/${project.id}/sources/${source.id}/review`, { geojson: draft, actions, notes }); await onRefresh(); await onNext(); })}>{zh ? `保存审核版本并进入3D${actions.length ? `（${actions.length}项修改）` : ""}` : `Save review & continue${actions.length ? ` (${actions.length} edits)` : ""}`}</Button></div>
+      <div className="course-review-actions"><Button onClick={() => void api.downloadArtifact(source.normalized_artifact_id, "review-draft.geojson")}>{zh ? "下载当前输入" : "Download input"}</Button><Button type="primary" disabled={mapState.status === "loading"} onClick={() => void act(zh ? "正在保存标注、生成3D并完成基线评分…" : "Saving annotation, generating 3D and scoring baseline…", async () => { const reviewed = await api.post<SceneSource>(`/api/v1/projects/${project.id}/sources/${source.id}/review`, { geojson: draft, actions, notes }); const job = await api.post<PlatformJob>(`/api/v1/projects/${project.id}/generate`, { source_id: reviewed.id, prompt: project.design_goal, generation_mode: "baseline" }); const done = await waitForJob(api, job); if (done.status !== "succeeded") throw new Error(done.error); await onRefresh(); await onNext(); })}>{zh ? `批准标注并生成3D基线${actions.length ? `（${actions.length}项修改）` : ""}` : `Approve & generate 3D${actions.length ? ` (${actions.length} edits)` : ""}`}</Button></div>
       {source.warnings?.map((warning) => <div className="course-notice" key={warning}>{warning}</div>)}
     </aside>
   </div>;
 }
 
-function DesignStage({ api, project, source, revisions, language, act, onRefresh }: { api: CourseApi; project: CourseProject; source: SceneSource | null; revisions: SceneRevision[]; language: ViewerLanguage; act: any; onRefresh: () => Promise<void> }) {
+function DesignStage({ api, project, source, revisions, evaluations, profiles, capabilities, language, act, onRefresh, onNext }: { api: CourseApi; project: CourseProject; source: SceneSource | null; revisions: SceneRevision[]; evaluations: EvaluationRun[]; profiles: EvaluationProfile[]; capabilities: PlatformCapabilities | null; language: ViewerLanguage; act: any; onRefresh: () => Promise<void>; onNext: () => void }) {
   const zh = language === "zh";
   const latest = revisions[0];
-  return <div className="course-design-layout"><section className="course-design-stage"><div className="course-design-horizon"><span>{latest ? `REV ${String(latest.revision_number).padStart(3, "0")}` : "NO SCENE"}</span><h2>{latest?.label ?? (zh ? "生成一个可编辑基线场景" : "Generate an editable baseline")}</h2><p>{latest ? `${latest.branch_kind} · ${latest.evaluation_status}` : (zh ? "使用已经批准的标注生成3D街道。" : "Generate a 3D street from the approved annotation.")}</p></div><div className="course-design-actions"><Button type="primary" disabled={!source} onClick={() => void act(zh ? "正在生成并评分3D场景…" : "Generating and evaluating 3D scene…", async () => { const job = await api.post<PlatformJob>(`/api/v1/projects/${project.id}/generate`, { source_id: source?.id, prompt: project.design_goal }); const done = await waitForJob(api, job); if (done.status !== "succeeded") throw new Error(done.error); await onRefresh(); })}>{zh ? "生成基线" : "Generate baseline"}</Button>{latest?.glb_artifact_id ? <Button onClick={() => void api.downloadArtifact(latest.glb_artifact_id!, `revision-${latest.revision_number}.glb`)}>{zh ? "下载3D" : "Download 3D"}</Button> : null}<Button onClick={() => { window.location.hash = "#viewer"; }}>{zh ? "进入专家3D查看器" : "Open expert 3D viewer"}</Button></div></section><section className="course-version-timeline">{revisions.map((item) => <div key={item.id}><span>{String(item.revision_number).padStart(2, "0")}</span><div><strong>{item.label || item.branch_kind}</strong><small>{item.branch_kind} · {item.evaluation_status}</small></div></div>)}</section></div>;
+  const latestEvaluation = evaluations.find((item) => item.revision_id === latest?.id);
+  const [weights, setWeights] = useState({ walkability: 45, safety: 35, beauty: 20 });
+  const llmReady = Boolean(capabilities?.llm.configured);
+  const resolvedMode = capabilities?.design_generation.redesign_default ?? "parametric";
+  const generate = async (mode: "baseline" | "auto") => {
+    const job = await api.post<PlatformJob>(`/api/v1/projects/${project.id}/generate`, {
+      source_id: source?.id,
+      prompt: project.design_goal,
+      generation_mode: mode,
+      parent_revision_id: mode === "auto" ? latest?.id : undefined,
+      goal_weights: mode === "auto" ? weights : undefined,
+    });
+    const done = await waitForJob(api, job);
+    if (done.status !== "succeeded") throw new Error(done.error);
+    await onRefresh();
+  };
+  return <div className="course-design-workbench">
+    <section className="course-design-viewport">
+      <CourseScenePreview api={api} artifactId={latest?.glb_artifact_id} label={latest?.label ?? (zh ? "等待2D标注生成基线" : "Awaiting 2D baseline")} />
+      <div className="course-design-viewport-bar">
+        <div><span>{latest ? `REV ${String(latest.revision_number).padStart(3, "0")}` : "2D → 3D"}</span><strong>{latest?.label ?? (zh ? "还没有生成场景" : "No generated scene")}</strong><small>{latest ? `${latest.branch_kind} · ${String(latest.provenance?.generation_method ?? "unknown")}` : (zh ? "返回03批准标注，系统会直接生成" : "Approve annotations in 03 to generate directly")}</small></div>
+        {latest?.glb_artifact_id ? <Button onClick={() => void api.downloadArtifact(latest.glb_artifact_id!, `revision-${latest.revision_number}.glb`)}>{zh ? "下载 GLB" : "Download GLB"}</Button> : <Button type="primary" disabled={!source} onClick={() => void act(zh ? "正在补生成参数化基线…" : "Generating parametric baseline…", () => generate("baseline"))}>{zh ? "补生成基线" : "Generate baseline"}</Button>}
+      </div>
+    </section>
+
+    <aside className="course-design-console">
+      <header><span className="course-eyebrow">DESIGN LOOP / {resolvedMode.toUpperCase()}</span><h2>{zh ? "从评价目标生成下一版" : "Generate the next version from goals"}</h2><p>{llmReady ? (zh ? `已连接 LLM · ${capabilities?.llm.text?.model ?? "configured model"}` : `LLM connected · ${capabilities?.llm.text?.model ?? "configured model"}`) : (zh ? "未配置 API，将使用可复现的参数化模型" : "No API configured; using the reproducible parametric model")}</p></header>
+      <div className="course-design-scores">
+        {(["walkability", "safety", "beauty", "overall"] as const).map((key) => <div key={key}><span>{key}</span><strong>{score(latestEvaluation?.result?.[key])}</strong></div>)}
+      </div>
+      <div className="course-design-goals">
+        <div><strong>{zh ? "选择最需要的设计目标" : "Choose your design priorities"}</strong><small>{zh ? "非负权重会在服务器归一化为100%" : "Weights are normalized to 100% on the server"}</small></div>
+        {Object.entries(weights).map(([key, value]) => <label key={key}><span>{key}</span><input type="range" min="0" max="100" value={value} onChange={(event) => setWeights({ ...weights, [key]: Number(event.target.value) })} /><InputNumber min={0} max={100} value={value} onChange={(next) => setWeights({ ...weights, [key]: Number(next ?? 0) })} /></label>)}
+      </div>
+      <Button type="primary" size="large" block disabled={!latest || !source || Object.values(weights).every((value) => value <= 0)} onClick={() => void act(llmReady ? (zh ? "LLM 正在根据目标设计候选版本…" : "LLM is designing a candidate…") : (zh ? "参数化模型正在生成候选版本…" : "Parametric model is generating a candidate…"), () => generate("auto"))}>{llmReady ? (zh ? "让 LLM 设计下一版" : "Ask LLM to redesign") : (zh ? "用参数化模型优化下一版" : "Optimize parametrically")}</Button>
+      <div className="course-design-secondary"><Button disabled={!latest || !profiles.length} onClick={() => void act(zh ? "正在评价当前版本…" : "Evaluating current revision…", async () => { const payload = await api.post<{ job: PlatformJob }>(`/api/v1/projects/${project.id}/evaluations`, { revision_id: latest?.id, profile_id: profiles[0]?.id, weights }); if (payload.job) await waitForJob(api, payload.job); await onRefresh(); })}>{zh ? "重新评价当前版本" : "Re-evaluate current"}</Button><Button onClick={onNext}>{zh ? "评价详情" : "Metrics detail"}</Button><Button onClick={() => { window.location.hash = "#viewer"; }}>{zh ? "专家编辑器" : "Expert editor"}</Button></div>
+    </aside>
+
+    <section className="course-version-timeline course-design-timeline"><header><span>REVISION LEDGER</span><strong>{revisions.length}</strong></header>{revisions.map((item) => <div key={item.id} data-current={String(item.id === latest?.id)}><span>{String(item.revision_number).padStart(2, "0")}</span><div><strong>{item.label || item.branch_kind}</strong><small>{item.branch_kind} · {String(item.provenance?.generation_method ?? item.evaluation_status)}</small></div></div>)}</section>
+  </div>;
 }
 
 function EvaluationStage({ api, project, revision, evaluations, profiles, language, act, onRefresh }: { api: CourseApi; project: CourseProject; revision: SceneRevision | null; evaluations: EvaluationRun[]; profiles: EvaluationProfile[]; language: ViewerLanguage; act: any; onRefresh: () => Promise<void> }) {

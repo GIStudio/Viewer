@@ -2491,7 +2491,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api/v1": {
-        target: process.env.ROADGEN_API_ORIGIN || "http://127.0.0.1:8000",
+        target: process.env.ROADGEN_API_ORIGIN || "http://127.0.0.1:8010",
         changeOrigin: true,
       },
     },

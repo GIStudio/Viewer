@@ -4,10 +4,11 @@ export type CourseUser = { id: string; email: string; display_name: string; syst
 export type Course = { id: string; name: string; code: string; role: string; invite_code?: string };
 export type CourseProject = { id: string; course_id: string; name: string; city: string; design_goal: string; aoi_bbox: number[] | null; workflow_step: string; role: string };
 export type SceneSource = { id: string; kind: string; quality_report: Record<string, any>; provenance: Record<string, any>; role_counts?: Record<string, number>; warnings?: string[]; normalized_artifact_id: string; annotation_artifact_id?: string };
-export type SceneRevision = { id: string; revision_number: number; branch_kind: string; label: string; parent_id?: string; layout_artifact_id?: string; glb_artifact_id?: string; evaluation_status: string; auto_evaluation?: EvaluationRun | null };
+export type SceneRevision = { id: string; revision_number: number; branch_kind: string; label: string; parent_id?: string; layout_artifact_id?: string; glb_artifact_id?: string; evaluation_status: string; provenance?: Record<string, any>; auto_evaluation?: EvaluationRun | null };
 export type EvaluationRun = { id: string; revision_id: string; status: string; weights: Record<string, number>; result: Record<string, unknown>; error: string };
 export type EvaluationProfile = { id: string; name: string; weights: Record<string, number>; is_default: boolean };
 export type PlatformJob = { id: string; kind: string; status: string; progress: number; result: Record<string, any>; error: string };
+export type PlatformCapabilities = { llm: { configured: boolean; provider?: string; text?: { configured: boolean; model?: string } }; design_generation: { baseline: string; redesign_default: "llm" | "parametric"; parametric_fallback: boolean } };
 
 export class CourseApi {
   token: string;
@@ -47,10 +48,14 @@ export class CourseApi {
     return `/api/v1/artifacts/${encodeURIComponent(id)}`;
   }
 
-  async downloadArtifact(id: string, filename: string): Promise<void> {
+  async fetchArtifactBlob(id: string): Promise<Blob> {
     const response = await fetch(this.artifactUrl(id), { headers: { Authorization: `Bearer ${this.token}` } });
     if (!response.ok) throw new Error(`Artifact download failed: ${response.status}`);
-    const blob = await response.blob();
+    return response.blob();
+  }
+
+  async downloadArtifact(id: string, filename: string): Promise<void> {
+    const blob = await this.fetchArtifactBlob(id);
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
