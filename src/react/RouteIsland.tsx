@@ -10,6 +10,7 @@ import { formatViewerKey, loadViewerLanguage } from "../viewer-i18n";
 import type { ViewerLanguage } from "../viewer-i18n";
 import type { WorkflowController } from "../workflow-controller";
 import { ViewerDesktopShell } from "./ViewerDesktopShell";
+import { CourseStudio } from "./CourseStudio";
 
 type Teardown = () => void;
 
@@ -23,6 +24,7 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
   const hostRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (route === "course-studio") return undefined;
     const host = hostRef.current;
     if (!host) {
       return undefined;
@@ -81,5 +83,8 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
     };
   }, [route, workflow]);
 
+  if (route === "course-studio") {
+    return <CourseStudio language={language} />;
+  }
   return <ViewerDesktopShell route={route} language={language} hostRef={hostRef} workflow={workflow} />;
 }

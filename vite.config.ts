@@ -2488,6 +2488,14 @@ function readRequestBody(req: any): Promise<string> {
 export default defineConfig({
   base: "/",
   plugins: [react(), viewerApiPlugin()],
+  server: {
+    proxy: {
+      "/api/v1": {
+        target: process.env.ROADGEN_API_ORIGIN || "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     rollupOptions: {
       input: {

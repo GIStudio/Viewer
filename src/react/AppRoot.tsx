@@ -41,7 +41,7 @@ export function AppRoot() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const standaloneViewer = params.has("layout") || params.get("capture") === "1";
-    if (standaloneViewer || route === "asset-editor" || route === "model-input-browser") {
+    if (standaloneViewer || route === "course-studio" || route === "asset-editor" || route === "model-input-browser") {
       return;
     }
     const targetRoute = workflowRoute(workflowSnapshot.step);

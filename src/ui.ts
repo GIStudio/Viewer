@@ -4,7 +4,7 @@
  */
 
 // 路由类型
-export type AppRoute = "viewer" | "scene-graph" | "asset-editor" | "model-input-browser";
+export type AppRoute = "course-studio" | "viewer" | "scene-graph" | "asset-editor" | "model-input-browser";
 
 interface RouteConfig {
   id: AppRoute;
@@ -23,6 +23,13 @@ interface HeaderOptions {
 }
 
 const ROUTES: Record<AppRoute, RouteConfig> = {
+  "course-studio": {
+    id: "course-studio",
+    label: "Course Studio",
+    path: "#course-studio",
+    kicker: "RoadGen3D / Course",
+    title: "Urban Street Teaching Studio",
+  },
   viewer: {
     id: "viewer",
     label: "3D Viewer",
@@ -58,6 +65,7 @@ const ROUTES: Record<AppRoute, RouteConfig> = {
 
 function getCurrentRoute(): AppRoute {
   const hash = window.location.hash;
+  if (hash === "#course-studio") return "course-studio";
   if (hash === "#scene-graph") return "scene-graph";
   if (hash === "#asset-editor") return "asset-editor";
   if (hash === "#model-input-browser") return "model-input-browser";
@@ -66,11 +74,7 @@ function getCurrentRoute(): AppRoute {
 
 function navigateTo(route: AppRoute): void {
   const config = ROUTES[route];
-  if (route === "viewer") {
-    window.location.hash = "";
-  } else {
-    window.location.hash = config.path;
-  }
+  window.location.hash = config.path;
 }
 
 function buildHeaderHTML(

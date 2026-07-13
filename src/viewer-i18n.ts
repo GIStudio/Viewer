@@ -9,6 +9,7 @@ type Translation = {
 };
 
 const TRANSLATIONS: Record<string, Translation> = {
+  "route.course-studio.label": { en: "Course Studio", zh: "课程工作台" },
   "route.viewer.label": { en: "3D Viewer", zh: "3D 查看器" },
   "route.scene-graph.label": { en: "Reference", zh: "参考图" },
   "route.asset-editor.label": { en: "Asset Editor", zh: "资产编辑器" },

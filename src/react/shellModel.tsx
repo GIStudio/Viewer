@@ -106,8 +106,12 @@ export const menuGroups: ShellMenuGroup[] = [
 
 export function resolveRoute(): AppRoute {
   const hash = window.location.hash;
+  if (hash === "#course-studio") return "course-studio";
+  if (hash === "#viewer") return "viewer";
   if (hash === "#scene-graph") return "scene-graph";
   if (hash === "#asset-editor") return "asset-editor";
   if (hash === "#model-input-browser") return "model-input-browser";
+  const defaultRoute = import.meta.env.VITE_ROADGEN_DEFAULT_ROUTE;
+  if (!hash && defaultRoute === "course-studio") return "course-studio";
   return "viewer";
 }
