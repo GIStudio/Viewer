@@ -1,5 +1,7 @@
 import "./styles/scene-graph.css";
 
+import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
+
 import type {
   AnnotationPoint,
   BezierCurve3,
@@ -241,7 +243,7 @@ import type { ScenarioDesign, ScenarioDesignCatalogPayload } from "./viewer-type
 import type { WorkflowController } from "./workflow-controller";
 import {
   extractSceneSource,
-  loadOsmBuildings,
+  loadOsmSceneSource,
   loadSceneJob,
   loadWorkflowCapabilities,
   normalizeSceneSource,
@@ -2361,8 +2363,19 @@ async function readImageFileDataUrl(file: File): Promise<string> {
   return `data:${file.type || "application/octet-stream"};base64,${window.btoa(binary)}`;
 }
 
-export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowController): () => void {
+export type SceneGraphHostOptions = {
+  mode?: "expert" | "course";
+  onApproveAndGenerate?: (annotation: ReferenceAnnotation) => Promise<void>;
+};
+
+export function mountSceneGraphPage(
+  shell: DesktopShell,
+  workflow: WorkflowController,
+  hostOptions: SceneGraphHostOptions = {},
+): () => void {
   const root = shell.root;
+  const courseMode = hostOptions.mode === "course";
+  root.dataset.workbenchHost = courseMode ? "course" : "expert";
   const eventController = new AbortController();
   const { signal } = eventController;
   shell.setHints([
@@ -2458,6 +2471,8 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
   } = collectSceneGraphElements(root);
 
   const toolButtons = Array.from(root.querySelectorAll<HTMLButtonElement>(".scene-tool-button"));
+  const osmMapHostEl = root.querySelector<HTMLElement>("#annotation-osm-map");
+  let courseOsmMap: MapLibreMap | null = null;
 
   const state = {
     referencePlans: [FALLBACK_REFERENCE_PLAN] as ReferencePlan[],
@@ -2600,7 +2615,9 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
     sourceNormalizeButton.disabled = Boolean(snapshot.busy.normalize);
     sourceOsmImportButton.disabled = Boolean(snapshot.busy.osm);
     sourceApproveButton.disabled = !normalized || Boolean(snapshot.busy.generate);
-    sourceGenerateButton.disabled = !normalized || Boolean(snapshot.busy.generate);
+    sourceGenerateButton.disabled = courseMode
+      ? state.annotation.centerlines.length === 0 || Boolean(snapshot.busy.generate)
+      : !normalized || Boolean(snapshot.busy.generate);
     if (snapshot.lastError && root.isConnected) {
       sourceStatusEl.textContent = snapshot.lastError;
       sourceStatusEl.dataset.tone = "error";
@@ -2714,36 +2731,17 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
     }
     const token = workflow.beginRequest("osm");
     workflow.clearError();
-    setStatus(sourceStatusEl, "Loading and aligning OSM building context…", "neutral");
+    setStatus(sourceStatusEl, "Loading OSM roads, buildings, land use and POI…", "neutral");
     try {
-      const osm = await loadOsmBuildings({
+      const osmNormalized = await loadOsmSceneSource({
         source_id: `${state.annotation.plan_id || "source"}_osm_context`,
         aoi_bbox: bbox,
       }, token.signal);
-      const osmNormalized = await normalizeSceneSource({
-        source: {
-          kind: "geojson",
-          source_id: String(osm.source.source_id ?? `${state.annotation.plan_id || "source"}_osm_context`),
-          producer: "import",
-          coordinate_space: "EPSG:4326",
-          geojson: osm.geojson,
-          image: sourceImageReference(true),
-        },
-      }, token.signal);
       if (!token.isCurrent()) return;
       pendingOsmNormalization = osmNormalized;
-      const primary = await normalizeSceneSource({
-        source: {
-          kind: "reference_annotation",
-          source_id: state.annotation.plan_id || "manual_reference_annotation",
-          producer: "manual",
-          annotation: cloneAnnotation(state.annotation),
-        },
-      }, token.signal);
-      if (!token.isCurrent()) return;
       applyNormalizedSourcePayload(
-        combineWithOsmContext(primary, osmNormalized),
-        `OSM context aligned as ${osmNormalized.aligned_buildings.length} non-editable white masses.`,
+        osmNormalized,
+        `OSM loaded into ReferenceAnnotation with ${osmNormalized.annotation.centerlines.length} roads and ${osmNormalized.aligned_buildings.length} locked building masses.`,
       );
       workflow.endRequest(token);
     } catch (error) {
@@ -2755,6 +2753,18 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
   }
 
   async function generateApprovedScene(): Promise<void> {
+    if (courseMode && hostOptions.onApproveAndGenerate) {
+      sourceGenerateButton.disabled = true;
+      setStatus(sourceReviewStatusEl, "Saving the complete annotation and starting the course baseline…", "neutral");
+      try {
+        await hostOptions.onApproveAndGenerate(cloneAnnotation(state.annotation));
+        setStatus(sourceReviewStatusEl, "Annotation approved. The course generation job is running.", "success");
+      } catch (error) {
+        setStatus(sourceReviewStatusEl, error instanceof Error ? error.message : "Course generation failed to start.", "error");
+        renderSourceWorkflow();
+      }
+      return;
+    }
     const beforeApproval = workflow.getSnapshot();
     if (!beforeApproval.normalized) {
       setStatus(sourceReviewStatusEl, "Normalize and review a source first.", "error");
@@ -3048,14 +3058,66 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
     }
   }
 
+  function hasAnnotationCanvas(): boolean {
+    return Boolean(state.currentImageUrl) || (
+      courseMode
+      && state.annotation.image_width_px > 0
+      && state.annotation.image_height_px > 0
+    );
+  }
+
+  function courseOsmBbox(): [number, number, number, number] | null {
+    const alignment = workflow.getSnapshot().normalized?.sourceContext.source_alignment as Record<string, unknown> | null | undefined;
+    const sourceFrame = alignment?.source_frame;
+    const bbox = sourceFrame && typeof sourceFrame === "object"
+      ? (sourceFrame as Record<string, unknown>).bbox_wgs84
+      : null;
+    if (!Array.isArray(bbox) || bbox.length !== 4 || bbox.some((value) => !Number.isFinite(Number(value)))) return null;
+    const result = bbox.map(Number) as [number, number, number, number];
+    return result[0] < result[2] && result[1] < result[3] ? result : null;
+  }
+
+  function mountCourseOsmBackground(): void {
+    if (!courseMode || !osmMapHostEl || courseOsmMap) return;
+    const bbox = courseOsmBbox();
+    if (!bbox) return;
+    osmMapHostEl.hidden = false;
+    const map = new maplibregl.Map({
+      container: osmMapHostEl,
+      interactive: false,
+      attributionControl: false,
+      style: {
+        version: 8,
+        sources: {
+          osm: {
+            type: "raster",
+            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tileSize: 256,
+            attribution: "© OpenStreetMap contributors",
+          },
+        },
+        layers: [{ id: "osm", type: "raster", source: "osm", paint: { "raster-opacity": 0.72 } }],
+      },
+    });
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
+    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 0, duration: 0, maxZoom: 19 });
+    courseOsmMap = map;
+    window.requestAnimationFrame(() => map.resize());
+  }
+
   function updateStageVisibility(): void {
     const hasImage = Boolean(state.currentImageUrl);
+    const hasCanvas = hasAnnotationCanvas();
     stageEl.dataset.hasImage = hasImage ? "true" : "false";
+    stageEl.dataset.hasCanvas = hasCanvas ? "true" : "false";
     stageEl.dataset.loading = state.isReferenceImageLoading ? "true" : "false";
-    stageEl.dataset.emptyState = hasImage ? "ready" : state.isReferenceImageLoading ? "loading" : "empty";
-    boardEl.hidden = !hasImage;
-    stageEmptyEl.hidden = hasImage;
-    if (!hasImage) {
+    stageEl.dataset.emptyState = hasCanvas ? "ready" : state.isReferenceImageLoading ? "loading" : "empty";
+    boardEl.hidden = !hasCanvas;
+    boardEl.style.aspectRatio = hasCanvas
+      ? `${state.annotation.image_width_px} / ${state.annotation.image_height_px}`
+      : "";
+    stageEmptyEl.hidden = hasCanvas;
+    if (!hasCanvas) {
       const loadingDefaultPlan = state.referenceImageLoadingMessage === DEFAULT_REFERENCE_IMAGE_LOADING_MESSAGE;
       const i18nKey = state.isReferenceImageLoading && loadingDefaultPlan
         ? "sceneGraph.status.loadingDefaultPlan"
@@ -3893,7 +3955,7 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
   }
 
   function renderOverlay(): void {
-    if (!state.currentImageUrl || state.annotation.image_width_px <= 0 || state.annotation.image_height_px <= 0) {
+    if (!hasAnnotationCanvas() || state.annotation.image_width_px <= 0 || state.annotation.image_height_px <= 0) {
       overlayHostEl.innerHTML = "";
       updateStageVisibility();
       return;
@@ -3947,7 +4009,7 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
     imageMetaEl.dataset.loading = showInlineLoading ? "true" : "false";
     imageMetaEl.textContent = showInlineLoading
       ? state.referenceImageLoadingMessage
-      : state.currentImageUrl
+      : hasAnnotationCanvas()
         ? `${state.annotation.plan_id || "custom"} · ${state.annotation.image_width_px} × ${state.annotation.image_height_px}px · ${state.annotation.pixels_per_meter.toFixed(1)} px/m · ${state.annotation.centerlines.length} roads · ${state.annotation.centerlines.reduce((sum, item) => sum + item.cross_section_strips.length, 0)} strips · ${state.annotation.centerlines.reduce((sum, item) => sum + item.street_furniture_instances.length, 0)} furniture · ${state.annotation.regions.length} regions · ${(state.annotation.derived_regions ?? []).length} auto building regions · ${state.annotation.surface_annotations.length} design surfaces · ${state.annotation.station_strip_patches.length} strip patches`
         : "选择参考 plan 或导入 PNG 后，就可以在图上开始标注。";
     applyViewerTranslations(shell.rightRail, loadViewerLanguage());
@@ -4018,7 +4080,7 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
   }
 
   function imagePointFromPointer(event: PointerEvent): AnnotationPoint | null {
-    if (!state.currentImageUrl || state.annotation.image_width_px <= 0 || state.annotation.image_height_px <= 0) {
+    if (!hasAnnotationCanvas() || state.annotation.image_width_px <= 0 || state.annotation.image_height_px <= 0) {
       return null;
     }
     const svgEl = overlayHostEl.querySelector<SVGSVGElement>("#annotation-overlay-svg");
@@ -5755,7 +5817,7 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
   overlayHostEl.addEventListener(
     "dblclick",
     (event) => {
-      if (!state.currentImageUrl) {
+      if (!hasAnnotationCanvas()) {
         return;
       }
       if (state.drag?.kind === "functional_zone_draw") {
@@ -5806,7 +5868,7 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
   overlayHostEl.addEventListener(
     "pointerdown",
     (event) => {
-      if (!state.currentImageUrl) {
+      if (!hasAnnotationCanvas()) {
         return;
       }
       const hit = state.selectedTool === "adjust" ? featureHitFromTarget(event.target) : hitFromTarget(event.target);
@@ -6408,6 +6470,10 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
   renderReferencePlanOptions(FALLBACK_REFERENCE_PLAN.plan_id);
   renderScenarioDesignOptions();
   const initialWorkflowSnapshot = workflow.getSnapshot();
+  if (courseMode) {
+    sourceGenerateButton.textContent = "批准完整标注并生成 3D 基线";
+    sourceGenerateButton.title = "Persist this ReferenceAnnotation and start the course generation job.";
+  }
   if (initialWorkflowSnapshot.normalized) {
     state.annotation = normalizeAnnotation(initialWorkflowSnapshot.normalized.referenceAnnotation);
     if (initialWorkflowSnapshot.normalized.graph) {
@@ -6449,28 +6515,31 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
   }
   renderAll();
   renderSourceWorkflow();
-  const capabilityToken = workflow.beginRequest("capabilities");
-  void loadWorkflowCapabilities(capabilityToken.signal)
-    .then((capabilities) => {
-      if (!capabilityToken.isCurrent()) return;
-      workflow.setCapabilities(capabilities);
-      workflow.endRequest(capabilityToken);
-      renderSourceWorkflow();
-    })
-    .catch((error) => {
-      workflow.endRequest(capabilityToken, error);
-      renderSourceWorkflow();
+  mountCourseOsmBackground();
+  if (!courseMode) {
+    const capabilityToken = workflow.beginRequest("capabilities");
+    void loadWorkflowCapabilities(capabilityToken.signal)
+      .then((capabilities) => {
+        if (!capabilityToken.isCurrent()) return;
+        workflow.setCapabilities(capabilities);
+        workflow.endRequest(capabilityToken);
+        renderSourceWorkflow();
+      })
+      .catch((error) => {
+        workflow.endRequest(capabilityToken, error);
+        renderSourceWorkflow();
+      });
+    void loadScenarioDesigns({ silent: true });
+    void loadReferencePlans({ silent: true }).catch((error) => {
+      setStatus(
+        statusEl,
+        error instanceof Error && error.message !== "Failed to fetch"
+          ? error.message
+          : { key: "sceneGraph.status.failedRefreshReferencePlans", fallback: "Failed to refresh reference plans." },
+        "error",
+      );
     });
-  void loadScenarioDesigns({ silent: true });
-  void loadReferencePlans({ silent: true }).catch((error) => {
-    setStatus(
-      statusEl,
-      error instanceof Error && error.message !== "Failed to fetch"
-        ? error.message
-        : { key: "sceneGraph.status.failedRefreshReferencePlans", fallback: "Failed to refresh reference plans." },
-      "error",
-    );
-  });
+  }
 
   function refreshSceneGraphLanguage(): void {
     const language = loadViewerLanguage();
@@ -6488,6 +6557,8 @@ export function mountSceneGraphPage(shell: DesktopShell, workflow: WorkflowContr
       autoGraphTimer = null;
     }
     revokeCurrentObjectUrl();
+    courseOsmMap?.remove();
+    courseOsmMap = null;
     unsubscribeWorkflow();
     eventController.abort();
   };

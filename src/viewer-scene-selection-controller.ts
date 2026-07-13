@@ -18,6 +18,7 @@ export type ViewerSceneSelectionControllerDeps = {
   setCurrentManifest: (manifest: ViewerManifest) => void;
   loadScene: (option: SceneOption) => Promise<void>;
   afterLayoutLoaded: () => void;
+  persistSelectionInUrl?: boolean;
 };
 
 export function createViewerSceneSelectionController(
@@ -113,7 +114,7 @@ export function createViewerSceneSelectionController(
     const { key: defaultKey, fallbackMessage } = defaultSceneKeyForManifest(manifest, options, manifestOptions);
     deps.selectEl.value = defaultKey;
     deps.selectEl.title = optionsByKey.get(defaultKey)?.label ?? "";
-    updateQueryLayout(layoutPath);
+    if (deps.persistSelectionInUrl !== false) updateQueryLayout(layoutPath);
     await deps.loadScene(optionsByKey.get(defaultKey) ?? options[0]!);
     if (fallbackMessage) {
       deps.setStatus(fallbackMessage);

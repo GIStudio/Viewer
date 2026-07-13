@@ -26,6 +26,10 @@ export type WorkflowSourceContext = Readonly<Record<string, unknown> & {
   source_alignment?: Readonly<Record<string, unknown>> | null;
 }>;
 
+export type WorkflowSceneRef =
+  | Readonly<{ kind: "local_layout"; layoutPath: string }>
+  | Readonly<{ kind: "project_revision"; projectId: string; revisionId: string }>;
+
 export type NormalizedSceneSource = Readonly<{
   referenceAnnotation: ReferenceAnnotation;
   graph: Readonly<Record<string, unknown>> | null;
@@ -69,6 +73,7 @@ export type WorkflowSnapshot = Readonly<{
   sourceGeojson: Readonly<Record<string, unknown>> | null;
   normalized: NormalizedSceneSource | null;
   approvedSourceRevision: number | null;
+  sceneRef: WorkflowSceneRef | null;
   sceneLayoutPath: string | null;
   sceneRevision: SceneRevision | null;
   contextMassing: Readonly<Record<string, unknown>> | null;
@@ -106,6 +111,7 @@ export type WorkflowController = {
   setGenerationStarted(): TransitionResult;
   setGeneratedScene(input: {
     layoutPath: string;
+    sceneRef?: WorkflowSceneRef | null;
     sceneRevision?: SceneRevision | null;
     contextMassing?: Record<string, unknown> | null;
   }): boolean;
@@ -143,6 +149,7 @@ function initialSnapshot(): WorkflowSnapshot {
     sourceGeojson: null,
     normalized: null,
     approvedSourceRevision: null,
+    sceneRef: null,
     sceneLayoutPath: null,
     sceneRevision: null,
     contextMassing: null,
@@ -219,6 +226,7 @@ export function createWorkflowController(): WorkflowController {
         sourceGeojson: input.geojson === undefined ? snapshot.sourceGeojson : immutableCopy(input.geojson),
         normalized: null,
         approvedSourceRevision: null,
+        sceneRef: null,
         sceneLayoutPath: null,
         sceneRevision: null,
         contextMassing: null,
@@ -235,6 +243,7 @@ export function createWorkflowController(): WorkflowController {
         sourceRevision: nextRevision,
         normalized: immutableCopy(source),
         approvedSourceRevision: null,
+        sceneRef: null,
         sceneLayoutPath: null,
         sceneRevision: null,
         contextMassing: null,
@@ -279,7 +288,7 @@ export function createWorkflowController(): WorkflowController {
     setGenerationStarted() {
       const result = controller.transition("generate");
       if (!result.ok) return result;
-      publish({ sceneLayoutPath: null, sceneRevision: null, undoCommand: null, evaluation: null, lastError: null });
+      publish({ sceneRef: null, sceneLayoutPath: null, sceneRevision: null, undoCommand: null, evaluation: null, lastError: null });
       return result;
     },
     setGeneratedScene(input) {
@@ -289,6 +298,9 @@ export function createWorkflowController(): WorkflowController {
       }
       publish({
         step: "edit",
+        sceneRef: input.sceneRef
+          ? immutableCopy(input.sceneRef)
+          : Object.freeze({ kind: "local_layout" as const, layoutPath: input.layoutPath }),
         sceneLayoutPath: input.layoutPath,
         sceneRevision: input.sceneRevision ? immutableCopy(input.sceneRevision) : null,
         contextMassing: input.contextMassing ? immutableCopy(input.contextMassing) : null,

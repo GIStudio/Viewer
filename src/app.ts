@@ -459,12 +459,18 @@ function createAvatarFigure(): THREE.Group {
   return avatar;
 }
 
-function mountViewer(shell: DesktopShell, workflow: WorkflowController): Promise<() => void> {
-  return mountViewerImpl(shell, workflow);
+export type ViewerHostOptions = {
+  embedded?: boolean;
+  persistSceneCommands?: (commands: SceneMoveInstanceCommand[]) => Promise<SceneLayoutEditResponse>;
+};
+
+function mountViewer(shell: DesktopShell, workflow: WorkflowController, hostOptions: ViewerHostOptions = {}): Promise<() => void> {
+  return mountViewerImpl(shell, workflow, hostOptions);
 }
 
-async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController): Promise<() => void> {
+async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController, hostOptions: ViewerHostOptions): Promise<() => void> {
   const root = shell.root;
+  root.dataset.workbenchHost = hostOptions.embedded ? "course" : "expert";
   const eventController = new AbortController();
   const { signal } = eventController;
   const captureMode = isHeadlessCaptureRequest();
@@ -606,7 +612,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   };
   const unsubscribeCapabilityStatus = workflow.subscribe(renderCapabilityStatus);
   renderCapabilityStatus();
-  if (!workflow.getSnapshot().capabilities && !workflow.getSnapshot().busy.capabilities) {
+  if (!hostOptions.embedded && !workflow.getSnapshot().capabilities && !workflow.getSnapshot().busy.capabilities) {
     const capabilityToken = workflow.beginRequest("capabilities");
     void loadWorkflowCapabilities(capabilityToken.signal)
       .then((capabilities) => {
@@ -1382,6 +1388,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       syncDesignGraphTemplateFromManifest(manifest, currentLayoutPath);
     },
     loadScene,
+    persistSelectionInUrl: !hostOptions.embedded,
     afterLayoutLoaded: () => {
       updateMetricsPanel();
       renderConsistencyPanel();
@@ -1918,8 +1925,10 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     await sceneSelectionController.loadLayoutSelection(result.revision.layout_path, {
       sceneGlbPath: result.revision.scene_glb_path,
     });
-    const recent = await loadRecentLayouts(20, false).catch(() => []);
-    recentLayoutSelector.populate(recent, result.revision.layout_path);
+    if (!hostOptions.embedded) {
+      const recent = await loadRecentLayouts(20, false).catch(() => []);
+      recentLayoutSelector.populate(recent, result.revision.layout_path);
+    }
     workflow.setSceneRevision({
       revision: result.revision.revision,
       sha256: result.revision.sha256,
@@ -1936,7 +1945,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     workflow.setEditPending(true);
     syncSceneCommandEditor();
     try {
-      const result = await saveSceneLayoutEdits(layoutPath, base, commands);
+      const result = hostOptions.persistSceneCommands
+        ? await hostOptions.persistSceneCommands(commands)
+        : await saveSceneLayoutEdits(layoutPath, base, commands);
       lastSceneEditUndo = { ...result.undo, layoutPath: result.revision.layout_path };
       await loadSceneEditRevision(result);
       sceneCommandStatusEl.textContent = `Saved immutable revision ${result.revision.revision}.`;
@@ -3448,15 +3459,24 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     syncEnvironmentUi();
     syncLightingUi();
     resizeRenderer();
-    void loadDesignScenarioCatalog();
+    if (!hostOptions.embedded) {
+      void loadDesignScenarioCatalog();
+    } else {
+      designScenarioEl.innerHTML = `<option value="">课程项目 revision</option>`;
+      designScenarioEl.disabled = true;
+      designScenarioMetaEl.textContent = "课程模式由项目 API 管理场景候选与版本。";
+      designScenarioMetaEl.dataset.tone = "base";
+    }
     if (captureMode) {
       setStatus("Capture API ready");
     } else {
-      const requestedLayoutPath = parseQueryLayoutPath();
+      const requestedLayoutPath = hostOptions.embedded
+        ? workflow.getSnapshot().sceneLayoutPath
+        : parseQueryLayoutPath();
       let recentLayouts: RecentLayout[] = [];
       let initialLayoutCandidates = requestedLayoutPath ? [requestedLayoutPath] : [];
 
-      if (!requestedLayoutPath) {
+      if (!requestedLayoutPath && !hostOptions.embedded) {
         recentLayouts = await loadRecentLayouts(INITIAL_RECENT_LAYOUT_LIMIT);
         initialLayoutCandidates = recentLayouts.map((item) => item.layout_path);
       }
@@ -3483,7 +3503,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       }
 
       // If user passed ?layout=... and it failed, fallback to latest recent layouts.
-      if (requestedLayoutPath && lastLayoutError) {
+      if (requestedLayoutPath && lastLayoutError && !hostOptions.embedded) {
         recentLayouts = await loadRecentLayouts(RECENT_LAYOUT_BACKGROUND_LIMIT);
         const fallbackCandidates = recentLayouts
           .map((item) => item.layout_path)
@@ -3507,7 +3527,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       }
       animate();
       updateOverlay();
-      if (initialLayoutPath) {
+      if (initialLayoutPath && !hostOptions.embedded) {
         const initialLoaded = recentLayouts.some((item) => item.layout_path === initialLayoutPath)
           ? recentLayouts.length
           : 0;

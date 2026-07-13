@@ -281,6 +281,7 @@ export function createSceneGraphStageHtml(): string {
       <div id="annotation-stage" class="scene-layer-stage scene-canvas-stage" data-has-image="false" data-loading="true" data-empty-state="loading">
         <div id="annotation-stage-empty" class="scene-image-empty" data-i18n-key="sceneGraph.status.loadingDefaultPlan">Loading default reference plan...</div>
         <div id="annotation-board" class="scene-board" hidden>
+          <div id="annotation-osm-map" class="scene-osm-map" hidden aria-label="OpenStreetMap annotation background"></div>
           <img id="annotation-original-image" class="scene-original-image annotation-original-image" alt="Reference plan" />
           <div id="annotation-overlay-host" class="scene-graph-overlay"></div>
         </div>

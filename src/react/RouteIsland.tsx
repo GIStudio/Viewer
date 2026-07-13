@@ -84,7 +84,7 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
   }, [route, workflow]);
 
   if (route === "course-studio") {
-    return <CourseStudio language={language} />;
+    return <CourseStudio language={language} workflow={workflow} />;
   }
   return <ViewerDesktopShell route={route} language={language} hostRef={hostRef} workflow={workflow} />;
 }

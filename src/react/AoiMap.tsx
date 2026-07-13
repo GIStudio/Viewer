@@ -37,6 +37,7 @@ export function AoiMap({ bbox, onChange }: AoiMapProps) {
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
+    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 38, duration: 0, maxZoom: 18 });
     map.on("load", () => {
       map.addSource("course-aoi", { type: "geojson", data: polygon(bbox) });
       map.addLayer({ id: "course-aoi-fill", type: "fill", source: "course-aoi", paint: { "fill-color": "#f2b705", "fill-opacity": 0.22 } });
@@ -52,10 +53,11 @@ export function AoiMap({ bbox, onChange }: AoiMapProps) {
   }, []);
 
   useEffect(() => {
-    const source = mapRef.current?.getSource("course-aoi") as GeoJSONSource | undefined;
+    const map = mapRef.current;
+    const source = map?.getSource("course-aoi") as GeoJSONSource | undefined;
     source?.setData(polygon(bbox));
+    map?.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 38, duration: 0, maxZoom: 18 });
   }, [bbox]);
 
   return <div className="course-aoi-map" ref={host} aria-label="OpenStreetMap area selector" />;
 }
-

@@ -23,9 +23,10 @@ type ViewerDesktopShellProps = {
   language: ViewerLanguage;
   hostRef: RefObject<HTMLDivElement>;
   workflow: WorkflowController;
+  embedded?: boolean;
 };
 
-export function ViewerDesktopShell({ route, language, hostRef, workflow }: ViewerDesktopShellProps) {
+export function ViewerDesktopShell({ route, language, hostRef, workflow, embedded = false }: ViewerDesktopShellProps) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [enabledActions, setEnabledActions] = useState<Set<ShellMenuActionId>>(() => new Set());
   const workflowSnapshot = useSyncExternalStore(
@@ -120,6 +121,7 @@ export function ViewerDesktopShell({ route, language, hostRef, workflow }: Viewe
         data-route={route}
       >
         <Layout.Header className="desktop-shell-topbar roadgen-ant-header">
+          {!embedded ? <>
           <div className="desktop-shell-brand">
             <div className="desktop-shell-traffic-lights" aria-hidden="true">
               <i />
@@ -180,6 +182,7 @@ export function ViewerDesktopShell({ route, language, hostRef, workflow }: Viewe
               {t("topbar.generate", "Generate & Load")}
             </Button>
           </div>
+          </> : null}
         </Layout.Header>
         <div className="workflow-shell-bar">
           <nav className="workflow-step-strip" aria-label={t("workflow.navigation", "[missing workflow.navigation]")}>

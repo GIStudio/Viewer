@@ -65,11 +65,13 @@ export type ViewerManifest = {
   final_scene: {
     glb_url: string;
     label: string;
+    artifact_id?: string;
   };
   production_steps?: Array<{
     step_id: string;
     title: string;
     glb_url: string;
+    artifact_id?: string;
   }>;
   instances?: Record<string, Record<string, unknown>>;
   asset_descriptions?: Record<string, unknown>;

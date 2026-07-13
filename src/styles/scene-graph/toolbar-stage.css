@@ -245,6 +245,14 @@
   background: rgba(248, 250, 252, 0.96);
 }
 
+.scene-layer-stage[data-has-canvas="true"][data-has-image="false"] .scene-board {
+  background-color: #f7faf9;
+  background-image:
+    linear-gradient(rgba(16, 45, 58, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 45, 58, 0.08) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
 .scene-layer-stage[data-empty-state="loading"] {
   min-height: 6rem;
   padding: 0.5rem 1rem 1rem;
@@ -293,6 +301,16 @@
   width: 100%;
   height: auto;
   background: #ebe7db;
+}
+
+.scene-osm-map {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.scene-osm-map[hidden] {
+  display: none;
 }
 
 .scene-graph-overlay {

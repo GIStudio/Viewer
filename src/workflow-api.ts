@@ -85,6 +85,8 @@ export type OsmBuildingsRequest = {
   aoi_bbox: Wgs84Bbox;
 };
 
+export type OsmSceneSourceRequest = OsmBuildingsRequest & { force_refetch?: boolean };
+
 export type OsmBuildingsResponse = {
   source: WorkflowSourceDescriptor;
   geojson: Record<string, unknown>;
@@ -181,6 +183,17 @@ export async function loadOsmBuildings(
   signal?: AbortSignal,
 ): Promise<OsmBuildingsResponse> {
   return apiJson<OsmBuildingsResponse>("/api/scene-sources/osm-buildings", {
+    method: "POST",
+    body: JSON.stringify(request),
+    signal,
+  });
+}
+
+export async function loadOsmSceneSource(
+  request: OsmSceneSourceRequest,
+  signal?: AbortSignal,
+): Promise<NormalizedSceneSourceResponse> {
+  return apiJson<NormalizedSceneSourceResponse>("/api/scene-sources/osm", {
     method: "POST",
     body: JSON.stringify(request),
     signal,
