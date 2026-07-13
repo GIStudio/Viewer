@@ -17,6 +17,12 @@ import {
 } from "../course-api";
 import type { ViewerLanguage } from "../viewer-i18n";
 import { AoiMap } from "./AoiMap";
+import {
+  ReferenceReviewMap,
+  type ReviewFeature,
+  type ReviewFeatureCollection,
+  type ReviewGeometry,
+} from "./ReferenceReviewMap";
 
 type StepId = "area" | "data" | "annotation" | "design" | "evaluation" | "compare_export";
 const STEPS: Array<{ id: StepId; zh: string; en: string; index: string }> = [
@@ -159,7 +165,7 @@ export function CourseStudio({ language }: { language: ViewerLanguage }) {
             <div className="course-stage-heading"><div><span>{STEPS.find((item) => item.id === step)?.index} / 06</span><h1>{STEPS.find((item) => item.id === step)?.[zh ? "zh" : "en"]}</h1></div><p>{project.name}<br /><small>{project.city} · {project.design_goal}</small></p></div>
             {step === "area" ? <AreaStage project={project} language={language} /> : null}
             {step === "data" ? <DataStage api={api} project={project} latestSource={latestSource} language={language} act={act} onRefresh={() => refreshProjectData(project.id)} onNext={() => selectStep("annotation")} /> : null}
-            {step === "annotation" ? <AnnotationStage api={api} source={latestSource} language={language} onNext={() => selectStep("design")} /> : null}
+            {step === "annotation" ? <AnnotationStage api={api} project={project} source={latestSource} language={language} act={act} onRefresh={() => refreshProjectData(project.id)} onNext={() => selectStep("design")} /> : null}
             {step === "design" ? <DesignStage api={api} project={project} source={latestSource} revisions={revisions} language={language} act={act} onRefresh={() => refreshProjectData(project.id)} /> : null}
             {step === "evaluation" ? <EvaluationStage api={api} project={project} revision={latestRevision} evaluations={evaluations} profiles={profiles} language={language} act={act} onRefresh={() => refreshProjectData(project.id)} /> : null}
             {step === "compare_export" ? <CompareStage api={api} project={project} revisions={revisions} comparison={comparison} setComparison={setComparison} language={language} act={act} /> : null}
@@ -223,10 +229,133 @@ function DataStage({ api, project, latestSource, language, act, onRefresh, onNex
   return <div className="course-data-layout"><section className="course-action-ledger"><div className="course-action-row"><span>01</span><div><strong>{zh ? "从 OpenStreetMap 获取" : "Fetch from OpenStreetMap"}</strong><p>{zh ? "道路、建筑、POI与土地利用；保存来源和处理日志。" : "Roads, buildings, POI and land use with provenance."}</p></div><Button type="primary" onClick={() => void act(zh ? "正在获取并标注 OSM…" : "Fetching and annotating OSM…", async () => { const job = await api.post<PlatformJob>(`/api/v1/projects/${project.id}/sources/osm`, {}); const done = await waitForJob(api, job); if (done.status !== "succeeded") throw new Error(done.error); await onRefresh(); })}>{zh ? "获取街区" : "Fetch area"}</Button></div><div className="course-action-row"><span>02</span><div><strong>{zh ? "导入普通 GeoJSON" : "Import standard GeoJSON"}</strong><p>EPSG:4326 · stable IDs · automatic roles</p></div><label className="course-file-button"><input type="file" accept=".geojson,.json,application/geo+json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} />{zh ? "选择文件" : "Choose file"}</label></div></section><section className="course-quality-panel"><span className="course-eyebrow">NORMALIZATION GATE</span>{latestSource ? <><h2>{latestSource.kind.toUpperCase()}</h2><div className="course-quality-chips"><span data-ok={String(latestSource.quality_report.conversion_ok)}>conversion_ok</span><span data-ok={String(latestSource.quality_report.topology_ok)}>topology_ok</span><span>geo_delta {String(latestSource.quality_report.geo_delta)}m</span></div><Button onClick={() => void api.downloadArtifact(latestSource.normalized_artifact_id, "normalized.geojson")}>{zh ? "下载标准 GeoJSON" : "Download GeoJSON"}</Button><Button type="primary" onClick={onNext}>{zh ? "进入2D检查" : "Review in 2D"}</Button></> : <p>{zh ? "尚未导入数据。" : "No source imported yet."}</p>}</section></div>;
 }
 
-function AnnotationStage({ api, source, language, onNext }: { api: CourseApi; source: SceneSource | null; language: ViewerLanguage; onNext: () => void }) {
+const REVIEW_ROLES = [
+  "centerline",
+  "road_intersection",
+  "building_footprint",
+  "functional_zone",
+  "tree_candidate",
+  "street_furniture_anchor",
+] as const;
+
+type ReviewAction = { op: string; feature_id: string; before?: unknown; after?: unknown };
+
+function AnnotationStage({ api, project, source, language, act, onRefresh, onNext }: { api: CourseApi; project: CourseProject; source: SceneSource | null; language: ViewerLanguage; act: any; onRefresh: () => Promise<void>; onNext: () => void }) {
   const zh = language === "zh";
+  const [draft, setDraft] = useState<ReviewFeatureCollection | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mode, setMode] = useState<"select" | "add_tree" | "add_furniture">("select");
+  const [actions, setActions] = useState<ReviewAction[]>([]);
+  const [notes, setNotes] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [mapState, setMapState] = useState<{ status: "loading" | "ready" | "error"; zoom?: number }>({ status: "loading" });
+
+  useEffect(() => {
+    if (!source) { setDraft(null); return; }
+    let cancelled = false;
+    setDraft(null);
+    setSelectedId(null);
+    setActions([]);
+    setLoadError("");
+    api.request<ReviewFeatureCollection>(api.artifactUrl(source.normalized_artifact_id))
+      .then((payload) => { if (!cancelled) setDraft(payload); })
+      .catch((reason) => { if (!cancelled) setLoadError(reason instanceof Error ? reason.message : String(reason)); });
+    return () => { cancelled = true; };
+  }, [api, source?.id]);
+
+  const selectedFeature = useMemo(
+    () => draft?.features.find((feature) => feature.id === selectedId) ?? null,
+    [draft, selectedId],
+  );
+  const roleCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const feature of draft?.features ?? []) {
+      const role = String(feature.properties.role ?? "unclassified");
+      counts[role] = (counts[role] ?? 0) + 1;
+    }
+    return counts;
+  }, [draft]);
+
+  const updateFeature = (featureId: string, updater: (feature: ReviewFeature) => ReviewFeature, action: ReviewAction) => {
+    setDraft((current) => current ? { ...current, features: current.features.map((feature) => feature.id === featureId ? updater(feature) : feature) } : current);
+    setActions((current) => [...current, action]);
+  };
+  const updateGeometry = (featureId: string, geometry: ReviewGeometry) => {
+    const feature = draft?.features.find((item) => item.id === featureId);
+    if (!feature) return;
+    updateFeature(featureId, (item) => ({ ...item, geometry, properties: { ...item.properties, annotation_status: "human_modified", annotation_source: "manual.course_review", annotation_confidence: 1 } }), { op: "update_geometry", feature_id: featureId, before: feature.geometry, after: geometry });
+  };
+  const addPoint = (coordinates: [number, number]) => {
+    if (mode === "select") return;
+    const role = mode === "add_tree" ? "tree_candidate" : "street_furniture_anchor";
+    const feature: ReviewFeature = {
+      type: "Feature",
+      id: `manual-${role}-${crypto.randomUUID()}`,
+      properties: { role, annotation_status: "human_added", annotation_source: "manual.course_review", annotation_confidence: 1 },
+      geometry: { type: "Point", coordinates },
+    };
+    setDraft((current) => current ? { ...current, features: [...current.features, feature] } : current);
+    setActions((current) => [...current, { op: "add_feature", feature_id: feature.id, after: feature }]);
+    setSelectedId(feature.id);
+    setMode("select");
+  };
+  const deleteSelected = () => {
+    if (!draft || !selectedFeature) return;
+    setDraft({ ...draft, features: draft.features.filter((feature) => feature.id !== selectedFeature.id) });
+    setActions((current) => [...current, { op: "delete_feature", feature_id: selectedFeature.id, before: selectedFeature }]);
+    setSelectedId(null);
+  };
+  const changeRole = (role: string) => {
+    if (!selectedFeature) return;
+    const before = selectedFeature.properties.role;
+    updateFeature(selectedFeature.id, (feature) => ({
+      ...feature,
+      properties: { ...feature.properties, role, annotation_status: "human_modified", annotation_source: "manual.course_review", annotation_confidence: 1 },
+    }), { op: "change_role", feature_id: selectedFeature.id, before, after: role });
+  };
+
   if (!source) return <div className="course-empty"><h2>{zh ? "先完成数据导入" : "Import data first"}</h2></div>;
-  return <div className="course-annotation-layout"><section><span className="course-eyebrow">AUTO ANNOTATION</span><h2>{zh ? "每项推断都保留来源和置信度" : "Every inferred role keeps its source and confidence"}</h2><div className="course-role-table">{Object.entries(source.role_counts ?? {}).map(([role, count]) => <div key={role}><code>{role}</code><strong>{count}</strong></div>)}</div>{source.warnings?.map((warning) => <div className="course-notice" key={warning}>{warning}</div>)}</section><section className="course-inspector"><h3>{zh ? "审阅操作" : "Review actions"}</h3><Button block onClick={() => { window.location.hash = "#scene-graph"; }}>{zh ? "打开完整2D标注器" : "Open full 2D annotator"}</Button>{source.annotation_artifact_id ? <Button block onClick={() => void api.downloadArtifact(source.annotation_artifact_id!, "reference-annotation.json")}>{zh ? "下载中间标注" : "Download annotation"}</Button> : null}<Button block type="primary" onClick={onNext}>{zh ? "批准并进入3D" : "Approve for 3D"}</Button></section></div>;
+  if (loadError) return <div className="course-empty"><div><h2>{zh ? "无法载入当前项目标注" : "Unable to load project annotation"}</h2><p>{loadError}</p></div></div>;
+  if (!draft) return <div className="course-empty"><Spin /><p>{zh ? "正在载入当前项目的标注…" : "Loading this project's annotation…"}</p></div>;
+  const bbox = (project.aoi_bbox ?? GUANGZHOU_BBOX) as [number, number, number, number];
+  return <div className="course-review-workbench">
+    <section className="course-review-map-panel">
+      <ReferenceReviewMap
+        bbox={bbox}
+        geojson={draft}
+        selectedFeature={selectedFeature}
+        mode={mode}
+        onSelect={setSelectedId}
+        onMapClick={addPoint}
+        onGeometryChange={updateGeometry}
+        onMapStatus={(status, zoom) => setMapState({ status, zoom })}
+      />
+      <div className="course-review-map-meta">
+        <span data-status={mapState.status}>{mapState.status === "ready" ? "OSM READY" : mapState.status === "error" ? "OSM TILE ERROR" : "LOADING OSM"}</span>
+        <strong>{zh ? "底图已按项目 AOI 自动匹配层级" : "Basemap fitted to project AOI"}</strong>
+        <code>z{mapState.zoom?.toFixed(1) ?? "–"} · {bbox.map((value) => value.toFixed(5)).join(" / ")}</code>
+      </div>
+      <div className="course-review-legend">
+        {REVIEW_ROLES.map((role) => <span key={role} data-role={role}><i />{role.replace(/_/g, " ")}</span>)}
+      </div>
+    </section>
+    <aside className="course-review-tools">
+      <div><span className="course-eyebrow">PROJECT SOURCE / {source.kind.toUpperCase()}</span><h2>{zh ? "检查自动标注" : "Review automatic annotations"}</h2><p>{zh ? "点击要素后可修改类别；拖动黄色顶点可修改几何。" : "Select a feature to change its role. Drag yellow vertices to edit geometry."}</p></div>
+      <div className="course-review-mode-switch">
+        <button data-active={mode === "select"} onClick={() => setMode("select")}>{zh ? "选择 / 拖动" : "Select / drag"}</button>
+        <button data-active={mode === "add_tree"} onClick={() => setMode("add_tree")}>＋ {zh ? "树点" : "Tree"}</button>
+        <button data-active={mode === "add_furniture"} onClick={() => setMode("add_furniture")}>＋ {zh ? "设施" : "Facility"}</button>
+      </div>
+      <div className="course-review-counts">{Object.entries(roleCounts).map(([role, count]) => <div key={role}><span>{role}</span><strong>{count}</strong></div>)}</div>
+      <div className="course-review-selection" data-empty={String(!selectedFeature)}>
+        <span className="course-eyebrow">SELECTED FEATURE</span>
+        {selectedFeature ? <><strong>{String(selectedFeature.properties.name ?? selectedFeature.id)}</strong><code>{selectedFeature.geometry.type} · {selectedFeature.id}</code><label>{zh ? "标注类别" : "Annotation role"}<Select value={String(selectedFeature.properties.role ?? "")} options={REVIEW_ROLES.map((role) => ({ value: role, label: role }))} onChange={changeRole} /></label><Button danger onClick={deleteSelected}>{zh ? "删除这个要素" : "Delete feature"}</Button></> : <p>{zh ? "从地图上选择道路、建筑、区域或点。" : "Select a road, building, zone or point on the map."}</p>}
+      </div>
+      <label className="course-review-notes">{zh ? "审核说明" : "Review notes"}<Input.TextArea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder={zh ? "记录无法判断或需要教师复核的内容" : "Record ambiguity or items requiring teacher review"} /></label>
+      <div className="course-review-actions"><Button onClick={() => void api.downloadArtifact(source.normalized_artifact_id, "review-draft.geojson")}>{zh ? "下载当前输入" : "Download input"}</Button><Button type="primary" disabled={mapState.status === "loading"} onClick={() => void act(zh ? "正在保存审核版本…" : "Saving reviewed version…", async () => { await api.post(`/api/v1/projects/${project.id}/sources/${source.id}/review`, { geojson: draft, actions, notes }); await onRefresh(); await onNext(); })}>{zh ? `保存审核版本并进入3D${actions.length ? `（${actions.length}项修改）` : ""}` : `Save review & continue${actions.length ? ` (${actions.length} edits)` : ""}`}</Button></div>
+      {source.warnings?.map((warning) => <div className="course-notice" key={warning}>{warning}</div>)}
+    </aside>
+  </div>;
 }
 
 function DesignStage({ api, project, source, revisions, language, act, onRefresh }: { api: CourseApi; project: CourseProject; source: SceneSource | null; revisions: SceneRevision[]; language: ViewerLanguage; act: any; onRefresh: () => Promise<void> }) {
