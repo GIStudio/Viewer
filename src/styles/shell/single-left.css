@@ -72,6 +72,30 @@
   background: rgba(255, 255, 255, 0.18);
 }
 
+.workbench-sidebar-group-label {
+  display: grid;
+  place-items: center;
+  flex: 0 0 1.35rem;
+  width: 100%;
+  overflow: hidden;
+  color: #8fa9b0;
+  font: 800 0.46rem/1 var(--rg-mono-font, ui-monospace, monospace);
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-group-label:first-child {
+  color: #f4c430;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-button[data-sidebar-group="navigation"] {
+  flex-basis: 3rem;
+  min-height: 3rem;
+  background: rgba(255, 255, 255, 0.035);
+}
+
 .desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-button,
 .desktop-shell[data-shell-mode="course_single_left"] .workbench-sidebar-button {
   position: relative;

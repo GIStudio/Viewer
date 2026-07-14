@@ -535,6 +535,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     designToggleEl,
     designPanelEl,
     generationDialogEl,
+    generationSourceSummaryEl,
+    generationStrategySummaryEl,
     designReviewRunEl,
     designCloseEl,
     designPresetEl,
@@ -613,6 +615,27 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   const renderCapabilityStatus = (): void => {
     const capabilities = workflow.getSnapshot().capabilities;
     capabilityStatusEl.innerHTML = renderWorkflowCapabilities(capabilities);
+  };
+  const updateGenerationDialogContract = (): void => {
+    const snapshot = workflow.getSnapshot();
+    const llm = snapshot.capabilities?.llm as Record<string, unknown> | undefined;
+    const text = llm?.text as Record<string, unknown> | undefined;
+    const hasApprovedSource = Boolean(
+      snapshot.normalized
+      && snapshot.approvedSourceRevision === snapshot.sourceRevision,
+    );
+    generationSourceSummaryEl.textContent = hasApprovedSource
+      ? translateViewerKey(currentLang, "viewer.generationDialog.sourceApproved")
+      : snapshot.normalized
+        ? translateViewerKey(currentLang, "viewer.generationDialog.sourceAwaitingApproval")
+        : translateViewerKey(currentLang, "viewer.generationDialog.sourceExpert");
+    generationStrategySummaryEl.textContent = text?.configured === true
+      ? translateViewerKey(currentLang, "viewer.generationDialog.strategyLlm")
+      : translateViewerKey(currentLang, "viewer.generationDialog.strategyParametric");
+    designGenerateEl.disabled = Boolean(snapshot.normalized) && !hasApprovedSource;
+    designGenerateEl.title = designGenerateEl.disabled
+      ? (translateViewerKey(currentLang, "viewer.generationDialog.approvalRequired") ?? "")
+      : "";
   };
   const unsubscribeCapabilityStatus = workflow.subscribe(renderCapabilityStatus);
   renderCapabilityStatus();
@@ -1314,6 +1337,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       updateOverlay();
     },
     onDesignOpen: () => {
+      updateGenerationDialogContract();
       populateDesignPresets();
       scheduleDesignMatrixRefresh({ force: true });
     },
@@ -2821,6 +2845,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     root.dataset.viewerLanguage = language;
     applyViewerTranslations(root, language);
     updateShellSectionTexts();
+    updateGenerationDialogContract();
     shell.setHints(localizedViewerHints());
     compareMode.refreshLanguage();
     void historyPanelController.refreshLanguage();
@@ -2881,11 +2906,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
 
   designToggleEl.addEventListener("click", () => panelController.setOpen("design", !panelController.isOpen("design")), { signal });
   generationRunEl.addEventListener("click", () => {
-    const workflowSnapshot = workflow.getSnapshot();
-    const run = workflowSnapshot.normalized
-      ? workflowBridge.runGeneration()
-      : designController.runDesignGeneration().finally(scheduleDesignMatrixRefresh);
-    void run;
+    updateGenerationDialogContract();
+    panelController.closeAll();
+    panelController.setOpen("design", true);
   }, { signal });
   root.querySelectorAll<HTMLElement>("[data-close-generation]").forEach((el) => {
     el.addEventListener("click", () => panelController.setOpen("design", false), { signal });
@@ -2928,7 +2951,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   }, { signal });
   designScenarioAnnotationEl.addEventListener("click", () => void openSelectedDesignScenarioAnnotation(), { signal });
   designGenerateEl.addEventListener("click", () => {
-    void designController.runDesignGeneration().finally(scheduleDesignMatrixRefresh);
+    const workflowSnapshot = workflow.getSnapshot();
+    const run = workflowSnapshot.normalized
+      ? workflowBridge.runGeneration()
+      : designController.runDesignGeneration().finally(scheduleDesignMatrixRefresh);
+    void run;
   }, { signal });
   designBenchmarkEl.addEventListener("click", () => void designController.loadBenchmarkExplorer(), { signal });
   designBranchHistoryEl.addEventListener("click", () => void designController.loadBranchRunHistory(), { signal });

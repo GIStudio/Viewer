@@ -136,6 +136,40 @@
   width: 100%;
 }
 
+.studio-professional-tool-switch {
+  display: grid;
+  grid-template-columns: minmax(15rem, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  width: min(650px, 56vw);
+}
+
+.studio-tool-switch-note {
+  max-width: 12rem;
+  color: var(--rg-muted);
+  font: 700 0.62rem/1.3 var(--rg-mono-font);
+  letter-spacing: 0.025em;
+}
+
+.studio-course-entry.ant-btn {
+  min-height: 2.25rem;
+  border-color: var(--rg-ink) !important;
+  border-radius: 3px;
+  color: var(--rg-ink) !important;
+  background: var(--rg-yellow) !important;
+  box-shadow: 3px 3px 0 var(--rg-ink) !important;
+  font-weight: 800;
+}
+
+.studio-course-entry.ant-btn:hover,
+.studio-course-entry.ant-btn:focus-visible {
+  border-color: var(--rg-coral) !important;
+  color: var(--rg-ink) !important;
+  background: var(--rg-mint) !important;
+  transform: translate(1px, 1px);
+  box-shadow: 2px 2px 0 var(--rg-ink) !important;
+}
+
 .studio-header-actions {
   display: flex;
   align-items: center;

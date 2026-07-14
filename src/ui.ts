@@ -30,7 +30,7 @@ interface HeaderOptions {
 const ROUTES: Record<AppRoute, RouteConfig> = {
   "course-studio": {
     id: "course-studio",
-    index: "00",
+    index: "CS",
     group: "course",
     label: "Course Studio",
     labelZh: "课程工作台",
@@ -41,7 +41,7 @@ const ROUTES: Record<AppRoute, RouteConfig> = {
   },
   viewer: {
     id: "viewer",
-    index: "01",
+    index: "3D",
     group: "professional",
     label: "3D Viewer",
     labelZh: "3D 查看器",
@@ -52,10 +52,10 @@ const ROUTES: Record<AppRoute, RouteConfig> = {
   },
   "scene-graph": {
     id: "scene-graph",
-    index: "02",
+    index: "2D",
     group: "professional",
-    label: "Reference",
-    labelZh: "参考图标注",
+    label: "2D Annotation",
+    labelZh: "2D 标注",
     path: "#scene-graph",
     kicker: "Viewer / Reference",
     title: "Reference Plan Annotation",
@@ -65,7 +65,7 @@ const ROUTES: Record<AppRoute, RouteConfig> = {
   },
   "asset-editor": {
     id: "asset-editor",
-    index: "03",
+    index: "AS",
     group: "professional",
     label: "Asset Editor",
     labelZh: "资产编辑器",
@@ -78,7 +78,7 @@ const ROUTES: Record<AppRoute, RouteConfig> = {
   },
   "model-input-browser": {
     id: "model-input-browser",
-    index: "04",
+    index: "MI",
     group: "professional",
     label: "Model Input Browser",
     labelZh: "模型输入审计",

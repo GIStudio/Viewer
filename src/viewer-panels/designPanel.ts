@@ -167,7 +167,7 @@ export function renderDesignPanelHtml(): string {
               <small>按上方结构、街道家具设计目标和补充要求生成场景。</small>
             </div>
             <div class="viewer-design-action-row">
-              <button id="viewer-design-generate" class="viewer-nav-button" type="button">Generate & Load / 生成并加载</button>
+              <button id="viewer-design-generate" class="viewer-nav-button" type="button">Confirm Generation &amp; Load / 确认生成并加载</button>
             </div>
           </section>
           <details class="viewer-design-advanced-details viewer-design-analysis-details">

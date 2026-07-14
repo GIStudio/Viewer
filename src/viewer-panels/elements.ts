@@ -42,6 +42,8 @@ export function collectViewerPanelElements(root: HTMLElement | Document): Viewer
     designToggleEl: requireElement<HTMLButtonElement>(root, "#viewer-design-toggle"),
     designPanelEl: requireElement<HTMLElement>(root, "#viewer-design-panel"),
     generationDialogEl: requireElement<HTMLElement>(root, "#viewer-generation-dialog"),
+    generationSourceSummaryEl: requireElement<HTMLElement>(root, "#viewer-generation-source-summary"),
+    generationStrategySummaryEl: requireElement<HTMLElement>(root, "#viewer-generation-strategy-summary"),
     designReviewRunEl: requireElement<HTMLButtonElement>(root, "#viewer-design-review-run"),
     designCloseEl: requireElement<HTMLButtonElement>(root, "#viewer-design-close"),
     designPresetEl: requireElement<HTMLSelectElement>(root, "#viewer-design-preset"),

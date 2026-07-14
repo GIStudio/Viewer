@@ -325,11 +325,19 @@ export function bindDesktopShell(
     rightTabPanels.innerHTML = "";
     let previousGroup: WorkbenchSidebarPage["group"] | null = null;
     pages.forEach((page) => {
-      if (previousGroup && previousGroup !== page.group) {
-        const divider = document.createElement("span");
-        divider.className = "workbench-sidebar-divider";
-        divider.setAttribute("aria-hidden", "true");
-        rightTabButtons.appendChild(divider);
+      if (previousGroup !== page.group) {
+        if (previousGroup) {
+          const divider = document.createElement("span");
+          divider.className = "workbench-sidebar-divider";
+          divider.setAttribute("aria-hidden", "true");
+          rightTabButtons.appendChild(divider);
+        }
+        const groupLabel = document.createElement("span");
+        groupLabel.className = "workbench-sidebar-group-label";
+        groupLabel.dataset.i18nKey = `sidebar.group.${page.group}`;
+        groupLabel.textContent = translateViewerKey(currentLanguage, `sidebar.group.${page.group}`) ?? page.group;
+        groupLabel.title = groupLabel.textContent;
+        rightTabButtons.appendChild(groupLabel);
       }
       previousGroup = page.group;
       const panelId = `desktop-shell-tab-panel-${page.id}`;

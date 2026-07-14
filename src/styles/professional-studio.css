@@ -25,13 +25,47 @@
 }
 
 .desktop-shell-workbench-select {
-  width: min(420px, 44vw);
+  width: 100%;
+}
+
+@media (max-width: 1240px) {
+  .desktop-shell[data-shell-mode="single_left_overlay"] .studio-tool-switch-note {
+    display: none;
+  }
+
+  .desktop-shell[data-shell-mode="single_left_overlay"] .studio-professional-tool-switch {
+    grid-template-columns: minmax(13rem, 1fr);
+    width: min(390px, 38vw);
+  }
 }
 
 .desktop-shell[data-shell-mode="single_left_overlay"] :is(.ant-select-selector, .ant-input, .ant-input-number, .ant-btn-default) {
   border-color: var(--rg-line) !important;
   background: var(--rg-surface) !important;
   box-shadow: none !important;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .studio-header-context-value {
+  width: min(650px, 56vw);
+}
+
+@media (max-width: 1240px) {
+  .desktop-shell[data-shell-mode="single_left_overlay"] .studio-header-context-value {
+    width: min(390px, 38vw);
+  }
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .studio-course-entry.ant-btn.ant-btn-default {
+  border-color: var(--rg-ink) !important;
+  background: var(--rg-yellow) !important;
+  box-shadow: 3px 3px 0 var(--rg-ink) !important;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .studio-course-entry.ant-btn.ant-btn-default:hover,
+.desktop-shell[data-shell-mode="single_left_overlay"] .studio-course-entry.ant-btn.ant-btn-default:focus-visible {
+  border-color: var(--rg-coral) !important;
+  background: var(--rg-mint) !important;
+  box-shadow: 2px 2px 0 var(--rg-ink) !important;
 }
 
 .desktop-shell[data-shell-mode="single_left_overlay"] :is(.ant-select-focused .ant-select-selector, .ant-input:focus, .ant-input-number-focused, .ant-btn-default:focus-visible) {
@@ -310,6 +344,24 @@
   border: 1px solid var(--rg-line);
   border-radius: 3px;
   background: var(--rg-paper-deep);
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-generation-dialog-contract {
+  border-color: var(--rg-ink);
+  background: var(--rg-ink);
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-generation-dialog-contract > div {
+  background: var(--rg-surface);
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-generation-dialog-contract span {
+  color: var(--rg-coral);
+  font-family: var(--rg-mono-font);
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-generation-dialog-contract strong {
+  color: var(--rg-ink);
 }
 
 .desktop-shell[data-shell-mode="single_left_overlay"] .stage-pill {

@@ -1,4 +1,4 @@
-import { Button, Layout, Select, Tabs } from "antd";
+import { Button, Layout, Select, Tabs, Tooltip } from "antd";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
 
@@ -138,22 +138,36 @@ export function ViewerDesktopShell({
             variant="professional"
             language={language}
             className="desktop-shell-topbar roadgen-ant-header"
-            contextLabel={t("studio.currentWorkbench", "Current workbench")}
+            contextLabel={t("studio.professionalTool", "Professional tool")}
             contextValue={(
-              <Select
-                className="desktop-shell-workbench-select"
-                aria-label={t("studio.currentWorkbench", "Current workbench")}
-                value={route}
-                options={routeItems}
-                optionRender={(option) => {
-                  const id = option.value as AppRoute;
-                  return <span className="studio-route-option"><small>{ROUTES[id].index}</small>{option.label}</span>;
-                }}
-                onChange={(nextRoute) => navigateTo(nextRoute as AppRoute)}
-              />
+              <div className="studio-professional-tool-switch">
+                <Select
+                  className="desktop-shell-workbench-select"
+                  aria-label={t("studio.professionalTool", "Professional tool")}
+                  value={route}
+                  options={routeItems}
+                  optionRender={(option) => {
+                    const id = option.value as AppRoute;
+                    return <span className="studio-route-option"><small>{ROUTES[id].index}</small>{option.label}</span>;
+                  }}
+                  onChange={(nextRoute) => navigateTo(nextRoute as AppRoute)}
+                />
+                <span className="studio-tool-switch-note">
+                  {t("studio.freeToolSwitch", "Free switching · workflow and scene stay unchanged")}
+                </span>
+              </div>
             )}
             actions={(
               <>
+                <Tooltip title={t("studio.courseEntryHint", "Open the six-step student course workflow") }>
+                  <Button
+                    className="studio-course-entry"
+                    type="default"
+                    onClick={() => navigateTo("course-studio")}
+                  >
+                    {t("studio.openCourse", "Course Studio")}
+                  </Button>
+                </Tooltip>
                 <Select
                   className="desktop-shell-language-select"
                   aria-label={t("language.group", "Language")}

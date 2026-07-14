@@ -7,14 +7,13 @@ export function createViewerStageHtml(): string {
     <div class="viewer-shell viewer-shell-embedded">
 
       <div class="stage-toolbar" data-od-id="stage-toolbar">
-        <div class="stage-toolbar-group stage-toolbar-flow" data-od-id="toolbar-left" aria-label="Generation workflow" data-i18n-aria-label-key="viewer.stage.workflow">
-          <button class="stage-toolbar-button stage-toolbar-button-primary stage-flow-step" type="button" id="viewer-generate-and-load">
-            <span class="stage-flow-index">01</span>
+        <div class="stage-toolbar-group stage-toolbar-flow" data-od-id="toolbar-left" aria-label="Generation and view controls" data-i18n-aria-label-key="viewer.stage.workflow">
+          <button class="stage-toolbar-button stage-toolbar-button-primary stage-flow-step" type="button" id="viewer-generate-and-load" aria-haspopup="dialog" aria-controls="viewer-generation-dialog">
             <span data-i18n-key="viewer.stage.generateLoad">Generate &amp; Load</span>
           </button>
-          <span class="stage-flow-arrow" aria-hidden="true">→</span>
+          <span class="stage-toolbar-divider" aria-hidden="true"></span>
           <div class="stage-view-step">
-            <span class="stage-flow-index">02</span>
+            <span class="stage-view-label" data-i18n-key="viewer.stage.viewMode">View</span>
             <div class="stage-segmented" aria-label="Canvas mode" data-i18n-aria-label-key="viewer.stage.canvasMode">
               <button type="button" aria-pressed="true" id="viewer-mode-3d">3D</button>
               <button type="button" aria-pressed="false" id="viewer-mode-2d">2D</button>
@@ -86,6 +85,20 @@ export function createViewerStageHtml(): string {
               <p data-i18n-key="viewer.generationDialog.subtitle">Full generation flow in a dialog; confirm to return to the stage view.</p>
             </div>
             <button class="viewer-settings-close" type="button" aria-label="Close generation control" data-i18n-aria-label-key="viewer.generationDialog.close" data-close-generation>x</button>
+          </div>
+          <div class="viewer-generation-dialog-contract" aria-label="Generation contract">
+            <div>
+              <span data-i18n-key="viewer.generationDialog.source">Input source</span>
+              <strong id="viewer-generation-source-summary">Current professional generation settings</strong>
+            </div>
+            <div>
+              <span data-i18n-key="viewer.generationDialog.strategy">Generation strategy</span>
+              <strong id="viewer-generation-strategy-summary">Parameterized generation</strong>
+            </div>
+            <div>
+              <span data-i18n-key="viewer.generationDialog.output">Output</span>
+              <strong data-i18n-key="viewer.generationDialog.outputRevision">Create a new scene result and load it into the 3D Viewer without overwriting the current scene</strong>
+            </div>
           </div>
           <div class="viewer-generation-dialog-body">
             ${renderDesignPanelHtml()}
