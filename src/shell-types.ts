@@ -20,10 +20,39 @@ export interface ShellTab {
   content: string | HTMLElement;
 }
 
+export type WorkbenchShellMode =
+  | "single_left_overlay"
+  | "course_single_left"
+  | "legacy_dual";
+
+export type WorkbenchSidebarGroup = "navigation" | "workspace" | "analysis" | "system";
+
+export type WorkbenchSidebarPage = {
+  id: string;
+  label: string;
+  icon?: string;
+  group: WorkbenchSidebarGroup;
+  content: HTMLElement | string;
+  disabled?: boolean;
+  badge?: string;
+  /** Action-only pages reuse an existing controller instead of duplicating its panel DOM. */
+  action?: () => void;
+};
+
+export interface WorkbenchSidebarController {
+  registerPages: (pages: WorkbenchSidebarPage[]) => () => void;
+  activate: (pageId: string) => void;
+  toggle: (pageId: string) => void;
+  close: () => void;
+  activePage: () => string | null;
+}
+
 
 export interface DesktopShell {
   root: HTMLElement;
   route: AppRoute;
+  mode: WorkbenchShellMode;
+  sidebar: WorkbenchSidebarController;
   leftRail: HTMLElement;
   centerStage: HTMLElement;
   rightRail: HTMLElement;

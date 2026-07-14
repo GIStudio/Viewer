@@ -16,4 +16,8 @@ export type {
   ShellI18nText,
   ShellSection,
   ShellTab,
+  WorkbenchShellMode,
+  WorkbenchSidebarController,
+  WorkbenchSidebarGroup,
+  WorkbenchSidebarPage,
 } from "./shell-types";

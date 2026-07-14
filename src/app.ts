@@ -176,7 +176,7 @@ import {
 import { captureGalleryViews, type GalleryCaptureTarget } from "./viewer-evaluation-capture";
 import { createViewerPresetsController } from "./viewer-presets-controller";
 import { createViewerEvaluationRunner } from "./viewer-evaluation-runner";
-import type { DesktopShell, ShellI18nText } from "./desktop-shell";
+import type { DesktopShell, ShellI18nText, WorkbenchSidebarPage } from "./desktop-shell";
 import { WORKFLOW_UNDO_EVENT } from "./workflow-controller";
 import type { WorkflowController } from "./workflow-controller";
 import { loadWorkflowCapabilities, normalizeSceneSource, toNormalizedSceneSource } from "./workflow-api";
@@ -462,6 +462,7 @@ function createAvatarFigure(): THREE.Group {
 export type ViewerHostOptions = {
   embedded?: boolean;
   persistSceneCommands?: (commands: SceneMoveInstanceCommand[]) => Promise<SceneLayoutEditResponse>;
+  sidebarPages?: WorkbenchSidebarPage[];
 };
 
 function mountViewer(shell: DesktopShell, workflow: WorkflowController, hostOptions: ViewerHostOptions = {}): Promise<() => void> {
@@ -486,6 +487,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       ]);
   shell.setLeftSections(createViewerLeftSections(t));
   shell.setRightTabs(createViewerRightTabs(t), null);
+  const unregisterHostSidebarPages = hostOptions.sidebarPages?.length
+    ? shell.sidebar.registerPages(hostOptions.sidebarPages)
+    : () => undefined;
   shell.statusStatusHost.innerHTML = `<div id="viewer-status" class="desktop-shell-inline-status" data-i18n-key="viewer.status.loading">${t("Loading viewer...", "正在加载查看器...")}</div>`;
   shell.setStatusSummary({ key: "viewer.status.loading" });
   shell.statusActivityHost.innerHTML = `<div class="desktop-shell-log-entry" data-tone="neutral" data-i18n-key="viewer.status.initialized">${t("Viewer shell initialized.", "查看器框架已初始化。")}</div>`;
@@ -1329,6 +1333,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       }
     },
   });
+  root.addEventListener("roadgen:workbench-close-active-panel", () => panelController.closeAll(), { signal });
   const centerControlsEl = root.querySelector<HTMLElement>("#viewer-center-controls");
   const centerControlsCloseEl = root.querySelector<HTMLButtonElement>("#viewer-center-controls-close");
   const centerControlButtons = Array.from(
@@ -2768,6 +2773,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       panelController.setOpen("settings", true);
     }
   }, { signal });
+  root.querySelector<HTMLButtonElement>("#viewer-edit-toggle")?.addEventListener("click", () => {
+    panelController.closeAll();
+    panelController.setOpen("settings", true);
+    window.requestAnimationFrame(() => {
+      sceneCommandJsonEl.scrollIntoView({ block: "center", behavior: "smooth" });
+      sceneCommandJsonEl.focus({ preventScroll: true });
+    });
+  }, { signal });
   settingsCloseEl.addEventListener("click", () => panelController.setOpen("settings", false), { signal });
   sceneCommandSubmitEl.addEventListener("click", () => void submitSceneCommandEditor(), { signal });
   sceneCommandUndoEl.addEventListener("click", () => void undoLastSceneEdit(), { signal });
@@ -2854,16 +2867,16 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   });
 
   root.querySelector<HTMLButtonElement>('[data-shell-tab="evaluate"]')?.addEventListener("click", () => {
-    panelController.setOpen("evaluate", true);
+    panelController.setOpen("evaluate", shell.sidebar.activePage() === "evaluate");
   }, { signal });
   root.querySelector<HTMLButtonElement>('[data-shell-tab="compare"]')?.addEventListener("click", () => {
-    panelController.setOpen("compare", true);
+    panelController.setOpen("compare", shell.sidebar.activePage() === "compare");
   }, { signal });
   root.querySelector<HTMLButtonElement>('[data-shell-tab="history"]')?.addEventListener("click", () => {
-    panelController.setOpen("history", true);
+    panelController.setOpen("history", shell.sidebar.activePage() === "history");
   }, { signal });
   root.querySelector<HTMLButtonElement>('[data-shell-tab="consistency"]')?.addEventListener("click", () => {
-    panelController.setOpen("consistency", true);
+    panelController.setOpen("consistency", shell.sidebar.activePage() === "consistency");
   }, { signal });
 
   designToggleEl.addEventListener("click", () => panelController.setOpen("design", !panelController.isOpen("design")), { signal });
@@ -3042,6 +3055,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (!floatingLaneSystem.config.enabled) {
       floatingLaneSystem.toggleOverlay();
     }
+    floatingLaneSystem.mountControlPanel();
+  }, { signal });
+  root.querySelector<HTMLButtonElement>('[data-shell-tab="floating-lane"]')?.addEventListener("click", () => {
+    if (shell.sidebar.activePage() !== "floating-lane") return;
+    if (!floatingLaneSystem.config.enabled) floatingLaneSystem.toggleOverlay();
     floatingLaneSystem.mountControlPanel();
   }, { signal });
 
@@ -3558,6 +3576,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       minimapClickHandle = null;
     }
     eventController.abort();
+    unregisterHostSidebarPages();
     workflowBridge.dispose();
     unsubscribeCapabilityStatus();
     controls.removeEventListener("lock", handleControlsLock);

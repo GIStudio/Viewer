@@ -13,6 +13,9 @@ import type {
   ShellI18nText,
   ShellSection,
   ShellTab,
+  WorkbenchShellMode,
+  WorkbenchSidebarController,
+  WorkbenchSidebarPage,
 } from "./shell-types";
 import {
   VIEWER_LANGUAGE_EVENT,
@@ -41,6 +44,9 @@ export type {
   ShellI18nText,
   ShellSection,
   ShellTab,
+  WorkbenchShellMode,
+  WorkbenchSidebarPage,
+  WorkbenchSidebarController,
 } from "./shell-types";
 
 function renderSectionContent(contentHost: HTMLElement, content: string | HTMLElement): void {
@@ -52,7 +58,11 @@ function renderSectionContent(contentHost: HTMLElement, content: string | HTMLEl
   contentHost.appendChild(content);
 }
 
-export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShell {
+export function bindDesktopShell(
+  root: HTMLElement,
+  route: AppRoute,
+  mode: WorkbenchShellMode = "legacy_dual",
+): DesktopShell {
   const shellRootNode = root.querySelector<HTMLElement>(".desktop-shell");
   const leftRailNode = root.querySelector<HTMLElement>("#desktop-shell-left-rail");
   const centerStageNode = root.querySelector<HTMLElement>("#desktop-shell-center-stage");
@@ -99,10 +109,23 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
   const hintsHost = hintsHostNode;
   const statusWorkbench = statusWorkbenchNode;
   let currentLanguage: ViewerLanguage = loadViewerLanguage();
+  const isSingleLeft = mode !== "legacy_dual";
+  let destroyed = false;
 
   const menuActionHandlers: Partial<Record<ShellMenuActionId, () => void>> = {};
   let activeRightTab: string | null = null;
   let currentHints: ShellI18nText[] = [];
+  let leftSidebarPages: WorkbenchSidebarPage[] = [];
+  let rightSidebarPages: WorkbenchSidebarPage[] = [];
+  const registeredSidebarPages = new Map<symbol, WorkbenchSidebarPage[]>();
+  let rememberedSidebarPage: string | null = null;
+  if (isSingleLeft) {
+    try {
+      rememberedSidebarPage = sessionStorage.getItem(`roadgen:sidebar:${route}`);
+    } catch {
+      rememberedSidebarPage = null;
+    }
+  }
 
   function resolveI18nText(message: ShellI18nText): string {
     if (typeof message === "string") {
@@ -205,6 +228,7 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
   }
 
   function setRightPinned(pinned: boolean): void {
+    if (isSingleLeft) return;
     shellRoot.classList.toggle("desktop-shell-right-pinned", pinned);
     const rightPinButton = root.querySelector<HTMLButtonElement>("[data-shell-right-pin]");
     rightPinButton?.setAttribute("aria-pressed", pinned ? "true" : "false");
@@ -214,24 +238,226 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     updatePinButtonText(rightPinButton, pinned, "right");
   }
 
-  function activateRightTab(id: string | null): void {
-    const nextActiveTab = id ?? rightTabButtons.querySelector<HTMLButtonElement>("[data-shell-tab]")?.dataset.shellTab ?? null;
-    activeRightTab = nextActiveTab;
+  function announceSidebarChange(pageId: string | null): void {
+    const detail = { pageId, mode };
+    root.dispatchEvent(new CustomEvent("roadgen:workbench-sidebar-change", {
+      bubbles: true,
+      detail,
+    }));
+    window.dispatchEvent(new CustomEvent("roadgen:workbench-sidebar-change", { detail }));
+  }
+
+  function setActiveSidebarPage(id: string | null): void {
+    activeRightTab = id;
+    shellRoot.dataset.sidebarOpen = id ? "true" : "false";
     rightTabButtons.querySelectorAll<HTMLButtonElement>("[data-shell-tab]").forEach((button) => {
-      const isActive = button.dataset.shellTab === nextActiveTab;
+      const isActive = button.dataset.shellTab === id;
       button.classList.toggle("active", isActive);
       button.dataset.open = isActive ? "true" : "false";
       button.setAttribute("aria-expanded", isActive ? "true" : "false");
+      button.setAttribute("aria-pressed", isActive ? "true" : "false");
     });
     rightTabPanels.querySelectorAll<HTMLElement>("[data-shell-tab-panel]").forEach((panel) => {
-      const isActive = panel.dataset.shellTabPanel === nextActiveTab;
+      const isActive = panel.dataset.shellTabPanel === id;
       panel.hidden = !isActive;
       panel.classList.toggle("active", isActive);
       panel.dataset.open = isActive ? "true" : "false";
     });
+    if (isSingleLeft) {
+      try {
+        if (id) {
+          rememberedSidebarPage = id;
+          sessionStorage.setItem(`roadgen:sidebar:${route}`, id);
+        }
+      } catch {
+        // Session storage can be unavailable in embedded or privacy-restricted contexts.
+      }
+    }
+    announceSidebarChange(id);
+  }
+
+  function activateRightTab(id: string | null): void {
+    if (id === null && isSingleLeft) {
+      closeSidebar();
+      return;
+    }
+    const nextActiveTab = id ?? (isSingleLeft
+      ? null
+      : rightTabButtons.querySelector<HTMLButtonElement>("[data-shell-tab]")?.dataset.shellTab ?? null);
+    setActiveSidebarPage(nextActiveTab);
+  }
+
+  function closeSidebar(): void {
+    rememberedSidebarPage = null;
+    if (isSingleLeft) {
+      try {
+        sessionStorage.removeItem(`roadgen:sidebar:${route}`);
+      } catch {
+        // Ignore storage restrictions; the in-memory state still closes.
+      }
+    }
+    setActiveSidebarPage(null);
+  }
+
+  function allSidebarPages(): WorkbenchSidebarPage[] {
+    const pages = [
+      ...leftSidebarPages,
+      ...rightSidebarPages,
+      ...Array.from(registeredSidebarPages.values()).flat(),
+    ].filter((page) => !page.disabled);
+    const deduped = new Map<string, WorkbenchSidebarPage>();
+    pages.forEach((page) => deduped.set(page.id, page));
+    const groupOrder = { navigation: 0, workspace: 1, analysis: 2, system: 3 };
+    return Array.from(deduped.values()).sort((a, b) => groupOrder[a.group] - groupOrder[b.group]);
+  }
+
+  function sidebarIcon(page: WorkbenchSidebarPage): string {
+    if (page.icon) return page.icon;
+    const words = page.label.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return "·";
+    return words.length === 1 ? words[0].slice(0, 2).toUpperCase() : words.map((word) => word[0]).join("").slice(0, 2).toUpperCase();
+  }
+
+  function renderSingleLeftPages(preferredActive: string | null = activeRightTab): void {
+    if (!isSingleLeft || destroyed) return;
+    const pages = allSidebarPages();
+    rightTabButtons.innerHTML = "";
+    rightTabPanels.innerHTML = "";
+    let previousGroup: WorkbenchSidebarPage["group"] | null = null;
+    pages.forEach((page) => {
+      if (previousGroup && previousGroup !== page.group) {
+        const divider = document.createElement("span");
+        divider.className = "workbench-sidebar-divider";
+        divider.setAttribute("aria-hidden", "true");
+        rightTabButtons.appendChild(divider);
+      }
+      previousGroup = page.group;
+      const panelId = `desktop-shell-tab-panel-${page.id}`;
+      const button = document.createElement("button");
+      if (page.id in viewerTabButtonIds) {
+        button.id = viewerTabButtonIds[page.id];
+      }
+      button.type = "button";
+      button.className = "desktop-shell-tab-button workbench-sidebar-button";
+      button.dataset.shellTab = page.id;
+      button.dataset.sidebarGroup = page.group;
+      button.dataset.open = "false";
+      button.title = page.label;
+      button.setAttribute("aria-label", page.label);
+      button.setAttribute("aria-controls", panelId);
+      button.setAttribute("aria-expanded", "false");
+      button.innerHTML = `<span class="workbench-sidebar-icon" aria-hidden="true"></span><span class="workbench-sidebar-label"></span>`;
+      button.querySelector<HTMLElement>(".workbench-sidebar-icon")!.textContent = sidebarIcon(page);
+      button.querySelector<HTMLElement>(".workbench-sidebar-label")!.textContent = page.label;
+      if (page.badge) {
+        const badge = document.createElement("span");
+        badge.className = "workbench-sidebar-badge";
+        badge.textContent = page.badge;
+        button.appendChild(badge);
+      }
+      button.addEventListener("click", () => {
+        if (page.action) {
+          closeSidebar();
+          page.action();
+          announceSidebarChange(page.id);
+          return;
+        }
+        if (activeRightTab === page.id) closeSidebar();
+        else setActiveSidebarPage(page.id);
+      });
+      rightTabButtons.appendChild(button);
+
+      if (!page.action) {
+        const panel = document.createElement("section");
+        panel.id = panelId;
+        panel.className = "desktop-shell-tab-panel workbench-sidebar-drawer";
+        panel.dataset.shellTabPanel = page.id;
+        panel.dataset.open = "false";
+        panel.dataset.i18nScope = "literal";
+        panel.setAttribute("role", "tabpanel");
+        panel.hidden = true;
+        const header = document.createElement("header");
+        header.className = "workbench-sidebar-drawer-header";
+        const heading = document.createElement("strong");
+        heading.textContent = page.label;
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "workbench-sidebar-close";
+        close.textContent = "×";
+        close.setAttribute("aria-label", `Close ${page.label}`);
+        close.addEventListener("click", closeSidebar);
+        header.append(heading, close);
+        const content = document.createElement("div");
+        content.className = "workbench-sidebar-drawer-body";
+        renderSectionContent(content, page.content);
+        panel.append(header, content);
+        rightTabPanels.appendChild(panel);
+      }
+    });
+    const requestedPage = preferredActive ?? rememberedSidebarPage;
+    const validPreferred = requestedPage && pages.some((page) => page.id === requestedPage && !page.action)
+      ? requestedPage
+      : null;
+    setActiveSidebarPage(validPreferred);
+    applyViewerTranslations(root, currentLanguage);
+  }
+
+  function viewerControlPages(content: string | HTMLElement): WorkbenchSidebarPage[] {
+    const host = document.createElement("div");
+    renderSectionContent(host, content);
+    leftRail.innerHTML = "";
+    leftRail.appendChild(host);
+    const idMap: Record<string, { id: string; group: WorkbenchSidebarPage["group"] }> = {
+      "viewer-scene-browser-toggle": { id: "scene", group: "workspace" },
+      "viewer-scene-graph-link": { id: "annotation", group: "workspace" },
+      "viewer-asset-editor-link": { id: "assets", group: "workspace" },
+      "viewer-design-toggle": { id: "design", group: "workspace" },
+      "viewer-presets-toggle": { id: "presets", group: "workspace" },
+      "viewer-edit-toggle": { id: "edit", group: "workspace" },
+      "viewer-settings-toggle": { id: "settings", group: "system" },
+      "viewer-help-toggle": { id: "help", group: "system" },
+    };
+    const pages: WorkbenchSidebarPage[] = [];
+    Array.from(host.querySelectorAll<HTMLButtonElement>(".viewer-control-menu-item")).forEach((button) => {
+      const implicitId = button.dataset.viewerCenterControl === "browser" ? "viewer-scene-browser-toggle" : button.id;
+      const mapped = idMap[implicitId];
+      if (!mapped || button.id === "viewer-floating-lane-toggle") return;
+      if (mode === "course_single_left" && !["scene", "edit", "settings"].includes(mapped.id)) return;
+      const label = button.querySelector("strong")?.textContent?.trim() || mapped.id;
+      const icon = button.querySelector(".viewer-control-menu-code")?.textContent?.trim();
+      pages.push({
+        ...mapped,
+        label,
+        icon,
+        content: "",
+        action: () => button.click(),
+      });
+    });
+    return pages;
   }
 
   function setLeftSections(sections: ShellSection[]): void {
+    if (isSingleLeft) {
+      const viewerControlSection = sections.find((section) => section.id === "viewer-control-menu");
+      const regularSections = sections.filter((section) => section !== viewerControlSection);
+      leftSidebarPages = [
+        ...(viewerControlSection ? viewerControlPages(viewerControlSection.content) : []),
+        ...regularSections.map((section) => {
+          const content = document.createElement("div");
+          content.className = "desktop-shell-section-body";
+          content.dataset.i18nScope = "literal";
+          renderSectionContent(content, section.content);
+          return {
+            id: section.id,
+            label: resolveI18nText(section.title),
+            group: "workspace" as const,
+            content,
+          };
+        }),
+      ];
+      renderSingleLeftPages();
+      return;
+    }
     leftRail.innerHTML = "";
     sections.forEach((section) => {
       const wrapper = document.createElement("details");
@@ -272,6 +498,37 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
   };
 
   function setRightTabs(tabs: ShellTab[], activeId: string | null = tabs[0]?.id ?? null): void {
+    if (isSingleLeft) {
+      const visibleTabs = mode === "course_single_left" && route === "viewer"
+        ? tabs.filter((tab) => ["evaluate", "compare", "floating-lane"].includes(tab.id))
+        : tabs;
+      leftRail.querySelector("[data-course-hidden-tabs]")?.remove();
+      if (visibleTabs.length !== tabs.length) {
+        const compatibilityHost = document.createElement("div");
+        compatibilityHost.hidden = true;
+        compatibilityHost.dataset.courseHiddenTabs = "true";
+        tabs.filter((tab) => !visibleTabs.includes(tab)).forEach((tab) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.shellTab = tab.id;
+          if (tab.id in viewerTabButtonIds) button.id = viewerTabButtonIds[tab.id];
+          compatibilityHost.appendChild(button);
+          const panel = document.createElement("div");
+          renderSectionContent(panel, tab.content);
+          compatibilityHost.appendChild(panel);
+        });
+        leftRail.appendChild(compatibilityHost);
+      }
+      rightSidebarPages = visibleTabs.map((tab) => ({
+        id: tab.id,
+        label: tab.label,
+        icon: ({ evaluate: "EV", compare: "CP", history: "HI", "floating-lane": "OV", consistency: "QA" } as Record<string, string>)[tab.id],
+        group: "analysis",
+        content: tab.content,
+      }));
+      renderSingleLeftPages(activeId);
+      return;
+    }
     rightTabButtons.innerHTML = "";
     rightTabPanels.innerHTML = "";
     tabs.forEach((tab) => {
@@ -489,6 +746,50 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
   };
   window.addEventListener(VIEWER_LANGUAGE_EVENT, handleViewerLanguageChange);
 
+  const handleSidebarEscape = (event: KeyboardEvent) => {
+    if (isSingleLeft && event.key === "Escape" && activeRightTab) {
+      event.preventDefault();
+      root.dispatchEvent(new CustomEvent("roadgen:workbench-close-active-panel"));
+      closeSidebar();
+      rightTabButtons.querySelector<HTMLButtonElement>("[data-shell-tab]")?.focus();
+    }
+  };
+  root.addEventListener("keydown", handleSidebarEscape);
+
+  const handleSidebarCloseRequest = () => {
+    if (isSingleLeft) closeSidebar();
+  };
+  root.addEventListener("roadgen:workbench-sidebar-close", handleSidebarCloseRequest);
+
+  const sidebar: WorkbenchSidebarController = {
+    registerPages: (pages: WorkbenchSidebarPage[]) => {
+      const token = Symbol("sidebar-pages");
+      registeredSidebarPages.set(token, pages);
+      renderSingleLeftPages();
+      return () => {
+        registeredSidebarPages.delete(token);
+        renderSingleLeftPages();
+      };
+    },
+    activate: (pageId: string) => {
+      const page = allSidebarPages().find((candidate) => candidate.id === pageId);
+      if (!page || page.disabled) return;
+      if (page.action) {
+        closeSidebar();
+        page.action();
+        announceSidebarChange(page.id);
+      } else {
+        setActiveSidebarPage(pageId);
+      }
+    },
+    toggle: (pageId: string) => {
+      if (activeRightTab === pageId) closeSidebar();
+      else sidebar.activate(pageId);
+    },
+    close: closeSidebar,
+    activePage: () => activeRightTab,
+  };
+
   refreshActionAvailability();
   emitActionAvailability();
   applyShellLanguage(currentLanguage);
@@ -496,6 +797,8 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
   return {
     root,
     route,
+    mode,
+    sidebar,
     leftRail,
     centerStage,
     rightRail,
@@ -519,8 +822,11 @@ export function bindDesktopShell(root: HTMLElement, route: AppRoute): DesktopShe
     setHints,
     setMenuActions,
     destroy: () => {
+      destroyed = true;
       document.removeEventListener("click", handleDocumentClick);
       window.removeEventListener(VIEWER_LANGUAGE_EVENT, handleViewerLanguageChange);
+      root.removeEventListener("keydown", handleSidebarEscape);
+      root.removeEventListener("roadgen:workbench-sidebar-close", handleSidebarCloseRequest);
       root.removeEventListener(SHELL_ACTION_EVENT, handleShellActionEvent);
       root.removeEventListener(SHELL_TOGGLE_EVENT, handleShellToggleEvent);
     },

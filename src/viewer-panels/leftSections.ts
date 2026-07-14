@@ -36,9 +36,13 @@ export function createViewerLeftSections(t: ViewerPanelText): ViewerLeftSection[
           </div>
           <div class="viewer-control-menu-group">
             <span class="viewer-control-menu-label">${t("Adjust", "调整")}</span>
+            <button class="viewer-control-menu-item" type="button" id="viewer-edit-toggle">
+              <span class="viewer-control-menu-code">ED</span>
+              <span><strong>${t("Edit", "编辑")}</strong><small>${t("Objects, transforms, and layers", "对象、变换与图层")}</small></span>
+            </button>
             <button class="viewer-control-menu-item" type="button" id="viewer-floating-lane-toggle">
               <span class="viewer-control-menu-code">OV</span>
-              <span><strong>${t("Live Overlay", "实时叠加")}</strong><small>${t("Open live controls on the right", "在右侧打开实时控制")}</small></span>
+              <span><strong>${t("Live Overlay", "实时叠加")}</strong><small>${t("Open semantic overlay controls", "打开语义叠加控制")}</small></span>
             </button>
           </div>
           <div class="viewer-control-menu-group">

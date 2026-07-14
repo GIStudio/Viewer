@@ -83,6 +83,9 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     closePanel("evaluate");
     closePanel("compare");
     closePanel("presets");
+    closePanel("help");
+    closePanel("history");
+    closePanel("consistency");
     deps.onCloseAllOverlays();
     deps.shell.activateRightTab(null);
     updateCanvasSlideOpenState();
@@ -90,9 +93,7 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
 
   function setOpen(panel: ViewerPanelKey, nextOpen: boolean, options?: { restoreRoam?: boolean }): void {
     if (nextOpen) {
-      if (panel !== "settings") {
-        closeAll();
-      }
+      closeAll();
       if (panel === "design") deps.onDesignOpen();
       if (panel === "compare") deps.onCompareOpen();
       if (panel === "presets") deps.onPresetsOpen();

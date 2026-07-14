@@ -11,6 +11,7 @@
     "test:i18n:routes": "node tests/viewer-i18n.test.mjs && node tests/model-input-browser.test.mjs",
     "test:i18n": "npm run test:i18n:contract && npm run test:i18n:routes",
     "test:plan-export": "node tests/plan-export.test.mjs",
+    "test:single-left-shell": "node tests/single-left-shell.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

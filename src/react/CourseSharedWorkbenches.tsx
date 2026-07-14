@@ -12,7 +12,14 @@ import type { ViewerLanguage } from "../viewer-i18n";
 import type { NormalizedSceneSourceResponse } from "../workflow-api";
 import { toNormalizedSceneSource } from "../workflow-api";
 import type { WorkflowController } from "../workflow-controller";
+import type { WorkbenchSidebarPage } from "../shell-types";
 import { ViewerDesktopShell } from "./ViewerDesktopShell";
+
+export type CourseWorkbenchNavigation = {
+  current: string;
+  items: Array<{ id: string; index: string; label: string }>;
+  onNavigate: (id: string) => void;
+};
 
 type MaterializedManifest = {
   manifest: ViewerManifest;
@@ -49,28 +56,51 @@ function MountedWorkbench({
   workflow,
   sceneGraphApproval,
   viewerOptions,
+  navigation,
 }: {
   route: "scene-graph" | "viewer";
   language: ViewerLanguage;
   workflow: WorkflowController;
   sceneGraphApproval?: (annotation: ReferenceAnnotation) => Promise<void>;
   viewerOptions?: ViewerHostOptions;
+  navigation: CourseWorkbenchNavigation;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const sceneGraphApprovalRef = useRef(sceneGraphApproval);
+  const viewerOptionsRef = useRef(viewerOptions);
+  const navigationRef = useRef(navigation);
+  sceneGraphApprovalRef.current = sceneGraphApproval;
+  viewerOptionsRef.current = viewerOptions;
+  navigationRef.current = navigation;
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;
     let disposed = false;
     let teardown: (() => void) | undefined;
-    const shell = bindDesktopShell(host, route);
-    shell.setRightPinned(true);
+    const shell = bindDesktopShell(host, route, "course_single_left");
+    const unregisterNavigation = shell.sidebar.registerPages(navigationRef.current.items.map((item) => ({
+      id: `course-${item.id}`,
+      label: item.label,
+      icon: item.index,
+      group: "navigation",
+      content: "",
+      badge: navigationRef.current.current === item.id ? "•" : undefined,
+      action: () => navigationRef.current.onNavigate(item.id),
+    })));
     if (route === "scene-graph") {
       teardown = mountSceneGraphPage(shell, workflow, {
         mode: "course",
-        onApproveAndGenerate: sceneGraphApproval,
+        onApproveAndGenerate: (annotation) => sceneGraphApprovalRef.current?.(annotation) ?? Promise.resolve(),
       });
     } else {
-      void mountViewer(shell, workflow, { embedded: true, ...viewerOptions }).then((next) => {
+      const initialOptions = viewerOptionsRef.current;
+      void mountViewer(shell, workflow, {
+        embedded: true,
+        ...initialOptions,
+        persistSceneCommands: initialOptions?.persistSceneCommands
+          ? (commands) => viewerOptionsRef.current!.persistSceneCommands!(commands)
+          : undefined,
+      }).then((next) => {
         if (disposed) next();
         else teardown = next;
       });
@@ -78,10 +108,11 @@ function MountedWorkbench({
     return () => {
       disposed = true;
       teardown?.();
+      unregisterNavigation();
       shell.destroy();
     };
-  }, [route, workflow, sceneGraphApproval, viewerOptions]);
-  return <ViewerDesktopShell route={route} language={language} hostRef={hostRef} workflow={workflow} embedded />;
+  }, [route, workflow]);
+  return <ViewerDesktopShell route={route} language={language} hostRef={hostRef} workflow={workflow} embedded mode="course_single_left" />;
 }
 
 export function CourseReferenceWorkbench({
@@ -91,6 +122,7 @@ export function CourseReferenceWorkbench({
   language,
   workflow,
   onGenerationStarted,
+  navigation,
 }: {
   api: CourseApi;
   project: CourseProject;
@@ -98,6 +130,7 @@ export function CourseReferenceWorkbench({
   language: ViewerLanguage;
   workflow: WorkflowController;
   onGenerationStarted: (job: PlatformJob) => void;
+  navigation: CourseWorkbenchNavigation;
 }) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
@@ -154,6 +187,7 @@ export function CourseReferenceWorkbench({
       language={language}
       workflow={workflow}
       sceneGraphApproval={approveAndGenerate}
+      navigation={navigation}
     />
   </div>;
 }
@@ -165,6 +199,8 @@ export function CourseViewerWorkbench({
   language,
   workflow,
   onRevisionCreated,
+  navigation,
+  sidebarPages = [],
 }: {
   api: CourseApi;
   project: CourseProject;
@@ -172,6 +208,8 @@ export function CourseViewerWorkbench({
   language: ViewerLanguage;
   workflow: WorkflowController;
   onRevisionCreated: () => Promise<void>;
+  navigation: CourseWorkbenchNavigation;
+  sidebarPages?: WorkbenchSidebarPage[];
 }) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
@@ -245,8 +283,8 @@ export function CourseViewerWorkbench({
     };
   }, [addMaterialized, api, onRevisionCreated, project.id]);
   const viewerOptions = useMemo<ViewerHostOptions>(
-    () => ({ embedded: true, persistSceneCommands }),
-    [persistSceneCommands],
+    () => ({ embedded: true, persistSceneCommands, sidebarPages }),
+    [persistSceneCommands, sidebarPages],
   );
 
   if (error) return <div className="course-empty"><h2>3D 道路查看器载入失败</h2><p>{error}</p></div>;
@@ -257,6 +295,7 @@ export function CourseViewerWorkbench({
       language={language}
       workflow={workflow}
       viewerOptions={viewerOptions}
+      navigation={navigation}
     />
   </div>;
 }

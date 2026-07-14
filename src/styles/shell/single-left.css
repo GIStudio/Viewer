@@ -1,0 +1,247 @@
+.desktop-shell[data-shell-mode="single_left_overlay"],
+.desktop-shell[data-shell-mode="course_single_left"] {
+  --workbench-menu-track: 4.25rem;
+  --workbench-drawer-width: min(21.25rem, calc(100vw - var(--workbench-menu-track) - 1rem));
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-main,
+.desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-main {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--workbench-menu-track) minmax(0, 1fr);
+  min-height: 0;
+  transition: none;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-rail-left,
+.desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-rail-left {
+  display: none;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-center,
+.desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-center {
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.75rem;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-rail-right,
+.desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-rail-right {
+  position: absolute;
+  z-index: 48;
+  inset: 0 auto 0 0;
+  display: block;
+  inline-size: var(--workbench-menu-track);
+  overflow: visible;
+  border: 0;
+  border-right: 1px solid rgba(16, 45, 58, 0.18);
+  background: #102d3a;
+  backdrop-filter: none;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-rail-right > .desktop-shell-rail-header,
+.desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-rail-right > .desktop-shell-rail-header {
+  display: none;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-tab-list,
+.desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-tab-list {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0;
+  width: var(--workbench-menu-track);
+  height: 100%;
+  padding: 0.35rem 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-tab-list::-webkit-scrollbar,
+.desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-tab-list::-webkit-scrollbar {
+  display: none;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-divider,
+.desktop-shell[data-shell-mode="course_single_left"] .workbench-sidebar-divider {
+  flex: 0 0 1px;
+  width: calc(100% - 1.35rem);
+  margin: 0.35rem auto;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-button,
+.desktop-shell[data-shell-mode="course_single_left"] .workbench-sidebar-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 0.2rem;
+  flex: 0 0 3.65rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.35rem 0.2rem;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  color: #c8d7da;
+  background: transparent;
+  line-height: 1;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-button:hover,
+.desktop-shell[data-shell-mode="course_single_left"] .workbench-sidebar-button:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-button.active,
+.desktop-shell[data-shell-mode="course_single_left"] .workbench-sidebar-button.active {
+  color: #102d3a;
+  border-left-color: #df654f;
+  background: #f4c430;
+}
+
+.desktop-shell[data-shell-mode="course_single_left"] .workbench-sidebar-button[data-sidebar-group="navigation"] {
+  flex-basis: 2.35rem;
+  min-height: 2.35rem;
+}
+
+.desktop-shell[data-shell-mode="course_single_left"] .workbench-sidebar-button[data-sidebar-group="navigation"] .workbench-sidebar-label {
+  display: none;
+}
+
+.workbench-sidebar-icon {
+  font: 850 0.72rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+}
+
+.workbench-sidebar-label {
+  display: block;
+  max-width: 3.65rem;
+  overflow: hidden;
+  font-size: 0.56rem;
+  font-weight: 720;
+  line-height: 1.05;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-sidebar-badge {
+  position: absolute;
+  top: 0.28rem;
+  right: 0.25rem;
+  min-width: 1rem;
+  padding: 0.12rem 0.2rem;
+  border-radius: 999px;
+  color: #102d3a;
+  background: #f4c430;
+  font: 800 0.5rem/1 ui-monospace, monospace;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-right-panels,
+.desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-right-panels {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto 0 var(--workbench-menu-track);
+  width: var(--workbench-drawer-width);
+  min-height: 0;
+  padding: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-drawer,
+.desktop-shell[data-shell-mode="course_single_left"] .workbench-sidebar-drawer {
+  position: absolute;
+  inset: 0;
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  color: #102d3a;
+  border-right: 1px solid rgba(16, 45, 58, 0.34);
+  background: rgba(249, 249, 246, 0.985);
+  box-shadow: 18px 0 44px rgba(16, 45, 58, 0.2);
+  pointer-events: auto;
+  backdrop-filter: blur(18px);
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-drawer.active,
+.desktop-shell[data-shell-mode="course_single_left"] .workbench-sidebar-drawer.active {
+  display: flex;
+  flex-direction: column;
+}
+
+.workbench-sidebar-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  min-height: 3.7rem;
+  padding: 0.8rem 0.9rem 0.75rem 1rem;
+  border-bottom: 1px solid rgba(16, 45, 58, 0.17);
+}
+
+.workbench-sidebar-drawer-header strong {
+  font: 700 1rem/1.15 Georgia, "Songti SC", serif;
+}
+
+.workbench-sidebar-close {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid rgba(16, 45, 58, 0.22);
+  border-radius: 50%;
+  color: #102d3a;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.workbench-sidebar-drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0.9rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-canvas[data-slide-open="true"],
+.desktop-shell[data-shell-mode="course_single_left"] .viewer-canvas[data-slide-open="true"] {
+  margin-right: 0 !important;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-settings-panel,
+.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-shell > .viewer-slide-panel,
+.desktop-shell[data-shell-mode="course_single_left"] .viewer-settings-panel,
+.desktop-shell[data-shell-mode="course_single_left"] .viewer-shell > .viewer-slide-panel {
+  right: auto;
+  left: 0;
+  width: var(--workbench-drawer-width);
+  box-shadow: 18px 0 44px rgba(16, 45, 58, 0.2);
+  transform: translateX(-105%);
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-settings-panel[data-open="true"],
+.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-shell > .viewer-slide-panel[data-open="true"],
+.desktop-shell[data-shell-mode="course_single_left"] .viewer-settings-panel[data-open="true"],
+.desktop-shell[data-shell-mode="course_single_left"] .viewer-shell > .viewer-slide-panel[data-open="true"] {
+  transform: translateX(0);
+}
+
+@media (max-width: 720px) {
+  .desktop-shell[data-shell-mode="single_left_overlay"],
+  .desktop-shell[data-shell-mode="course_single_left"] {
+    --workbench-menu-track: 3.75rem;
+    --workbench-drawer-width: min(20.5rem, calc(100vw - var(--workbench-menu-track)));
+  }
+
+  .desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-center,
+  .desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-center {
+    padding: 0.35rem;
+  }
+}

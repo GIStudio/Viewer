@@ -14,6 +14,7 @@ import {
 import type { ViewerLanguage } from "../viewer-i18n";
 import { WORKFLOW_STEPS, WORKFLOW_UNDO_EVENT, workflowRoute } from "../workflow-controller";
 import type { WorkflowController, WorkflowStep } from "../workflow-controller";
+import type { WorkbenchShellMode } from "../shell-types";
 import { ShellMenus } from "./ShellMenus";
 import { ShortcutModal } from "./ShortcutModal";
 import { languageOptions } from "./shellModel";
@@ -24,9 +25,17 @@ type ViewerDesktopShellProps = {
   hostRef: RefObject<HTMLDivElement>;
   workflow: WorkflowController;
   embedded?: boolean;
+  mode?: WorkbenchShellMode;
 };
 
-export function ViewerDesktopShell({ route, language, hostRef, workflow, embedded = false }: ViewerDesktopShellProps) {
+export function ViewerDesktopShell({
+  route,
+  language,
+  hostRef,
+  workflow,
+  embedded = false,
+  mode = "legacy_dual",
+}: ViewerDesktopShellProps) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [enabledActions, setEnabledActions] = useState<Set<ShellMenuActionId>>(() => new Set());
   const workflowSnapshot = useSyncExternalStore(
@@ -117,8 +126,9 @@ export function ViewerDesktopShell({ route, language, hostRef, workflow, embedde
   return (
     <div ref={hostRef} className="roadgen-react-shell-host">
       <Layout
-        className={`desktop-shell ${route === "viewer" ? "desktop-shell-left-pinned" : "desktop-shell-left-auto-collapse"} desktop-shell-right-auto-collapse roadgen-ant-shell`}
+        className={`desktop-shell ${mode === "legacy_dual" ? `${route === "viewer" ? "desktop-shell-left-pinned" : "desktop-shell-left-auto-collapse"} desktop-shell-right-auto-collapse` : "desktop-shell-single-left"} roadgen-ant-shell`}
         data-route={route}
+        data-shell-mode={mode}
       >
         <Layout.Header className="desktop-shell-topbar roadgen-ant-header">
           {!embedded ? <>
@@ -253,7 +263,7 @@ export function ViewerDesktopShell({ route, language, hostRef, workflow, embedde
             <div id="desktop-shell-center-stage" className="desktop-shell-center-stage" />
           </section>
 
-          <aside className="desktop-shell-rail desktop-shell-rail-right" data-shell-region="right" aria-label={t(railKeys.rightTitle, `[missing ${railKeys.rightTitle}]`)}>
+          <aside className="desktop-shell-rail desktop-shell-rail-right" data-shell-region="right" data-shell-role={mode === "legacy_dual" ? "right-rail" : "left-sidebar"} aria-label={mode === "legacy_dual" ? t(railKeys.rightTitle, `[missing ${railKeys.rightTitle}]`) : t("shell.workspace", "Workspace")}>
             <div className="desktop-shell-rail-header">
               <div>
                 <div className="desktop-shell-rail-kicker">

@@ -9,6 +9,7 @@ import type { AppRoute } from "../ui";
 import { formatViewerKey, loadViewerLanguage } from "../viewer-i18n";
 import type { ViewerLanguage } from "../viewer-i18n";
 import type { WorkflowController } from "../workflow-controller";
+import type { WorkbenchShellMode } from "../shell-types";
 import { ViewerDesktopShell } from "./ViewerDesktopShell";
 import { CourseStudio } from "./CourseStudio";
 
@@ -32,7 +33,8 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
 
     let cancelled = false;
     let routeTeardown: Teardown | undefined;
-    const shell = bindDesktopShell(host, route);
+    const shellMode: WorkbenchShellMode = route === "viewer" ? "single_left_overlay" : "legacy_dual";
+    const shell = bindDesktopShell(host, route, shellMode);
 
     function mountRoute() {
       switch (route) {
@@ -86,5 +88,6 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
   if (route === "course-studio") {
     return <CourseStudio language={language} workflow={workflow} />;
   }
-  return <ViewerDesktopShell route={route} language={language} hostRef={hostRef} workflow={workflow} />;
+  const shellMode: WorkbenchShellMode = route === "viewer" ? "single_left_overlay" : "legacy_dual";
+  return <ViewerDesktopShell route={route} language={language} hostRef={hostRef} workflow={workflow} mode={shellMode} />;
 }
