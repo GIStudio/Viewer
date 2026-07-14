@@ -35,6 +35,8 @@ export type WorkbenchSidebarPage = {
   content: HTMLElement | string;
   disabled?: boolean;
   badge?: string;
+  /** Marks a durable navigation location without opening a drawer. */
+  current?: boolean;
   /** Action-only pages reuse an existing controller instead of duplicating its panel DOM. */
   action?: () => void;
 };

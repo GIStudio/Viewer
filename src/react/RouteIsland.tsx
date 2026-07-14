@@ -5,9 +5,16 @@ import { mountAssetEditor } from "../asset-editor";
 import { mountSceneGraphPage } from "../scene-graph";
 import { mountModelInputBrowser } from "../model-input-browser";
 import { bindDesktopShell } from "../desktop-shell";
+import { navigateTo } from "../ui";
 import type { AppRoute } from "../ui";
-import { formatViewerKey, loadViewerLanguage } from "../viewer-i18n";
+import {
+  VIEWER_LANGUAGE_EVENT,
+  formatViewerKey,
+  loadViewerLanguage,
+  translateViewerKey,
+} from "../viewer-i18n";
 import type { ViewerLanguage } from "../viewer-i18n";
+import { WORKFLOW_STEPS, workflowRoute } from "../workflow-controller";
 import type { WorkflowController } from "../workflow-controller";
 import type { WorkbenchShellMode } from "../shell-types";
 import { ViewerDesktopShell } from "./ViewerDesktopShell";
@@ -33,8 +40,36 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
 
     let cancelled = false;
     let routeTeardown: Teardown | undefined;
+    let unregisterWorkflowNavigation: (() => void) | undefined;
     const shellMode: WorkbenchShellMode = "single_left_overlay";
     const shell = bindDesktopShell(host, route, shellMode);
+
+    const syncWorkflowNavigation = () => {
+      const snapshot = workflow.getSnapshot();
+      const currentLanguage = loadViewerLanguage();
+      unregisterWorkflowNavigation?.();
+      unregisterWorkflowNavigation = shell.sidebar.registerPages(WORKFLOW_STEPS.map((step, index) => ({
+        id: `workflow-${step}`,
+        label: translateViewerKey(currentLanguage, `workflow.step.${step}`) ?? step,
+        icon: String(index + 1).padStart(2, "0"),
+        group: "navigation" as const,
+        content: "",
+        current: snapshot.step === step,
+        action: () => {
+          const result = workflow.transition(step);
+          if (!result.ok) {
+            shell.setStatusSummary(result.reason);
+            shell.pushActivity(result.reason, "warning");
+            return;
+          }
+          navigateTo(workflowRoute(step));
+        },
+      })));
+    };
+
+    syncWorkflowNavigation();
+    const unsubscribeWorkflow = workflow.subscribe(syncWorkflowNavigation);
+    window.addEventListener(VIEWER_LANGUAGE_EVENT, syncWorkflowNavigation);
 
     function mountRoute() {
       switch (route) {
@@ -80,6 +115,9 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
 
     return () => {
       cancelled = true;
+      window.removeEventListener(VIEWER_LANGUAGE_EVENT, syncWorkflowNavigation);
+      unsubscribeWorkflow();
+      unregisterWorkflowNavigation?.();
       routeTeardown?.();
       shell.destroy();
     };

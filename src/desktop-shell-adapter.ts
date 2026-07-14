@@ -341,11 +341,13 @@ export function bindDesktopShell(
       button.className = "desktop-shell-tab-button workbench-sidebar-button";
       button.dataset.shellTab = page.id;
       button.dataset.sidebarGroup = page.group;
+      button.dataset.current = page.current ? "true" : "false";
       button.dataset.open = "false";
       button.title = page.label;
       button.setAttribute("aria-label", page.label);
       button.setAttribute("aria-controls", panelId);
       button.setAttribute("aria-expanded", "false");
+      if (page.current) button.setAttribute("aria-current", "step");
       button.innerHTML = `<span class="workbench-sidebar-icon" aria-hidden="true"></span><span class="workbench-sidebar-label"></span>`;
       button.querySelector<HTMLElement>(".workbench-sidebar-icon")!.textContent = sidebarIcon(page);
       button.querySelector<HTMLElement>(".workbench-sidebar-label")!.textContent = page.label;

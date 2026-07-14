@@ -21,6 +21,7 @@ for (const mode of ["single_left_overlay", "course_single_left", "legacy_dual"])
   assert.match(types, new RegExp(`\\| \\"${mode}\\"`), `missing shell mode ${mode}`);
 }
 assert.match(types, /interface WorkbenchSidebarController/);
+assert.match(types, /current\?: boolean/);
 assert.match(shell, /data-shell-mode=\{mode\}/);
 assert.match(adapter, /if \(activeRightTab === page\.id\) closeSidebar\(\)/);
 assert.match(adapter, /event\.key === "Escape"/);
@@ -38,6 +39,10 @@ assert.match(theme, /--rg-paper: #f3f0e7/);
 assert.match(professional, /background-image: var\(--rg-grid-paper\)/);
 assert.match(professional, /\.desktop-shell-center-stage/);
 assert.match(professional, /box-shadow: 5px 5px 0 var\(--rg-yellow\)/);
+assert.match(professional, /> \.workflow-shell-bar \{[\s\S]*display: none/);
+assert.match(professional, /data-current="true"/);
+assert.match(routeIsland, /WORKFLOW_STEPS\.map/);
+assert.match(routeIsland, /group: "navigation"/);
 assert.doesNotMatch(course, /course-design-timeline/);
 assert.match(course, /course-design-external-drawer/);
 assert.match(course, /sidebarPages=\{sidebarPages\}/);

@@ -1,11 +1,15 @@
 /* Professional workbenches share the teaching studio's editorial field-notebook language. */
 .desktop-shell[data-shell-mode="single_left_overlay"] {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   color: var(--rg-ink);
   font-family: var(--rg-body-font);
   background-color: var(--rg-paper);
   background-image: var(--rg-grid-paper);
   background-size: 24px 24px;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] > .workflow-shell-bar {
+  display: none;
 }
 
 .desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-topbar {
@@ -159,6 +163,32 @@
   border-left-color: var(--rg-coral);
   color: var(--rg-ink);
   background: var(--rg-yellow);
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-button[data-sidebar-group="navigation"] {
+  flex-basis: 3rem;
+  min-height: 3rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-button[data-sidebar-group="navigation"] .workbench-sidebar-icon {
+  color: var(--rg-yellow);
+  font-size: 0.66rem;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-button[data-sidebar-group="navigation"] .workbench-sidebar-label {
+  color: #d8e3e4;
+  font-size: 0.53rem;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-button[data-current="true"] {
+  border-left-color: var(--rg-coral);
+  color: var(--rg-ink);
+  background: var(--rg-yellow);
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-button[data-current="true"] :is(.workbench-sidebar-icon, .workbench-sidebar-label) {
+  color: var(--rg-ink);
 }
 
 .desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-label,
