@@ -257,6 +257,9 @@ import type {
 } from "./workflow-api";
 
 const DEFAULT_REFERENCE_IMAGE_LOADING_MESSAGE = "Loading default reference plan...";
+const ANNOTATION_MIN_ZOOM = 0.25;
+const ANNOTATION_MAX_ZOOM = 6;
+const ANNOTATION_ZOOM_STEP = 1.25;
 
 type SceneGraphStatusText = string | {
   key: string;
@@ -2429,6 +2432,10 @@ export function mountSceneGraphPage(
     snapToRoadInput,
     imageMetaEl,
     stageEl,
+    zoomOutButton,
+    zoomInButton,
+    zoomFitButton,
+    zoomLevelEl,
     stageEmptyEl,
     boardEl,
     originalImageEl,
@@ -2528,6 +2535,15 @@ export function mountSceneGraphPage(
     crossHoverSnap: null as BranchSnapTarget | null,
     crossDraft: null as CrossDraft | null,
     snapToRoadEnabled: true,
+    viewportScale: 1,
+    viewportSpacePressed: false,
+    viewportPan: null as null | {
+      pointerId: number;
+      startClientX: number;
+      startClientY: number;
+      startScrollLeft: number;
+      startScrollTop: number;
+    },
   };
 
   const retainedNormalizedSource = workflow.getSnapshot().normalized;
@@ -3105,11 +3121,76 @@ export function mountSceneGraphPage(
     window.requestAnimationFrame(() => map.resize());
   }
 
+  function renderViewportControls(): void {
+    const hasCanvas = hasAnnotationCanvas();
+    boardEl.style.transform = `scale(${state.viewportScale})`;
+    zoomLevelEl.value = `${Math.round(state.viewportScale * 100)}%`;
+    zoomOutButton.disabled = !hasCanvas || state.viewportScale <= ANNOTATION_MIN_ZOOM;
+    zoomInButton.disabled = !hasCanvas || state.viewportScale >= ANNOTATION_MAX_ZOOM;
+    zoomFitButton.disabled = !hasCanvas;
+    stageEl.dataset.zoomed = state.viewportScale > 1 ? "true" : "false";
+    stageEl.dataset.panReady = state.viewportSpacePressed ? "true" : "false";
+    stageEl.dataset.panning = state.viewportPan ? "true" : "false";
+  }
+
+  function setViewportScale(
+    requestedScale: number,
+    anchorClientX = stageEl.getBoundingClientRect().left + stageEl.clientWidth / 2,
+    anchorClientY = stageEl.getBoundingClientRect().top + stageEl.clientHeight / 2,
+  ): void {
+    if (!hasAnnotationCanvas()) return;
+    const nextScale = clamp(requestedScale, ANNOTATION_MIN_ZOOM, ANNOTATION_MAX_ZOOM);
+    const oldScale = state.viewportScale;
+    if (Math.abs(nextScale - oldScale) < 0.001) return;
+
+    const boardRect = boardEl.getBoundingClientRect();
+    const anchorX = clamp(anchorClientX, boardRect.left, boardRect.right);
+    const anchorY = clamp(anchorClientY, boardRect.top, boardRect.bottom);
+    const boardPointX = (anchorX - boardRect.left) / oldScale;
+    const boardPointY = (anchorY - boardRect.top) / oldScale;
+
+    state.viewportScale = nextScale;
+    renderViewportControls();
+    stageEl.scrollLeft += boardPointX * (nextScale - oldScale);
+    stageEl.scrollTop += boardPointY * (nextScale - oldScale);
+  }
+
+  function resetViewport(): void {
+    state.viewportScale = 1;
+    state.viewportPan = null;
+    stageEl.scrollLeft = 0;
+    stageEl.scrollTop = 0;
+    renderViewportControls();
+  }
+
+  function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+    return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, button, [contenteditable='true']"));
+  }
+
+  function beginViewportPan(event: PointerEvent): boolean {
+    const shouldPan = event.button === 1 || (event.button === 0 && state.viewportSpacePressed);
+    if (!shouldPan || !hasAnnotationCanvas()) return false;
+    state.viewportPan = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startScrollLeft: stageEl.scrollLeft,
+      startScrollTop: stageEl.scrollTop,
+    };
+    stageEl.focus({ preventScroll: true });
+    renderViewportControls();
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  }
+
   function updateStageVisibility(): void {
     const hasImage = Boolean(state.currentImageUrl);
     const hasCanvas = hasAnnotationCanvas();
     stageEl.dataset.hasImage = hasImage ? "true" : "false";
     stageEl.dataset.hasCanvas = hasCanvas ? "true" : "false";
+    const viewportShellEl = stageEl.closest<HTMLElement>(".scene-canvas-viewport-shell");
+    if (viewportShellEl) viewportShellEl.dataset.hasCanvas = hasCanvas ? "true" : "false";
     stageEl.dataset.loading = state.isReferenceImageLoading ? "true" : "false";
     stageEl.dataset.emptyState = hasCanvas ? "ready" : state.isReferenceImageLoading ? "loading" : "empty";
     boardEl.hidden = !hasCanvas;
@@ -3140,6 +3221,7 @@ export function mountSceneGraphPage(
     originalImageEl.style.opacity = String(state.originalOpacity);
     overlayHostEl.hidden = !state.showOverlay;
     overlayHostEl.style.opacity = String(state.overlayOpacity);
+    renderViewportControls();
   }
 
   function syncJsonTextarea(force = false): void {
@@ -4142,6 +4224,7 @@ export function mountSceneGraphPage(
       clearCrossDraft();
       clearFurniturePlacement();
       clearGraphResult("Reference image updated. Road graph will be generated after annotation.");
+      resetViewport();
       setStatus(statusEl, `Loaded reference image: ${planId || "custom"}.`, "success");
     } catch (error) {
       if (preserveCurrentOnError) {
@@ -5621,6 +5704,7 @@ export function mountSceneGraphPage(
       renderAll();
       uploadedImageDataUrl = "";
       pendingOsmNormalization = null;
+      resetViewport();
       workflow.setSourceDraft({
         kind: "manual_annotation",
         imageDataUrl: null,
@@ -5814,6 +5898,38 @@ export function mountSceneGraphPage(
     setStatus(statusEl, state.snapToRoadEnabled ? "Road snap enabled." : "Road snap disabled. Furniture will place on selected road/strip.", "neutral");
   }, { signal });
 
+  zoomOutButton.addEventListener(
+    "click",
+    () => setViewportScale(state.viewportScale / ANNOTATION_ZOOM_STEP),
+    { signal },
+  );
+  zoomInButton.addEventListener(
+    "click",
+    () => setViewportScale(state.viewportScale * ANNOTATION_ZOOM_STEP),
+    { signal },
+  );
+  zoomFitButton.addEventListener("click", resetViewport, { signal });
+  stageEl.addEventListener(
+    "wheel",
+    (event) => {
+      if (!hasAnnotationCanvas() || (event.target instanceof HTMLElement && event.target.closest(".scene-canvas-viewport-controls"))) {
+        return;
+      }
+      event.preventDefault();
+      const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+      setViewportScale(state.viewportScale * zoomFactor, event.clientX, event.clientY);
+    },
+    { signal, passive: false },
+  );
+  stageEl.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.target instanceof HTMLElement && event.target.closest(".scene-canvas-viewport-controls")) return;
+      beginViewportPan(event);
+    },
+    { signal, capture: true },
+  );
+
   overlayHostEl.addEventListener(
     "dblclick",
     (event) => {
@@ -5835,6 +5951,16 @@ export function mountSceneGraphPage(
   window.addEventListener(
     "keydown",
     (event) => {
+      if (
+        event.code === "Space"
+        && !event.repeat
+        && !isEditableKeyboardTarget(event.target)
+        && (stageEl.matches(":hover") || document.activeElement === stageEl)
+      ) {
+        state.viewportSpacePressed = true;
+        renderViewportControls();
+        event.preventDefault();
+      }
       if (state.drag?.kind === "functional_zone_draw" && event.key === "Enter") {
         event.preventDefault();
         commitFunctionalZoneDraft();
@@ -5861,6 +5987,26 @@ export function mountSceneGraphPage(
         renderAll();
         setStatus(statusEl, "Cancelled scene region box.", "neutral");
       }
+    },
+    { signal },
+  );
+
+  window.addEventListener(
+    "keyup",
+    (event) => {
+      if (event.code !== "Space") return;
+      state.viewportSpacePressed = false;
+      renderViewportControls();
+    },
+    { signal },
+  );
+
+  window.addEventListener(
+    "blur",
+    () => {
+      state.viewportSpacePressed = false;
+      state.viewportPan = null;
+      renderViewportControls();
     },
     { signal },
   );
@@ -6132,6 +6278,12 @@ export function mountSceneGraphPage(
   window.addEventListener(
     "pointermove",
     (event) => {
+      if (state.viewportPan?.pointerId === event.pointerId) {
+        stageEl.scrollLeft = state.viewportPan.startScrollLeft - (event.clientX - state.viewportPan.startClientX);
+        stageEl.scrollTop = state.viewportPan.startScrollTop - (event.clientY - state.viewportPan.startClientY);
+        event.preventDefault();
+        return;
+      }
       if (state.previewResize && state.previewResize.pointerId === event.pointerId) {
         const centerline = state.annotation.centerlines.find((item) => item.id === state.previewResize?.centerlineId);
         const leftStrip = centerline?.cross_section_strips.find((strip) => strip.strip_id === state.previewResize?.leftStripId);
@@ -6284,6 +6436,12 @@ export function mountSceneGraphPage(
   window.addEventListener(
     "pointerup",
     (event) => {
+      if (state.viewportPan?.pointerId === event.pointerId) {
+        state.viewportPan = null;
+        renderViewportControls();
+        event.preventDefault();
+        return;
+      }
       if (state.previewResize && state.previewResize.pointerId === event.pointerId) {
         const resized = state.previewResize.didResize;
         state.previewResize = null;

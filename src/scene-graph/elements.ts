@@ -29,6 +29,10 @@ export type SceneGraphElements = {
   snapToRoadInput: HTMLInputElement;
   imageMetaEl: HTMLElement;
   stageEl: HTMLElement;
+  zoomOutButton: HTMLButtonElement;
+  zoomInButton: HTMLButtonElement;
+  zoomFitButton: HTMLButtonElement;
+  zoomLevelEl: HTMLOutputElement;
   stageEmptyEl: HTMLElement;
   boardEl: HTMLElement;
   originalImageEl: HTMLImageElement;
@@ -100,6 +104,10 @@ export function collectSceneGraphElements(root: HTMLElement | Document): SceneGr
     snapToRoadInput: requireElement<HTMLInputElement>(root, "#annotation-snap-to-road"),
     imageMetaEl: requireElement<HTMLElement>(root, "#annotation-image-meta"),
     stageEl: requireElement<HTMLElement>(root, "#annotation-stage"),
+    zoomOutButton: requireElement<HTMLButtonElement>(root, "#annotation-zoom-out"),
+    zoomInButton: requireElement<HTMLButtonElement>(root, "#annotation-zoom-in"),
+    zoomFitButton: requireElement<HTMLButtonElement>(root, "#annotation-zoom-fit"),
+    zoomLevelEl: requireElement<HTMLOutputElement>(root, "#annotation-zoom-level"),
     stageEmptyEl: requireElement<HTMLElement>(root, "#annotation-stage-empty"),
     boardEl: requireElement<HTMLElement>(root, "#annotation-board"),
     originalImageEl: requireElement<HTMLImageElement>(root, "#annotation-original-image"),

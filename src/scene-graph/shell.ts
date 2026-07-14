@@ -278,12 +278,21 @@ export function createSceneGraphStageHtml(): string {
   return `
     <div class="scene-shell-stage">
       ${createSceneGraphActionToolbarHtml()}
-      <div id="annotation-stage" class="scene-layer-stage scene-canvas-stage" data-has-image="false" data-loading="true" data-empty-state="loading">
-        <div id="annotation-stage-empty" class="scene-image-empty" data-i18n-key="sceneGraph.status.loadingDefaultPlan">Loading default reference plan...</div>
-        <div id="annotation-board" class="scene-board" hidden>
-          <div id="annotation-osm-map" class="scene-osm-map" hidden aria-label="OpenStreetMap annotation background"></div>
-          <img id="annotation-original-image" class="scene-original-image annotation-original-image" alt="Reference plan" />
-          <div id="annotation-overlay-host" class="scene-graph-overlay"></div>
+      <div class="scene-canvas-viewport-shell" data-has-canvas="false">
+        <div class="scene-canvas-viewport-controls" role="group" aria-label="Annotation canvas zoom controls">
+          <button id="annotation-zoom-out" class="scene-canvas-viewport-button" type="button" aria-label="Zoom out">−</button>
+          <output id="annotation-zoom-level" class="scene-canvas-viewport-level" aria-live="polite">100%</output>
+          <button id="annotation-zoom-in" class="scene-canvas-viewport-button" type="button" aria-label="Zoom in">+</button>
+          <button id="annotation-zoom-fit" class="scene-canvas-viewport-fit" type="button" title="Fit canvas width">适应宽度</button>
+        </div>
+        <div class="scene-canvas-viewport-hint" aria-hidden="true">滚轮缩放 · Space / 中键拖动画布</div>
+        <div id="annotation-stage" class="scene-layer-stage scene-canvas-stage" data-has-image="false" data-loading="true" data-empty-state="loading" tabindex="0" aria-label="Reference annotation canvas. Use the mouse wheel to zoom and hold Space or the middle mouse button to pan.">
+          <div id="annotation-stage-empty" class="scene-image-empty" data-i18n-key="sceneGraph.status.loadingDefaultPlan">Loading default reference plan...</div>
+          <div id="annotation-board" class="scene-board" hidden>
+            <div id="annotation-osm-map" class="scene-osm-map" hidden aria-label="OpenStreetMap annotation background"></div>
+            <img id="annotation-original-image" class="scene-original-image annotation-original-image" alt="Reference plan" />
+            <div id="annotation-overlay-host" class="scene-graph-overlay"></div>
+          </div>
         </div>
       </div>
       <button id="scene-page-asset-editor" type="button" hidden>Asset Editor</button>
