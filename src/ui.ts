@@ -8,11 +8,16 @@ export type AppRoute = "course-studio" | "viewer" | "scene-graph" | "asset-edito
 
 interface RouteConfig {
   id: AppRoute;
+  index: string;
+  group: "course" | "professional";
   label: string;
+  labelZh: string;
   path: string;
   kicker: string;
   title: string;
+  titleZh: string;
   subtitle?: string;
+  subtitleZh?: string;
 }
 
 interface HeaderOptions {
@@ -25,41 +30,64 @@ interface HeaderOptions {
 const ROUTES: Record<AppRoute, RouteConfig> = {
   "course-studio": {
     id: "course-studio",
+    index: "00",
+    group: "course",
     label: "Course Studio",
+    labelZh: "课程工作台",
     path: "#course-studio",
     kicker: "RoadGen3D / Course",
     title: "Urban Street Teaching Studio",
+    titleZh: "城市街道教学工作台",
   },
   viewer: {
     id: "viewer",
+    index: "01",
+    group: "professional",
     label: "3D Viewer",
+    labelZh: "3D 查看器",
     path: "",
     kicker: "RoadGen3D",
     title: "3D Road Viewer",
+    titleZh: "3D 道路查看器",
   },
   "scene-graph": {
     id: "scene-graph",
+    index: "02",
+    group: "professional",
     label: "Reference",
+    labelZh: "参考图标注",
     path: "#scene-graph",
     kicker: "Viewer / Reference",
     title: "Reference Plan Annotation",
+    titleZh: "参考图标注",
     subtitle: "Calibrate the plan scale, trace road centerlines, define cross sections and street-furniture anchors, then export JSON or convert to a road graph.",
+    subtitleZh: "校准比例、描绘道路中心线、定义横断面和街道设施锚点，再导出标注或转换为道路图。",
   },
   "asset-editor": {
     id: "asset-editor",
+    index: "03",
+    group: "professional",
     label: "Asset Editor",
+    labelZh: "资产编辑器",
     path: "#asset-editor",
     kicker: "Viewer / 3D Assets",
     title: "3D Asset Editor",
+    titleZh: "3D 资产编辑器",
     subtitle: "Browse, inspect, and manage project 3D assets",
+    subtitleZh: "浏览、检查并管理项目 3D 资产",
   },
   "model-input-browser": {
     id: "model-input-browser",
+    index: "04",
+    group: "professional",
     label: "Model Input Browser",
+    labelZh: "模型输入审计",
     path: "#model-input-browser",
     kicker: "Viewer / Raw Evidence",
     title: "Model Input Browser",
+    titleZh: "模型输入审计",
     subtitle: "Read-only audit of the exact raw GeoJSON prompt supplied to the model.",
+    subtitleZh: "只读核验发送给模型的原始 GeoJSON 提示词。",
   },
 };
 

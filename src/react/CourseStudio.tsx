@@ -21,6 +21,7 @@ import type { ViewerLanguage } from "../viewer-i18n";
 import type { WorkflowController } from "../workflow-controller";
 import { AoiMap } from "./AoiMap";
 import { CourseReferenceWorkbench, CourseViewerWorkbench, type CourseWorkbenchNavigation } from "./CourseSharedWorkbenches";
+import { StudioBrandHeader } from "./StudioBrandHeader";
 
 type StepId = "area" | "data" | "annotation" | "design" | "evaluation" | "compare_export";
 const STEPS: Array<{ id: StepId; zh: string; en: string; index: string }> = [
@@ -135,19 +136,26 @@ export function CourseStudio({ language, workflow }: { language: ViewerLanguage;
 
   return (
     <div className="course-studio-shell" data-step={step} data-immersive={String(step === "annotation" || (step === "design" && !generationJob && Boolean(latestRevision)))}>
-      <header className="course-studio-header">
-        <div className="course-wordmark"><span>RG</span><div><strong>RoadGen3D</strong><small>{zh ? "城市街道教学工作台" : "Urban street teaching studio"}</small></div></div>
-        <div className="course-header-project">
-          <span>{zh ? "当前项目" : "Current project"}</span>
+      <StudioBrandHeader
+        variant="course"
+        language={language}
+        className="course-studio-header"
+        contextLabel={zh ? "当前项目" : "Current project"}
+        contextValue={(
           <Select
             value={project?.id}
             placeholder={zh ? "新建一个课程项目" : "Create a course project"}
             options={projects.map((item) => ({ value: item.id, label: `${item.name} · ${item.city}` }))}
             onChange={(id) => setProject(projects.find((item) => item.id === id) ?? null)}
           />
-        </div>
-        <div className="course-user-block"><div><strong>{user.display_name}</strong><small>{user.system_role}</small></div><Button onClick={() => { api.setToken(""); setUser(null); }}>{zh ? "退出" : "Sign out"}</Button></div>
-      </header>
+        )}
+        actions={(
+          <div className="course-user-block">
+            <div><strong>{user.display_name}</strong><small>{user.system_role}</small></div>
+            <Button onClick={() => { api.setToken(""); setUser(null); }}>{zh ? "退出" : "Sign out"}</Button>
+          </div>
+        )}
+      />
 
       <aside className="course-studio-sidebar">
         <div className="course-sidebar-label">{zh ? "课程" : "COURSE"}</div>

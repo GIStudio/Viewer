@@ -1,4 +1,4 @@
-import { Button, Layout, Menu, Select, Tabs, type MenuProps } from "antd";
+import { Button, Layout, Select, Tabs } from "antd";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
 
@@ -18,6 +18,7 @@ import type { WorkbenchShellMode } from "../shell-types";
 import { ShellMenus } from "./ShellMenus";
 import { ShortcutModal } from "./ShortcutModal";
 import { languageOptions } from "./shellModel";
+import { StudioBrandHeader } from "./StudioBrandHeader";
 
 type ViewerDesktopShellProps = {
   route: AppRoute;
@@ -109,12 +110,14 @@ export function ViewerDesktopShell({
     return () => host.removeEventListener(SHELL_ACTIONS_CHANGE_EVENT, handleActionsChange);
   }, [hostRef, route]);
 
-  const routeItems = useMemo<MenuProps["items"]>(
+  const routeItems = useMemo(
     () =>
-      (Object.keys(ROUTES) as AppRoute[]).map((id) => ({
-        key: id,
-        label: t(`route.${id}.label`, `[missing route.${id}.label]`),
-      })),
+      (Object.keys(ROUTES) as AppRoute[])
+        .filter((id) => ROUTES[id].group === "professional")
+        .map((id) => ({
+          value: id,
+          label: t(`route.${id}.label`, `[missing route.${id}.label]`),
+        })),
     [language],
   );
 
@@ -130,72 +133,51 @@ export function ViewerDesktopShell({
         data-route={route}
         data-shell-mode={mode}
       >
-        <Layout.Header className="desktop-shell-topbar roadgen-ant-header">
-          {!embedded ? <>
-          <div className="desktop-shell-brand">
-            <div className="desktop-shell-traffic-lights" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </div>
-            <div className="desktop-shell-title-wrap">
-              <h1 className="desktop-shell-title">
-                {t(`shell.${route}.title`, `[missing shell.${route}.title]`)}
-              </h1>
-              {route !== "viewer" ? (
-                <p className="desktop-shell-subtitle">
-                  {t(`shell.${route}.subtitle`, `[missing shell.${route}.subtitle]`)}
-                </p>
-              ) : null}
-            </div>
-            <Menu
-              className="desktop-shell-route-switch roadgen-ant-route-menu"
-              mode="horizontal"
-              selectedKeys={[route]}
-              items={routeItems}
-              onClick={({ key }) => navigateTo(key as AppRoute)}
-            />
-          </div>
-          <div className="desktop-shell-topbar-actions">
-            <Select
-              className="desktop-shell-language-select"
-              aria-label={t("language.group", "Language")}
-              value={language}
-              options={languageOptions}
-              onChange={(nextLanguage) => setViewerLanguage(nextLanguage)}
-            />
-            <ShellMenus
-              language={language}
-              enabledActions={enabledActions}
-              hostRef={hostRef}
-              onOpenShortcuts={() => setShortcutsOpen(true)}
-            />
-            <Button
-              className="desktop-shell-topbar-button"
-              type="default"
-              data-shell-action="tools-open-history"
-            >
-              {t("topbar.history", "History")}
-            </Button>
-            <Button
-              className="desktop-shell-topbar-button"
-              type="default"
-              data-shell-toggle="right"
-            >
-              {t("topbar.analyze", "Analyze")}
-            </Button>
-            <Button
-              className="desktop-shell-topbar-button desktop-shell-topbar-button-primary"
-              type="primary"
-              data-shell-action="tools-open-design"
-            >
-              {t("topbar.generate", "Generate & Load")}
-            </Button>
-          </div>
-          </> : null}
-        </Layout.Header>
+        {!embedded ? (
+          <StudioBrandHeader
+            variant="professional"
+            language={language}
+            className="desktop-shell-topbar roadgen-ant-header"
+            contextLabel={t("studio.currentWorkbench", "Current workbench")}
+            contextValue={(
+              <Select
+                className="desktop-shell-workbench-select"
+                aria-label={t("studio.currentWorkbench", "Current workbench")}
+                value={route}
+                options={routeItems}
+                optionRender={(option) => {
+                  const id = option.value as AppRoute;
+                  return <span className="studio-route-option"><small>{ROUTES[id].index}</small>{option.label}</span>;
+                }}
+                onChange={(nextRoute) => navigateTo(nextRoute as AppRoute)}
+              />
+            )}
+            actions={(
+              <>
+                <Select
+                  className="desktop-shell-language-select"
+                  aria-label={t("language.group", "Language")}
+                  value={language}
+                  options={languageOptions}
+                  onChange={(nextLanguage) => setViewerLanguage(nextLanguage)}
+                />
+                <ShellMenus
+                  language={language}
+                  enabledActions={enabledActions}
+                  hostRef={hostRef}
+                  onOpenShortcuts={() => setShortcutsOpen(true)}
+                />
+              </>
+            )}
+          />
+        ) : null}
         <div className="workflow-shell-bar">
-          <nav className="workflow-step-strip" aria-label={t("workflow.navigation", "[missing workflow.navigation]")}>
+          <nav
+            className="workflow-step-strip"
+            aria-label={embedded
+              ? t("workflow.navigation", "RoadGen3D student workflow")
+              : t("workflow.professionalNavigation", "RoadGen3D professional workflow")}
+          >
             {WORKFLOW_STEPS.map((step, index) => (
               <button
                 key={step}
@@ -207,7 +189,7 @@ export function ViewerDesktopShell({
                 disabled={!canOpenStep[step]}
                 onClick={() => openWorkflowStep(step)}
               >
-                <span>{index + 1}</span>
+                <span>{String(index + 1).padStart(2, "0")}</span>
                 <strong>{stepLabels[step]}</strong>
               </button>
             ))}

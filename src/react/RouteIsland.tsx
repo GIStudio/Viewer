@@ -33,7 +33,7 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
 
     let cancelled = false;
     let routeTeardown: Teardown | undefined;
-    const shellMode: WorkbenchShellMode = route === "viewer" ? "single_left_overlay" : "legacy_dual";
+    const shellMode: WorkbenchShellMode = "single_left_overlay";
     const shell = bindDesktopShell(host, route, shellMode);
 
     function mountRoute() {
@@ -88,6 +88,6 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
   if (route === "course-studio") {
     return <CourseStudio language={language} workflow={workflow} />;
   }
-  const shellMode: WorkbenchShellMode = route === "viewer" ? "single_left_overlay" : "legacy_dual";
+  const shellMode: WorkbenchShellMode = "single_left_overlay";
   return <ViewerDesktopShell route={route} language={language} hostRef={hostRef} workflow={workflow} mode={shellMode} />;
 }

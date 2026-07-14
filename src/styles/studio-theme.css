@@ -1,0 +1,202 @@
+:root {
+  --rg-ink: #102d3a;
+  --rg-blue: #174b64;
+  --rg-paper: #f3f0e7;
+  --rg-paper-deep: #ece9df;
+  --rg-surface: #fffef9;
+  --rg-line: #c8c3b5;
+  --rg-yellow: #f4c430;
+  --rg-coral: #df654f;
+  --rg-mint: #b9d9cc;
+  --rg-muted: #65757b;
+  --rg-display-font: Georgia, "Songti SC", "STSong", serif;
+  --rg-body-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --rg-mono-font: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --rg-grid-paper: linear-gradient(rgba(23, 75, 100, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 75, 100, 0.055) 1px, transparent 1px);
+
+  --course-ink: var(--rg-ink);
+  --course-blue: var(--rg-blue);
+  --course-paper: var(--rg-paper);
+  --course-line: var(--rg-line);
+  --course-yellow: var(--rg-yellow);
+  --course-coral: var(--rg-coral);
+  --course-mint: var(--rg-mint);
+
+  --color-primary: var(--rg-blue);
+  --color-primary-dark: var(--rg-ink);
+  --color-primary-light: #24657f;
+  --color-primary-lighter: #e4eee9;
+  --color-accent: var(--rg-yellow);
+  --color-accent-dark: #c79c0c;
+  --color-accent-light: #f9dd70;
+  --color-bg: rgba(255, 254, 249, 0.96);
+  --color-bg-solid: var(--rg-paper);
+  --color-bg-panel: var(--rg-surface);
+  --color-bg-elevated: #ffffff;
+  --color-bg-hover: rgba(23, 75, 100, 0.07);
+  --color-bg-active: rgba(223, 101, 79, 0.12);
+  --color-text: var(--rg-ink);
+  --color-text-secondary: var(--rg-muted);
+  --color-text-muted: #829095;
+  --color-border: var(--rg-line);
+  --color-border-light: rgba(16, 45, 58, 0.18);
+  --shadow-sm: 2px 2px 0 rgba(16, 45, 58, 0.72);
+  --shadow-md: 5px 5px 0 var(--rg-ink);
+  --shadow-lg: 7px 7px 0 var(--rg-ink);
+  --radius-sm: 0.2rem;
+  --radius-md: 0.3rem;
+  --radius-lg: 0.4rem;
+  --radius-full: 999px;
+}
+
+.studio-brand-header {
+  display: grid;
+  grid-template-columns: 238px minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  min-height: 76px;
+  color: var(--rg-ink);
+  border-bottom: 1px solid var(--rg-ink);
+  background: rgba(243, 240, 231, 0.97);
+}
+
+.studio-wordmark {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 0 20px;
+  color: white;
+  background: var(--rg-ink);
+}
+
+.studio-wordmark > span {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--rg-yellow);
+  color: var(--rg-yellow);
+  font: 800 13px/1 var(--rg-mono-font);
+}
+
+.studio-wordmark > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.studio-wordmark strong {
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+
+.studio-wordmark small {
+  overflow: hidden;
+  color: #d9e3e4;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-brand-header[data-studio-variant="professional"] .studio-wordmark small {
+  display: -webkit-box;
+  line-height: 1.2;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.studio-header-context {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 0 24px;
+}
+
+.studio-header-context > span {
+  flex: 0 0 auto;
+  color: #68757a;
+  font: 700 10px/1 var(--rg-mono-font);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.studio-header-context-value {
+  min-width: 0;
+  width: min(420px, 46vw);
+}
+
+.studio-header-context-value .ant-select {
+  width: 100%;
+}
+
+.studio-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  padding-right: 20px;
+}
+
+.studio-route-option {
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.studio-route-option small {
+  color: var(--rg-coral);
+  font: 800 0.64rem/1 var(--rg-mono-font);
+}
+
+@media (max-width: 820px) {
+  .studio-brand-header {
+    grid-template-columns: 176px minmax(0, 1fr) auto;
+    min-height: 70px;
+  }
+
+  .studio-wordmark {
+    padding-inline: 12px;
+  }
+
+  .studio-wordmark small,
+  .studio-header-context > span {
+    display: none;
+  }
+
+  .studio-header-context {
+    padding-inline: 12px;
+  }
+
+  .studio-header-context-value {
+    width: 100%;
+  }
+}
+
+@media (max-width: 620px) {
+  .studio-brand-header {
+    grid-template-columns: 58px minmax(0, 1fr) auto;
+  }
+
+  .studio-wordmark {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .studio-wordmark > div {
+    display: none;
+  }
+
+  .studio-header-actions {
+    gap: 5px;
+    padding-right: 8px;
+  }
+}

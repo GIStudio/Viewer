@@ -36,20 +36,34 @@ export type ShellMenuGroup = {
 export const antdTheme = {
   algorithm: theme.defaultAlgorithm,
   token: {
-    colorPrimary: "#00539f",
-    colorInfo: "#00539f",
-    colorWarning: "#ffd100",
-    borderRadius: 8,
-    fontFamily: '"SF Pro Text", "Helvetica Neue", Arial, sans-serif',
+    colorPrimary: "#174b64",
+    colorInfo: "#174b64",
+    colorWarning: "#f4c430",
+    colorText: "#102d3a",
+    colorTextSecondary: "#65757b",
+    colorBorder: "#c8c3b5",
+    colorBgContainer: "#fffef9",
+    borderRadius: 4,
+    fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
   components: {
     Button: {
-      borderRadius: 8,
+      borderRadius: 4,
+      defaultShadow: "none",
+      primaryShadow: "2px 2px 0 #102d3a",
     },
     Menu: {
-      itemBorderRadius: 8,
-      horizontalItemHoverColor: "#00539f",
-      horizontalItemSelectedColor: "#00539f",
+      itemBorderRadius: 2,
+      horizontalItemHoverColor: "#174b64",
+      horizontalItemSelectedColor: "#174b64",
+    },
+    Select: {
+      borderRadius: 4,
+      optionSelectedBg: "#f6e7a8",
+    },
+    Tabs: {
+      itemSelectedColor: "#174b64",
+      inkBarColor: "#df654f",
     },
   },
 };

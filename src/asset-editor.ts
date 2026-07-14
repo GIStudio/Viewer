@@ -2223,7 +2223,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
   let currentLanguage = loadViewerLanguage();
   const languageController = new AbortController();
   const shellRoot = root.querySelector<HTMLElement>(".desktop-shell");
-  shellRoot?.classList.add("desktop-shell-left-pinned");
+  if (shell.mode === "legacy_dual") shellRoot?.classList.add("desktop-shell-left-pinned");
   const leftPinButton = root.querySelector<HTMLButtonElement>("[data-shell-left-pin]");
   if (leftPinButton) {
     leftPinButton.setAttribute("aria-pressed", "true");
