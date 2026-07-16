@@ -61,6 +61,8 @@ try {
   let osmRequestCount = 0;
   let hkustImageRequestCount = 0;
   let submittedBbox = null;
+  const browserErrors = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
   await page.route("https://tile.openstreetmap.org/**", (route) => route.fulfill({ status: 204 }));
   await page.route("**/api/**", async (route) => {
     const url = route.request().url();
@@ -128,6 +130,7 @@ try {
   assert.equal(await page.locator("#scene-osm-aoi-picker").isVisible(), false, "the shared annotation canvas replaces the picker after normalization");
   assert.equal(await page.locator("#annotation-osm-map").isVisible(), true, "professional annotation retains the aligned OSM basemap");
   await page.getByText("professional-osm", { exact: true }).first().waitFor();
+  assert.deepEqual(browserErrors, [], `professional OSM flow must not emit page errors: ${browserErrors.join(" | ")}`);
 
   console.log("professional OSM AOI: explicit selection, single fetch, shared annotation canvas, and no HKUST default verified");
 } finally {

@@ -217,8 +217,15 @@ export function mountOsmAoiPicker(host: HTMLElement, options: OsmAoiPickerOption
     map.addLayer({ id: "roadgen-aoi-line", type: "line", source: "roadgen-aoi", paint: { "line-color": "#102d3a", "line-width": 3, "line-dasharray": [2, 1] } });
     if (!options.readonly) {
       const cornerLabels = zh ? ["西南角", "东南角", "东北角", "西北角"] : ["Southwest corner", "Southeast corner", "Northeast corner", "Northwest corner"];
+      const cornerPositions: Array<[number, number]> = [
+        [bbox[0], bbox[1]],
+        [bbox[2], bbox[1]],
+        [bbox[2], bbox[3]],
+        [bbox[0], bbox[3]],
+      ];
       cornerLabels.forEach((label, index) => {
-        const marker = new maplibregl.Marker({ element: createCornerElement(label), draggable: true });
+        const marker = new maplibregl.Marker({ element: createCornerElement(label), draggable: true })
+          .setLngLat(cornerPositions[index]!);
         marker.on("drag", () => {
           const point = marker.getLngLat();
           const next: Wgs84Bbox = [...bbox];
