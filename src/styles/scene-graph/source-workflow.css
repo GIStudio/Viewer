@@ -51,6 +51,32 @@
   line-height: 1.35;
 }
 
+.scene-source-divider {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 1.4rem;
+  color: #66767b;
+  font: 800 0.58rem/1 var(--rg-mono-font, ui-monospace, monospace);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.scene-source-divider::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--rg-line, #9da9a9);
+}
+
+.scene-source-divider span {
+  position: relative;
+  padding: 0 0.55rem;
+  background: var(--rg-paper, #f3f0e7);
+}
+
 .scene-source-provenance {
   display: grid;
   gap: 0.36rem;

@@ -245,6 +245,21 @@
   min-height: 0;
 }
 
+.scene-osm-aoi-picker {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+}
+
+.scene-osm-aoi-picker[hidden] {
+  display: none;
+}
+
+.scene-osm-aoi-picker > .osm-aoi-picker {
+  min-height: 100%;
+  border-radius: 0;
+}
+
 .scene-canvas-viewport-controls {
   position: absolute;
   top: 0.65rem;
@@ -427,9 +442,11 @@
   background: #ebe7db;
 }
 
-.scene-osm-map {
+.scene-board > .scene-osm-map.maplibregl-map {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   z-index: 1;
 }
 

@@ -1,62 +1,43 @@
-import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
 import { useEffect, useRef } from "react";
 
+import {
+  mountOsmAoiPicker,
+  type OsmAoiPickerController,
+  type Wgs84Bbox,
+} from "../osm-aoi-picker";
+
 type AoiMapProps = {
-  bbox: [number, number, number, number];
-  onChange: (bbox: [number, number, number, number]) => void;
+  bbox: Wgs84Bbox;
+  onChange: (bbox: Wgs84Bbox) => void;
+  readonly?: boolean;
+  language?: "zh" | "en";
 };
 
-function polygon(bbox: [number, number, number, number]) {
-  const [west, south, east, north] = bbox;
-  return {
-    type: "Feature" as const,
-    properties: {},
-    geometry: { type: "Polygon" as const, coordinates: [[[west, south], [east, south], [east, north], [west, north], [west, south]]] },
-  };
-}
-
-export function AoiMap({ bbox, onChange }: AoiMapProps) {
+export function AoiMap({ bbox, onChange, readonly = false, language = "zh" }: AoiMapProps) {
   const host = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<MapLibreMap | null>(null);
+  const controller = useRef<OsmAoiPickerController | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
   useEffect(() => {
     if (!host.current) return undefined;
-    const center: [number, number] = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
-    const map = new maplibregl.Map({
-      container: host.current,
-      center,
-      zoom: 14,
-      attributionControl: false,
-      style: {
-        version: 8,
-        sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
-        layers: [{ id: "osm", type: "raster", source: "osm" }],
-      },
+    controller.current = mountOsmAoiPicker(host.current, {
+      initialBbox: bbox,
+      readonly,
+      language,
+      showConfirm: false,
+      showCityPicker: !readonly,
+      onBboxChange: (next) => onChangeRef.current(next),
+      onConfirm: async () => undefined,
     });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-    map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
-    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 38, duration: 0, maxZoom: 18 });
-    map.on("load", () => {
-      map.addSource("course-aoi", { type: "geojson", data: polygon(bbox) });
-      map.addLayer({ id: "course-aoi-fill", type: "fill", source: "course-aoi", paint: { "fill-color": "#f2b705", "fill-opacity": 0.22 } });
-      map.addLayer({ id: "course-aoi-line", type: "line", source: "course-aoi", paint: { "line-color": "#002f4f", "line-width": 3, "line-dasharray": [2, 1] } });
-    });
-    map.on("click", (event) => {
-      const width = Math.max(0.002, bbox[2] - bbox[0]);
-      const height = Math.max(0.002, bbox[3] - bbox[1]);
-      onChangeRef.current([event.lngLat.lng - width / 2, event.lngLat.lat - height / 2, event.lngLat.lng + width / 2, event.lngLat.lat + height / 2]);
-    });
-    mapRef.current = map;
-    return () => { mapRef.current = null; map.remove(); };
-  }, []);
+    return () => {
+      controller.current?.destroy();
+      controller.current = null;
+    };
+  }, [language, readonly]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    const source = map?.getSource("course-aoi") as GeoJSONSource | undefined;
-    source?.setData(polygon(bbox));
-    map?.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 38, duration: 0, maxZoom: 18 });
+    controller.current?.setBbox(bbox);
   }, [bbox]);
 
   return <div className="course-aoi-map" ref={host} aria-label="OpenStreetMap area selector" />;

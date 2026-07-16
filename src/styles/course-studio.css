@@ -73,7 +73,9 @@
 
 .course-project-creator, .course-create-panel { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(310px, .65fr); max-width: 1280px; min-height: 650px; margin: 0 auto; border: 1px solid var(--course-ink); background: white; box-shadow: 7px 7px 0 var(--course-ink); }
 .course-project-map { position: relative; min-height: 650px; border-right: 1px solid var(--course-ink); }
-.course-aoi-map.maplibregl-map { position: absolute; inset: 0; min-height: 100%; }
+.course-project-map > .course-aoi-map,
+.course-map-readonly > .course-aoi-map { position: absolute; inset: 0; min-height: 100%; }
+.course-aoi-map > .osm-aoi-picker { min-height: 100%; border: 0; }
 .course-map-caption { position: absolute; left: 18px; bottom: 18px; z-index: 2; padding: 9px 12px; color: white; background: var(--course-ink); font: 10px/1.4 monospace; }
 .course-project-form, .course-create-panel > section { display: flex; flex-direction: column; justify-content: center; gap: 17px; padding: clamp(30px, 4vw, 58px); }
 .course-project-form h1, .course-create-panel h1 { margin: 0; font: 700 38px/1.05 Georgia, "Songti SC", serif; }

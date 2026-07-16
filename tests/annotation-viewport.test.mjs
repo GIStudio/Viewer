@@ -48,6 +48,11 @@ try {
 
   await page.goto(`${origin}/#scene-graph`);
   await page.waitForLoadState("networkidle");
+  assert.equal(await page.locator("#scene-osm-aoi-picker").isVisible(), true, "professional 01A must open with the OSM selector");
+  await page.locator("#annotation-plan-select").evaluate((element) => {
+    element.value = "hkust_gz_gate";
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   const stage = page.locator("#annotation-stage");
   const board = page.locator("#annotation-board");
   const zoomLevel = page.locator("#annotation-zoom-level");

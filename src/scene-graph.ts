@@ -2,6 +2,12 @@ import "./styles/scene-graph.css";
 
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 
+import {
+  mountOsmAoiPicker,
+  type OsmAoiPickerController,
+  type Wgs84Bbox as EditableWgs84Bbox,
+} from "./osm-aoi-picker";
+
 import type {
   AnnotationPoint,
   BezierCurve3,
@@ -258,6 +264,8 @@ const DEFAULT_REFERENCE_IMAGE_LOADING_MESSAGE = "Loading default reference plan.
 const ANNOTATION_MIN_ZOOM = 0.25;
 const ANNOTATION_MAX_ZOOM = 6;
 const ANNOTATION_ZOOM_STEP = 1.25;
+const PROFESSIONAL_OSM_BBOX_KEY = "roadgen3d:professional-osm-bbox-v1";
+const DEFAULT_PROFESSIONAL_OSM_BBOX: EditableWgs84Bbox = [113.266, 23.128, 113.271, 23.1325];
 
 type SceneGraphStatusText = string | {
   key: string;
@@ -2477,11 +2485,14 @@ export function mountSceneGraphPage(
 
   const toolButtons = Array.from(root.querySelectorAll<HTMLButtonElement>(".scene-tool-button"));
   const osmMapHostEl = root.querySelector<HTMLElement>("#annotation-osm-map");
-  let courseOsmMap: MapLibreMap | null = null;
+  const osmPickerHostEl = root.querySelector<HTMLElement>("#scene-osm-aoi-picker");
+  let annotationOsmMap: MapLibreMap | null = null;
+  let osmPicker: OsmAoiPickerController | null = null;
 
   const state = {
     referencePlans: [FALLBACK_REFERENCE_PLAN] as ReferencePlan[],
     scenarioDesigns: [] as ScenarioDesign[],
+    scenarioGraphTemplateId: "",
     selectedScenarioId: "",
     scenarioDesignsError: "",
     isScenarioDesignCatalogLoading: true,
@@ -2558,6 +2569,29 @@ export function mountSceneGraphPage(
       }
     : null;
   let uploadedImageDataUrl = workflow.getSnapshot().sourceImageDataUrl ?? "";
+
+  function storedProfessionalOsmBbox(): EditableWgs84Bbox {
+    try {
+      const value = window.sessionStorage.getItem(PROFESSIONAL_OSM_BBOX_KEY);
+      const parsed = value ? JSON.parse(value) : null;
+      if (Array.isArray(parsed)) {
+        const bbox = parseExplicitWgs84Bbox(parsed.join(","));
+        if (bbox) return [...bbox];
+      }
+    } catch {
+      // A blocked or malformed session store must not prevent the OSM picker from opening.
+    }
+    return [...DEFAULT_PROFESSIONAL_OSM_BBOX];
+  }
+
+  function persistProfessionalOsmBbox(bbox: readonly number[]): void {
+    sourceBboxInput.value = bbox.map((value) => Number(value).toFixed(6)).join(", ");
+    try {
+      window.sessionStorage.setItem(PROFESSIONAL_OSM_BBOX_KEY, JSON.stringify(bbox));
+    } catch {
+      // Session persistence is a convenience; the visible bbox remains authoritative.
+    }
+  }
 
   function sourceImageReference(requireBbox: boolean): SourceImageReference {
     const bbox = parseExplicitWgs84Bbox(sourceBboxInput.value);
@@ -2656,11 +2690,13 @@ export function mountSceneGraphPage(
     clearAnnotationEditingState();
     updateCleanAnnotationSnapshot();
     workflow.setNormalizedSource(toNormalizedSceneSource(payload));
+    state.isReferenceImageLoading = false;
     setStatus(sourceStatusEl, status, "success");
     setStatus(graphStatusEl, "Graph conversion complete through the shared source normalizer.", "success");
     renderScenarioDesignOptions();
     renderAll();
     renderSourceWorkflow();
+    remountAnnotationOsmBackground();
   }
 
   async function normalizeCurrentSceneSource(): Promise<void> {
@@ -2745,12 +2781,13 @@ export function mountSceneGraphPage(
     }
   }
 
-  async function importOsmContext(): Promise<void> {
-    const bbox = parseExplicitWgs84Bbox(sourceBboxInput.value);
+  async function importOsmContext(explicitBbox?: EditableWgs84Bbox): Promise<void> {
+    const bbox = explicitBbox ?? parseExplicitWgs84Bbox(sourceBboxInput.value);
     if (!bbox) {
       setStatus(sourceStatusEl, "OSM import requires an explicit valid WGS84 bbox.", "error");
       return;
     }
+    persistProfessionalOsmBbox(bbox);
     const token = workflow.beginRequest("osm");
     workflow.clearError();
     setStatus(sourceStatusEl, "Loading OSM roads, buildings, land use and POI…", "neutral");
@@ -2760,6 +2797,11 @@ export function mountSceneGraphPage(
         aoi_bbox: bbox,
       }, token.signal);
       if (!token.isCurrent()) return;
+      workflow.setSourceDraft({
+        kind: "osm",
+        fileName: `${osmNormalized.source.source_id}.geojson`,
+        geojson: osmNormalized.geojson,
+      });
       pendingOsmNormalization = osmNormalized;
       applyNormalizedSourcePayload(
         osmNormalized,
@@ -2768,9 +2810,10 @@ export function mountSceneGraphPage(
       workflow.endRequest(token);
     } catch (error) {
       if (workflow.endRequest(token, error)) {
-        setStatus(sourceStatusEl, error instanceof Error ? error.message : "OSM building import failed.", "error");
+        setStatus(sourceStatusEl, error instanceof Error ? error.message : "OSM import failed.", "error");
         renderSourceWorkflow();
       }
+      throw error;
     }
   }
 
@@ -3054,13 +3097,13 @@ export function mountSceneGraphPage(
 
   function hasAnnotationCanvas(): boolean {
     return Boolean(state.currentImageUrl) || (
-      courseMode
+      Boolean(workflow.getSnapshot().normalized)
       && state.annotation.image_width_px > 0
       && state.annotation.image_height_px > 0
     );
   }
 
-  function courseOsmBbox(): [number, number, number, number] | null {
+  function annotationOsmBbox(): EditableWgs84Bbox | null {
     const alignment = workflow.getSnapshot().normalized?.sourceContext.source_alignment as Record<string, unknown> | null | undefined;
     const sourceFrame = alignment?.source_frame;
     const bbox = sourceFrame && typeof sourceFrame === "object"
@@ -3071,9 +3114,9 @@ export function mountSceneGraphPage(
     return result[0] < result[2] && result[1] < result[3] ? result : null;
   }
 
-  function mountCourseOsmBackground(): void {
-    if (!courseMode || !osmMapHostEl || courseOsmMap) return;
-    const bbox = courseOsmBbox();
+  function mountAnnotationOsmBackground(): void {
+    if (!osmMapHostEl || annotationOsmMap) return;
+    const bbox = annotationOsmBbox();
     if (!bbox) return;
     osmMapHostEl.hidden = false;
     const map = new maplibregl.Map({
@@ -3095,8 +3138,25 @@ export function mountSceneGraphPage(
     });
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 0, duration: 0, maxZoom: 19 });
-    courseOsmMap = map;
+    annotationOsmMap = map;
     window.requestAnimationFrame(() => map.resize());
+  }
+
+  function remountAnnotationOsmBackground(): void {
+    annotationOsmMap?.remove();
+    annotationOsmMap = null;
+    if (osmMapHostEl) osmMapHostEl.hidden = true;
+    mountAnnotationOsmBackground();
+  }
+
+  function updateOsmPickerVisibility(): void {
+    if (!osmPickerHostEl || courseMode) return;
+    const snapshot = workflow.getSnapshot();
+    const visible = snapshot.normalized ? snapshot.step === "source" : !hasAnnotationCanvas();
+    osmPickerHostEl.hidden = !visible;
+    stageEl.hidden = visible;
+    const viewportShellEl = stageEl.closest<HTMLElement>(".scene-canvas-viewport-shell");
+    if (viewportShellEl) viewportShellEl.dataset.osmPicker = String(visible);
   }
 
   function renderViewportControls(): void {
@@ -3199,6 +3259,7 @@ export function mountSceneGraphPage(
     originalImageEl.style.opacity = String(state.originalOpacity);
     overlayHostEl.hidden = !state.showOverlay;
     overlayHostEl.style.opacity = String(state.overlayOpacity);
+    updateOsmPickerVisibility();
     renderViewportControls();
   }
 
@@ -3240,9 +3301,7 @@ export function mountSceneGraphPage(
       (preferredPlanId && state.referencePlans.some((plan) => plan.plan_id === preferredPlanId) ? preferredPlanId : "") ||
       (state.annotation.plan_id && state.referencePlans.some((plan) => plan.plan_id === state.annotation.plan_id)
         ? state.annotation.plan_id
-        : "") ||
-      state.referencePlans[0]?.plan_id ||
-      "";
+        : "");
     planSelect.value = resolvedPlanId;
   }
 
@@ -4339,12 +4398,7 @@ export function mountSceneGraphPage(
       }
       const payload = (await response.json()) as ReferencePlansPayload;
       mergeReferencePlans(Array.isArray(payload.items) ? payload.items : []);
-      const defaultPlan = state.referencePlans.find((item) => item.plan_id === "hkust_gz_gate") ?? state.referencePlans[0];
-      renderReferencePlanOptions(defaultPlan?.plan_id);
-      if (!state.currentImageUrl && !workflow.getSnapshot().normalized && defaultPlan) {
-        await applyReferencePlan(defaultPlan.plan_id);
-        return;
-      }
+      renderReferencePlanOptions(state.annotation.plan_id || undefined);
       renderAll();
     } finally {
       window.clearTimeout(timeoutId);
@@ -4371,6 +4425,7 @@ export function mountSceneGraphPage(
         throw new Error(detail || `Failed to load scenario designs (${response.status}).`);
       }
       const catalogPayload = (await response.json()) as ScenarioDesignCatalogPayload;
+      state.scenarioGraphTemplateId = String(catalogPayload.graph_template_id || "").trim();
       state.scenarioDesigns = Array.isArray(catalogPayload.items) ? catalogPayload.items : [];
       state.scenarioDesignsError = "";
       renderScenarioDesignOptions(state.selectedScenarioId);
@@ -4486,6 +4541,10 @@ export function mountSceneGraphPage(
     if (scenario?.enabled === false) {
       throw new Error(scenario.excluded_reason_zh || "This scenario design is excluded from the current default workflow.");
     }
+    const graphTemplateId = state.scenarioGraphTemplateId.trim();
+    if (!graphTemplateId) {
+      throw new Error("This scenario catalog does not declare a graph_template_id. Select a reference template explicitly before loading the scenario.");
+    }
     state.isScenarioDesignAnnotationLoading = true;
     renderScenarioDesignOptions(scenarioId);
     setStatus(statusEl, `Loading scenario design: ${label}...`, "neutral");
@@ -4493,7 +4552,7 @@ export function mountSceneGraphPage(
     const timeoutId = window.setTimeout(() => controller.abort(), 8000);
     try {
       const response = await fetch(
-        `${API_BASE}/api/scenario-designs/${encodeURIComponent(scenarioId)}/reference-annotation?graph_template_id=hkust_gz_gate`,
+        `${API_BASE}/api/scenario-designs/${encodeURIComponent(scenarioId)}/reference-annotation?graph_template_id=${encodeURIComponent(graphTemplateId)}`,
         { signal: controller.signal },
       );
       if (!response.ok) {
@@ -5609,13 +5668,23 @@ export function mountSceneGraphPage(
   );
   sourceNormalizeButton.addEventListener("click", () => void normalizeCurrentSceneSource(), { signal });
   sourceAiExtractButton.addEventListener("click", () => void extractCurrentReferenceImage(), { signal });
-  sourceOsmImportButton.addEventListener("click", () => void importOsmContext(), { signal });
+  sourceOsmImportButton.addEventListener("click", () => void importOsmContext().catch(() => undefined), { signal });
+  sourceBboxInput.addEventListener("change", () => {
+    const bbox = parseExplicitWgs84Bbox(sourceBboxInput.value);
+    if (!bbox) {
+      setStatus(sourceStatusEl, "AOI must be a valid WGS84 bbox with west < east and south < north.", "error");
+      return;
+    }
+    persistProfessionalOsmBbox(bbox);
+    osmPicker?.setBbox([...bbox], { fit: true });
+  }, { signal });
   sourceBackButton.addEventListener(
     "click",
     () => {
       workflow.transition("source");
       shell.activateRightTab("source");
       renderSourceWorkflow();
+      updateOsmPickerVisibility();
     },
     { signal },
   );
@@ -6603,9 +6672,21 @@ export function mountSceneGraphPage(
     { signal },
   );
 
-  renderReferencePlanOptions(FALLBACK_REFERENCE_PLAN.plan_id);
+  renderReferencePlanOptions();
   renderScenarioDesignOptions();
   const initialWorkflowSnapshot = workflow.getSnapshot();
+  if (!courseMode && osmPickerHostEl) {
+    const initialBbox = storedProfessionalOsmBbox();
+    persistProfessionalOsmBbox(initialBbox);
+    osmPicker = mountOsmAoiPicker(osmPickerHostEl, {
+      initialBbox,
+      language: loadViewerLanguage(),
+      showCityPicker: true,
+      showConfirm: true,
+      onBboxChange: persistProfessionalOsmBbox,
+      onConfirm: importOsmContext,
+    });
+  }
   if (courseMode) {
     sourceGenerateButton.textContent = "批准完整标注并生成 3D 基线";
     sourceGenerateButton.title = "Persist this ReferenceAnnotation and start the course generation job.";
@@ -6635,23 +6716,14 @@ export function mountSceneGraphPage(
       state.isReferenceImageLoading = false;
     }
   } else {
-    void applyReferencePlan(FALLBACK_REFERENCE_PLAN.plan_id).catch((error) => {
-      state.isReferenceImageLoading = false;
-      renderAll();
-      setStatus(
-        statusEl,
-        statusTextFromImageLoadError(
-          error,
-          "sceneGraph.status.failedLoadReferencePlan",
-          `Failed to load default reference plan ${FALLBACK_REFERENCE_PLAN.plan_id}.`,
-        ),
-        "error",
-      );
-    });
+    state.isReferenceImageLoading = false;
+    state.referenceImageLoadingMessage = courseMode
+      ? "No persisted course annotation is available."
+      : "Select an OSM area or choose another source.";
   }
   renderAll();
   renderSourceWorkflow();
-  mountCourseOsmBackground();
+  mountAnnotationOsmBackground();
   if (!courseMode) {
     const capabilityToken = workflow.beginRequest("capabilities");
     void loadWorkflowCapabilities(capabilityToken.signal)
@@ -6693,8 +6765,10 @@ export function mountSceneGraphPage(
       autoGraphTimer = null;
     }
     revokeCurrentObjectUrl();
-    courseOsmMap?.remove();
-    courseOsmMap = null;
+    osmPicker?.destroy();
+    osmPicker = null;
+    annotationOsmMap?.remove();
+    annotationOsmMap = null;
     unsubscribeWorkflow();
     eventController.abort();
   };

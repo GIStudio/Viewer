@@ -10,7 +10,7 @@ import type { SceneJobCreatePayload, SceneJobStatusPayload } from "./viewer-type
 import { apiJson, postApiJson } from "./viewer-api";
 
 export type Wgs84Bbox = readonly [number, number, number, number];
-export type SourceProducer = "manual" | "ai" | "import" | "catalog";
+export type SourceProducer = "manual" | "ai" | "import" | "catalog" | "osm";
 
 export type SourceImageReference = {
   width_px: number;

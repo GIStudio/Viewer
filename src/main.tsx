@@ -7,6 +7,7 @@ import "./react-shell.css";
 import "./style.css";
 import "./styles/course-studio.css";
 import "./styles/professional-studio.css";
+import "./styles/osm-aoi-picker.css";
 
 import { createRoot } from "react-dom/client";
 

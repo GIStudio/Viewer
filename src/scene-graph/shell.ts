@@ -95,28 +95,36 @@ export function createSceneGraphRightTabs(): ShellTab[] {
           <section class="scene-source-step" data-workflow-panel="source">
             <div class="scene-source-heading">
               <div>
-                <span>STEP 1</span>
-                <strong>Source & Normalize</strong>
+                <span>01A / OSM FIRST</span>
+                <strong>选择街区并建立标注</strong>
               </div>
-              <p>All manual, imported, and AI-assisted inputs converge to one ReferenceAnnotation normalizer.</p>
-            </div>
-            <div class="scene-import-toolbar scene-import-toolbar-compact">
-              <button id="scene-source-image-import" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Reference Image</button>
-              <label class="scene-file-button" for="scene-source-geojson-input">GeoJSON</label>
-              <input id="scene-source-geojson-input" class="scene-file-input" type="file" accept=".geojson,.json,application/geo+json,application/json" />
+              <p>在主舞台缩放地图并框选街区；确认后，道路、建筑、土地利用、树木和 POI 将进入同一个 ReferenceAnnotation。</p>
             </div>
             <label class="scene-form-field">
-              <span>GeoJSON coordinate space</span>
-              <select id="scene-source-coordinate-space" class="scene-select">
-                <option value="image_px">Image pixels (x right, y down)</option>
-                <option value="EPSG:4326">EPSG:4326 (longitude, latitude)</option>
-              </select>
+              <span>当前 AOI · WGS84 [west, south, east, north]</span>
+              <input id="scene-source-bbox" type="text" inputmode="decimal" placeholder="113.266, 23.128, 113.271, 23.1325" />
+              <small>由主舞台地图同步；也可精确输入。调整范围不会自动请求服务器。</small>
             </label>
-            <label class="scene-form-field">
-              <span>Image bbox WGS84 [west, south, east, north]</span>
-              <input id="scene-source-bbox" type="text" inputmode="decimal" placeholder="114.16, 22.29, 114.18, 22.31" />
-              <small>Required for EPSG:4326 alignment and OSM massing. Never inferred from an ungeoreferenced screenshot.</small>
-            </label>
+            <button id="scene-source-osm-import" class="scene-toolbar-button" type="button">获取当前 AOI 的 OSM 并进入标注</button>
+            <div class="scene-source-divider"><span>其他数据来源</span></div>
+            <details class="scene-collapsible-panel">
+              <summary class="scene-collapsible-summary">参考图片、GeoJSON 与模板库</summary>
+              <div class="scene-collapsible-body">
+                <div class="scene-import-toolbar scene-import-toolbar-compact">
+                  <button id="scene-source-image-import" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Reference Image</button>
+                  <label class="scene-file-button" for="scene-source-geojson-input">GeoJSON</label>
+                  <input id="scene-source-geojson-input" class="scene-file-input" type="file" accept=".geojson,.json,application/geo+json,application/json" />
+                </div>
+                <label class="scene-form-field">
+                  <span>GeoJSON coordinate space</span>
+                  <select id="scene-source-coordinate-space" class="scene-select">
+                    <option value="image_px">Image pixels (x right, y down)</option>
+                    <option value="EPSG:4326">EPSG:4326 (longitude, latitude)</option>
+                  </select>
+                </label>
+                <p class="scene-micro-note">HKUST-GZ 等参考图仅保留为模板；选择模板后才会加载，不再作为默认数据源。</p>
+              </div>
+            </details>
             <details class="scene-collapsible-panel">
               <summary class="scene-collapsible-summary">AI extraction (advanced)</summary>
               <div class="scene-collapsible-body">
@@ -126,13 +134,6 @@ export function createSceneGraphRightTabs(): ShellTab[] {
                 </label>
                 <button id="scene-source-ai-extract" class="scene-toolbar-button" type="button" disabled>Extract with configured vision model</button>
                 <div id="scene-source-ai-status" class="scene-status" data-tone="neutral">Checking vision capability…</div>
-              </div>
-            </details>
-            <details class="scene-collapsible-panel">
-              <summary class="scene-collapsible-summary">OSM white massing (advanced)</summary>
-              <div class="scene-collapsible-body">
-                <p class="scene-micro-note">Requires the explicit WGS84 bbox above. Imported buildings are white, non-editable context massing.</p>
-                <button id="scene-source-osm-import" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Import OSM buildings</button>
               </div>
             </details>
             <button id="scene-source-normalize" class="scene-toolbar-button" type="button">Normalize & Review</button>
@@ -279,6 +280,7 @@ export function createSceneGraphStageHtml(): string {
     <div class="scene-shell-stage">
       ${createSceneGraphActionToolbarHtml()}
       <div class="scene-canvas-viewport-shell" data-has-canvas="false">
+        <div id="scene-osm-aoi-picker" class="scene-osm-aoi-picker" hidden></div>
         <div class="scene-canvas-viewport-controls" role="group" aria-label="Annotation canvas zoom controls">
           <button id="annotation-zoom-out" class="scene-canvas-viewport-button" type="button" aria-label="Zoom out">−</button>
           <output id="annotation-zoom-level" class="scene-canvas-viewport-level" aria-live="polite">100%</output>

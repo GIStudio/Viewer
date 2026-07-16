@@ -12,6 +12,8 @@ export type WorkflowSourceKind =
   | "annotation_json"
   | "geojson"
   | "ai_extraction"
+  | "osm"
+  /** @deprecated Legacy snapshots used a building-only OSM source kind. */
   | "osm_buildings"
   | "scenario_design";
 
