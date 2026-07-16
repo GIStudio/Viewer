@@ -25,6 +25,7 @@ import { AoiMap } from "./AoiMap";
 import { OsmRoadStudyMap } from "./OsmRoadStudyMap";
 import { CourseReferenceWorkbench, CourseViewerWorkbench, type CourseWorkbenchNavigation } from "./CourseSharedWorkbenches";
 import { StudioBrandHeader } from "./StudioBrandHeader";
+import { StudioLanguageToggle } from "./StudioLanguageToggle";
 
 type StepId = "area" | "data" | "annotation" | "design" | "evaluation" | "compare_export";
 const STEPS: Array<{ id: StepId; zh: string; en: string; index: string }> = [
@@ -71,16 +72,17 @@ export function CourseStudio({ language, workflow }: { language: ViewerLanguage;
   const zh = language === "zh";
 
   const refreshProjects = useCallback(async () => {
-    const [me, coursePayload, projectPayload, capabilityPayload] = await Promise.all([
+    const [me, coursePayload, projectPayload] = await Promise.all([
       api.request<CourseUser>("/api/v1/me"),
       api.request<{ items: Course[] }>("/api/v1/courses"),
       api.request<{ items: CourseProject[] }>("/api/v1/projects"),
-      api.request<PlatformCapabilities>("/api/v1/capabilities"),
     ]);
     setUser(me);
     setCourses(coursePayload.items);
     setProjects(projectPayload.items);
-    setCapabilities(capabilityPayload);
+    void api.request<PlatformCapabilities>("/api/v1/capabilities")
+      .then(setCapabilities)
+      .catch(() => setCapabilities(null));
     setProject((current) => projectPayload.items.find((item) => item.id === current?.id) ?? projectPayload.items[0] ?? null);
   }, [api]);
 
@@ -154,6 +156,7 @@ export function CourseStudio({ language, workflow }: { language: ViewerLanguage;
         )}
         actions={(
           <div className="course-user-block">
+            <StudioLanguageToggle language={language} />
             <div><strong>{user.display_name}</strong><small>{user.system_role}</small></div>
             <Button onClick={() => { api.setToken(""); setUser(null); }}>{zh ? "退出" : "Sign out"}</Button>
           </div>

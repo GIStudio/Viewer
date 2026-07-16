@@ -2371,6 +2371,7 @@ async function readImageFileDataUrl(file: File): Promise<string> {
 export type SceneGraphHostOptions = {
   mode?: "expert" | "course";
   onApproveAndGenerate?: (annotation: ReferenceAnnotation) => Promise<void>;
+  onApproveProfessionalBaseline?: () => Promise<void>;
 };
 
 export function mountSceneGraphPage(
@@ -2692,6 +2693,11 @@ export function mountSceneGraphPage(
     sourceAiStatusEl.dataset.tone = visionConfigured ? "success" : "neutral";
 
     sourceNormalizeButton.disabled = Boolean(snapshot.busy.normalize);
+    const browsingOsm = !courseMode
+      && professionalOsmStage !== "annotation"
+      && (snapshot.step === "source" || !snapshot.normalized);
+    sourceNormalizeButton.hidden = browsingOsm;
+    sourceNormalizeButton.setAttribute("aria-hidden", String(browsingOsm));
     sourceApproveButton.disabled = !normalized
       || snapshot.approvedSourceRevision === snapshot.sourceRevision
       || Boolean(snapshot.busy.generate);
@@ -5836,9 +5842,24 @@ export function mountSceneGraphPage(
   );
   sourceApproveButton.addEventListener(
     "click",
-    () => {
+    async () => {
       const result = workflow.approveReview();
-      if (!result.ok) setStatus(sourceReviewStatusEl, result.reason, "error");
+      if (!result.ok) {
+        setStatus(sourceReviewStatusEl, result.reason, "error");
+        return;
+      }
+      if (!courseMode && hostOptions.onApproveProfessionalBaseline) {
+        setStatus(sourceReviewStatusEl, "Annotation approved. Starting a deterministic road baseline…", "neutral");
+        try {
+          await hostOptions.onApproveProfessionalBaseline();
+        } catch (error) {
+          setStatus(
+            sourceReviewStatusEl,
+            error instanceof Error ? error.message : "Road baseline failed to start.",
+            "error",
+          );
+        }
+      }
     },
     { signal },
   );
@@ -6882,18 +6903,17 @@ export function mountSceneGraphPage(
         renderSourceWorkflow();
       })
       .catch((error) => {
-        workflow.endRequest(capabilityToken, error);
+        workflow.endRequest(capabilityToken);
         renderSourceWorkflow();
+        sourceAiStatusEl.textContent = error instanceof Error
+          ? `Optional AI capability check unavailable: ${error.message}`
+          : "Optional AI capability check unavailable.";
+        sourceAiStatusEl.dataset.tone = "neutral";
       });
     void loadScenarioDesigns({ silent: true });
     void loadReferencePlans({ silent: true }).catch((error) => {
-      setStatus(
-        statusEl,
-        error instanceof Error && error.message !== "Failed to fetch"
-          ? error.message
-          : { key: "sceneGraph.status.failedRefreshReferencePlans", fallback: "Failed to refresh reference plans." },
-        "error",
-      );
+      const reason = error instanceof Error ? error.message : "Reference template library unavailable.";
+      shell.pushActivity(`Reference template library unavailable: ${reason}`, "warning");
     });
   }
 

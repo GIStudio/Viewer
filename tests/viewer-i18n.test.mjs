@@ -14,18 +14,17 @@ const server = await createServer({
 });
 
 async function selectLanguage(page, language) {
-  await page.locator(".desktop-shell-language-select").click();
-  await page.keyboard.press(language === "zh" ? "ArrowDown" : "ArrowUp");
-  await page.keyboard.press("Enter");
+  await page.locator(`.studio-language-toggle [role="radio"]:has-text("${language === "zh" ? "中文" : "EN"}")`).click();
 }
 
 let browser;
 try {
   const i18nSource = await fs.readFile(new URL("../src/viewer-i18n.ts", import.meta.url), "utf8");
-  const shellModelSource = await fs.readFile(new URL("../src/react/shellModel.tsx", import.meta.url), "utf8");
+  const languageToggleSource = await fs.readFile(new URL("../src/react/StudioLanguageToggle.tsx", import.meta.url), "utf8");
   assert.match(i18nSource, /return value === "zh" \? "zh" : "en";/, "stale mixed language values must normalize to English");
   assert.doesNotMatch(i18nSource, /"mixed"/, "the localization core must not retain a mixed locale");
-  assert.equal((shellModelSource.match(/value: "/g) ?? []).length, 2, "language Select must expose exactly two values");
+  assert.match(languageToggleSource, /role="radiogroup"/);
+  assert.match(languageToggleSource, /role="radio"/);
 
   await server.listen();
   const address = server.httpServer?.address();
@@ -48,10 +47,9 @@ try {
   await page.goto(`${origin}/#viewer`);
   await page.evaluate(() => localStorage.removeItem("viewer-lang"));
   await page.reload();
-  await page.locator(".desktop-shell-language-select").waitFor();
-  await page.locator(".desktop-shell-language-select").click();
-  const optionTexts = await page.locator('[role="option"]').allTextContents();
-  assert.deepEqual(optionTexts.map((value) => value.trim()).sort(), ["en", "zh"], "only EN and Simplified Chinese must be selectable");
+  await page.locator(".studio-language-toggle").waitFor();
+  const optionTexts = await page.locator('.studio-language-toggle [role="radio"]').allTextContents();
+  assert.deepEqual(optionTexts.map((value) => value.trim()), ["中文", "EN"], "the header exposes a direct Chinese/English switch");
   await selectLanguage(page, "zh");
   await page.getByText("新建生成…", { exact: true }).first().waitFor();
   await page.getByText("控制菜单", { exact: true }).first().waitFor({ state: "attached" });
@@ -67,7 +65,7 @@ try {
   await page.getByText("New generation…", { exact: true }).first().waitFor();
 
   await page.goto(`${origin}/#scene-graph`);
-  await page.locator(".desktop-shell-language-select").waitFor();
+  await page.locator(".studio-language-toggle").waitFor();
   await page.evaluate(() => {
     localStorage.setItem("viewer-lang", "en");
     window.dispatchEvent(new CustomEvent("roadgen3d:viewer-language-change", { detail: { language: "en" } }));

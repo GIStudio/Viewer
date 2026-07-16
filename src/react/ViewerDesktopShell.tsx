@@ -1,4 +1,4 @@
-import { Button, Layout, Select, Tabs, Tooltip } from "antd";
+import { Button, Layout, Tabs, Tooltip } from "antd";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
 
@@ -8,7 +8,6 @@ import { navigateTo, ROUTES } from "../ui";
 import type { AppRoute } from "../ui";
 import {
   formatViewerKey,
-  setViewerLanguage,
   translateViewerKey,
 } from "../viewer-i18n";
 import type { ViewerLanguage } from "../viewer-i18n";
@@ -18,8 +17,8 @@ import type { WorkflowController, WorkflowStep } from "../workflow-controller";
 import type { WorkbenchShellMode } from "../shell-types";
 import { ShellMenus } from "./ShellMenus";
 import { ShortcutModal } from "./ShortcutModal";
-import { languageOptions } from "./shellModel";
 import { StudioBrandHeader } from "./StudioBrandHeader";
+import { StudioLanguageToggle } from "./StudioLanguageToggle";
 
 type ViewerDesktopShellProps = {
   route: AppRoute;
@@ -156,13 +155,7 @@ export function ViewerDesktopShell({
                     {t("studio.openCourse", "Course Studio")}
                   </Button>
                 </Tooltip>
-                <Select
-                  className="desktop-shell-language-select"
-                  aria-label={t("language.group", "Language")}
-                  value={language}
-                  options={languageOptions}
-                  onChange={(nextLanguage) => setViewerLanguage(nextLanguage)}
-                />
+                <StudioLanguageToggle language={language} />
                 <ShellMenus
                   language={language}
                   enabledActions={enabledActions}

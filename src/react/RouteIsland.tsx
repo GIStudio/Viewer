@@ -15,6 +15,7 @@ import {
 } from "../viewer-i18n";
 import type { ViewerLanguage } from "../viewer-i18n";
 import type { WorkflowController } from "../workflow-controller";
+import type { ProfessionalBaselineCoordinator } from "../professional-baseline-coordinator";
 import {
   annotationPreparationStatus,
   assetPreparationStatus,
@@ -34,9 +35,10 @@ type RouteIslandProps = {
   route: AppRoute;
   language: ViewerLanguage;
   workflow: WorkflowController;
+  baselineCoordinator: ProfessionalBaselineCoordinator;
 };
 
-export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
+export function RouteIsland({ route, language, workflow, baselineCoordinator }: RouteIslandProps) {
   const hostRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -266,7 +268,12 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
     function mountRoute() {
       switch (route) {
         case "scene-graph":
-          routeTeardown = mountSceneGraphPage(shell, workflow);
+          routeTeardown = mountSceneGraphPage(shell, workflow, {
+            onApproveProfessionalBaseline: async () => {
+              await baselineCoordinator.start();
+              navigateTo("viewer");
+            },
+          });
           break;
         case "asset-editor":
           routeTeardown = mountAssetEditor(shell, workflow);
@@ -275,7 +282,7 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
           routeTeardown = mountModelInputBrowser(shell);
           break;
         default:
-          void mountViewer(shell, workflow)
+          void mountViewer(shell, workflow, { baselineCoordinator })
             .then((teardown) => {
               routeTeardown = teardown;
               if (cancelled) routeTeardown();
@@ -318,7 +325,7 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
       routeTeardown?.();
       shell.destroy();
     };
-  }, [route, workflow]);
+  }, [baselineCoordinator, route, workflow]);
 
   if (route === "course-studio") {
     return <CourseStudio language={language} workflow={workflow} />;

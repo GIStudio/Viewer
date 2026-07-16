@@ -192,6 +192,45 @@
   overflow: hidden;
 }
 
+.viewer-empty-state {
+  position: absolute;
+  inset: 3.75rem 0 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  background:
+    linear-gradient(rgba(23, 75, 100, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 75, 100, 0.06) 1px, transparent 1px),
+    #e6ece8;
+  background-size: 24px 24px;
+}
+
+.viewer-empty-state[hidden] { display: none; }
+
+.viewer-empty-card {
+  width: min(38rem, 100%);
+  padding: 1.4rem;
+  border: 1px solid #102d3a;
+  background: #f3f0e7;
+  box-shadow: 7px 7px 0 #f4c430;
+}
+
+.viewer-empty-card[data-tone="error"] { box-shadow: 7px 7px 0 #df654f; }
+.viewer-empty-kicker { color: #df654f; font: 800 0.65rem/1.2 ui-monospace, monospace; letter-spacing: 0.12em; }
+.viewer-empty-card h2 { margin: 0.5rem 0; color: #102d3a; font: 700 1.7rem/1.05 Georgia, "Songti SC", serif; }
+.viewer-empty-card p { margin: 0; color: #53666d; line-height: 1.55; }
+.viewer-empty-progress { height: 0.75rem; margin-top: 1rem; border: 1px solid #102d3a; background: #fff; }
+.viewer-empty-progress i { display: block; height: 100%; background: #f4c430; transition: width 180ms linear; }
+.viewer-empty-meta { display: flex; justify-content: space-between; margin-top: 0.35rem; font: 700 0.7rem/1.2 ui-monospace, monospace; }
+.viewer-empty-card ol { margin: 0.8rem 0 0; padding-left: 1.25rem; color: #53666d; font-size: 0.75rem; }
+.viewer-empty-actions { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 1rem; }
+.viewer-empty-actions button { min-height: 2.35rem; padding: 0.55rem 0.85rem; border: 1px solid #102d3a; border-radius: 3px; background: #174b64; color: #fff; font-weight: 800; cursor: pointer; }
+.viewer-empty-actions button + button { background: #fff; color: #102d3a; }
+.viewer-shell-embedded[data-empty="true"] .viewer-minimap,
+.viewer-shell-embedded[data-empty="true"] .viewer-overlay,
+.viewer-shell-embedded[data-empty="true"] .viewer-axis-hud { display: none; }
+
 
 .viewer-center-controls {
   display: none;

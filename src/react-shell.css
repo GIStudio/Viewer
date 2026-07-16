@@ -31,9 +31,31 @@
   border-radius: var(--radius-sm);
 }
 
-.desktop-shell-language-select {
-  min-width: 5.75rem;
+.studio-language-toggle {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  min-width: 7.2rem;
+  min-height: 2.3rem;
+  overflow: hidden;
+  border: 1px solid var(--rg-ink, #102d3a);
+  border-radius: 3px;
+  background: #fff;
 }
+
+.studio-language-toggle button {
+  min-width: 0;
+  padding: 0.45rem 0.65rem;
+  border: 0;
+  border-right: 1px solid var(--rg-ink, #102d3a);
+  color: var(--rg-ink, #102d3a);
+  background: transparent;
+  font: 800 0.72rem/1 var(--rg-mono-font, ui-monospace, monospace);
+  cursor: pointer;
+}
+
+.studio-language-toggle button:last-child { border-right: 0; }
+.studio-language-toggle button[data-active="true"] { color: #fff; background: var(--rg-blue, #174b64); }
+.studio-language-toggle button:focus-visible { position: relative; outline: 2px solid var(--rg-coral, #df654f); outline-offset: -3px; }
 
 .desktop-shell-menu-toggle.ant-btn,
 .desktop-shell-menu-action.ant-btn,

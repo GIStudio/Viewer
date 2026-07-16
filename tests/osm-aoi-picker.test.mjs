@@ -79,10 +79,30 @@ try {
       });
       return;
     }
-    if (url.endsWith("/api/scene-sources/osm")) {
+    if (url.endsWith("/api/scene-sources/osm/jobs")) {
       osmRequestCount += 1;
       submittedBbox = (await route.request().postDataJSON()).aoi_bbox;
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(normalizedOsmPayload(submittedBbox)) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        id: "osm-fixture-job",
+        kind: "osm_acquisition",
+        status: "succeeded",
+        stage: "preview_ready",
+        progress: 100,
+        message: "ready",
+        detail: {},
+        operations: [],
+        error: "",
+        result: {
+          preview_id: "preview-fixture",
+          source_id: "professional-osm",
+          retrieval_bbox: submittedBbox,
+          logical_roads: { type: "FeatureCollection", features: [] },
+          context_geojson: { type: "FeatureCollection", features: [] },
+          feature_counts: { logical_roads: 0, buildings: 0 },
+          cache_hit: false,
+          fingerprint: "fixture",
+        },
+      }) });
       return;
     }
     if (url.endsWith("/api/reference-plans")) {
@@ -108,7 +128,8 @@ try {
   assert.equal(hkustImageRequestCount, 0, "HKUST-GZ must not be fetched as an implicit default");
   assert.equal(osmRequestCount, 0, "opening and browsing the map must not fetch Overpass data");
   assert.equal(await picker.getAttribute("data-has-selection"), "false", "Guangzhou is an initial map view, not a preselected AOI");
-  assert.equal(await page.locator('[data-aoi-action="confirm"]').isVisible(), false, "fetch remains hidden until an area is captured");
+  assert.equal(await page.locator('[data-aoi-action="confirm"]').isVisible(), true, "the panel always exposes the next primary action");
+  assert.match(await page.locator('[data-aoi-action="confirm"]').innerText(), /截取当前视野|capture current view/i);
   assert.equal(await page.locator('[data-aoi-coordinate="0"]').isVisible(), false, "coordinate inputs are advanced controls, not the default workflow");
   assert.equal(await page.locator("#scene-source-bbox").count(), 0, "the source drawer no longer duplicates the coordinate form");
 
@@ -117,7 +138,7 @@ try {
   await page.locator("[data-aoi-city]").selectOption("guangzhou");
   assert.equal(osmRequestCount, 0, "city navigation only changes the map view");
 
-  await page.locator('[data-aoi-action="viewport"]').click();
+  await page.locator('[data-aoi-action="confirm"]').click();
   assert.equal(await picker.getAttribute("data-has-selection"), "true", "the current map viewport becomes a candidate AOI");
   assert.equal(await page.locator('[data-aoi-action="confirm"]').isVisible(), true);
   assert.equal(osmRequestCount, 0, "capturing the current view remains a local action");
@@ -140,15 +161,13 @@ try {
   assert.equal(osmRequestCount, 0, "advanced coordinates only update the candidate AOI");
 
   await page.locator('[data-aoi-action="confirm"]').click();
-  await page.locator("#annotation-board").waitFor({ state: "visible" });
+  await page.locator(".osm-road-study-picker").waitFor({ state: "visible" });
   assert.equal(osmRequestCount, 1, "confirming the AOI submits exactly one OSM request");
   assert.deepEqual(submittedBbox, preciseBbox, "the confirmed coordinate AOI is submitted exactly");
-  assert.equal(await page.locator("#scene-osm-aoi-picker").isVisible(), false, "the shared annotation canvas replaces the picker after normalization");
-  assert.equal(await page.locator("#annotation-osm-map").isVisible(), true, "professional annotation retains the aligned OSM basemap");
-  await page.getByText("professional-osm", { exact: true }).first().waitFor();
+  assert.equal(await page.locator("#annotation-board").isVisible(), false, "road selection precedes the shared annotation canvas");
   assert.deepEqual(browserErrors, [], `professional OSM flow must not emit page errors: ${browserErrors.join(" | ")}`);
 
-  console.log("professional OSM AOI: explicit selection, single fetch, shared annotation canvas, and no HKUST default verified");
+  console.log("professional OSM AOI: explicit capture, single async fetch, road-selection handoff, and no HKUST default verified");
 } finally {
   await browser?.close();
   await server.close();

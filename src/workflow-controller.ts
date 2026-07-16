@@ -1,5 +1,6 @@
 import type { ReferenceAnnotation } from "./sg-types";
 import type { EvaluationResult } from "./viewer-evaluation";
+import type { SceneJobOperation } from "./viewer-types";
 
 export const WORKFLOW_STEPS = ["source", "review", "generate", "edit", "evaluate"] as const;
 export const WORKFLOW_UNDO_EVENT = "roadgen3d:workflow-undo";
@@ -62,6 +63,17 @@ export type AssetPreparationState =
 
 export type SceneReviewStatus = "not_available" | "pending" | "changes_requested" | "accepted";
 
+export type WorkflowBaselineRun = Readonly<{
+  sourceRevision: number;
+  jobId: string | null;
+  status: "idle" | "queued" | "running" | "succeeded" | "failed" | "cancelled" | "stale";
+  stage: string;
+  progress: number;
+  message: string;
+  operations: readonly SceneJobOperation[];
+  error?: string;
+}>;
+
 export type NormalizedSceneSource = Readonly<{
   referenceAnnotation: ReferenceAnnotation;
   graph: Readonly<Record<string, unknown>> | null;
@@ -116,6 +128,7 @@ export type WorkflowSnapshot = Readonly<{
   /** @deprecated Read assetPreparation instead. */
   assetPreparationChoice: AssetPreparationChoice;
   sceneReviewStatus: SceneReviewStatus;
+  baselineRun: WorkflowBaselineRun;
   capabilities: WorkflowCapabilities | null;
   busy: Readonly<Partial<Record<WorkflowRequestKind, boolean>>>;
   lastError: string | null;
@@ -157,6 +170,8 @@ export type WorkflowController = {
   setAssetPreparation(state: AssetPreparationState): void;
   setAssetPreparationChoice(choice: Exclude<AssetPreparationChoice, null>): void;
   setSceneReviewStatus(status: Exclude<SceneReviewStatus, "not_available">): TransitionResult;
+  setBaselineRun(run: WorkflowBaselineRun): void;
+  updateBaselineRun(sourceRevision: number, patch: Partial<Omit<WorkflowBaselineRun, "sourceRevision">>): boolean;
   setCapabilities(capabilities: WorkflowCapabilities): void;
   reportError(error: unknown): void;
   clearError(): void;
@@ -255,6 +270,15 @@ function initialSnapshot(): WorkflowSnapshot {
     assetPreparation,
     assetPreparationChoice: assetChoiceForState(assetPreparation),
     sceneReviewStatus: "not_available",
+    baselineRun: Object.freeze({
+      sourceRevision: 0,
+      jobId: null,
+      status: "idle",
+      stage: "",
+      progress: 0,
+      message: "",
+      operations: Object.freeze([]),
+    }),
     capabilities: null,
     busy: INITIAL_BUSY,
     lastError: null,
@@ -333,6 +357,11 @@ export function createWorkflowController(): WorkflowController {
         undoCommand: null,
         evaluation: null,
         sceneReviewStatus: "not_available",
+        baselineRun: Object.freeze({
+          ...snapshot.baselineRun,
+          status: snapshot.baselineRun.jobId ? "stale" : "idle",
+          message: snapshot.baselineRun.jobId ? "The source changed; the previous baseline is stale." : "",
+        }),
         lastError: null,
       });
     },
@@ -351,6 +380,11 @@ export function createWorkflowController(): WorkflowController {
         undoCommand: null,
         evaluation: null,
         sceneReviewStatus: "not_available",
+        baselineRun: Object.freeze({
+          ...snapshot.baselineRun,
+          status: snapshot.baselineRun.jobId ? "stale" : "idle",
+          message: snapshot.baselineRun.jobId ? "The source changed; the previous baseline is stale." : "",
+        }),
         lastError: null,
       });
     },
@@ -468,6 +502,16 @@ export function createWorkflowController(): WorkflowController {
         lastError: null,
       });
       return Object.freeze({ ok: true });
+    },
+    setBaselineRun(run) {
+      publish({ baselineRun: immutableCopy(run) });
+    },
+    updateBaselineRun(sourceRevision, patch) {
+      if (snapshot.sourceRevision !== sourceRevision || snapshot.baselineRun.sourceRevision !== sourceRevision) {
+        return false;
+      }
+      publish({ baselineRun: immutableCopy({ ...snapshot.baselineRun, ...patch, sourceRevision }) });
+      return true;
     },
     setCapabilities(capabilities) {
       publish({ capabilities: immutableCopy(capabilities) });

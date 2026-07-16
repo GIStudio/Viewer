@@ -6,8 +6,8 @@
 
 import * as THREE from "three";
 import type { ViewerManifest, RecentLayout } from "./viewer-types";
+import { API_BASE, describeApiRequest, resolveApiUrl } from "./api-origin";
 
-const API_BASE = (import.meta.env.VITE_ROADGEN_API_BASE as string | undefined) || "http://127.0.0.1:8010";
 const RECENT_LAYOUTS_CACHE_TTL_MS = 30_000;
 
 type CacheEntry<T> = {
@@ -199,10 +199,17 @@ export function viewerApiCacheStats(): Record<string, unknown> {
  * Generic API JSON fetch.
  */
 export async function apiJson<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(resolveApiUrl(url), {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  let response: Response;
+  try {
+    response = await fetch(resolveApiUrl(url), {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+  } catch (error) {
+    if (options?.signal?.aborted) throw error;
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`RoadGen3D API is unavailable at ${describeApiRequest(url)} (${reason}).`);
+  }
   
   if (!response.ok) {
     throw new Error(`API request failed: ${response.status} ${response.statusText}`);
@@ -365,16 +372,6 @@ async function responseErrorDetail(response: Response): Promise<string> {
   } catch {
     return "";
   }
-}
-
-function resolveApiUrl(url: string): string {
-  if (/^https?:\/\//i.test(url)) {
-    return url;
-  }
-  if (url.startsWith("/api/")) {
-    return `${API_BASE}${url}`;
-  }
-  return url;
 }
 
 function mapRecentLayoutsPayload(data: unknown): RecentLayout[] {

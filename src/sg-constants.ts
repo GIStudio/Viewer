@@ -1,6 +1,6 @@
 import type { CrossSectionMode, StripKind, StripDirection, FurnitureKind, FunctionalZoneKind, MetaurbanAssetBadge, ReferencePlan, SurfaceAnnotationKind, SurfaceRole } from "./sg-types";
+export { API_BASE } from "./api-origin";
 
-export const API_BASE = (import.meta.env.VITE_ROADGEN_API_BASE as string | undefined) || "http://127.0.0.1:8010";
 export const ANNOTATION_SCHEMA_VERSION = "roadgen3d_reference_annotation_v2";
 export const FALLBACK_REFERENCE_PLAN: ReferencePlan = {
   plan_id: "hkust_gz_gate",

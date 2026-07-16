@@ -7,6 +7,7 @@ import type {
   ScenarioDesignRunPayload,
 } from "./viewer-types";
 import { escapeHtml } from "./viewer-utils";
+import { describeApiRequest } from "./api-origin";
 
 export type ViewerScenarioDesignsController = {
   loadCatalog: () => Promise<void>;
@@ -323,7 +324,7 @@ export function createViewerScenarioDesignsController(
 function formatBackendError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? "Request failed.");
   if (message.toLowerCase().includes("failed to fetch") || message.toLowerCase().includes("network")) {
-    return "Scenario Designs backend is unavailable at http://127.0.0.1:8010.";
+    return `Scenario Designs backend is unavailable at ${describeApiRequest("/api/scenario-designs")}.`;
   }
   return message || "Scenario Designs backend request failed.";
 }

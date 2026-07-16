@@ -155,7 +155,7 @@ export function mountOsmAoiPicker(host: HTMLElement, options: OsmAoiPickerOption
           <select data-aoi-city><option value="">${zh ? "加载城市目录…" : "Loading cities…"}</option></select>
         </label>
         <div class="osm-aoi-picker-actions">
-          <button type="button" data-aoi-action="viewport" ${options.readonly ? "hidden" : ""}>${zh ? "使用当前视野" : "Use current view"}</button>
+          <button type="button" data-aoi-action="viewport" ${options.readonly ? "hidden" : ""}>${selection ? (zh ? "更新为当前视野" : "Update from view") : (zh ? "截取当前视野" : "Capture current view")}</button>
           <button type="button" data-aoi-action="draw" ${options.readonly ? "hidden" : ""}>${zh ? "精确框选" : "Draw precisely"}</button>
           <button type="button" data-aoi-action="fit" ${selection ? "" : "hidden"}>${zh ? "适应选区" : "Fit area"}</button>
         </div>
@@ -178,9 +178,13 @@ export function mountOsmAoiPicker(host: HTMLElement, options: OsmAoiPickerOption
           </div>
           <button type="button" data-aoi-action="coordinates">${zh ? "应用坐标为研究区" : "Use coordinates as area"}</button>
         </details>
-        <div class="osm-aoi-confirm-row" ${selection ? "" : "hidden"}>
-          <button type="button" data-aoi-action="clear" ${options.readonly ? "hidden" : ""}>${zh ? "清除" : "Clear"}</button>
-          ${options.showConfirm === false ? "" : `<button class="osm-aoi-confirm" type="button" data-aoi-action="confirm">${options.confirmLabel ?? (zh ? "获取 OSM 并进入标注" : "Fetch OSM and start annotation")}</button>`}
+        <div class="osm-aoi-confirm-row">
+          <button type="button" data-aoi-action="clear" ${options.readonly || !selection ? "hidden" : ""}>${zh ? "清除" : "Clear"}</button>
+          <button class="osm-aoi-confirm" type="button" data-aoi-action="confirm">${selection && options.showConfirm !== false
+            ? (options.confirmLabel ?? (zh ? "获取 OSM 并进入标注" : "Fetch OSM and start annotation"))
+            : selection
+              ? (zh ? "更新为当前视野" : "Update from current view")
+              : (zh ? "截取当前视野作为检索范围" : "Capture current view as retrieval area")}</button>
         </div>
         <small>© OpenStreetMap contributors</small>
       </aside>
@@ -212,7 +216,18 @@ export function mountOsmAoiPicker(host: HTMLElement, options: OsmAoiPickerOption
   function syncCopy(): void {
     root.dataset.hasSelection = String(Boolean(selection));
     fitButton.hidden = !selection;
-    confirmRow.hidden = !selection;
+    confirmRow.hidden = Boolean(options.readonly && !selection);
+    viewportButton.textContent = selection
+      ? (zh ? "更新为当前视野" : "Update from view")
+      : (zh ? "截取当前视野" : "Capture current view");
+    if (clearButton) clearButton.hidden = Boolean(options.readonly || !selection);
+    if (confirmButton) {
+      confirmButton.textContent = selection && options.showConfirm !== false
+        ? (options.confirmLabel ?? (zh ? "获取 OSM 并进入标注" : "Fetch OSM and start annotation"))
+        : selection
+          ? (zh ? "更新为当前视野" : "Update from current view")
+          : (zh ? "截取当前视野作为检索范围" : "Capture current view as retrieval area");
+    }
     if (!selection) {
       kicker.textContent = zh ? "浏览地图" : "Browse the map";
       selectionTitle.textContent = zh ? "先找到你想研究的街区" : "Find the district you want to study";
@@ -244,7 +259,7 @@ export function mountOsmAoiPicker(host: HTMLElement, options: OsmAoiPickerOption
     fitButton.disabled = busy || !selection;
     clearButton && (clearButton.disabled = busy || !selection);
     coordinateButton && (coordinateButton.disabled = busy);
-    confirmButton && (confirmButton.disabled = busy || !selection || oversized);
+    confirmButton && (confirmButton.disabled = busy || !mapLoaded || Boolean(selection && options.showConfirm !== false && oversized));
     citySelect && (citySelect.disabled = busy || Boolean(options.readonly));
     coordinateInputs.forEach((input) => { input.disabled = Boolean(options.readonly) || busy; });
   }
@@ -423,7 +438,12 @@ export function mountOsmAoiPicker(host: HTMLElement, options: OsmAoiPickerOption
     fitSelection();
   });
   confirmButton?.addEventListener("click", async () => {
-    if (busy || !selection || dimensionsMetres(selection.bbox).oversized) return;
+    if (busy || !mapLoaded) return;
+    if (!selection || options.showConfirm === false) {
+      captureViewport();
+      return;
+    }
+    if (dimensionsMetres(selection.bbox).oversized) return;
     controller.setBusy(true);
     setStatus(zh ? "正在获取道路、建筑、土地利用、树木和 POI…" : "Fetching roads, buildings, land use, trees and POI…");
     try {

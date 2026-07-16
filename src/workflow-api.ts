@@ -339,6 +339,13 @@ export async function loadSceneJob(jobId: string, signal?: AbortSignal): Promise
   return apiJson<SceneJobStatusPayload>(`/api/scene/jobs/${encodeURIComponent(jobId)}`, { signal });
 }
 
+export async function cancelSceneJob(jobId: string, signal?: AbortSignal): Promise<SceneJobStatusPayload> {
+  return apiJson<SceneJobStatusPayload>(`/api/scene/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+    signal,
+  });
+}
+
 export async function submitSceneLayoutEdits(
   request: SceneLayoutEditRequest,
   signal?: AbortSignal,

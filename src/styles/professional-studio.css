@@ -114,10 +114,7 @@
   box-shadow: 0 0 0 2px rgba(223, 101, 79, 0.18) !important;
 }
 
-.desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-language-select {
-  width: 5.4rem;
-  min-width: 5.4rem;
-}
+.desktop-shell[data-shell-mode="single_left_overlay"] .studio-language-toggle { min-width: 7.2rem; }
 
 .desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-menu-groups {
   gap: 0.35rem;

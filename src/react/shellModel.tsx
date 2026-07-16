@@ -14,7 +14,6 @@ import type { ReactNode } from "react";
 
 import type { ShellMenuActionId, ShellToggleTarget } from "../shell-events";
 import type { AppRoute } from "../ui";
-import type { ViewerLanguage } from "../viewer-i18n";
 
 export type MenuGroupId = "file" | "view" | "tools" | "help";
 
@@ -67,11 +66,6 @@ export const antdTheme = {
     },
   },
 };
-
-export const languageOptions: Array<{ value: ViewerLanguage; label: string }> = [
-  { value: "en", label: "EN" },
-  { value: "zh", label: "中文" },
-];
 
 export const menuGroups: ShellMenuGroup[] = [
   {

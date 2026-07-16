@@ -179,6 +179,7 @@ import { captureGalleryViews, type GalleryCaptureTarget } from "./viewer-evaluat
 import { createViewerPresetsController } from "./viewer-presets-controller";
 import { createViewerEvaluationRunner } from "./viewer-evaluation-runner";
 import type { DesktopShell, ShellI18nText, WorkbenchSidebarPage } from "./desktop-shell";
+import type { ProfessionalBaselineCoordinator } from "./professional-baseline-coordinator";
 import { WORKFLOW_UNDO_EVENT } from "./workflow-controller";
 import type { WorkflowController } from "./workflow-controller";
 import { loadWorkflowCapabilities, normalizeSceneSource, toNormalizedSceneSource } from "./workflow-api";
@@ -465,6 +466,7 @@ export type ViewerHostOptions = {
   embedded?: boolean;
   persistSceneCommands?: (commands: SceneMoveInstanceCommand[]) => Promise<SceneLayoutEditResponse>;
   sidebarPages?: WorkbenchSidebarPage[];
+  baselineCoordinator?: ProfessionalBaselineCoordinator;
 };
 
 function mountViewer(shell: DesktopShell, workflow: WorkflowController, hostOptions: ViewerHostOptions = {}): Promise<() => void> {
@@ -639,6 +641,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   const reviewChangesEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-changes");
   const reviewAnnotationEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-annotation");
   const reviewAssetsEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-assets");
+  const emptyStateEl = root.querySelector<HTMLElement>("#viewer-empty-state");
+  const viewerShellEl = root.querySelector<HTMLElement>(".viewer-shell-embedded");
   let generationWizard: ReturnType<typeof createViewerGenerationWizardController> | null = null;
   const renderCapabilityStatus = (): void => {
     const capabilities = workflow.getSnapshot().capabilities;
@@ -771,6 +775,54 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     renderUsedAssetProvenance();
     const snapshot = workflow.getSnapshot();
     const hasScene = Boolean(snapshot.sceneLayoutPath);
+    const baseline = snapshot.baselineRun;
+    const baselineBusy = baseline.sourceRevision === snapshot.sourceRevision
+      && (baseline.status === "queued" || baseline.status === "running");
+    generationRunEl.disabled = baselineBusy;
+    generationRunEl.title = baselineBusy
+      ? (currentLang === "zh" ? "道路基线运行期间请先等待，或取消后再配置设计版本。" : "Wait for the road baseline, or cancel it before configuring a design version.")
+      : "";
+    if (emptyStateEl && viewerShellEl) {
+      emptyStateEl.hidden = hasScene;
+      viewerShellEl.dataset.empty = String(!hasScene);
+      if (!hasScene) {
+        const approved = Boolean(snapshot.normalized && snapshot.approvedSourceRevision === snapshot.sourceRevision);
+        const recentOperations = baseline.operations.slice(-3).map((operation) => {
+          const message = typeof operation === "string"
+            ? operation
+            : operation.message ?? operation.stage ?? operation.name ?? "operation";
+          return `<li>${escapeHtml(String(message))}</li>`;
+        }).join("");
+        if (baselineBusy) {
+          emptyStateEl.innerHTML = `
+            <div class="viewer-empty-card" data-tone="running">
+              <span class="viewer-empty-kicker">AUTO BASELINE · SOURCE REV ${baseline.sourceRevision}</span>
+              <h2>${currentLang === "zh" ? "正在生成无家具道路基线" : "Generating the furniture-free road baseline"}</h2>
+              <p>${escapeHtml(baseline.message || (currentLang === "zh" ? "正在建立道路、铺装与透明建筑白模。" : "Building roads, paving and transparent building massing."))}</p>
+              <div class="viewer-empty-progress"><i style="width:${Math.max(0, Math.min(100, baseline.progress))}%"></i></div>
+              <div class="viewer-empty-meta"><strong>${Math.round(baseline.progress)}%</strong><span>${escapeHtml(baseline.stage || baseline.status)}</span></div>
+              ${recentOperations ? `<ol>${recentOperations}</ol>` : ""}
+              <div class="viewer-empty-actions"><button type="button" data-baseline-action="cancel">${currentLang === "zh" ? "取消基线" : "Cancel baseline"}</button></div>
+            </div>`;
+        } else if (baseline.status === "failed") {
+          emptyStateEl.innerHTML = `
+            <div class="viewer-empty-card" data-tone="error">
+              <span class="viewer-empty-kicker">BASELINE FAILED · ${escapeHtml(baseline.stage || "failed")}</span>
+              <h2>${currentLang === "zh" ? "道路基线生成失败" : "Road baseline generation failed"}</h2>
+              <p>${escapeHtml(baseline.error || baseline.message || "Unknown generation error")}</p>
+              <div class="viewer-empty-actions"><button type="button" data-baseline-action="retry">${currentLang === "zh" ? "重试生成" : "Retry"}</button><button type="button" data-baseline-action="source">${currentLang === "zh" ? "返回 01A" : "Back to 01A"}</button></div>
+            </div>`;
+        } else {
+          emptyStateEl.innerHTML = `
+            <div class="viewer-empty-card">
+              <span class="viewer-empty-kicker">${approved ? "BASELINE READY" : "01A · REFERENCE ANNOTATION"}</span>
+              <h2>${approved ? (currentLang === "zh" ? "已批准标注，等待生成道路基线" : "Approved annotation is ready for a road baseline") : (currentLang === "zh" ? "尚无可审核的 3D 场景" : "No reviewable 3D scene yet")}</h2>
+              <p>${approved ? (currentLang === "zh" ? "基线只包含道路、铺装和透明建筑白模，不添加任何街道家具。" : "The baseline contains roads, paving and transparent massing, without street furniture.") : (currentLang === "zh" ? "前往 01A 获取 OSM、选择道路并批准完整标注。" : "Open 01A, acquire OSM, select the road and approve the full annotation.")}</p>
+              <div class="viewer-empty-actions">${approved ? `<button type="button" data-baseline-action="retry">${currentLang === "zh" ? "生成道路基线" : "Generate road baseline"}</button>` : ""}<button type="button" data-baseline-action="source">${currentLang === "zh" ? "前往 01A" : "Open 01A"}</button></div>
+            </div>`;
+        }
+      }
+    }
     if (reviewStateEl) {
       const strong = reviewStateEl.querySelector<HTMLElement>("strong");
       const detail = reviewStateEl.querySelector<HTMLElement>("span");
@@ -803,6 +855,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         : (translateViewerKey(currentLang, "professional.pipeline.reviewRequired") ?? "Accept the generated result before evaluation.");
     }
   };
+  emptyStateEl?.addEventListener("click", (event) => {
+    const action = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-baseline-action]")?.dataset.baselineAction;
+    if (action === "source") window.location.hash = "scene-graph";
+    if (action === "retry") void hostOptions.baselineCoordinator?.retry();
+    if (action === "cancel") void hostOptions.baselineCoordinator?.cancel();
+  }, { signal });
   const unsubscribeCapabilityStatus = workflow.subscribe(renderProfessionalWorkflowState);
   assetPolicyInputs.forEach((input) => {
     input.addEventListener("change", () => {
@@ -835,7 +893,13 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         workflow.setCapabilities(capabilities);
         workflow.endRequest(capabilityToken);
       })
-      .catch((error) => workflow.endRequest(capabilityToken, error));
+      .catch((error) => {
+        workflow.endRequest(capabilityToken);
+        shell.pushActivity(
+          error instanceof Error ? `Optional capability check unavailable: ${error.message}` : "Optional capability check unavailable.",
+          "warning",
+        );
+      });
   }
 
   const historyPanelController = createHistoryPanelController({
@@ -3889,23 +3953,32 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       const requestedLayoutPath = hostOptions.embedded
         ? workflow.getSnapshot().sceneLayoutPath
         : parseQueryLayoutPath();
+      const hasActiveWorkflowSource = Boolean(workflow.getSnapshot().normalized);
       let recentLayouts: RecentLayout[] = [];
       let initialLayoutCandidates = requestedLayoutPath ? [requestedLayoutPath] : [];
 
-      if (!requestedLayoutPath && !hostOptions.embedded) {
-        recentLayouts = await loadRecentLayouts(INITIAL_RECENT_LAYOUT_LIMIT);
+      if (!requestedLayoutPath && !hostOptions.embedded && !hasActiveWorkflowSource) {
+        try {
+          recentLayouts = await loadRecentLayouts(INITIAL_RECENT_LAYOUT_LIMIT);
+        } catch (error) {
+          shell.pushActivity(
+            error instanceof Error ? `Recent scenes unavailable: ${error.message}` : "Recent scenes unavailable.",
+            "warning",
+          );
+          recentLayouts = [];
+        }
         initialLayoutCandidates = recentLayouts.map((item) => item.layout_path);
       }
 
       if (initialLayoutCandidates.length === 0) {
-        throw new Error(
-          "No recent scene layouts were found. Generate a scene first or open the viewer with ?layout=/abs/path/to/scene_layout.json.",
-        );
-      }
-
-      let initialLayoutPath = initialLayoutCandidates[0];
-      let lastLayoutError = "";
-      for (const candidate of initialLayoutCandidates) {
+        animate();
+        updateOverlay();
+        setStatus(t("Ready for a road baseline.", "等待道路基线。"));
+        renderProfessionalWorkflowState();
+      } else {
+        let initialLayoutPath = initialLayoutCandidates[0];
+        let lastLayoutError = "";
+        for (const candidate of initialLayoutCandidates) {
         try {
           populateRecentLayoutOptions(recentLayouts, candidate);
           await sceneSelectionController.loadLayoutSelection(candidate);
@@ -3916,10 +3989,10 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
           lastLayoutError = error instanceof Error ? error.message : "Failed to load scene layout.";
           console.warn(`Skipping unavailable scene layout ${candidate}:`, error);
         }
-      }
+        }
 
-      // If user passed ?layout=... and it failed, fallback to latest recent layouts.
-      if (requestedLayoutPath && lastLayoutError && !hostOptions.embedded) {
+        // If user passed ?layout=... and it failed, fallback to latest recent layouts.
+        if (requestedLayoutPath && lastLayoutError && !hostOptions.embedded) {
         recentLayouts = await loadRecentLayouts(RECENT_LAYOUT_BACKGROUND_LIMIT);
         const fallbackCandidates = recentLayouts
           .map((item) => item.layout_path)
@@ -3936,18 +4009,19 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
             console.warn(`Skipping fallback scene layout ${candidate}:`, error);
           }
         }
-      }
+        }
 
-      if (lastLayoutError) {
-        throw new Error(`No viewable scene layouts were found. Last error: ${lastLayoutError}`);
-      }
-      animate();
-      updateOverlay();
-      if (initialLayoutPath && !hostOptions.embedded) {
-        const initialLoaded = recentLayouts.some((item) => item.layout_path === initialLayoutPath)
-          ? recentLayouts.length
-          : 0;
-        scheduleRecentLayoutHydration(initialLayoutPath, initialLoaded);
+        if (lastLayoutError) {
+          throw new Error(`No viewable scene layouts were found. Last error: ${lastLayoutError}`);
+        }
+        animate();
+        updateOverlay();
+        if (initialLayoutPath && !hostOptions.embedded) {
+          const initialLoaded = recentLayouts.some((item) => item.layout_path === initialLayoutPath)
+            ? recentLayouts.length
+            : 0;
+          scheduleRecentLayoutHydration(initialLayoutPath, initialLoaded);
+        }
       }
     }
   } catch (error) {

@@ -13,12 +13,14 @@ const app = read("src/app.ts");
 const assetEditor = read("src/asset-editor.ts");
 const stage = read("src/viewer-panels/stage.ts");
 const designPanel = read("src/viewer-panels/designPanel.ts");
+const baseline = read("src/professional-baseline-coordinator.ts");
 
 assert.match(workflow, /type AssetPreparationChoice = "current_manifest" \| "default_transparent_massing" \| null/);
 assert.match(workflow, /export type AssetCandidateManifest/);
 assert.match(workflow, /export type AssetPreparationState/);
 assert.match(workflow, /mode: "candidate_manifests"/);
 assert.match(workflow, /type SceneReviewStatus = "not_available" \| "pending" \| "changes_requested" \| "accepted"/);
+assert.match(workflow, /export type WorkflowBaselineRun/);
 assert.match(workflow, /setGeneratedScene[\s\S]*sceneReviewStatus: "pending"/);
 assert.match(workflow, /setSceneRevision[\s\S]*sceneReviewStatus: "pending"/);
 assert.match(pipeline, /if \(snapshot\.sceneReviewStatus === "changes_requested"\) return "edit"/);
@@ -36,5 +38,13 @@ assert.match(assetEditor, /id: "asset-candidates"/);
 assert.match(assetEditor, /DEFAULT_ASSET_MANIFEST_NAME = "real_assets_manifest\.jsonl"/);
 assert.match(app, /candidate_asset_manifests/);
 assert.match(designPanel, /viewer-generation-candidate-list/);
+assert.match(baseline, /street_furniture_profile: "none"/);
+assert.match(baseline, /amenity_coverage_mode: "off"/);
+assert.match(baseline, /curated_street_assets_profile: "disabled"/);
+assert.match(baseline, /building_representation: "transparent_massing"/);
+assert.match(baseline, /skip_llm: true/);
+assert.match(baseline, /randomSeed: 42/);
+assert.match(baseline, /render_presentation_artifacts: false/);
+assert.match(baseline, /capture_3d_views: false/);
 
 console.log("professional Y-pipeline contract: ok");

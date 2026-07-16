@@ -33,6 +33,8 @@ export function createViewerStageHtml(): string {
 
       <div id="viewer-canvas" class="viewer-canvas"></div>
 
+      <section id="viewer-empty-state" class="viewer-empty-state" aria-live="polite" hidden></section>
+
       <div id="viewer-design-workspace" class="viewer-design-workspace" hidden></div>
 
       <section id="viewer-center-controls" class="viewer-center-controls" data-open="false" aria-labelledby="viewer-center-controls-title">

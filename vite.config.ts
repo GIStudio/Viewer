@@ -2611,7 +2611,7 @@ export default defineConfig({
   plugins: [react(), viewerApiPlugin()],
   server: {
     proxy: {
-      "/api/v1": {
+      "/api": {
         target: process.env.ROADGEN_API_ORIGIN || "http://127.0.0.1:8010",
         changeOrigin: true,
       },

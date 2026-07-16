@@ -1,3 +1,5 @@
+import { describeApiRequest } from "./api-origin";
+
 export const COURSE_TOKEN_KEY = "roadgen3d-course-token";
 
 export type CourseUser = { id: string; email: string; display_name: string; system_role: "student" | "teacher" | "admin" };
@@ -41,7 +43,13 @@ export class CourseApi {
     const headers = new Headers(init.headers);
     if (this.token) headers.set("Authorization", `Bearer ${this.token}`);
     if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
-    const response = await fetch(path, { ...init, headers });
+    let response: Response;
+    try {
+      response = await fetch(path, { ...init, headers });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`RoadGen3D API is unavailable at ${describeApiRequest(path)} (${reason}).`);
+    }
     const payload = await response.json().catch(() => ({})) as Record<string, any>;
     if (!response.ok) {
       const detail = payload.detail;

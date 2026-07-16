@@ -149,9 +149,7 @@ try {
     assert.ok(Math.abs(canvasBeforeReview.width - canvasDuringReview.width) <= 1, `review drawer must not resize the 3D canvas at ${viewport.width}x${viewport.height}`);
     await page.keyboard.press("Escape");
   }
-  await page.locator(".desktop-shell-language-select").click();
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
+  await page.locator('.studio-language-toggle [role="radio"]:has-text("中文")').click();
   await page.getByText("生产流程", { exact: true }).waitFor();
   await page.getByText("检查工具", { exact: true }).waitFor();
   await page.getByText("3D 场景工作台", { exact: true }).waitFor();
