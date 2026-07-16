@@ -62,6 +62,7 @@ export type ViewerPanelElements = {
   designPresetEl: HTMLSelectElement;
   designPromptEl: HTMLTextAreaElement;
   designCountEl: HTMLSelectElement;
+  designSeedEl: HTMLInputElement;
   designTemplateEl: HTMLInputElement;
   designScenarioEl: HTMLSelectElement;
   designScenarioMetaEl: HTMLElement;

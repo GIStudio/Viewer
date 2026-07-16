@@ -12,6 +12,7 @@ const routeIsland = read("src/react/RouteIsland.tsx");
 const app = read("src/app.ts");
 const assetEditor = read("src/asset-editor.ts");
 const stage = read("src/viewer-panels/stage.ts");
+const designPanel = read("src/viewer-panels/designPanel.ts");
 
 assert.match(workflow, /type AssetPreparationChoice = "current_manifest" \| "default_transparent_massing" \| null/);
 assert.match(workflow, /export type AssetCandidateManifest/);
@@ -26,7 +27,7 @@ assert.match(routeIsland, /01A/);
 assert.match(routeIsland, /01B/);
 assert.match(routeIsland, /storeProfessionalViewerTarget/);
 assert.match(routeIsland, /model-input-audit/);
-assert.match(stage, /viewer-generation-asset-policy/);
+assert.match(designPanel, /viewer-generation-asset-policy/);
 assert.match(app, /building_representation = "transparent_massing"/);
 assert.match(app, /setSceneReviewStatus\("accepted"\)/);
 assert.match(app, /setSceneReviewStatus\("changes_requested"\)/);
@@ -34,6 +35,6 @@ assert.match(assetEditor, /setAssetPreparation\(Object\.freeze\(\{/);
 assert.match(assetEditor, /id: "asset-candidates"/);
 assert.match(assetEditor, /DEFAULT_ASSET_MANIFEST_NAME = "real_assets_manifest\.jsonl"/);
 assert.match(app, /candidate_asset_manifests/);
-assert.match(stage, /viewer-generation-candidate-list/);
+assert.match(designPanel, /viewer-generation-candidate-list/);
 
 console.log("professional Y-pipeline contract: ok");

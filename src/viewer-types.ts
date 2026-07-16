@@ -269,7 +269,7 @@ export type SceneJobCreatePayload = {
 
 export type SceneJobStatusPayload = {
   job_id: string;
-  status: "queued" | "running" | "processing" | "succeeded" | "failed";
+  status: "queued" | "running" | "processing" | "succeeded" | "failed" | "cancelled";
   stage?: string;
   progress?: number;
   operations?: Array<{

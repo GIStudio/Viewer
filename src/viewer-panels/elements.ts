@@ -49,6 +49,7 @@ export function collectViewerPanelElements(root: HTMLElement | Document): Viewer
     designPresetEl: requireElement<HTMLSelectElement>(root, "#viewer-design-preset"),
     designPromptEl: requireElement<HTMLTextAreaElement>(root, "#viewer-design-prompt"),
     designCountEl: requireElement<HTMLSelectElement>(root, "#viewer-design-count"),
+    designSeedEl: requireElement<HTMLInputElement>(root, "#viewer-design-seed"),
     designTemplateEl: requireElement<HTMLInputElement>(root, "#viewer-design-template"),
     designScenarioEl: requireElement<HTMLSelectElement>(root, "#viewer-design-scenario"),
     designScenarioMetaEl: requireElement<HTMLElement>(root, "#viewer-design-scenario-meta"),

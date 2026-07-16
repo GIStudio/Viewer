@@ -18,6 +18,8 @@ try {
 
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1576, height: 980 } });
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   let generationRequestCount = 0;
   await page.route("**/api/**", async (route) => {
     const url = route.request().url();
@@ -71,6 +73,7 @@ try {
   await page.goto(`${origin}/#viewer`);
   await page.waitForLoadState("networkidle");
   await page.locator(".studio-brand-header").waitFor();
+  assert.deepEqual(pageErrors, [], `viewer initialization errors: ${pageErrors.join(" | ")}`);
 
   assert.equal((await page.locator(".studio-header-context > span").textContent())?.trim(), "Current context");
   await page.getByRole("button", { name: "Course Studio", exact: true }).waitFor();
@@ -91,20 +94,38 @@ try {
   }
 
   const openGeneration = page.locator("#viewer-generate-and-load");
+  await page.waitForFunction(() => document.querySelector("#viewer-generate-and-load")?.textContent?.trim() === "New generation…");
+  assert.deepEqual(pageErrors, [], `viewer initialization errors: ${pageErrors.join(" | ")}`);
   assert.equal((await openGeneration.textContent())?.trim(), "New generation…");
   assert.equal(await openGeneration.getAttribute("aria-haspopup"), "dialog");
   await openGeneration.click();
   const generationDialog = page.locator("#viewer-generation-dialog");
   await generationDialog.waitFor({ state: "visible" });
   assert.equal(await generationDialog.getAttribute("data-open"), "true");
-  await page.getByText("Input source", { exact: true }).waitFor();
-  await page.getByText("Generation strategy", { exact: true }).waitFor();
-  await page.getByText("Output", { exact: true }).waitFor();
-  await generationDialog.getByText("3D asset preparation", { exact: true }).waitFor();
+  assert.equal(await generationDialog.getByRole("tab", { name: /输入来源/ }).count(), 1);
+  assert.equal(await generationDialog.getByRole("tab", { name: /生成策略/ }).count(), 1);
+  assert.equal(await generationDialog.getByRole("tab", { name: /输出结果/ }).count(), 1);
+  await generationDialog.getByRole("tab", { name: /生成策略/ }).click();
+  for (const name of [/3D 素材/, /场景结构/, /家具目标/, /补充要求/, /方案矩阵/]) {
+    assert.equal(await generationDialog.getByRole("tab", { name }).count(), 1);
+  }
+  await generationDialog.getByText("3D 素材准备", { exact: true }).waitFor();
+  assert.equal(await generationDialog.locator('[data-generation-primary-panel]:visible').count(), 1, "only one primary page may be visible");
+  assert.equal(await generationDialog.locator('[data-generation-strategy-panel]:visible').count(), 1, "only one strategy subpage may be visible");
+  const dialogDimensions = await generationDialog.locator('.viewer-generation-dialog-panel').evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  assert.ok(dialogDimensions.scrollHeight - dialogDimensions.clientHeight <= 1, "the full dialog must not become a long vertical scroller");
   assert.equal(await page.locator('#viewer-design-generate').isDisabled(), true, "generation must wait for approved 2D input and an asset strategy");
-  await page.getByText("Use default assets and transparent massing", { exact: true }).click();
+  await page.getByText("使用默认素材与透明建筑白模", { exact: true }).click();
   assert.equal(await page.locator('[data-shell-tab="prepare-assets"] .workbench-sidebar-badge').textContent(), "DEF");
   assert.equal(await page.locator('#viewer-design-generate').isDisabled(), true, "asset defaults alone must not bypass 2D approval");
+  await generationDialog.getByRole("tab", { name: /输出结果/ }).click();
+  assert.equal(await page.locator('#viewer-design-generate').isVisible(), true, "final generation action belongs only to the output page");
+  await generationDialog.getByRole("tab", { name: /生成策略/ }).click();
+  await generationDialog.getByRole("tab", { name: /场景结构/ }).click();
+  assert.equal(await generationDialog.locator('[data-generation-strategy-panel]:visible').getAttribute('data-generation-strategy-panel'), "structure");
   assert.equal(generationRequestCount, 0, "opening generation setup must not submit a generation job");
   assert.equal(await page.locator(".viewer-generation-dialog-panel .viewer-settings-close:visible").count(), 1, "generation dialog must expose one unambiguous close action");
 

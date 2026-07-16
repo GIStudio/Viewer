@@ -15,7 +15,6 @@ import type {
   ScenarioDesign,
   SceneJobStatusPayload,
 } from "./viewer-types";
-import { DEFAULT_GRAPH_TEMPLATE_ID } from "./viewer-types";
 import { escapeHtml, sleep } from "./viewer-utils";
 
 type DesignTone = "neutral" | "success" | "warning" | "error";
@@ -33,6 +32,7 @@ export type ViewerDesignMatrixControllerDeps = {
   getSelectedScenarioDesign: () => ScenarioDesign | null;
   getLatestDraftScenario: () => ScenarioDesign | null;
   getDesignSemanticConfigPatch: () => Record<string, unknown>;
+  isReferenceAnnotationMode?: () => boolean;
   getCurrentLayoutPath: () => string;
   loadLayoutSelection: (layoutPath: string, options?: LoadManifestOptions) => Promise<void>;
   populateRecentLayoutOptions: (layouts: RecentLayout[], selectedPath: string) => void;
@@ -95,6 +95,18 @@ export function createViewerDesignMatrixController(
   }
 
   async function refresh(options: { quiet?: boolean } = {}): Promise<void> {
+    if (deps.isReferenceAnnotationMode?.()) {
+      inventory = null;
+      deps.matrixEl.dataset.state = "disabled";
+      deps.matrixEl.innerHTML = `<div class="viewer-design-matrix-empty">ReferenceAnnotation 模式保持已批准道路结构。方案矩阵仅用于明确选择 Graph Template 的专家批量实验，不会隐式使用 HKUST-GZ。</div>`;
+      return;
+    }
+    if (!deps.designTemplateEl.value.trim()) {
+      inventory = null;
+      deps.matrixEl.dataset.state = "disabled";
+      deps.matrixEl.innerHTML = `<div class="viewer-design-matrix-empty">请先在输出设置中选择明确的 Graph Template ID，再使用方案矩阵。</div>`;
+      return;
+    }
     if (!options.quiet) {
       deps.matrixEl.dataset.state = "loading";
       deps.matrixEl.innerHTML = `<div class="viewer-design-matrix-empty">Loading matrix status...</div>`;
@@ -305,7 +317,7 @@ export function createViewerDesignMatrixController(
   }
 
   function buildMatrixRequest(): Record<string, unknown> {
-    const graphTemplateId = deps.designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
+    const graphTemplateId = deps.designTemplateEl.value.trim();
     return {
       graph_template_id: graphTemplateId,
       custom_structure: customStructurePayload(),

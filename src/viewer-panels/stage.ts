@@ -76,7 +76,7 @@ export function createViewerStageHtml(): string {
       <div id="viewer-overlay" class="viewer-overlay" data-i18n-key="viewer.overlay.capture">Click scene to capture mouse</div>
 
 
-      <div id="viewer-generation-dialog" class="viewer-generation-dialog" data-open="false" aria-labelledby="viewer-generation-dialog-title">
+      <div id="viewer-generation-dialog" class="viewer-generation-dialog" data-open="false" role="dialog" aria-modal="true" aria-labelledby="viewer-generation-dialog-title" tabindex="-1">
         <div class="viewer-generation-dialog-backdrop" data-close-generation></div>
         <div class="viewer-generation-dialog-panel">
           <div class="viewer-generation-dialog-head">
@@ -86,42 +86,11 @@ export function createViewerStageHtml(): string {
             </div>
             <button class="viewer-settings-close" type="button" aria-label="Close generation control" data-i18n-aria-label-key="viewer.generationDialog.close" data-close-generation>x</button>
           </div>
-          <div class="viewer-generation-dialog-contract" aria-label="Generation contract">
-            <div>
-              <span data-i18n-key="viewer.generationDialog.source">Input source</span>
-              <strong id="viewer-generation-source-summary">Current professional generation settings</strong>
-            </div>
-            <div>
-              <span data-i18n-key="viewer.generationDialog.strategy">Generation strategy</span>
-              <strong id="viewer-generation-strategy-summary">Parameterized generation</strong>
-            </div>
-            <div>
-              <span data-i18n-key="viewer.generationDialog.output">Output</span>
-              <strong data-i18n-key="viewer.generationDialog.outputRevision">Create a new scene result and load it into the 3D Viewer without overwriting the current scene</strong>
-            </div>
+          <div class="viewer-generation-primary-tabs" role="tablist" aria-label="3D 场景生成步骤">
+            <button id="viewer-generation-tab-source" type="button" role="tab" aria-selected="true" aria-controls="viewer-generation-page-source" tabindex="0" data-generation-primary-tab="source" data-status="pending"><span>01</span><strong>输入来源</strong><i aria-hidden="true"></i></button>
+            <button id="viewer-generation-tab-strategy" type="button" role="tab" aria-selected="false" aria-controls="viewer-generation-page-strategy" tabindex="-1" data-generation-primary-tab="strategy" data-status="pending"><span>02</span><strong>生成策略</strong><i aria-hidden="true"></i></button>
+            <button id="viewer-generation-tab-output" type="button" role="tab" aria-selected="false" aria-controls="viewer-generation-page-output" tabindex="-1" data-generation-primary-tab="output" data-status="pending"><span>03</span><strong>输出结果</strong><i aria-hidden="true"></i></button>
           </div>
-          <fieldset class="viewer-generation-asset-policy" id="viewer-generation-asset-policy">
-            <legend data-i18n-key="professional.assets.policyTitle">3D asset preparation</legend>
-            <p data-i18n-key="professional.assets.policyDescription">Confirm the asset source that will join the approved 2D annotation.</p>
-            <label>
-              <input type="radio" name="viewer-generation-asset-policy" value="current_manifest" />
-              <span><strong data-i18n-key="professional.assets.currentManifest">Use the active candidate repository</strong><small data-i18n-key="professional.assets.currentManifestHint">Search scene-eligible trees and street furniture across the active manifests.</small></span>
-            </label>
-            <label>
-              <input type="radio" name="viewer-generation-asset-policy" value="default_transparent_massing" />
-              <span><strong data-i18n-key="professional.assets.defaultMassing">Use default assets and transparent massing</strong><small data-i18n-key="professional.assets.defaultMassingHint">Skip custom asset preparation; buildings remain transparent white context.</small></span>
-            </label>
-            <section class="viewer-generation-candidate-repository" aria-labelledby="viewer-generation-candidate-title">
-              <header>
-                <strong id="viewer-generation-candidate-title">本次候选资产仓库</strong>
-                <button id="viewer-generation-edit-candidates" type="button">返回 01B 调整</button>
-              </header>
-              <div id="viewer-generation-candidate-summary"></div>
-              <div id="viewer-generation-candidate-list"></div>
-              <p>候选资产只进入检索池，不保证出现在最终场景中。</p>
-            </section>
-            <div id="viewer-generation-readiness" class="viewer-generation-readiness" data-tone="warning" role="status"></div>
-          </fieldset>
           <div class="viewer-generation-dialog-body">
             ${renderDesignPanelHtml()}
           </div>
