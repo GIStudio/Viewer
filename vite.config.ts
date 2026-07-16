@@ -214,7 +214,33 @@ function resolveManifestAssetPath(rawPath: string | null | undefined, manifestPa
   }
 
   const manifestDir = path.dirname(path.resolve(manifestPath));
-  return path.resolve(manifestDir, trimmed);
+  const relativeToManifest = path.resolve(manifestDir, trimmed);
+  if (fs.existsSync(relativeToManifest)) return relativeToManifest;
+  return path.resolve(repoRoot, trimmed);
+}
+
+function globallyDisabledAssetIds(): Set<string> {
+  const result = new Set<string>();
+  const paths = [
+    path.join(ASSET_MANIFESTS_DIR, "real_assets_manifest.jsonl"),
+    path.join(ASSET_MANIFESTS_DIR, "real_assets_manifest_v2.jsonl"),
+    path.join(repoRoot, "data", "street_furniture", "street_furniture_manifest.jsonl"),
+  ];
+  for (const sourcePath of paths) {
+    if (!fs.existsSync(sourcePath)) continue;
+    for (const line of fs.readFileSync(sourcePath, "utf-8").split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      try {
+        const row = JSON.parse(line) as JsonRecord;
+        const enabled = ![false, 0, "0", "false", "no", "off"].includes(row.scene_eligible as never);
+        const assetId = String(row.asset_id ?? "").trim();
+        if (assetId && !enabled) result.add(assetId);
+      } catch {
+        // Malformed rows are reported by the per-manifest summary.
+      }
+    }
+  }
+  return result;
 }
 
 function normalizeManifestRecordPaths(record: JsonRecord, manifestPath: string): JsonRecord {
@@ -279,13 +305,15 @@ function assetManifestSummary(manifestPath: string, name: string, label: string)
   const categoryCounts: Record<string, number> = {};
   const assetIds = new Set<string>();
   let duplicateCount = 0;
+  const disabledAssetIds = globallyDisabledAssetIds();
   for (const row of rows) {
     const assetId = String(row.asset_id ?? "").trim();
     if (assetId) {
       if (assetIds.has(assetId)) duplicateCount += 1;
       assetIds.add(assetId);
     }
-    if (row.scene_eligible === false) continue;
+    const explicitDisabled = [false, 0, "0", "false", "no", "off"].includes(row.scene_eligible as never);
+    if (explicitDisabled || disabledAssetIds.has(assetId)) continue;
     eligibleCount += 1;
     const category = String(row.category ?? "unknown").trim().toLowerCase() || "unknown";
     categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
@@ -293,9 +321,17 @@ function assetManifestSummary(manifestPath: string, name: string, label: string)
     const meshPath = rawMeshPath ? resolveManifestAssetPath(rawMeshPath, manifestPath) : "";
     const supported = GENERATION_ASSET_CATEGORIES.has(category);
     const meshReady = Boolean(meshPath && fs.existsSync(meshPath));
+    const source = String(row.source ?? "").trim().toLowerCase();
+    const generatorType = String(row.generator_type ?? "").trim().toLowerCase();
+    const qualityTier = Number(row.quality_tier ?? 1);
+    const runtimeEligible = !source.includes("real_asset")
+      && !source.includes("urbanverse_import")
+      && !generatorType.includes("_v2")
+      && !generatorType.includes("-v2")
+      && (!Number.isFinite(qualityTier) || qualityTier >= 1);
     if (!supported) unsupportedCategoryCount += 1;
     if (!meshReady) missingMeshCount += 1;
-    if (supported && meshReady) readyCount += 1;
+    if (supported && meshReady && runtimeEligible) readyCount += 1;
   }
   const warnings = [
     ...(malformedCount ? [`${malformedCount} malformed record(s)`] : []),
