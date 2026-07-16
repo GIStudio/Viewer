@@ -7,7 +7,11 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { CSS2DRenderer, CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import type { DesktopShell } from "./desktop-shell";
 import { VIEWER_LANGUAGE_EVENT, applyViewerTranslations, loadViewerLanguage, translateViewerKey } from "./viewer-i18n";
-import type { WorkflowController } from "./workflow-controller";
+import type {
+  AssetCandidateManifest,
+  AssetPreparationState,
+  WorkflowController,
+} from "./workflow-controller";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -47,6 +51,12 @@ type ManifestInfo = {
   name: string;
   label: string;
   count: number;
+  eligibleCount?: number;
+  readyCount?: number;
+  categoryCounts?: Record<string, number>;
+  fingerprint?: string;
+  updatedAt?: string;
+  warnings?: string[];
 };
 
 const DEFAULT_ASSET_MANIFEST_NAME = "real_assets_manifest.jsonl";
@@ -58,6 +68,44 @@ const FALLBACK_MANIFESTS: ManifestInfo[] = [
   { name: "street_furniture/street_furniture_manifest.jsonl", label: "[street_furniture] Street furniture manifest", count: 0 },
   { name: "building/buildings_manifest.jsonl", label: "[building] Buildings manifest", count: 0 },
 ];
+const ACTIVE_MANIFEST_SESSION_KEY = "roadgen3d:asset-editor-active-manifest";
+const ACTIVE_ASSET_SESSION_KEY_PREFIX = "roadgen3d:asset-editor-active-asset:";
+
+function readSessionValue(key: string): string {
+  try {
+    return sessionStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeSessionValue(key: string, value: string): void {
+  try {
+    if (value) sessionStorage.setItem(key, value);
+    else sessionStorage.removeItem(key);
+  } catch {
+    // The live editor still works when session storage is unavailable.
+  }
+}
+
+function candidateManifestFromInfo(
+  manifest: ManifestInfo,
+  priority: number,
+  activatedBy: AssetCandidateManifest["activatedBy"],
+): AssetCandidateManifest {
+  return Object.freeze({
+    name: manifest.name,
+    label: manifest.label || manifest.name,
+    fingerprint: manifest.fingerprint ?? "",
+    eligibleCount: Math.max(0, Number(manifest.eligibleCount ?? manifest.count) || 0),
+    readyCount: Math.max(0, Number(manifest.readyCount ?? manifest.eligibleCount ?? manifest.count) || 0),
+    categoryCounts: Object.freeze({ ...(manifest.categoryCounts ?? {}) }),
+    priority,
+    activatedBy,
+    updatedAt: manifest.updatedAt ?? "",
+    warnings: Object.freeze([...(manifest.warnings ?? [])]),
+  });
+}
 
 type SceneChildInfo = {
   name: string;
@@ -72,6 +120,8 @@ type SceneChildInfo = {
 
 type AssetEditorState = {
   manifestName: string;
+  manifestCatalog: ManifestInfo[];
+  currentManifest: ManifestInfo | null;
   assets: AssetRecord[];
   filteredAssets: AssetRecord[];
   selectedAssetId: string | null;
@@ -868,15 +918,17 @@ type ManifestAssetsResponse = {
   offset: number;
   limit: number;
   hasMore: boolean;
+  manifest?: ManifestInfo;
 };
 
 async function fetchManifestAssets(
   name: string,
   offset: number = 0,
   limit: number = 100,
+  eligibility: "all" | "eligible" | "disabled" = "all",
 ): Promise<ManifestAssetsResponse> {
   const res = await fetch(
-    `/api/asset-manifest?name=${encodeURIComponent(name)}&offset=${offset}&limit=${limit}`,
+    `/api/asset-manifest?name=${encodeURIComponent(name)}&offset=${offset}&limit=${limit}&eligibility=${eligibility}`,
   );
   if (!res.ok) throw new Error(`Failed to fetch manifest: ${res.status}`);
   const data = await res.json();
@@ -890,6 +942,7 @@ async function fetchManifestAssets(
     offset: data.offset ?? offset,
     limit: data.limit ?? limit,
     hasMore: data.hasMore ?? false,
+    manifest: data.manifest ?? undefined,
   };
 }
 
@@ -2194,6 +2247,8 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
   const root = shell.root;
   const state: AssetEditorState = {
     manifestName: "",
+    manifestCatalog: [],
+    currentManifest: null,
     assets: [],
     filteredAssets: [],
     selectedAssetId: null,
@@ -2240,17 +2295,17 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
   ]);
   shell.setLeftSections([
     {
-      id: "asset-manifest",
-      title: "Manifest",
-      subtitle: "Source and filters",
+      id: "asset-library",
+      title: "资产库",
+      subtitle: "清单、筛选与检查",
       content: `
-        <div class="desktop-shell-form-stack">
+        <div class="desktop-shell-form-stack ae-library-controls">
           <label class="desktop-shell-field">
             <span data-i18n-key="assetEditor.manifest">Manifest</span>
             <select id="ae-manifest-select" class="ae-manifest-select" title="Manifest" data-i18n-title-key="assetEditor.manifest">
               <option value="">-- Select Manifest --</option>
             </select>
-            <button id="ae-use-manifest-for-generation" class="ae-action-btn ae-btn-primary" type="button" disabled data-i18n-key="professional.assets.useManifest">Use this manifest for generation</button>
+            <button id="ae-use-manifest-for-generation" class="ae-action-btn ae-btn-primary" type="button" disabled data-i18n-key="professional.assets.useManifest">Add to candidate repository</button>
             <span id="ae-generation-manifest-status" class="desktop-shell-field-note" data-i18n-key="professional.assets.useManifestHint">Select and inspect a manifest, then confirm it as the 3D preparation branch.</span>
           </label>
           <input id="ae-search" type="text" placeholder="Search assets..." class="ae-search-input" />
@@ -2272,13 +2327,6 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
             <option value="disabled">Disabled</option>
           </select>
         </div>
-      `,
-    },
-    {
-      id: "asset-gallery",
-      title: "Asset List",
-      subtitle: "Gallery browser",
-      content: `
         <div class="asset-gallery-panel asset-gallery-panel-shell">
           <div class="ae-gallery-stats" id="ae-gallery-stats"></div>
           <div class="ae-bulk-toolbar" id="ae-bulk-toolbar">
@@ -2313,6 +2361,22 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
         </div>
       `,
       open: true,
+    },
+    {
+      id: "asset-candidates",
+      title: "候选仓库",
+      subtitle: "用于 02 场景生成",
+      content: `
+        <section class="ae-candidate-repository" aria-labelledby="ae-candidate-repository-title">
+          <header>
+            <span>01B / CANDIDATE REPOSITORY</span>
+            <h3 id="ae-candidate-repository-title">本次候选资产仓库</h3>
+            <p>这些资产会进入检索池，但不保证出现在最终场景中。</p>
+          </header>
+          <div id="ae-candidate-repository-summary" class="ae-candidate-summary" role="status"></div>
+          <div id="ae-candidate-repository-list" class="ae-candidate-list"></div>
+        </section>
+      `,
     },
   ]);
   shell.setRightTabs(
@@ -2381,7 +2445,8 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
     <div class="asset-editor-shell-stage">
       <div id="ae-empty-state" class="ae-empty-state">
         <div class="ae-empty-icon">&#9881;</div>
-        <p data-i18n-key="assetEditor.empty.selectAsset">Select an asset from the gallery to inspect</p>
+        <strong id="ae-empty-title">正在连接真实 3D 资产检查器</strong>
+        <p id="ae-empty-message">正在恢复资产清单并加载首个可检查模型。</p>
       </div>
       <div class="ae-detail-content" id="ae-detail-content" style="display:none;">
         <div class="ae-preview-section">
@@ -2409,6 +2474,8 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
   const manifestSelect = qs<HTMLSelectElement>(root, "#ae-manifest-select");
   const useManifestBtn = qs<HTMLButtonElement>(root, "#ae-use-manifest-for-generation");
   const generationManifestStatus = qs<HTMLElement>(root, "#ae-generation-manifest-status");
+  const candidateRepositorySummary = qs<HTMLElement>(root, "#ae-candidate-repository-summary");
+  const candidateRepositoryList = qs<HTMLElement>(root, "#ae-candidate-repository-list");
   const backBtn = qs<HTMLButtonElement>(root, "#ae-back-btn");
   const searchInput = qs<HTMLInputElement>(root, "#ae-search");
   const categoryFilter = qs<HTMLSelectElement>(root, "#ae-category-filter");
@@ -2425,6 +2492,8 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
   const disableManifestBtn = qs<HTMLButtonElement>(root, "#ae-disable-manifest-btn");
   const detailPanel = qs<HTMLDivElement>(root, "#ae-detail-panel");
   const emptyState = qs<HTMLDivElement>(root, "#ae-empty-state");
+  const emptyTitle = qs<HTMLElement>(root, "#ae-empty-title");
+  const emptyMessage = qs<HTMLElement>(root, "#ae-empty-message");
   const detailContent = qs<HTMLDivElement>(root, "#ae-detail-content");
   const previewCanvas = qs<HTMLDivElement>(root, "#ae-preview-canvas");
   const infoGrid = qs<HTMLDivElement>(root, "#ae-info-grid");
@@ -2486,57 +2555,244 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
   });
 
   /* ── Manifest loading ──────────────────────────────────────────── */
-  async function initManifests() {
-    try {
-      const manifests = await fetchManifests();
-      for (const m of manifests) {
-        const opt = document.createElement("option");
-        opt.value = m.name;
-        opt.textContent = `${m.label} (${m.count})`;
-        manifestSelect.appendChild(opt);
-      }
-    } catch (err) {
-      showToast(root, `Failed to load manifests: ${err}`, "error");
-    }
+  function candidateManifests(): readonly AssetCandidateManifest[] {
+    const preparation = workflow?.getSnapshot().assetPreparation;
+    return preparation?.mode === "candidate_manifests" ? preparation.manifests : [];
   }
 
-  manifestSelect.addEventListener("change", async () => {
-    const name = manifestSelect.value;
-    useManifestBtn.disabled = !name || !workflow;
-    if (!name) return;
+  function setCandidateManifests(manifests: readonly AssetCandidateManifest[]): void {
+    if (!workflow) return;
+    if (!manifests.length) {
+      workflow.setAssetPreparation(null);
+      return;
+    }
+    workflow.setAssetPreparation(Object.freeze({
+      mode: "candidate_manifests",
+      manifests: Object.freeze(manifests.map((manifest, priority) => Object.freeze({ ...manifest, priority }))),
+    }));
+  }
+
+  function activateManifest(manifest: ManifestInfo, activatedBy: AssetCandidateManifest["activatedBy"]): void {
+    if (!workflow) return;
+    const current = [...candidateManifests()];
+    const existingIndex = current.findIndex((item) => item.name === manifest.name);
+    const next = candidateManifestFromInfo(
+      manifest,
+      existingIndex >= 0 ? existingIndex : current.length,
+      existingIndex >= 0 ? current[existingIndex].activatedBy : activatedBy,
+    );
+    if (existingIndex >= 0) current.splice(existingIndex, 1, next);
+    else current.push(next);
+    setCandidateManifests(current);
+  }
+
+  function refreshCandidateSummaries(catalog: readonly ManifestInfo[]): void {
+    if (!workflow) return;
+    const current = candidateManifests();
+    if (!current.length) return;
+    const refreshed = current.map((candidate, priority) => {
+      const manifest = catalog.find((item) => item.name === candidate.name);
+      if (!manifest) {
+        return Object.freeze({
+          ...candidate,
+          priority,
+          readyCount: 0,
+          warnings: Object.freeze([...(candidate.warnings ?? []), "Manifest is no longer available"]),
+        });
+      }
+      return candidateManifestFromInfo(manifest, priority, candidate.activatedBy);
+    });
+    setCandidateManifests(refreshed);
+  }
+
+  function syncManifestCandidateStatus(): void {
+    const active = candidateManifests().some((item) => item.name === state.manifestName);
+    useManifestBtn.disabled = !state.manifestName || !workflow;
+    useManifestBtn.textContent = active ? "已在候选仓库中" : "加入候选仓库";
+    generationManifestStatus.textContent = state.currentManifest
+      ? `${state.currentManifest.label} · ${state.currentManifest.readyCount ?? 0} 可用 / ${state.currentManifest.eligibleCount ?? 0} 候选`
+      : "选择资产清单后可加入候选仓库";
+    generationManifestStatus.dataset.tone = active ? "success" : "neutral";
+  }
+
+  function renderCandidateRepository(): void {
+    const manifests = [...candidateManifests()];
+    const readyCount = manifests.reduce((sum, item) => sum + item.readyCount, 0);
+    const eligibleCount = manifests.reduce((sum, item) => sum + item.eligibleCount, 0);
+    candidateRepositorySummary.innerHTML = manifests.length
+      ? `<strong>${manifests.length} 个清单 · ${readyCount.toLocaleString()} 个可用候选</strong><span>${eligibleCount.toLocaleString()} 个已启用记录；候选资产不保证被最终使用。</span>`
+      : `<strong>尚未建立候选仓库</strong><span>在资产库中加入清单，或新建、导入、拆分、启用一个资产。</span>`;
+    candidateRepositoryList.innerHTML = manifests.map((manifest, index) => {
+      const categories = Object.entries(manifest.categoryCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([category, count]) => `<span>${escapeHtml(category)} ${Number(count).toLocaleString()}</span>`)
+        .join("");
+      const warnings = (manifest.warnings ?? []).map((warning) => `<li>${escapeHtml(warning)}</li>`).join("");
+      return `
+        <details class="ae-candidate-manifest" data-manifest-name="${escapeHtml(manifest.name)}">
+          <summary>
+            <span class="ae-candidate-priority">${String(index + 1).padStart(2, "0")}</span>
+            <span><strong>${escapeHtml(manifest.label)}</strong><small>${manifest.readyCount.toLocaleString()} 可用 / ${manifest.eligibleCount.toLocaleString()} 候选</small></span>
+            <span class="ae-candidate-source">${manifest.activatedBy === "asset_write" ? "自动加入" : "手动加入"}</span>
+          </summary>
+          <div class="ae-candidate-manifest-body">
+            <div class="ae-candidate-categories">${categories || "<span>无支持类别</span>"}</div>
+            ${warnings ? `<ul class="ae-candidate-warnings">${warnings}</ul>` : ""}
+            <div class="ae-candidate-assets" data-candidate-assets>展开后加载候选资产明细…</div>
+            <div class="ae-candidate-actions">
+              <button type="button" data-candidate-action="up" ${index === 0 ? "disabled" : ""}>提高优先级</button>
+              <button type="button" data-candidate-action="down" ${index === manifests.length - 1 ? "disabled" : ""}>降低优先级</button>
+              <button type="button" data-candidate-action="inspect">在检查器中打开</button>
+              <button type="button" data-candidate-action="remove">移除</button>
+            </div>
+          </div>
+        </details>
+      `;
+    }).join("");
+    syncManifestCandidateStatus();
+
+    candidateRepositoryList.querySelectorAll<HTMLDetailsElement>(".ae-candidate-manifest").forEach((details) => {
+      details.addEventListener("toggle", () => {
+        if (!details.open || details.dataset.assetsLoaded === "true") return;
+        const name = details.dataset.manifestName ?? "";
+        const host = details.querySelector<HTMLElement>("[data-candidate-assets]");
+        if (!name || !host) return;
+        details.dataset.assetsLoaded = "true";
+        host.textContent = "正在读取候选资产…";
+        void fetchManifestAssets(name, 0, 500, "eligible")
+          .then((response) => {
+            host.innerHTML = response.assets.length
+              ? `<ol>${response.assets.map((asset) => `<li><code>${escapeHtml(asset.asset_id)}</code><span>${escapeHtml(asset.category || "unknown")}</span></li>`).join("")}</ol>`
+              : "此清单没有已启用资产。";
+          })
+          .catch((error) => {
+            host.textContent = `候选明细读取失败：${String(error)}`;
+          });
+      });
+      details.querySelectorAll<HTMLButtonElement>("[data-candidate-action]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const name = details.dataset.manifestName ?? "";
+          const index = candidateManifests().findIndex((item) => item.name === name);
+          if (index < 0) return;
+          const action = button.dataset.candidateAction;
+          if (action === "inspect") {
+            void loadManifest(name, true);
+            shell.sidebar.activate("asset-library");
+            return;
+          }
+          const next = [...candidateManifests()];
+          if (action === "remove") next.splice(index, 1);
+          if (action === "up" && index > 0) [next[index - 1], next[index]] = [next[index], next[index - 1]];
+          if (action === "down" && index < next.length - 1) [next[index + 1], next[index]] = [next[index], next[index + 1]];
+          setCandidateManifests(next);
+        });
+      });
+    });
+  }
+
+  async function loadManifest(name: string, autoSelectAsset: boolean): Promise<void> {
+    const manifest = state.manifestCatalog.find((item) => item.name === name) ?? null;
     state.manifestName = name;
+    state.currentManifest = manifest;
+    manifestSelect.value = name;
+    writeSessionValue(ACTIVE_MANIFEST_SESSION_KEY, name);
     state.selectedAssetId = null;
     state.selectedAssetIds.clear();
     state.selectedObjects.clear();
     state.assets = [];
     state.loadedOffset = 0;
     state.hasMoreAssets = false;
-    showEmptyState();
-    
+    showTranslatedEmptyState("assetEditor.empty.loading.title", "assetEditor.empty.loading.message", manifest?.label ?? name);
+    syncManifestCandidateStatus();
     try {
       const response = await fetchManifestAssets(name, 0, 100);
       state.assets = response.assets;
       state.totalAssets = response.total;
       state.loadedOffset = response.offset + response.assets.length;
       state.hasMoreAssets = response.hasMore;
-      
+      state.currentManifest = response.manifest ?? manifest;
+      if (response.manifest) {
+        const catalogIndex = state.manifestCatalog.findIndex((item) => item.name === name);
+        if (catalogIndex >= 0) state.manifestCatalog.splice(catalogIndex, 1, response.manifest);
+      }
       rebuildCategoryProfiles(state.assets);
       updateCategoryFilter();
       applyFilters();
       updateLoadMoreSection();
+      syncManifestCandidateStatus();
+      if (!state.assets.length) {
+        showTranslatedEmptyState("assetEditor.empty.manifest.title", "assetEditor.empty.manifest.message");
+        return;
+      }
+      if (autoSelectAsset) {
+        const rememberedId = readSessionValue(`${ACTIVE_ASSET_SESSION_KEY_PREFIX}${name}`);
+        const preferred = state.assets.find((asset) => asset.asset_id === rememberedId)
+          ?? state.assets.find((asset) => isSceneEligible(asset) && Boolean(asset.mesh_path))
+          ?? state.assets[0];
+        if (preferred) await selectAsset(preferred.asset_id);
+      }
     } catch (err) {
+      showTranslatedEmptyState("assetEditor.empty.loadFailed.title", "assetEditor.empty.manifest.message", String(err));
       showToast(root, `Failed to load manifest: ${err}`, "error");
     }
+  }
+
+  async function initManifests() {
+    try {
+      const manifests = await fetchManifests();
+      state.manifestCatalog = manifests.length ? manifests : FALLBACK_MANIFESTS;
+      refreshCandidateSummaries(state.manifestCatalog);
+      for (const m of state.manifestCatalog) {
+        const opt = document.createElement("option");
+        opt.value = m.name;
+        opt.textContent = `${m.label} (${m.readyCount ?? m.count} ready / ${m.count})`;
+        manifestSelect.appendChild(opt);
+      }
+      const remembered = readSessionValue(ACTIVE_MANIFEST_SESSION_KEY);
+      const candidateName = candidateManifests()[0]?.name ?? "";
+      const preferred = [remembered, candidateName, DEFAULT_ASSET_MANIFEST_NAME]
+        .find((name) => state.manifestCatalog.some((manifest) => manifest.name === name && manifest.count > 0))
+        ?? state.manifestCatalog.find((manifest) => manifest.count > 0)?.name
+        ?? state.manifestCatalog[0]?.name;
+      renderCandidateRepository();
+      if (preferred) await loadManifest(preferred, true);
+      else showTranslatedEmptyState("assetEditor.empty.none.title", "assetEditor.empty.none.message");
+    } catch (err) {
+      showTranslatedEmptyState("assetEditor.empty.unavailable.title", "assetEditor.empty.none.message", String(err));
+      showToast(root, `Failed to load manifests: ${err}`, "error");
+    }
+  }
+
+  async function refreshManifestAfterWrite(autoActivate: boolean): Promise<void> {
+    if (!state.manifestName) return;
+    try {
+      const catalog = await fetchManifests();
+      if (catalog.length) state.manifestCatalog = catalog;
+      const updated = state.manifestCatalog.find((item) => item.name === state.manifestName);
+      if (updated) {
+        state.currentManifest = updated;
+        if (autoActivate) activateManifest(updated, "asset_write");
+        else refreshCandidateSummaries(state.manifestCatalog);
+      }
+      renderCandidateRepository();
+    } catch (error) {
+      showToast(root, `候选仓库刷新失败: ${String(error)}`, "error");
+    }
+  }
+
+  manifestSelect.addEventListener("change", () => {
+    const name = manifestSelect.value;
+    if (name) void loadManifest(name, true);
   });
 
   useManifestBtn.addEventListener("click", () => {
-    if (!workflow || !state.manifestName) return;
-    workflow.setAssetPreparationChoice("current_manifest");
-    generationManifestStatus.textContent = `${state.manifestName} · ${translateViewerKey(currentLanguage, "professional.assets.manifestReady") ?? "ready for generation"}`;
-    generationManifestStatus.dataset.tone = "success";
+    if (!workflow || !state.currentManifest) return;
+    activateManifest(state.currentManifest, "manual");
     shell.setStatusSummary({ key: "professional.assets.manifestReady" });
-    showToast(root, translateViewerKey(currentLanguage, "professional.assets.manifestReady") ?? "Asset preparation is ready.");
+    showToast(root, "清单已加入候选仓库；生成时仍会根据场景需求选择资产。");
   });
+
+  const unsubscribeCandidateWorkflow = workflow?.subscribe(renderCandidateRepository);
 
   /* ── Load More ─────────────────────────────────────────────────── */
   function updateLoadMoreSection() {
@@ -2707,6 +2963,7 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
         scope: "selected",
       });
       applyBulkUpdatesToLoadedAssets(new Set(uniqueIds), updates);
+      await refreshManifestAfterWrite(eligible);
       showToast(root, `${eligible ? "Enabled" : "Disabled"} ${result.updatedCount.toLocaleString()} assets`);
     } catch (err) {
       showToast(root, `Bulk update failed: ${err}`, "error");
@@ -2728,6 +2985,7 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
       const result = await bulkSaveAssetMetadata(state.manifestName, updates, { scope: "all" });
       applyBulkUpdatesToLoadedAssets(null, updates);
       state.selectedAssetIds.clear();
+      await refreshManifestAfterWrite(false);
       showToast(root, `Disabled ${result.updatedCount.toLocaleString()} assets in ${state.manifestName}`);
     } catch (err) {
       showToast(root, `Manifest disable failed: ${err}`, "error");
@@ -2841,6 +3099,9 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
   /* ── Asset selection ───────────────────────────────────────────── */
   async function selectAsset(assetId: string) {
     state.selectedAssetId = assetId;
+    if (state.manifestName) {
+      writeSessionValue(`${ACTIVE_ASSET_SESSION_KEY_PREFIX}${state.manifestName}`, assetId);
+    }
     state.selectedObjects.clear();
     if (previewCtx) {
       clearMeshSelection();
@@ -2926,13 +3187,32 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
           finalPreviewYawForPolicy(orientationPolicyForAsset(asset), state.frontDirection, state.yawValue),
         );
       } catch (err) {
+        showTranslatedEmptyState("assetEditor.empty.modelFailed.title", "assetEditor.empty.choose.message", `${asset.asset_id} · ${String(err)}`);
         showToast(root, `Failed to load GLB: ${err}`, "error");
       }
     }
   }
 
-  function showEmptyState() {
+  let currentEmptyTranslation: { titleKey: string; messageKey: string; detail: string } | null = null;
+
+  function showTranslatedEmptyState(titleKey: string, messageKey: string, detail = ""): void {
+    currentEmptyTranslation = { titleKey, messageKey, detail };
+    const title = translateViewerKey(currentLanguage, titleKey) ?? titleKey;
+    const message = [detail, translateViewerKey(currentLanguage, messageKey) ?? messageKey]
+      .filter(Boolean)
+      .join(" · ");
+    showEmptyState(title, message, false);
+  }
+
+  function showEmptyState(
+    title: string = translateViewerKey(currentLanguage, "assetEditor.empty.choose.title") ?? "Choose an inspectable asset",
+    message: string = translateViewerKey(currentLanguage, "assetEditor.empty.choose.message") ?? "Select a record from the asset library.",
+    clearTranslation = true,
+  ) {
+    if (clearTranslation) currentEmptyTranslation = null;
     emptyState.style.display = "";
+    emptyTitle.textContent = title;
+    emptyMessage.textContent = message;
     detailContent.style.display = "none";
     saveBtn.disabled = true;
     deleteRecordBtn.disabled = true;
@@ -3292,6 +3572,7 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
       if (asset) applyCurationUpdatesToAsset(asset, snapshot.updates);
       if (!destroyed && snapshot.version === curationAutosaveVersion) {
         renderGallery();
+        await refreshManifestAfterWrite(snapshot.updates.scene_eligible === true);
         setCurationSaveStatus("审核信息已自动保存", "saved");
       }
     } catch (err) {
@@ -4000,6 +4281,7 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
       
       // Re-render gallery
       applyFilters();
+      await refreshManifestAfterWrite(false);
       
       showToast(root, "Asset record deleted");
     } catch (err) {
@@ -4265,6 +4547,7 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
       state.totalAssets += addedCount;
       rebuildCategoryProfiles(state.assets);
       applyFilters();
+      await refreshManifestAfterWrite(true);
       showToast(
         root,
         `后端自动拆分完成：新增 ${result.created_count || result.assets.length} 个子资产，cluster=${result.cluster_count}, method=${result.actual_method}${result.fallback_reason ? " fallback" : ""}`,
@@ -4322,6 +4605,7 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
       state.totalAssets += createdAssets.length;
       rebuildCategoryProfiles(state.assets);
       applyFilters();
+      await refreshManifestAfterWrite(true);
       showToast(root, `已拆分并新增 ${createdAssets.length} 个子资产记录`);
     } catch (err) {
       showToast(root, `自动拆分失败: ${err}`, "error");
@@ -4376,6 +4660,7 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
       state.totalAssets += createdAssets.length;
       rebuildCategoryProfiles(state.assets);
       applyFilters();
+      await refreshManifestAfterWrite(true);
       showToast(root, mode === "extracted"
         ? "已提取天空球并创建 sky_dome 记录"
         : "未找到圆球，已生成程序化 sky_dome 记录");
@@ -4442,6 +4727,7 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
       state.totalAssets += createdAssets.length;
       rebuildCategoryProfiles(state.assets);
       applyFilters();
+      await refreshManifestAfterWrite(true);
       clearMeshSelection();
       state.selectedObjects.clear();
       renderObjectList();
@@ -4462,16 +4748,30 @@ export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowControl
       leftPinButton.title = translateViewerKey(currentLanguage, "shell.unpinLeft") ?? "Unpin left sidebar";
     }
     renderGallery();
+    renderCandidateRepository();
+    if (emptyState.style.display !== "none") {
+      if (currentEmptyTranslation) {
+        showTranslatedEmptyState(
+          currentEmptyTranslation.titleKey,
+          currentEmptyTranslation.messageKey,
+          currentEmptyTranslation.detail,
+        );
+      } else {
+        showEmptyState();
+      }
+    }
     updateOrientationStatus();
   }
 
   window.addEventListener(VIEWER_LANGUAGE_EVENT, refreshAssetEditorLanguage, { signal: languageController.signal });
   /* ── Init ──────────────────────────────────────────────────────── */
+  shell.sidebar.activate("asset-library");
   initManifests();
 
   /* ── Teardown ──────────────────────────────────────────────────── */
   return () => {
     destroyed = true;
+    unsubscribeCandidateWorkflow?.();
     languageController.abort();
     clearDimensionAutosaveTimer();
     clearCurationAutosaveTimer();

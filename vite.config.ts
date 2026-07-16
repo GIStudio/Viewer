@@ -25,6 +25,16 @@ const EXTRA_ASSET_MANIFEST_DIRS = [
   path.resolve(repoRoot, "data", "street_furniture"),
   path.resolve(repoRoot, "assets", "building"),
 ];
+const GENERATION_ASSET_CATEGORIES = new Set([
+  "bench",
+  "lamp",
+  "trash",
+  "tree",
+  "bus_stop",
+  "mailbox",
+  "hydrant",
+  "bollard",
+]);
 const MODEL_INPUT_BROWSER_INDEX_PATH = process.env.ROADGEN_MODEL_INPUT_BROWSER_INDEX
   ? path.resolve(process.env.ROADGEN_MODEL_INPUT_BROWSER_INDEX)
   : path.resolve(repoRoot, "data", "model-input-browser", "index.json");
@@ -233,6 +243,77 @@ function resolveAssetManifestPath(manifestName: string): string | null {
   const candidate = path.resolve(ASSET_MANIFESTS_DIR, manifestName);
   const relative = path.relative(ASSET_MANIFESTS_DIR, candidate);
   return !relative.startsWith("..") && !path.isAbsolute(relative) ? candidate : null;
+}
+
+type AssetManifestSummary = {
+  name: string;
+  label: string;
+  count: number;
+  eligibleCount: number;
+  readyCount: number;
+  categoryCounts: Record<string, number>;
+  fingerprint: string;
+  updatedAt: string;
+  warnings: string[];
+};
+
+function assetManifestSummary(manifestPath: string, name: string, label: string): AssetManifestSummary {
+  const text = fs.readFileSync(manifestPath, "utf-8");
+  const rows: JsonRecord[] = [];
+  let malformedCount = 0;
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const value = JSON.parse(trimmed) as unknown;
+      if (value && typeof value === "object" && !Array.isArray(value)) rows.push(value as JsonRecord);
+      else malformedCount += 1;
+    } catch {
+      malformedCount += 1;
+    }
+  }
+  let eligibleCount = 0;
+  let readyCount = 0;
+  let missingMeshCount = 0;
+  let unsupportedCategoryCount = 0;
+  const categoryCounts: Record<string, number> = {};
+  const assetIds = new Set<string>();
+  let duplicateCount = 0;
+  for (const row of rows) {
+    const assetId = String(row.asset_id ?? "").trim();
+    if (assetId) {
+      if (assetIds.has(assetId)) duplicateCount += 1;
+      assetIds.add(assetId);
+    }
+    if (row.scene_eligible === false) continue;
+    eligibleCount += 1;
+    const category = String(row.category ?? "unknown").trim().toLowerCase() || "unknown";
+    categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+    const rawMeshPath = String(row.mesh_path ?? "").trim();
+    const meshPath = rawMeshPath ? resolveManifestAssetPath(rawMeshPath, manifestPath) : "";
+    const supported = GENERATION_ASSET_CATEGORIES.has(category);
+    const meshReady = Boolean(meshPath && fs.existsSync(meshPath));
+    if (!supported) unsupportedCategoryCount += 1;
+    if (!meshReady) missingMeshCount += 1;
+    if (supported && meshReady) readyCount += 1;
+  }
+  const warnings = [
+    ...(malformedCount ? [`${malformedCount} malformed record(s)`] : []),
+    ...(missingMeshCount ? [`${missingMeshCount} eligible asset(s) have no readable mesh`] : []),
+    ...(unsupportedCategoryCount ? [`${unsupportedCategoryCount} eligible asset(s) use unsupported categories`] : []),
+    ...(duplicateCount ? [`${duplicateCount} duplicate asset id(s)`] : []),
+  ];
+  return {
+    name,
+    label,
+    count: rows.length,
+    eligibleCount,
+    readyCount,
+    categoryCounts,
+    fingerprint: crypto.createHash("sha256").update(text).digest("hex"),
+    updatedAt: fs.statSync(manifestPath).mtime.toISOString(),
+    warnings,
+  };
 }
 
 function safeAssetFileStem(assetId: string): string {
@@ -1853,7 +1934,7 @@ function viewerApiPlugin(): Plugin {
         }
 
         if (isAssetManifestsRoute) {
-          const manifests: Array<{ name: string; label: string; count: number }> = [];
+          const manifests: AssetManifestSummary[] = [];
           
           // Helper function to scan a directory for manifests
           const scanManifestDir = (dirPath: string, prefix: string = "") => {
@@ -1863,16 +1944,15 @@ function viewerApiPlugin(): Plugin {
               if (!entry.endsWith(".jsonl")) continue;
               const fullPath = path.join(dirPath, entry);
               if (!fs.statSync(fullPath).isFile()) continue;
-              const lines = fs.readFileSync(fullPath, "utf-8").split(/\r?\n/);
-              let count = 0;
-              for (const line of lines) {
-                if (line.trim()) count++;
-              }
               const baseName = entry.replace(/\.jsonl$/, "").replace(/[_-]/g, " ");
               const label = baseName.charAt(0).toUpperCase() + baseName.slice(1);
               // Use prefix in name to distinguish manifests from different directories
               const name = prefix ? `${prefix}/${entry}` : entry;
-              manifests.push({ name, label: prefix ? `[${prefix}] ${label}` : label, count });
+              manifests.push(assetManifestSummary(
+                fullPath,
+                name,
+                prefix ? `[${prefix}] ${label}` : label,
+              ));
             }
           };
           
@@ -1940,29 +2020,34 @@ function viewerApiPlugin(): Plugin {
             .map((line) => line.trim())
             .filter(Boolean);
           const order = requestUrl.searchParams.get("order") ?? "latest";
+          const eligibility = requestUrl.searchParams.get("eligibility") ?? "all";
           const orderedLines = order === "file" ? recordLines : recordLines.slice().reverse();
-          const totalCount = recordLines.length;
-          const assets: JsonRecord[] = [];
-          const pageLines = orderedLines.slice(offset, offset + limit);
-          
-          for (const line of pageLines) {
+          const records: JsonRecord[] = [];
+          for (const line of orderedLines) {
             try {
-              const record = normalizeManifestRecordPaths(
-                JSON.parse(line) as JsonRecord,
-                manifestPath,
-              );
-              assets.push(record);
+              const record = JSON.parse(line) as JsonRecord;
+              const enabled = record.scene_eligible !== false;
+              if (eligibility === "eligible" && !enabled) continue;
+              if (eligibility === "disabled" && enabled) continue;
+              records.push(record);
             } catch {
               // Skip invalid JSON
             }
           }
+          const totalCount = records.length;
+          const assets = records
+            .slice(offset, offset + limit)
+            .map((record) => normalizeManifestRecordPaths({ ...record }, manifestPath));
+          const manifestLabel = manifestName.replace(/\.jsonl$/, "").replace(/[_-]/g, " ");
+          const summary = assetManifestSummary(manifestPath, manifestName, manifestLabel);
           
           jsonResponse(res, 200, { 
             assets, 
             total: totalCount,
             offset,
             limit,
-            hasMore: offset + assets.length < totalCount
+            hasMore: offset + assets.length < totalCount,
+            manifest: summary,
           });
           return;
         }

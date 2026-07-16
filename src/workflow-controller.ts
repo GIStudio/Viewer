@@ -34,6 +34,30 @@ export type ProfessionalPipelineStage = "prepare" | "generate" | "review" | "edi
 
 export type AssetPreparationChoice = "current_manifest" | "default_transparent_massing" | null;
 
+export type AssetCandidateManifest = Readonly<{
+  name: string;
+  label: string;
+  fingerprint: string;
+  eligibleCount: number;
+  readyCount: number;
+  categoryCounts: Readonly<Record<string, number>>;
+  priority: number;
+  activatedBy: "manual" | "asset_write";
+  updatedAt: string;
+  warnings?: readonly string[];
+}>;
+
+export type AssetPreparationState =
+  | Readonly<{
+      mode: "candidate_manifests";
+      manifests: readonly AssetCandidateManifest[];
+    }>
+  | Readonly<{
+      mode: "default_transparent_massing";
+      manifests: readonly [];
+    }>
+  | null;
+
 export type SceneReviewStatus = "not_available" | "pending" | "changes_requested" | "accepted";
 
 export type NormalizedSceneSource = Readonly<{
@@ -86,6 +110,8 @@ export type WorkflowSnapshot = Readonly<{
   editPending: boolean;
   undoCommand: LayoutEditCommand | null;
   evaluation: EvaluationResult | null;
+  assetPreparation: AssetPreparationState;
+  /** @deprecated Read assetPreparation instead. */
   assetPreparationChoice: AssetPreparationChoice;
   sceneReviewStatus: SceneReviewStatus;
   capabilities: WorkflowCapabilities | null;
@@ -126,6 +152,7 @@ export type WorkflowController = {
   setSceneRevision(revision: SceneRevision, undoCommand?: LayoutEditCommand | null): void;
   setEditPending(pending: boolean): void;
   setEvaluation(result: EvaluationResult): void;
+  setAssetPreparation(state: AssetPreparationState): void;
   setAssetPreparationChoice(choice: Exclude<AssetPreparationChoice, null>): void;
   setSceneReviewStatus(status: Exclude<SceneReviewStatus, "not_available">): TransitionResult;
   setCapabilities(capabilities: WorkflowCapabilities): void;
@@ -135,6 +162,62 @@ export type WorkflowController = {
 };
 
 const INITIAL_BUSY: WorkflowSnapshot["busy"] = Object.freeze({});
+const ASSET_PREPARATION_SESSION_KEY = "roadgen3d:professional-asset-preparation-v2";
+
+function assetChoiceForState(state: AssetPreparationState): AssetPreparationChoice {
+  if (!state) return null;
+  return state.mode === "default_transparent_massing" ? "default_transparent_massing" : "current_manifest";
+}
+
+function normalizeAssetPreparationState(value: unknown): AssetPreparationState {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (record.mode === "default_transparent_massing") {
+    return Object.freeze({
+      mode: "default_transparent_massing" as const,
+      manifests: Object.freeze([]) as readonly [],
+    });
+  }
+  if (record.mode !== "candidate_manifests" || !Array.isArray(record.manifests)) return null;
+  const manifests = record.manifests
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+    .map((item, index): AssetCandidateManifest => Object.freeze({
+      name: String(item.name ?? "").trim(),
+      label: String(item.label ?? item.name ?? "").trim(),
+      fingerprint: String(item.fingerprint ?? "").trim(),
+      eligibleCount: Math.max(0, Number(item.eligibleCount ?? 0) || 0),
+      readyCount: Math.max(0, Number(item.readyCount ?? 0) || 0),
+      categoryCounts: Object.freeze({
+        ...((item.categoryCounts as Record<string, number> | undefined) ?? {}),
+      }),
+      priority: index,
+      activatedBy: item.activatedBy === "asset_write" ? "asset_write" : "manual",
+      updatedAt: String(item.updatedAt ?? "").trim(),
+      warnings: Object.freeze(Array.isArray(item.warnings) ? item.warnings.map(String) : []),
+    }))
+    .filter((item) => Boolean(item.name));
+  if (!manifests.length) return null;
+  return Object.freeze({ mode: "candidate_manifests" as const, manifests: Object.freeze(manifests) });
+}
+
+function loadAssetPreparationState(): AssetPreparationState {
+  try {
+    if (typeof sessionStorage === "undefined") return null;
+    return normalizeAssetPreparationState(JSON.parse(sessionStorage.getItem(ASSET_PREPARATION_SESSION_KEY) ?? "null"));
+  } catch {
+    return null;
+  }
+}
+
+function persistAssetPreparationState(state: AssetPreparationState): void {
+  try {
+    if (typeof sessionStorage === "undefined") return;
+    if (state) sessionStorage.setItem(ASSET_PREPARATION_SESSION_KEY, JSON.stringify(state));
+    else sessionStorage.removeItem(ASSET_PREPARATION_SESSION_KEY);
+  } catch {
+    // Session persistence is best-effort; the live controller remains authoritative.
+  }
+}
 
 function immutableCopy<T>(value: T): T {
   const cloned = structuredClone(value);
@@ -150,6 +233,7 @@ function immutableCopy<T>(value: T): T {
 }
 
 function initialSnapshot(): WorkflowSnapshot {
+  const assetPreparation = loadAssetPreparationState();
   return Object.freeze({
     step: "source",
     sourceRevision: 0,
@@ -166,7 +250,8 @@ function initialSnapshot(): WorkflowSnapshot {
     editPending: false,
     undoCommand: null,
     evaluation: null,
-    assetPreparationChoice: null,
+    assetPreparation,
+    assetPreparationChoice: assetChoiceForState(assetPreparation),
     sceneReviewStatus: "not_available",
     capabilities: null,
     busy: INITIAL_BUSY,
@@ -345,8 +430,29 @@ export function createWorkflowController(): WorkflowController {
     setEvaluation(result) {
       publish({ step: "evaluate", evaluation: immutableCopy(result), lastError: null });
     },
+    setAssetPreparation(state) {
+      const normalized = normalizeAssetPreparationState(state);
+      persistAssetPreparationState(normalized);
+      publish({
+        assetPreparation: normalized,
+        assetPreparationChoice: assetChoiceForState(normalized),
+        lastError: null,
+      });
+    },
     setAssetPreparationChoice(choice) {
-      publish({ assetPreparationChoice: choice, lastError: null });
+      if (choice === "default_transparent_massing") {
+        controller.setAssetPreparation(Object.freeze({
+          mode: "default_transparent_massing",
+          manifests: Object.freeze([]) as readonly [],
+        }));
+        return;
+      }
+      const current = snapshot.assetPreparation;
+      if (current?.mode === "candidate_manifests" && current.manifests.length > 0) {
+        controller.setAssetPreparation(current);
+        return;
+      }
+      publish({ assetPreparationChoice: "current_manifest", lastError: null });
     },
     setSceneReviewStatus(status) {
       if (!snapshot.sceneLayoutPath) {

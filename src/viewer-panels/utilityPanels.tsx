@@ -23,6 +23,13 @@ export function EvaluatePanelShell() {
           Scores are comparative proxies, not validated safety, beauty, accessibility, or planning outcomes. Missing evidence remains N/A.
         </span>
       </div>
+      <section className="viewer-used-assets" aria-labelledby="viewer-evaluate-used-assets-title">
+        <header>
+          <strong id="viewer-evaluate-used-assets-title">本次实际采用资产</strong>
+          <small>与生成前的候选仓库分开记录</small>
+        </header>
+        <div id="viewer-evaluate-used-assets">生成场景后显示实际放置的资产。</div>
+      </section>
       <details id="viewer-evaluation-parameters" className="viewer-evaluation-parameters">
         <summary>
           <span>

@@ -616,6 +616,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     root.querySelectorAll<HTMLInputElement>('input[name="viewer-generation-asset-policy"]'),
   );
   const generationReadinessEl = root.querySelector<HTMLElement>("#viewer-generation-readiness");
+  const generationCandidateSummaryEl = root.querySelector<HTMLElement>("#viewer-generation-candidate-summary");
+  const generationCandidateListEl = root.querySelector<HTMLElement>("#viewer-generation-candidate-list");
+  const generationEditCandidatesEl = root.querySelector<HTMLButtonElement>("#viewer-generation-edit-candidates");
+  const reviewUsedAssetsEl = root.querySelector<HTMLElement>("#viewer-review-used-assets");
+  const evaluateUsedAssetsEl = root.querySelector<HTMLElement>("#viewer-evaluate-used-assets");
   const reviewStateEl = root.querySelector<HTMLElement>("#viewer-result-review-state");
   const reviewAcceptEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-accept");
   const reviewChangesEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-changes");
@@ -624,6 +629,50 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   const renderCapabilityStatus = (): void => {
     const capabilities = workflow.getSnapshot().capabilities;
     capabilityStatusEl.innerHTML = renderWorkflowCapabilities(capabilities);
+  };
+  const renderCandidateRepository = (): void => {
+    const preparation = workflow.getSnapshot().assetPreparation;
+    const manifests = preparation?.mode === "candidate_manifests" ? preparation.manifests : [];
+    const readyCount = manifests.reduce((sum, manifest) => sum + manifest.readyCount, 0);
+    if (generationCandidateSummaryEl) {
+      generationCandidateSummaryEl.textContent = manifests.length
+        ? `${manifests.length} 个清单 · ${readyCount.toLocaleString()} 个可用候选`
+        : preparation?.mode === "default_transparent_massing"
+          ? "使用默认参数化素材；没有自定义候选清单"
+          : "尚未从 01B 加入候选清单";
+    }
+    if (generationCandidateListEl) {
+      generationCandidateListEl.innerHTML = manifests.map((manifest, index) => {
+        const categories = Object.entries(manifest.categoryCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 4)
+          .map(([category, count]) => `${escapeHtml(category)} ${Number(count).toLocaleString()}`)
+          .join(" · ");
+        return `<div><span>${String(index + 1).padStart(2, "0")}</span><strong>${escapeHtml(manifest.label)}</strong><small>${manifest.readyCount.toLocaleString()} ready${categories ? ` · ${categories}` : ""}</small></div>`;
+      }).join("");
+    }
+  };
+  const renderUsedAssetProvenance = (): void => {
+    const summary = (currentManifest?.summary ?? {}) as Record<string, unknown>;
+    const byManifest = summary.used_asset_ids_by_manifest;
+    const groups: Array<{ label: string; ids: string[] }> = [];
+    if (byManifest && typeof byManifest === "object" && !Array.isArray(byManifest)) {
+      for (const [label, value] of Object.entries(byManifest as Record<string, unknown>)) {
+        const ids = Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+        if (ids.length) groups.push({ label, ids });
+      }
+    }
+    if (!groups.length && Array.isArray(summary.asset_usage_by_source)) {
+      for (const entry of summary.asset_usage_by_source as Array<Record<string, unknown>>) {
+        const ids = Array.isArray(entry.asset_ids) ? entry.asset_ids.map(String).filter(Boolean) : [];
+        if (ids.length) groups.push({ label: String(entry.source ?? "asset source"), ids });
+      }
+    }
+    const html = groups.length
+      ? groups.map((group) => `<details><summary><strong>${escapeHtml(group.label)}</strong><span>${group.ids.length} used</span></summary><ol>${group.ids.map((id) => `<li><code>${escapeHtml(id)}</code></li>`).join("")}</ol></details>`).join("")
+      : "当前场景没有记录实际采用的资产；参数化对象不会伪装成资产库记录。";
+    if (reviewUsedAssetsEl) reviewUsedAssetsEl.innerHTML = html;
+    if (evaluateUsedAssetsEl) evaluateUsedAssetsEl.innerHTML = html;
   };
   const updateGenerationDialogContract = (): void => {
     const snapshot = workflow.getSnapshot();
@@ -644,7 +693,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     assetPolicyInputs.forEach((input) => {
       input.checked = input.value === snapshot.assetPreparationChoice;
     });
-    const assetReady = Boolean(snapshot.assetPreparationChoice);
+    const assetReady = snapshot.assetPreparation?.mode === "default_transparent_massing"
+      || (snapshot.assetPreparation?.mode === "candidate_manifests"
+        && snapshot.assetPreparation.manifests.some((manifest) => manifest.readyCount > 0));
     const generationReady = hostOptions.embedded || (hasApprovedSource && assetReady);
     designGenerateEl.disabled = !generationReady || Boolean(snapshot.busy.generate);
     const missing = [
@@ -658,10 +709,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         ? (translateViewerKey(currentLang, "professional.assets.generationReady") ?? "Ready to generate.")
         : (missing || translateViewerKey(currentLang, "professional.assets.policyRequired") || "Choose an asset strategy.");
     }
+    renderCandidateRepository();
   };
   const renderProfessionalWorkflowState = (): void => {
     renderCapabilityStatus();
     updateGenerationDialogContract();
+    renderUsedAssetProvenance();
     const snapshot = workflow.getSnapshot();
     const hasScene = Boolean(snapshot.sceneLayoutPath);
     if (reviewStateEl) {
@@ -714,6 +767,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   }, { signal });
   reviewAnnotationEl?.addEventListener("click", () => { window.location.hash = "scene-graph"; }, { signal });
   reviewAssetsEl?.addEventListener("click", () => { window.location.hash = "asset-editor"; }, { signal });
+  generationEditCandidatesEl?.addEventListener("click", () => { window.location.hash = "asset-editor"; }, { signal });
   renderProfessionalWorkflowState();
   if (!hostOptions.embedded && !workflow.getSnapshot().capabilities && !workflow.getSnapshot().busy.capabilities) {
     const capabilityToken = workflow.beginRequest("capabilities");
@@ -847,11 +901,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
 
   function selectedDesignSemanticConfigPatch(): Record<string, unknown> {
     const patch: Record<string, unknown> = {};
-    const assetChoice = workflow.getSnapshot().assetPreparationChoice;
-    if (assetChoice === "default_transparent_massing") {
+    const assetPreparation = workflow.getSnapshot().assetPreparation;
+    if (assetPreparation?.mode === "default_transparent_massing") {
       patch.asset_curation_mode = "scene_ready_first";
       patch.building_representation = "transparent_massing";
-    } else if (assetChoice === "current_manifest") {
+    } else if (assetPreparation?.mode === "candidate_manifests") {
       patch.asset_curation_mode = "scene_ready_first";
       patch.building_representation = "asset";
     }
@@ -871,6 +925,17 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       patch.street_furniture_profile_reasons = ["viewer_advanced_override"];
     }
     return patch;
+  }
+
+  function selectedAssetGenerationOptions(): Record<string, unknown> {
+    const preparation = workflow.getSnapshot().assetPreparation;
+    if (preparation?.mode !== "candidate_manifests") return {};
+    return {
+      candidate_asset_manifests: preparation.manifests.map((manifest) => ({
+        name: manifest.name,
+        expected_fingerprint: manifest.fingerprint,
+      })),
+    };
   }
 
   function selectedDesignSemanticSummary(preset: DesignPreset | null): DesignSemanticSummary {
@@ -1505,6 +1570,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     afterLayoutLoaded: () => {
       updateMetricsPanel();
       renderConsistencyPanel();
+      renderUsedAssetProvenance();
       if (graphOverlayActive) {
         setToggleInput(graphOverlayToggleEl, false);
         graphOverlayActive = false;
@@ -1683,6 +1749,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     errorEl,
     getSelectedDesignPreset: selectedDesignPreset,
     getDesignSemanticConfigPatch: selectedDesignSemanticConfigPatch,
+    getGenerationOptionsPatch: selectedAssetGenerationOptions,
     getDesignSemanticSummary: selectedDesignSemanticSummary,
     hasLastDesignRunSnapshot: () => lastDesignRunSnapshot !== null,
     setSelectedBranchNodeId: (nodeId) => {

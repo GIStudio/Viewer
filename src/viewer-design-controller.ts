@@ -96,6 +96,7 @@ export type ViewerDesignControllerDeps = {
   getSelectedDesignPreset: () => DesignPreset | null;
   getSelectedScenarioDesign: () => ScenarioDesign | null;
   getDesignSemanticConfigPatch: () => Record<string, unknown>;
+  getGenerationOptionsPatch: () => Record<string, unknown>;
   getDesignSemanticSummary: (preset: DesignPreset | null) => DesignSemanticSummary;
   hasLastDesignRunSnapshot: () => boolean;
   setSelectedBranchNodeId: (nodeId: string | null) => void;
@@ -1082,6 +1083,7 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
     const effectivePrompt = effectiveDesignPrompt(preset, prompt, scenario);
     const graphTemplateId = deps.designTemplateEl.value.trim() || DEFAULT_GRAPH_TEMPLATE_ID;
     const semanticConfigPatch = deps.getDesignSemanticConfigPatch();
+    const generationOptionsPatch = deps.getGenerationOptionsPatch();
     const semanticSummary = deps.getDesignSemanticSummary(preset);
     const structureSource = scenario
       ? (scenario.title_zh || scenario.scenario_id)
@@ -1122,7 +1124,15 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
       for (const variant of variants) {
         deps.updateDesignStatus(`Submitting ${variant.name} · ${scenarioLabel}...`);
         try {
-          const createPayload = await submitDesignJob(preset, prompt, graphTemplateId, variant, scenario, semanticConfigPatch);
+          const createPayload = await submitDesignJob(
+            preset,
+            prompt,
+            graphTemplateId,
+            variant,
+            scenario,
+            semanticConfigPatch,
+            generationOptionsPatch,
+          );
           deps.updateDesignStatus(`${variant.name}: job ${createPayload.job_id} submitted${scenario ? ` with ${scenario.scenario_id}` : ""}.`);
           const result = await waitForDesignJob(createPayload.job_id, preset, variant, effectivePrompt, graphTemplateId, structureSource, semanticSummary);
           if (!result.scene_layout_path) {

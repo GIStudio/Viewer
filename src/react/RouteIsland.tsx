@@ -211,7 +211,9 @@ export function RouteIsland({ route, language, workflow }: RouteIslandProps) {
       });
       updatePage("prepare-assets", {
         label: tr("professional.pipeline.assets", "3D asset preparation"),
-        badge: snapshot.assetPreparationChoice === "current_manifest" ? "MAN" : snapshot.assetPreparationChoice ? "DEF" : "—",
+        badge: snapshot.assetPreparation?.mode === "candidate_manifests"
+          ? String(snapshot.assetPreparation.manifests.length)
+          : snapshot.assetPreparation?.mode === "default_transparent_massing" ? "DEF" : "—",
         status: assetsStatus,
         current: currentId === "prepare-assets",
       });

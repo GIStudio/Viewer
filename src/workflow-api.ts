@@ -210,6 +210,7 @@ export async function submitWorkflowSceneJob(input: {
   prompt: string;
   presetId: string;
   configPatch?: Record<string, unknown>;
+  generationOptions?: Record<string, unknown>;
   randomSeed?: number;
   signal?: AbortSignal;
 }): Promise<SceneJobCreatePayload> {
@@ -238,6 +239,7 @@ export async function submitWorkflowSceneJob(input: {
       generation_options: {
         preset_id: input.presetId || "custom",
         random_seed: input.randomSeed ?? 20260710,
+        ...(input.generationOptions ?? {}),
       },
     }),
     signal: input.signal,

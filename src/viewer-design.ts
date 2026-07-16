@@ -105,6 +105,7 @@ export async function submitDesignJob(
   variant: DesignSchemeVariant,
   scenario: ScenarioDesign | null = null,
   semanticConfigPatch: Record<string, unknown> = {},
+  generationOptionsPatch: Record<string, unknown> = {},
 ): Promise<SceneJobCreatePayload> {
   if (scenario?.enabled === false) {
     throw new Error(scenario.excluded_reason_zh || "This scenario design is excluded from generation.");
@@ -157,6 +158,7 @@ export async function submitDesignJob(
       course_delivery_config_fields: Object.keys(COURSE_DELIVERY_CONFIG_PATCH),
       design_variant_adjusted_fields: ["density", "road_width_m"],
       explicit_override_fields: explicitOverrideFields,
+      ...generationOptionsPatch,
       ...(scenarioId ? {
         scenario_id: scenarioId,
         scenario_compose_patch_applied: true,

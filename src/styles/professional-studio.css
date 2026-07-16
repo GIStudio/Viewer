@@ -524,6 +524,54 @@
   background: #e5f2ed;
 }
 
+.viewer-generation-candidate-repository,
+.viewer-used-assets {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.65rem;
+  border: 1px solid var(--rg-ink);
+  background: rgba(255, 254, 249, 0.94);
+}
+
+.viewer-generation-candidate-repository > header,
+.viewer-used-assets > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.viewer-generation-candidate-repository > header strong,
+.viewer-used-assets > header strong {
+  font: 700 0.78rem/1.15 var(--rg-display-font);
+}
+
+.viewer-generation-candidate-repository > header button {
+  padding: 0.28rem 0.45rem;
+  border: 1px solid var(--rg-ink);
+  border-radius: 2px;
+  background: var(--rg-paper-light);
+  font: 700 0.58rem/1 var(--rg-mono-font);
+  cursor: pointer;
+}
+
+.viewer-generation-candidate-repository > header button:hover { background: var(--rg-yellow); }
+.viewer-generation-candidate-repository > p { margin: 0; color: #60747b; font-size: 0.62rem; }
+#viewer-generation-candidate-summary { color: var(--rg-coral); font: 800 0.65rem/1.2 var(--rg-mono-font); }
+#viewer-generation-candidate-list { display: grid; gap: 0.3rem; }
+#viewer-generation-candidate-list > div { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr); gap: 0.15rem 0.4rem; padding: 0.4rem; border-top: 1px solid var(--rg-line); }
+#viewer-generation-candidate-list > div > span { grid-row: span 2; color: var(--rg-coral); font: 800 0.62rem/1 var(--rg-mono-font); }
+#viewer-generation-candidate-list > div > strong { font-size: 0.7rem; }
+#viewer-generation-candidate-list > div > small { color: #60747b; font: 0.58rem/1.25 var(--rg-mono-font); }
+
+.viewer-used-assets { margin: 0.1rem 0; border-left: 5px solid var(--rg-mint); }
+.viewer-used-assets > header small { color: #60747b; font: 0.56rem/1.2 var(--rg-mono-font); }
+.viewer-used-assets > div { display: grid; gap: 0.3rem; color: #60747b; font-size: 0.65rem; }
+.viewer-used-assets details { border-top: 1px solid var(--rg-line); padding-top: 0.35rem; }
+.viewer-used-assets summary { display: flex; justify-content: space-between; gap: 0.5rem; cursor: pointer; }
+.viewer-used-assets ol { max-height: 10rem; overflow: auto; margin: 0.4rem 0 0; padding-left: 1.2rem; }
+.viewer-used-assets code { overflow-wrap: anywhere; }
+
 .professional-result-review {
   display: grid;
   gap: 0.9rem;

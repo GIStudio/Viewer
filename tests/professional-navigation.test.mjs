@@ -32,6 +32,39 @@ try {
       });
       return;
     }
+    if (url.endsWith("/api/asset-manifests")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ manifests: [{
+          name: "real_assets_manifest.jsonl",
+          label: "Real assets manifest",
+          count: 1,
+          eligibleCount: 1,
+          readyCount: 1,
+          categoryCounts: { tree: 1 },
+          fingerprint: "fixture-fingerprint",
+          updatedAt: "2026-07-16T00:00:00Z",
+          warnings: [],
+        }] }),
+      });
+      return;
+    }
+    if (url.includes("/api/asset-manifest?")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          assets: [{ asset_id: "fixture-tree", category: "tree", mesh_path: "/fixture-tree.glb", scene_eligible: true }],
+          total: 1,
+          offset: 0,
+          limit: 100,
+          hasMore: false,
+          manifest: { name: "real_assets_manifest.jsonl", readyCount: 1, eligibleCount: 1 },
+        }),
+      });
+      return;
+    }
     await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "test fixture" }) });
   });
 
@@ -104,7 +137,10 @@ try {
   await page.locator('[data-shell-tab="prepare-assets"]').click();
   await page.waitForURL(/#asset-editor$/);
   await page.locator('#ae-use-manifest-for-generation').waitFor();
-  assert.equal(await page.locator('#ae-use-manifest-for-generation').isDisabled(), true, "asset branch confirmation waits for a selected manifest");
+  assert.equal(await page.locator('#ae-manifest-select').inputValue(), "real_assets_manifest.jsonl", "01B must automatically restore the default manifest");
+  assert.equal(await page.locator('#ae-use-manifest-for-generation').isDisabled(), false, "a restored manifest can be added to the candidate repository");
+  await page.locator('#ae-use-manifest-for-generation').click();
+  assert.equal(await page.locator('[data-shell-tab="prepare-assets"] .workbench-sidebar-badge').textContent(), "1");
   await page.getByRole("button", { name: "课程教学", exact: true }).click();
   await page.waitForURL(/#course-studio$/);
 

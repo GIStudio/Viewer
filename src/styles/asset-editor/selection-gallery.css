@@ -244,3 +244,105 @@
   max-height: calc(100vh - 13rem);
   overflow: auto;
 }
+
+.ae-library-controls {
+  padding-bottom: 0.75rem;
+  border-bottom: 3px double var(--rg-ink, var(--color-border));
+}
+
+.ae-candidate-repository {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.ae-candidate-repository > header {
+  display: grid;
+  gap: 0.28rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 3px double var(--rg-ink, var(--color-border));
+}
+
+.ae-candidate-repository > header > span {
+  color: var(--rg-coral, var(--color-primary));
+  font: 800 0.62rem/1 var(--rg-mono-font, monospace);
+  letter-spacing: 0.08em;
+}
+
+.ae-candidate-repository h3,
+.ae-candidate-repository p {
+  margin: 0;
+}
+
+.ae-candidate-repository h3 {
+  font: 700 1.15rem/1.1 var(--rg-display-font, Georgia, serif);
+}
+
+.ae-candidate-repository p {
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.ae-candidate-summary {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.65rem;
+  border: 1px solid var(--rg-ink, var(--color-border));
+  border-left: 5px solid var(--rg-yellow, #f4c430);
+  background: rgba(185, 217, 204, 0.25);
+}
+
+.ae-candidate-summary strong {
+  font: 700 0.8rem/1.2 var(--rg-body-font, sans-serif);
+}
+
+.ae-candidate-summary span {
+  color: var(--color-text-secondary);
+  font: 0.64rem/1.4 var(--rg-mono-font, monospace);
+}
+
+.ae-candidate-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.ae-candidate-manifest {
+  border: 1px solid var(--rg-ink, var(--color-border));
+  background: var(--rg-paper-light, var(--color-bg));
+  box-shadow: 3px 3px 0 var(--rg-mint, #b9d9cc);
+}
+
+.ae-candidate-manifest > summary {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.65rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ae-candidate-manifest > summary::-webkit-details-marker { display: none; }
+.ae-candidate-manifest > summary > span:nth-child(2) { display: grid; gap: 0.12rem; }
+.ae-candidate-manifest small { color: var(--color-text-secondary); font-size: 0.63rem; }
+.ae-candidate-priority { color: var(--rg-coral, var(--color-primary)); font: 800 0.7rem/1 var(--rg-mono-font, monospace); }
+.ae-candidate-source { padding: 0.2rem 0.35rem; border: 1px solid var(--color-border); font: 700 0.56rem/1 var(--rg-mono-font, monospace); }
+
+.ae-candidate-manifest-body {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.7rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.ae-candidate-categories { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.ae-candidate-categories span { padding: 0.2rem 0.35rem; border: 1px solid var(--color-border); background: var(--rg-paper-deep, var(--color-bg-elevated)); font: 0.58rem/1 var(--rg-mono-font, monospace); }
+.ae-candidate-warnings { margin: 0; padding-left: 1.1rem; color: #8b3d32; font-size: 0.66rem; }
+.ae-candidate-assets { max-height: 14rem; overflow: auto; color: var(--color-text-secondary); font-size: 0.65rem; }
+.ae-candidate-assets ol { display: grid; gap: 0.25rem; margin: 0; padding-left: 1.2rem; }
+.ae-candidate-assets li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.4rem; }
+.ae-candidate-assets code { overflow-wrap: anywhere; }
+.ae-candidate-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.ae-candidate-actions button { padding: 0.35rem 0.45rem; border: 1px solid var(--rg-ink, var(--color-border)); border-radius: 2px; background: var(--rg-paper-light, white); font-size: 0.62rem; cursor: pointer; }
+.ae-candidate-actions button:hover:not(:disabled) { background: var(--rg-yellow, #f4c430); }
+.ae-candidate-actions button:disabled { opacity: 0.35; cursor: not-allowed; }

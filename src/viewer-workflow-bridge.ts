@@ -67,7 +67,10 @@ export function createViewerWorkflowBridge(deps: ViewerWorkflowBridgeDeps): View
       deps.setStatus("Approve the reviewed source before generation.");
       return;
     }
-    if (!snapshot.assetPreparationChoice) {
+    const assetPreparationReady = snapshot.assetPreparation?.mode === "default_transparent_massing"
+      || (snapshot.assetPreparation?.mode === "candidate_manifests"
+        && snapshot.assetPreparation.manifests.some((manifest) => manifest.readyCount > 0));
+    if (!assetPreparationReady) {
       deps.workflow.reportError("Choose a 3D asset preparation strategy before generation.");
       deps.setStatus("Choose a 3D asset preparation strategy before generation.");
       return;
@@ -84,10 +87,18 @@ export function createViewerWorkflowBridge(deps: ViewerWorkflowBridgeDeps): View
         presetId: deps.getPresetId(),
         configPatch: {
           asset_curation_mode: "scene_ready_first",
-          building_representation: snapshot.assetPreparationChoice === "default_transparent_massing"
+          building_representation: snapshot.assetPreparation?.mode === "default_transparent_massing"
             ? "transparent_massing"
             : "asset",
         },
+        generationOptions: snapshot.assetPreparation?.mode === "candidate_manifests"
+          ? {
+              candidate_asset_manifests: snapshot.assetPreparation.manifests.map((manifest) => ({
+                name: manifest.name,
+                expected_fingerprint: manifest.fingerprint,
+              })),
+            }
+          : {},
         signal: token.signal,
       });
       for (let attempt = 0; attempt < 360; attempt += 1) {

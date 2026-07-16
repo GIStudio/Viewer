@@ -105,12 +105,21 @@ export function createViewerStageHtml(): string {
             <p data-i18n-key="professional.assets.policyDescription">Confirm the asset source that will join the approved 2D annotation.</p>
             <label>
               <input type="radio" name="viewer-generation-asset-policy" value="current_manifest" />
-              <span><strong data-i18n-key="professional.assets.currentManifest">Use the current checked asset manifest</strong><small data-i18n-key="professional.assets.currentManifestHint">Use scene-eligible trees and street furniture from the professional asset library.</small></span>
+              <span><strong data-i18n-key="professional.assets.currentManifest">Use the active candidate repository</strong><small data-i18n-key="professional.assets.currentManifestHint">Search scene-eligible trees and street furniture across the active manifests.</small></span>
             </label>
             <label>
               <input type="radio" name="viewer-generation-asset-policy" value="default_transparent_massing" />
               <span><strong data-i18n-key="professional.assets.defaultMassing">Use default assets and transparent massing</strong><small data-i18n-key="professional.assets.defaultMassingHint">Skip custom asset preparation; buildings remain transparent white context.</small></span>
             </label>
+            <section class="viewer-generation-candidate-repository" aria-labelledby="viewer-generation-candidate-title">
+              <header>
+                <strong id="viewer-generation-candidate-title">本次候选资产仓库</strong>
+                <button id="viewer-generation-edit-candidates" type="button">返回 01B 调整</button>
+              </header>
+              <div id="viewer-generation-candidate-summary"></div>
+              <div id="viewer-generation-candidate-list"></div>
+              <p>候选资产只进入检索池，不保证出现在最终场景中。</p>
+            </section>
             <div id="viewer-generation-readiness" class="viewer-generation-readiness" data-tone="warning" role="status"></div>
           </fieldset>
           <div class="viewer-generation-dialog-body">

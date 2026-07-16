@@ -9,7 +9,7 @@ export const PROFESSIONAL_VIEWER_TARGET_KEY = "roadgen3d:professional-viewer-tar
 
 export function professionalPipelineStage(snapshot: WorkflowSnapshot): ProfessionalPipelineStage {
   if (!snapshot.sceneLayoutPath) {
-    return snapshot.approvedSourceRevision === snapshot.sourceRevision && snapshot.assetPreparationChoice
+    return snapshot.approvedSourceRevision === snapshot.sourceRevision && assetPreparationStatus(snapshot) === "ready"
       ? "generate"
       : "prepare";
   }
@@ -24,7 +24,12 @@ export function annotationPreparationStatus(snapshot: WorkflowSnapshot): "pendin
 }
 
 export function assetPreparationStatus(snapshot: WorkflowSnapshot): "pending" | "ready" {
-  return snapshot.assetPreparationChoice ? "ready" : "pending";
+  if (snapshot.assetPreparation?.mode === "default_transparent_massing") return "ready";
+  if (
+    snapshot.assetPreparation?.mode === "candidate_manifests"
+    && snapshot.assetPreparation.manifests.some((manifest) => manifest.readyCount > 0)
+  ) return "ready";
+  return "pending";
 }
 
 export function storeProfessionalViewerTarget(target: ProfessionalViewerTarget): void {
@@ -64,6 +69,10 @@ export function renderProfessionalReviewPanelHtml(): string {
         <li><span>03</span><div><strong data-i18n-key="professional.review.assets">Trees and street assets</strong><small data-i18n-key="professional.review.assetsHint">Missing objects, collisions, scale and orientation.</small></div></li>
         <li><span>04</span><div><strong data-i18n-key="professional.review.consistency">2D / 3D consistency</strong><small data-i18n-key="professional.review.consistencyHint">Compare the generated scene with the approved source.</small></div></li>
       </ol>
+      <section class="viewer-used-assets" aria-labelledby="viewer-review-used-assets-title">
+        <header><strong id="viewer-review-used-assets-title">本次实际采用资产</strong><small>候选仓库中的资产不一定全部被使用</small></header>
+        <div id="viewer-review-used-assets">生成场景后显示实际放置的资产。</div>
+      </section>
       <div class="professional-review-actions">
         <button id="viewer-result-review-accept" class="viewer-nav-button" type="button" data-i18n-key="professional.review.accept">Accept and continue to evaluation</button>
         <button id="viewer-result-review-changes" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.changes">Needs scene changes</button>

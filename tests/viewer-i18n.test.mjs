@@ -38,7 +38,7 @@ try {
   let assetRequests = 0;
   await page.route("**/api/asset-manifests", async (route) => {
     manifestRequests += 1;
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ manifests: [{ name: "fixture", label: "Fixture", count: 0 }] }) });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ manifests: [{ name: "fixture", label: "Fixture", count: 0, eligibleCount: 0, readyCount: 0, fingerprint: "fixture-0", categoryCounts: {}, updatedAt: "2026-07-16T00:00:00Z" }] }) });
   });
   await page.route("**/api/asset-manifest?*", async (route) => {
     assetRequests += 1;
@@ -53,8 +53,8 @@ try {
   const optionTexts = await page.locator('[role="option"]').allTextContents();
   assert.deepEqual(optionTexts.map((value) => value.trim()).sort(), ["en", "zh"], "only EN and Simplified Chinese must be selectable");
   await selectLanguage(page, "zh");
-  await page.getByText("生成并加载", { exact: true }).first().waitFor();
-  await page.getByText("控制菜单", { exact: true }).waitFor();
+  await page.getByText("新建生成…", { exact: true }).first().waitFor();
+  await page.getByText("控制菜单", { exact: true }).first().waitFor({ state: "attached" });
   await page.locator("#viewer-center-controls").evaluate((element) => element.setAttribute("data-open", "true"));
   await page.locator("#viewer-center-controls-title").getByText("场景浏览器", { exact: true }).waitFor();
   await page.locator("#viewer-settings-panel").evaluate((element) => element.setAttribute("data-open", "true"));
@@ -64,7 +64,7 @@ try {
     localStorage.setItem("viewer-lang", "en");
     window.dispatchEvent(new CustomEvent("roadgen3d:viewer-language-change", { detail: { language: "en" } }));
   });
-  await page.getByText("Generate & Load", { exact: true }).first().waitFor();
+  await page.getByText("New generation…", { exact: true }).first().waitFor();
 
   await page.goto(`${origin}/#scene-graph`);
   await page.locator(".desktop-shell-language-select").waitFor();
@@ -72,34 +72,34 @@ try {
     localStorage.setItem("viewer-lang", "en");
     window.dispatchEvent(new CustomEvent("roadgen3d:viewer-language-change", { detail: { language: "en" } }));
   });
-  await page.getByText("Source", { exact: true }).first().waitFor();
+  await page.locator(".studio-professional-context-tool strong").getByText("2D Annotation", { exact: true }).waitFor();
   await page.evaluate(() => {
     localStorage.setItem("viewer-lang", "zh");
     window.dispatchEvent(new CustomEvent("roadgen3d:viewer-language-change", { detail: { language: "zh" } }));
   });
-  await page.getByText("输入", { exact: true }).first().waitFor();
+  await page.locator(".studio-professional-context-tool strong").getByText("2D 标注", { exact: true }).waitFor();
   await page.evaluate(() => {
     localStorage.setItem("viewer-lang", "en");
     window.dispatchEvent(new CustomEvent("roadgen3d:viewer-language-change", { detail: { language: "en" } }));
   });
-  await page.getByText("Source", { exact: true }).first().waitFor();
+  await page.locator(".studio-professional-context-tool strong").getByText("2D Annotation", { exact: true }).waitFor();
   await page.goto(`${origin}/#asset-editor`);
   await page.locator("#ae-manifest-select").waitFor();
-  await page.locator("#ae-manifest-select").selectOption("fixture");
-  await page.getByText("Select an asset from the gallery to inspect", { exact: true }).waitFor();
+  assert.equal(await page.locator("#ae-manifest-select").inputValue(), "fixture", "asset editor must restore and synchronize the selected manifest");
+  await page.getByText("Asset manifest is empty", { exact: true }).waitFor();
   const requestsBeforeLanguageEvents = { manifestRequests, assetRequests };
   await page.evaluate(() => {
     localStorage.setItem("viewer-lang", "zh");
     window.dispatchEvent(new CustomEvent("roadgen3d:viewer-language-change", { detail: { language: "zh" } }));
   });
-  await page.getByText("从图库中选择资产进行检查", { exact: true }).waitFor();
+  await page.getByText("资产清单为空", { exact: true }).waitFor();
   assert.deepEqual({ manifestRequests, assetRequests }, requestsBeforeLanguageEvents, "locale changes must not refetch asset manifests or assets");
   assert.equal(await page.locator("#ae-manifest-select").getAttribute("title"), "资产清单");
   await page.evaluate(() => {
     localStorage.setItem("viewer-lang", "en");
     window.dispatchEvent(new CustomEvent("roadgen3d:viewer-language-change", { detail: { language: "en" } }));
   });
-  await page.getByText("Select an asset from the gallery to inspect", { exact: true }).waitFor();
+  await page.getByText("Asset manifest is empty", { exact: true }).waitFor();
   assert.deepEqual({ manifestRequests, assetRequests }, requestsBeforeLanguageEvents, "returning to English must not refetch assets");
 
   console.log("viewer i18n regression: EN/zh switch updates active Viewer routes without manifest refetches");
