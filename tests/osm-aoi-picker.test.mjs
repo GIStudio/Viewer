@@ -106,27 +106,43 @@ try {
   await picker.waitFor({ state: "visible" });
   assert.equal(await page.locator("#annotation-board").isVisible(), false, "annotation canvas waits for an explicit source");
   assert.equal(hkustImageRequestCount, 0, "HKUST-GZ must not be fetched as an implicit default");
-  assert.equal(osmRequestCount, 0, "opening or adjusting the AOI must not fetch Overpass data");
+  assert.equal(osmRequestCount, 0, "opening and browsing the map must not fetch Overpass data");
+  assert.equal(await picker.getAttribute("data-has-selection"), "false", "Guangzhou is an initial map view, not a preselected AOI");
+  assert.equal(await page.locator('[data-aoi-action="confirm"]').isVisible(), false, "fetch remains hidden until an area is captured");
+  assert.equal(await page.locator('[data-aoi-coordinate="0"]').isVisible(), false, "coordinate inputs are advanced controls, not the default workflow");
+  assert.equal(await page.locator("#scene-source-bbox").count(), 0, "the source drawer no longer duplicates the coordinate form");
 
-  const westInput = page.locator('[data-aoi-coordinate="0"]');
-  await westInput.fill("113.267000");
-  await westInput.press("Tab");
-  assert.equal(osmRequestCount, 0, "coordinate changes remain a local preview");
-  assert.match(await page.locator("#scene-source-bbox").inputValue(), /^113\.267000,/);
+  const mapBox = await page.locator("[data-aoi-map]").boundingBox();
+  assert.ok(mapBox && mapBox.width > 800 && mapBox.height > 300, `OSM map must fill the stage, received ${JSON.stringify(mapBox)}`);
+  await page.locator("[data-aoi-city]").selectOption("guangzhou");
+  assert.equal(osmRequestCount, 0, "city navigation only changes the map view");
+
+  await page.locator('[data-aoi-action="viewport"]').click();
+  assert.equal(await picker.getAttribute("data-has-selection"), "true", "the current map viewport becomes a candidate AOI");
+  assert.equal(await page.locator('[data-aoi-action="confirm"]').isVisible(), true);
+  assert.equal(osmRequestCount, 0, "capturing the current view remains a local action");
 
   await page.locator('[data-aoi-action="draw"]').click();
-  const mapBox = await page.locator("[data-aoi-map]").boundingBox();
-  assert.ok(mapBox);
   await page.mouse.move(mapBox.x + mapBox.width * 0.32, mapBox.y + mapBox.height * 0.42);
   await page.mouse.down();
   await page.mouse.move(mapBox.x + mapBox.width * 0.62, mapBox.y + mapBox.height * 0.67, { steps: 4 });
   await page.mouse.up();
+  assert.match(await page.locator("[data-aoi-kicker]").innerText(), /精确框选|precise draw/i, "drawing replaces the viewport capture");
   assert.equal(osmRequestCount, 0, "dragging a rectangle must not fetch OSM automatically");
+
+  await page.locator(".osm-aoi-coordinate-details summary").click();
+  const preciseBbox = [113.267, 23.129, 113.2705, 23.132];
+  for (let index = 0; index < preciseBbox.length; index += 1) {
+    await page.locator(`[data-aoi-coordinate="${index}"]`).fill(String(preciseBbox[index]));
+  }
+  await page.locator('[data-aoi-action="coordinates"]').click();
+  assert.match(await page.locator("[data-aoi-kicker]").innerText(), /坐标定位|coordinates/i);
+  assert.equal(osmRequestCount, 0, "advanced coordinates only update the candidate AOI");
 
   await page.locator('[data-aoi-action="confirm"]').click();
   await page.locator("#annotation-board").waitFor({ state: "visible" });
   assert.equal(osmRequestCount, 1, "confirming the AOI submits exactly one OSM request");
-  assert.ok(Array.isArray(submittedBbox) && submittedBbox.length === 4);
+  assert.deepEqual(submittedBbox, preciseBbox, "the confirmed coordinate AOI is submitted exactly");
   assert.equal(await page.locator("#scene-osm-aoi-picker").isVisible(), false, "the shared annotation canvas replaces the picker after normalization");
   assert.equal(await page.locator("#annotation-osm-map").isVisible(), true, "professional annotation retains the aligned OSM basemap");
   await page.getByText("professional-osm", { exact: true }).first().waitFor();

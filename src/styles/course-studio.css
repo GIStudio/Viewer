@@ -82,6 +82,11 @@
 .course-project-form label, .course-create-panel label { display: grid; gap: 6px; color: #56656b; font: 700 10px/1.2 monospace; letter-spacing: .08em; text-transform: uppercase; }
 .course-coordinate-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .course-coordinate-grid .ant-input-number { width: 100%; }
+.course-aoi-summary { display: grid; gap: 7px; padding: 12px 14px; border-left: 4px solid var(--course-coral); background: #fff0ed; }
+.course-aoi-summary[data-ready="true"] { border-left-color: #4e9a7b; background: #edf7f1; }
+.course-aoi-summary span { color: var(--course-ink); font: 800 11px/1.2 monospace; letter-spacing: .06em; text-transform: uppercase; }
+.course-aoi-summary code { overflow-wrap: anywhere; color: #4f6268; font-size: 10px; line-height: 1.5; }
+.course-aoi-summary small { color: #66767b; font-size: 11px; line-height: 1.45; }
 .course-create-panel > aside { display: flex; flex-direction: column; justify-content: center; padding: 48px; color: white; background: var(--course-blue); }
 .course-create-panel > aside > span { color: var(--course-yellow); font: 800 11px/1 monospace; letter-spacing: .15em; }
 .course-create-panel > aside > strong { margin: 28px 0 18px; overflow-wrap: anywhere; color: var(--course-yellow); font: 800 28px/1.2 monospace; }

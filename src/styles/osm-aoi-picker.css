@@ -10,12 +10,15 @@
   font-family: var(--rg-body-font, ui-sans-serif, system-ui, sans-serif);
 }
 
-.osm-aoi-picker-map {
+/* MapLibre's .maplibregl-map rule is loaded after component styles in some routes. */
+.osm-aoi-picker > .osm-aoi-picker-map.maplibregl-map {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
-.osm-aoi-picker-header,
+.osm-aoi-picker-toolbar,
 .osm-aoi-picker-panel {
   position: absolute;
   z-index: 4;
@@ -28,41 +31,19 @@
   box-shadow: 5px 5px 0 var(--rg-ink, #102d3a);
 }
 
-.osm-aoi-picker-header {
+.osm-aoi-picker-toolbar {
   top: 1rem;
   left: 1rem;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 1rem;
-  width: min(44rem, calc(100% - 10rem));
-  padding: 0.9rem 1rem;
-}
-
-.osm-aoi-picker-header span,
-.osm-aoi-picker-panel label > span {
-  display: block;
-  color: var(--rg-coral, #df654f);
-  font: 800 0.62rem/1.2 var(--rg-mono-font, ui-monospace, monospace);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.osm-aoi-picker-header strong {
-  display: block;
-  margin-top: 0.35rem;
-  font: 700 1.2rem/1.1 var(--rg-display-font, Georgia, "Songti SC", serif);
-}
-
-.osm-aoi-picker-header p {
-  margin: 0.35rem 0 0;
-  color: #5d6d72;
-  font-size: 0.7rem;
-  line-height: 1.45;
+  display: flex;
+  align-items: end;
+  gap: 0.65rem;
+  max-width: calc(100% - 7.5rem);
+  padding: 0.65rem;
 }
 
 .osm-aoi-picker-actions {
   display: flex;
-  align-items: start;
+  align-items: center;
   gap: 0.4rem;
 }
 
@@ -97,48 +78,49 @@
   opacity: 0.52;
 }
 
+.osm-aoi-city-field {
+  display: grid;
+  gap: 0.25rem;
+  width: min(17rem, 35vw);
+}
+
+.osm-aoi-city-field > span,
+.osm-aoi-selection-copy > span,
+.osm-aoi-coordinate-grid label > span {
+  display: block;
+  color: var(--rg-coral, #df654f);
+  font: 800 0.58rem/1.2 var(--rg-mono-font, ui-monospace, monospace);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.osm-aoi-city-field select {
+  width: 100%;
+  min-height: 2.2rem;
+  padding: 0 0.65rem;
+}
+
 .osm-aoi-picker-panel {
   right: 1rem;
   bottom: 1rem;
   display: grid;
   gap: 0.65rem;
-  width: min(25rem, calc(100% - 2rem));
+  width: min(29rem, calc(100% - 2rem));
   padding: 0.85rem;
 }
 
-.osm-aoi-city-field {
-  display: grid;
-  gap: 0.35rem;
+.osm-aoi-selection-copy strong {
+  display: block;
+  margin-top: 0.35rem;
+  font: 700 1.08rem/1.15 var(--rg-display-font, Georgia, "Songti SC", serif);
 }
 
-.osm-aoi-city-field select {
-  width: 100%;
-  min-height: 2.3rem;
-  padding: 0 0.65rem;
-}
-
-.osm-aoi-coordinate-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.45rem;
-}
-
-.osm-aoi-coordinate-grid label {
-  display: grid;
-  grid-template-columns: 2.4rem minmax(0, 1fr);
-  align-items: center;
-  gap: 0.3rem;
-}
-
-.osm-aoi-coordinate-grid label > span {
-  color: #607177;
-  font-size: 0.55rem;
-}
-
-.osm-aoi-coordinate-grid input {
-  width: 100%;
-  min-height: 2rem;
-  padding: 0 0.45rem;
+.osm-aoi-selection-copy p {
+  margin: 0.35rem 0 0;
+  color: #5d6d72;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .osm-aoi-picker-status {
@@ -160,6 +142,63 @@
   border-left-color: var(--rg-coral, #df654f);
   background: #fff0ed;
   color: #863526;
+}
+
+.osm-aoi-coordinate-details {
+  border-top: 1px solid rgba(16, 45, 58, 0.35);
+  border-bottom: 1px solid rgba(16, 45, 58, 0.35);
+  padding: 0.55rem 0;
+}
+
+.osm-aoi-coordinate-details summary {
+  cursor: pointer;
+  color: #607177;
+  font: 800 0.62rem/1.2 var(--rg-mono-font, ui-monospace, monospace);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.osm-aoi-coordinate-details[open] summary {
+  margin-bottom: 0.55rem;
+}
+
+.osm-aoi-coordinate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+}
+
+.osm-aoi-coordinate-grid label {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.osm-aoi-coordinate-grid label > span {
+  color: #607177;
+  font-size: 0.55rem;
+}
+
+.osm-aoi-coordinate-grid input {
+  width: 100%;
+  min-height: 2rem;
+  padding: 0 0.45rem;
+}
+
+.osm-aoi-coordinate-details > button {
+  width: 100%;
+}
+
+.osm-aoi-confirm-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.55rem;
+}
+
+.osm-aoi-confirm-row[hidden] {
+  display: none;
 }
 
 .osm-aoi-confirm {
@@ -194,28 +233,33 @@
   cursor: crosshair;
 }
 
-.osm-aoi-picker[data-readonly="true"] .osm-aoi-picker-header {
-  width: min(32rem, calc(100% - 8rem));
+.osm-aoi-picker[data-readonly="true"] .osm-aoi-picker-toolbar {
+  display: none;
 }
 
 .osm-aoi-picker[data-readonly="true"] .osm-aoi-picker-panel {
-  width: min(20rem, calc(100% - 2rem));
+  width: min(24rem, calc(100% - 2rem));
 }
 
-.osm-aoi-picker[data-readonly="true"] .osm-aoi-coordinate-grid input {
-  background: #f3f0e7;
+.osm-aoi-picker[data-readonly="true"] .osm-aoi-picker-status {
+  display: none;
 }
 
 @media (max-width: 760px) {
-  .osm-aoi-picker-header {
+  .osm-aoi-picker-toolbar {
     right: 0.7rem;
     left: 0.7rem;
-    width: auto;
-    grid-template-columns: 1fr;
+    display: grid;
+    max-width: none;
   }
 
-  .osm-aoi-picker-header p {
-    display: none;
+  .osm-aoi-city-field {
+    width: 100%;
+  }
+
+  .osm-aoi-picker-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 
   .osm-aoi-picker-panel {
@@ -223,5 +267,9 @@
     bottom: 0.7rem;
     left: 0.7rem;
     width: auto;
+  }
+
+  .osm-aoi-coordinate-grid {
+    grid-template-columns: 1fr;
   }
 }

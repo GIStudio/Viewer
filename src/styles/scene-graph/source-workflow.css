@@ -51,6 +51,32 @@
   line-height: 1.35;
 }
 
+.scene-source-aoi-summary {
+  display: grid;
+  gap: 0.32rem;
+  padding: 0.65rem 0.72rem;
+  border-left: 3px solid var(--rg-coral, #df654f);
+  background: #fff0ed;
+}
+
+.scene-source-aoi-summary[data-ready="true"] {
+  border-left-color: #4e9a7b;
+  background: #edf7f1;
+}
+
+.scene-source-aoi-summary strong {
+  color: var(--rg-ink, #102d3a);
+  font: 800 0.68rem/1.25 var(--rg-mono-font, ui-monospace, monospace);
+  letter-spacing: 0.05em;
+}
+
+.scene-source-aoi-summary span {
+  overflow-wrap: anywhere;
+  color: #617176;
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
 .scene-source-divider {
   position: relative;
   display: grid;

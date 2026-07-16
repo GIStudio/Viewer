@@ -96,16 +96,14 @@ export function createSceneGraphRightTabs(): ShellTab[] {
             <div class="scene-source-heading">
               <div>
                 <span>01A / OSM FIRST</span>
-                <strong>选择街区并建立标注</strong>
+                <strong>浏览地图并截取研究区</strong>
               </div>
-              <p>在主舞台缩放地图并框选街区；确认后，道路、建筑、土地利用、树木和 POI 将进入同一个 ReferenceAnnotation。</p>
+              <p>在主舞台自由浏览 OSM；使用当前视野或精确框选后，道路、建筑、土地利用、树木和 POI 将进入同一个 ReferenceAnnotation。</p>
             </div>
-            <label class="scene-form-field">
-              <span>当前 AOI · WGS84 [west, south, east, north]</span>
-              <input id="scene-source-bbox" type="text" inputmode="decimal" placeholder="113.266, 23.128, 113.271, 23.1325" />
-              <small>由主舞台地图同步；也可精确输入。调整范围不会自动请求服务器。</small>
-            </label>
-            <button id="scene-source-osm-import" class="scene-toolbar-button" type="button">获取当前 AOI 的 OSM 并进入标注</button>
+            <div id="scene-source-aoi-summary" class="scene-source-aoi-summary" data-ready="false">
+              <strong>尚未截取研究区</strong>
+              <span>地图浏览不会请求服务器；坐标输入位于地图的“高级定位”中。</span>
+            </div>
             <div class="scene-source-divider"><span>其他数据来源</span></div>
             <details class="scene-collapsible-panel">
               <summary class="scene-collapsible-summary">参考图片、GeoJSON 与模板库</summary>

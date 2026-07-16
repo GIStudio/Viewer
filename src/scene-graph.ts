@@ -3,8 +3,11 @@ import "./styles/scene-graph.css";
 import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
 
 import {
+  DEFAULT_GUANGZHOU_OSM_VIEW,
   mountOsmAoiPicker,
   type OsmAoiPickerController,
+  type OsmAoiSelection,
+  type OsmMapView,
   type Wgs84Bbox as EditableWgs84Bbox,
 } from "./osm-aoi-picker";
 
@@ -257,15 +260,13 @@ import {
 import type {
   NormalizedSceneSourceResponse,
   SourceImageReference,
-  Wgs84Bbox,
 } from "./workflow-api";
 
 const DEFAULT_REFERENCE_IMAGE_LOADING_MESSAGE = "Loading default reference plan...";
 const ANNOTATION_MIN_ZOOM = 0.25;
 const ANNOTATION_MAX_ZOOM = 6;
 const ANNOTATION_ZOOM_STEP = 1.25;
-const PROFESSIONAL_OSM_BBOX_KEY = "roadgen3d:professional-osm-bbox-v1";
-const DEFAULT_PROFESSIONAL_OSM_BBOX: EditableWgs84Bbox = [113.266, 23.128, 113.271, 23.1325];
+const PROFESSIONAL_OSM_VIEW_KEY = "roadgen3d:professional-osm-view-v1";
 
 type SceneGraphStatusText = string | {
   key: string;
@@ -2345,23 +2346,6 @@ function downloadText(filename: string, text: string): void {
   URL.revokeObjectURL(url);
 }
 
-function parseExplicitWgs84Bbox(value: string): Wgs84Bbox | null {
-  const coordinates = value.split(",").map((item) => Number(item.trim()));
-  if (
-    coordinates.length !== 4
-    || coordinates.some((item) => !Number.isFinite(item))
-    || coordinates[0]! < -180
-    || coordinates[2]! > 180
-    || coordinates[1]! < -90
-    || coordinates[3]! > 90
-    || coordinates[0]! >= coordinates[2]!
-    || coordinates[1]! >= coordinates[3]!
-  ) {
-    return null;
-  }
-  return [coordinates[0]!, coordinates[1]!, coordinates[2]!, coordinates[3]!];
-}
-
 async function readImageFileDataUrl(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
@@ -2467,11 +2451,10 @@ export function mountSceneGraphPage(
     sourceImageImportButton,
     sourceGeojsonInput,
     sourceCoordinateSpaceSelect,
-    sourceBboxInput,
+    sourceAoiSummaryEl,
     sourceAiPrompt,
     sourceAiExtractButton,
     sourceAiStatusEl,
-    sourceOsmImportButton,
     sourceNormalizeButton,
     sourceStatusEl,
     sourceProvenanceEl,
@@ -2570,31 +2553,63 @@ export function mountSceneGraphPage(
     : null;
   let uploadedImageDataUrl = workflow.getSnapshot().sourceImageDataUrl ?? "";
 
-  function storedProfessionalOsmBbox(): EditableWgs84Bbox {
-    try {
-      const value = window.sessionStorage.getItem(PROFESSIONAL_OSM_BBOX_KEY);
-      const parsed = value ? JSON.parse(value) : null;
-      if (Array.isArray(parsed)) {
-        const bbox = parseExplicitWgs84Bbox(parsed.join(","));
-        if (bbox) return [...bbox];
-      }
-    } catch {
-      // A blocked or malformed session store must not prevent the OSM picker from opening.
-    }
-    return [...DEFAULT_PROFESSIONAL_OSM_BBOX];
+  function normalizedOsmBboxFromWorkflow(): EditableWgs84Bbox | null {
+    const alignment = workflow.getSnapshot().normalized?.sourceContext.source_alignment as Record<string, unknown> | null | undefined;
+    const sourceFrame = alignment?.source_frame;
+    const bbox = sourceFrame && typeof sourceFrame === "object"
+      ? (sourceFrame as Record<string, unknown>).bbox_wgs84
+      : null;
+    if (!Array.isArray(bbox) || bbox.length !== 4 || bbox.some((value) => !Number.isFinite(Number(value)))) return null;
+    const result = bbox.map(Number) as EditableWgs84Bbox;
+    return result[0] < result[2] && result[1] < result[3] ? result : null;
   }
 
-  function persistProfessionalOsmBbox(bbox: readonly number[]): void {
-    sourceBboxInput.value = bbox.map((value) => Number(value).toFixed(6)).join(", ");
+  const retainedOsmBbox = normalizedOsmBboxFromWorkflow();
+  let professionalOsmSelection: OsmAoiSelection | null = retainedOsmBbox
+    ? { bbox: [...retainedOsmBbox], source: "coordinates" }
+    : null;
+
+  function storedProfessionalOsmView(): OsmMapView {
     try {
-      window.sessionStorage.setItem(PROFESSIONAL_OSM_BBOX_KEY, JSON.stringify(bbox));
+      const value = window.sessionStorage.getItem(PROFESSIONAL_OSM_VIEW_KEY);
+      const parsed = value ? JSON.parse(value) : null;
+      if (
+        parsed
+        && Array.isArray(parsed.center)
+        && parsed.center.length === 2
+        && parsed.center.every((item: unknown) => Number.isFinite(Number(item)))
+        && Number.isFinite(Number(parsed.zoom))
+      ) {
+        return {
+          center: [Number(parsed.center[0]), Number(parsed.center[1])],
+          zoom: Number(parsed.zoom),
+        };
+      }
     } catch {
-      // Session persistence is a convenience; the visible bbox remains authoritative.
+      // A blocked or malformed session store must not prevent the map from opening.
     }
+    return { ...DEFAULT_GUANGZHOU_OSM_VIEW, center: [...DEFAULT_GUANGZHOU_OSM_VIEW.center] };
+  }
+
+  function persistProfessionalOsmView(view: OsmMapView): void {
+    try {
+      window.sessionStorage.setItem(PROFESSIONAL_OSM_VIEW_KEY, JSON.stringify(view));
+    } catch {
+      // View persistence is a convenience; the visible map remains authoritative.
+    }
+  }
+
+  function renderProfessionalAoiSummary(): void {
+    sourceAoiSummaryEl.dataset.ready = String(Boolean(professionalOsmSelection));
+    if (!professionalOsmSelection) {
+      sourceAoiSummaryEl.innerHTML = "<strong>尚未截取研究区</strong><span>在主舞台浏览 OSM，然后使用当前视野或精确框选。</span>";
+      return;
+    }
+    sourceAoiSummaryEl.innerHTML = `<strong>候选研究区已截取</strong><span>${professionalOsmSelection.bbox.map((value) => Number(value).toFixed(6)).join(" · ")}</span>`;
   }
 
   function sourceImageReference(requireBbox: boolean): SourceImageReference {
-    const bbox = parseExplicitWgs84Bbox(sourceBboxInput.value);
+    const bbox = professionalOsmSelection?.bbox ?? normalizedOsmBboxFromWorkflow();
     if (requireBbox && !bbox) {
       throw new Error("Enter an explicit valid WGS84 bbox [west, south, east, north].");
     }
@@ -2623,6 +2638,7 @@ export function mountSceneGraphPage(
 
   function renderSourceWorkflow(): void {
     const snapshot = workflow.getSnapshot();
+    renderProfessionalAoiSummary();
     const reviewVisible = snapshot.step !== "source" && Boolean(snapshot.normalized);
     sourceWorkflowEl.dataset.step = reviewVisible ? "review" : "source";
     const sourcePanel = sourceWorkflowEl.querySelector<HTMLElement>('[data-workflow-panel="source"]');
@@ -2661,7 +2677,6 @@ export function mountSceneGraphPage(
     sourceAiStatusEl.dataset.tone = visionConfigured ? "success" : "neutral";
 
     sourceNormalizeButton.disabled = Boolean(snapshot.busy.normalize);
-    sourceOsmImportButton.disabled = Boolean(snapshot.busy.osm);
     sourceApproveButton.disabled = !normalized
       || snapshot.approvedSourceRevision === snapshot.sourceRevision
       || Boolean(snapshot.busy.generate);
@@ -2781,13 +2796,15 @@ export function mountSceneGraphPage(
     }
   }
 
-  async function importOsmContext(explicitBbox?: EditableWgs84Bbox): Promise<void> {
-    const bbox = explicitBbox ?? parseExplicitWgs84Bbox(sourceBboxInput.value);
+  async function importOsmContext(explicitSelection?: OsmAoiSelection): Promise<void> {
+    const selected = explicitSelection ?? professionalOsmSelection;
+    const bbox = selected?.bbox;
     if (!bbox) {
-      setStatus(sourceStatusEl, "OSM import requires an explicit valid WGS84 bbox.", "error");
+      setStatus(sourceStatusEl, "Browse the map and capture a study area before fetching OSM.", "error");
       return;
     }
-    persistProfessionalOsmBbox(bbox);
+    professionalOsmSelection = { source: selected?.source ?? "coordinates", bbox: [...bbox] };
+    renderProfessionalAoiSummary();
     const token = workflow.beginRequest("osm");
     workflow.clearError();
     setStatus(sourceStatusEl, "Loading OSM roads, buildings, land use and POI…", "neutral");
@@ -3104,14 +3121,7 @@ export function mountSceneGraphPage(
   }
 
   function annotationOsmBbox(): EditableWgs84Bbox | null {
-    const alignment = workflow.getSnapshot().normalized?.sourceContext.source_alignment as Record<string, unknown> | null | undefined;
-    const sourceFrame = alignment?.source_frame;
-    const bbox = sourceFrame && typeof sourceFrame === "object"
-      ? (sourceFrame as Record<string, unknown>).bbox_wgs84
-      : null;
-    if (!Array.isArray(bbox) || bbox.length !== 4 || bbox.some((value) => !Number.isFinite(Number(value)))) return null;
-    const result = bbox.map(Number) as [number, number, number, number];
-    return result[0] < result[2] && result[1] < result[3] ? result : null;
+    return normalizedOsmBboxFromWorkflow();
   }
 
   function mountAnnotationOsmBackground(): void {
@@ -3157,6 +3167,7 @@ export function mountSceneGraphPage(
     stageEl.hidden = visible;
     const viewportShellEl = stageEl.closest<HTMLElement>(".scene-canvas-viewport-shell");
     if (viewportShellEl) viewportShellEl.dataset.osmPicker = String(visible);
+    if (visible) window.requestAnimationFrame(() => osmPicker?.resize());
   }
 
   function renderViewportControls(): void {
@@ -5668,20 +5679,15 @@ export function mountSceneGraphPage(
   );
   sourceNormalizeButton.addEventListener("click", () => void normalizeCurrentSceneSource(), { signal });
   sourceAiExtractButton.addEventListener("click", () => void extractCurrentReferenceImage(), { signal });
-  sourceOsmImportButton.addEventListener("click", () => void importOsmContext().catch(() => undefined), { signal });
-  sourceBboxInput.addEventListener("change", () => {
-    const bbox = parseExplicitWgs84Bbox(sourceBboxInput.value);
-    if (!bbox) {
-      setStatus(sourceStatusEl, "AOI must be a valid WGS84 bbox with west < east and south < north.", "error");
-      return;
-    }
-    persistProfessionalOsmBbox(bbox);
-    osmPicker?.setBbox([...bbox], { fit: true });
-  }, { signal });
   sourceBackButton.addEventListener(
     "click",
     () => {
       workflow.transition("source");
+      const sourceBbox = normalizedOsmBboxFromWorkflow();
+      if (sourceBbox) {
+        professionalOsmSelection = { bbox: [...sourceBbox], source: "coordinates" };
+        osmPicker?.setSelection(professionalOsmSelection, { fit: true });
+      }
       shell.activateRightTab("source");
       renderSourceWorkflow();
       updateOsmPickerVisibility();
@@ -6676,14 +6682,17 @@ export function mountSceneGraphPage(
   renderScenarioDesignOptions();
   const initialWorkflowSnapshot = workflow.getSnapshot();
   if (!courseMode && osmPickerHostEl) {
-    const initialBbox = storedProfessionalOsmBbox();
-    persistProfessionalOsmBbox(initialBbox);
     osmPicker = mountOsmAoiPicker(osmPickerHostEl, {
-      initialBbox,
+      initialView: storedProfessionalOsmView(),
+      initialSelection: initialWorkflowSnapshot.normalized ? professionalOsmSelection : null,
       language: loadViewerLanguage(),
       showCityPicker: true,
       showConfirm: true,
-      onBboxChange: persistProfessionalOsmBbox,
+      onViewChange: persistProfessionalOsmView,
+      onSelectionChange: (next) => {
+        professionalOsmSelection = next;
+        renderProfessionalAoiSummary();
+      },
       onConfirm: importOsmContext,
     });
   }

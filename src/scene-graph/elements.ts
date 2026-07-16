@@ -58,11 +58,10 @@ export type SceneGraphElements = {
   sourceImageImportButton: HTMLButtonElement;
   sourceGeojsonInput: HTMLInputElement;
   sourceCoordinateSpaceSelect: HTMLSelectElement;
-  sourceBboxInput: HTMLInputElement;
+  sourceAoiSummaryEl: HTMLElement;
   sourceAiPrompt: HTMLTextAreaElement;
   sourceAiExtractButton: HTMLButtonElement;
   sourceAiStatusEl: HTMLElement;
-  sourceOsmImportButton: HTMLButtonElement;
   sourceNormalizeButton: HTMLButtonElement;
   sourceStatusEl: HTMLElement;
   sourceProvenanceEl: HTMLElement;
@@ -133,11 +132,10 @@ export function collectSceneGraphElements(root: HTMLElement | Document): SceneGr
     sourceImageImportButton: requireElement<HTMLButtonElement>(root, "#scene-source-image-import"),
     sourceGeojsonInput: requireElement<HTMLInputElement>(root, "#scene-source-geojson-input"),
     sourceCoordinateSpaceSelect: requireElement<HTMLSelectElement>(root, "#scene-source-coordinate-space"),
-    sourceBboxInput: requireElement<HTMLInputElement>(root, "#scene-source-bbox"),
+    sourceAoiSummaryEl: requireElement<HTMLElement>(root, "#scene-source-aoi-summary"),
     sourceAiPrompt: requireElement<HTMLTextAreaElement>(root, "#scene-source-ai-prompt"),
     sourceAiExtractButton: requireElement<HTMLButtonElement>(root, "#scene-source-ai-extract"),
     sourceAiStatusEl: requireElement<HTMLElement>(root, "#scene-source-ai-status"),
-    sourceOsmImportButton: requireElement<HTMLButtonElement>(root, "#scene-source-osm-import"),
     sourceNormalizeButton: requireElement<HTMLButtonElement>(root, "#scene-source-normalize"),
     sourceStatusEl: requireElement<HTMLElement>(root, "#scene-source-status"),
     sourceProvenanceEl: requireElement<HTMLElement>(root, "#scene-source-provenance"),

@@ -49,5 +49,8 @@ assert.match(routeIsland, /group: "inspection"/);
 assert.doesNotMatch(course, /course-design-timeline/);
 assert.match(course, /course-design-external-drawer/);
 assert.match(course, /sidebarPages=\{sidebarPages\}/);
+assert.match(course, /useState<OsmAoiSelection \| null>\(null\)/, "new course projects must begin without a preselected AOI");
+assert.match(course, /disabled=\{!selection\}/, "course project creation must wait for map capture");
+assert.doesNotMatch(course, /course-coordinate-grid">\{bbox\.map/, "coordinates must not be the default course workflow");
 
 console.log("single-left shell contract: ok");
