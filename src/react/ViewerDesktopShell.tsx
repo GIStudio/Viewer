@@ -1,5 +1,5 @@
 import { Button, Layout, Select, Tabs, Tooltip } from "antd";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
 
 import { SHELL_ACTIONS_CHANGE_EVENT } from "../shell-events";
@@ -12,6 +12,7 @@ import {
   translateViewerKey,
 } from "../viewer-i18n";
 import type { ViewerLanguage } from "../viewer-i18n";
+import { professionalPipelineStage } from "../professional-pipeline";
 import { WORKFLOW_STEPS, WORKFLOW_UNDO_EVENT, workflowRoute } from "../workflow-controller";
 import type { WorkflowController, WorkflowStep } from "../workflow-controller";
 import type { WorkbenchShellMode } from "../shell-types";
@@ -67,6 +68,8 @@ export function ViewerDesktopShell({
     edit: Boolean(workflowSnapshot.sceneLayoutPath),
     evaluate: Boolean(workflowSnapshot.sceneLayoutPath) && !workflowSnapshot.editPending,
   };
+  const professionalStage = professionalPipelineStage(workflowSnapshot);
+  const professionalStageLabel = t(`professional.stage.${professionalStage}`, professionalStage);
   const railKeys = route === "scene-graph"
     ? {
       leftKicker: "shell.scene-graph.left.kicker",
@@ -110,17 +113,6 @@ export function ViewerDesktopShell({
     return () => host.removeEventListener(SHELL_ACTIONS_CHANGE_EVENT, handleActionsChange);
   }, [hostRef, route]);
 
-  const routeItems = useMemo(
-    () =>
-      (Object.keys(ROUTES) as AppRoute[])
-        .filter((id) => ROUTES[id].group === "professional")
-        .map((id) => ({
-          value: id,
-          label: t(`route.${id}.label`, `[missing route.${id}.label]`),
-        })),
-    [language],
-  );
-
   const openWorkflowStep = (step: WorkflowStep): void => {
     const result = workflow.transition(step);
     if (result.ok) navigateTo(workflowRoute(step));
@@ -138,23 +130,19 @@ export function ViewerDesktopShell({
             variant="professional"
             language={language}
             className="desktop-shell-topbar roadgen-ant-header"
-            contextLabel={t("studio.professionalTool", "Professional tool")}
+            contextLabel={t("studio.currentContext", "Current context")}
             contextValue={(
-              <div className="studio-professional-tool-switch">
-                <Select
-                  className="desktop-shell-workbench-select"
-                  aria-label={t("studio.professionalTool", "Professional tool")}
-                  value={route}
-                  options={routeItems}
-                  optionRender={(option) => {
-                    const id = option.value as AppRoute;
-                    return <span className="studio-route-option"><small>{ROUTES[id].index}</small>{option.label}</span>;
-                  }}
-                  onChange={(nextRoute) => navigateTo(nextRoute as AppRoute)}
-                />
-                <span className="studio-tool-switch-note">
-                  {t("studio.freeToolSwitch", "Free switching · workflow and scene stay unchanged")}
+              <div className="studio-professional-context" aria-live="polite">
+                <span className="studio-professional-context-tool">
+                  <small>{ROUTES[route].index}</small>
+                  <strong>{t(`route.${route}.label`, ROUTES[route].label)}</strong>
                 </span>
+                <span className="studio-professional-context-stage">{professionalStageLabel}</span>
+                {workflowSnapshot.sceneRevision ? (
+                  <span className="studio-professional-context-revision">
+                    {formatViewerKey(language, "workflow.revision", { revision: workflowSnapshot.sceneRevision.revision })}
+                  </span>
+                ) : null}
               </div>
             )}
             actions={(
@@ -185,7 +173,7 @@ export function ViewerDesktopShell({
             )}
           />
         ) : null}
-        <div className="workflow-shell-bar">
+        {embedded ? <div className="workflow-shell-bar">
           <nav
             className="workflow-step-strip"
             aria-label={embedded
@@ -235,7 +223,7 @@ export function ViewerDesktopShell({
               </Button>
             ) : null}
           </div>
-        </div>
+        </div> : null}
 
         <div className="desktop-shell-main">
           <aside className="desktop-shell-rail desktop-shell-rail-left" data-shell-region="left" aria-label={t(railKeys.leftTitle, `[missing ${railKeys.leftTitle}]`)}>

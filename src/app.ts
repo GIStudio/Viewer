@@ -612,6 +612,15 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     mode2dEl,
     modeGraphEl,
   } = collectViewerPanelElements(root);
+  const assetPolicyInputs = Array.from(
+    root.querySelectorAll<HTMLInputElement>('input[name="viewer-generation-asset-policy"]'),
+  );
+  const generationReadinessEl = root.querySelector<HTMLElement>("#viewer-generation-readiness");
+  const reviewStateEl = root.querySelector<HTMLElement>("#viewer-result-review-state");
+  const reviewAcceptEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-accept");
+  const reviewChangesEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-changes");
+  const reviewAnnotationEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-annotation");
+  const reviewAssetsEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-assets");
   const renderCapabilityStatus = (): void => {
     const capabilities = workflow.getSnapshot().capabilities;
     capabilityStatusEl.innerHTML = renderWorkflowCapabilities(capabilities);
@@ -628,17 +637,84 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       ? translateViewerKey(currentLang, "viewer.generationDialog.sourceApproved")
       : snapshot.normalized
         ? translateViewerKey(currentLang, "viewer.generationDialog.sourceAwaitingApproval")
-        : translateViewerKey(currentLang, "viewer.generationDialog.sourceExpert");
+        : translateViewerKey(currentLang, "viewer.generationDialog.sourceMissing");
     generationStrategySummaryEl.textContent = text?.configured === true
       ? translateViewerKey(currentLang, "viewer.generationDialog.strategyLlm")
       : translateViewerKey(currentLang, "viewer.generationDialog.strategyParametric");
-    designGenerateEl.disabled = Boolean(snapshot.normalized) && !hasApprovedSource;
-    designGenerateEl.title = designGenerateEl.disabled
-      ? (translateViewerKey(currentLang, "viewer.generationDialog.approvalRequired") ?? "")
-      : "";
+    assetPolicyInputs.forEach((input) => {
+      input.checked = input.value === snapshot.assetPreparationChoice;
+    });
+    const assetReady = Boolean(snapshot.assetPreparationChoice);
+    const generationReady = hostOptions.embedded || (hasApprovedSource && assetReady);
+    designGenerateEl.disabled = !generationReady || Boolean(snapshot.busy.generate);
+    const missing = [
+      ...(!hasApprovedSource ? [translateViewerKey(currentLang, "viewer.generationDialog.approvalRequired")] : []),
+      ...(!assetReady ? [translateViewerKey(currentLang, "professional.assets.policyRequired")] : []),
+    ].filter(Boolean).join(" · ");
+    designGenerateEl.title = generationReady ? "" : missing;
+    if (generationReadinessEl) {
+      generationReadinessEl.dataset.tone = generationReady ? "ready" : "warning";
+      generationReadinessEl.textContent = generationReady
+        ? (translateViewerKey(currentLang, "professional.assets.generationReady") ?? "Ready to generate.")
+        : (missing || translateViewerKey(currentLang, "professional.assets.policyRequired") || "Choose an asset strategy.");
+    }
   };
-  const unsubscribeCapabilityStatus = workflow.subscribe(renderCapabilityStatus);
-  renderCapabilityStatus();
+  const renderProfessionalWorkflowState = (): void => {
+    renderCapabilityStatus();
+    updateGenerationDialogContract();
+    const snapshot = workflow.getSnapshot();
+    const hasScene = Boolean(snapshot.sceneLayoutPath);
+    if (reviewStateEl) {
+      const strong = reviewStateEl.querySelector<HTMLElement>("strong");
+      const detail = reviewStateEl.querySelector<HTMLElement>("span");
+      const revision = snapshot.sceneRevision ? ` · rev ${snapshot.sceneRevision.revision}` : "";
+      if (snapshot.sceneReviewStatus === "accepted") {
+        reviewStateEl.dataset.tone = "ready";
+        if (strong) strong.textContent = translateViewerKey(currentLang, "professional.review.accepted") ?? "Result accepted";
+        if (detail) detail.textContent = `${translateViewerKey(currentLang, "professional.review.acceptedHint") ?? "Evaluation and delivery are now available."}${revision}`;
+      } else if (snapshot.sceneReviewStatus === "changes_requested") {
+        reviewStateEl.dataset.tone = "warning";
+        if (strong) strong.textContent = translateViewerKey(currentLang, "professional.review.changesRequested") ?? "Changes requested";
+        if (detail) detail.textContent = `${translateViewerKey(currentLang, "professional.review.changesRequestedHint") ?? "Save an edited revision, then review it again."}${revision}`;
+      } else if (snapshot.sceneReviewStatus === "pending") {
+        reviewStateEl.dataset.tone = "warning";
+        if (strong) strong.textContent = translateViewerKey(currentLang, "professional.review.pending") ?? "Generated result awaiting review";
+        if (detail) detail.textContent = `${translateViewerKey(currentLang, "professional.review.pendingHint") ?? "Inspect the 3D result before evaluation."}${revision}`;
+      } else {
+        reviewStateEl.dataset.tone = "empty";
+        if (strong) strong.textContent = translateViewerKey(currentLang, "professional.review.noScene") ?? "No generated scene is available.";
+        if (detail) detail.textContent = translateViewerKey(currentLang, "professional.review.noSceneHint") ?? "Complete scene generation first.";
+      }
+    }
+    [reviewAcceptEl, reviewChangesEl, reviewAnnotationEl, reviewAssetsEl].forEach((button) => {
+      if (button) button.disabled = !hasScene;
+    });
+    if (!hostOptions.embedded) {
+      evaluateRunEl.disabled = snapshot.sceneReviewStatus !== "accepted" || Boolean(snapshot.busy.evaluate);
+      evaluateRunEl.title = snapshot.sceneReviewStatus === "accepted"
+        ? ""
+        : (translateViewerKey(currentLang, "professional.pipeline.reviewRequired") ?? "Accept the generated result before evaluation.");
+    }
+  };
+  const unsubscribeCapabilityStatus = workflow.subscribe(renderProfessionalWorkflowState);
+  assetPolicyInputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked && (input.value === "current_manifest" || input.value === "default_transparent_massing")) {
+        workflow.setAssetPreparationChoice(input.value);
+      }
+    }, { signal });
+  });
+  reviewAcceptEl?.addEventListener("click", () => {
+    if (!workflow.setSceneReviewStatus("accepted").ok) return;
+    root.querySelector<HTMLButtonElement>('[data-shell-tab="evaluate"]')?.click();
+  }, { signal });
+  reviewChangesEl?.addEventListener("click", () => {
+    if (!workflow.setSceneReviewStatus("changes_requested").ok) return;
+    root.querySelector<HTMLButtonElement>("#viewer-edit-toggle")?.click();
+  }, { signal });
+  reviewAnnotationEl?.addEventListener("click", () => { window.location.hash = "scene-graph"; }, { signal });
+  reviewAssetsEl?.addEventListener("click", () => { window.location.hash = "asset-editor"; }, { signal });
+  renderProfessionalWorkflowState();
   if (!hostOptions.embedded && !workflow.getSnapshot().capabilities && !workflow.getSnapshot().busy.capabilities) {
     const capabilityToken = workflow.beginRequest("capabilities");
     void loadWorkflowCapabilities(capabilityToken.signal)
@@ -771,6 +847,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
 
   function selectedDesignSemanticConfigPatch(): Record<string, unknown> {
     const patch: Record<string, unknown> = {};
+    const assetChoice = workflow.getSnapshot().assetPreparationChoice;
+    if (assetChoice === "default_transparent_massing") {
+      patch.asset_curation_mode = "scene_ready_first";
+      patch.building_representation = "transparent_massing";
+    } else if (assetChoice === "current_manifest") {
+      patch.asset_curation_mode = "scene_ready_first";
+      patch.building_representation = "asset";
+    }
     const skeletonProfile = designSkeletonProfileEl.value.trim();
     if (skeletonProfile) {
       patch.skeleton_design_profile = skeletonProfile;
@@ -2824,7 +2908,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     const tabLabels: Array<[string, string]> = [
       ["settings", "viewer.tab.settings"],
       ["design", "viewer.tab.design"],
-      ["evaluate", "viewer.tab.evaluate"],
+      ["evaluate", "professional.pipeline.deliver"],
       ["compare", "viewer.tab.compare"],
       ["history", "viewer.tab.history"],
       ["presets", "viewer.tab.presets"],
@@ -2834,8 +2918,16 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     for (const [tabId, key] of tabLabels) {
       const button = root.querySelector<HTMLButtonElement>(`[data-shell-tab="${tabId}"]`);
       if (button) {
-        button.dataset.i18nKey = key;
-        button.textContent = translateViewerKey(currentLang, key) ?? `[missing ${key}]`;
+        const translated = translateViewerKey(currentLang, key) ?? `[missing ${key}]`;
+        const label = button.querySelector<HTMLElement>(".workbench-sidebar-label");
+        if (label) {
+          label.dataset.i18nKey = key;
+          label.textContent = translated;
+          button.title = translated;
+        } else {
+          button.dataset.i18nKey = key;
+          button.textContent = translated;
+        }
       }
     }
   }

@@ -237,17 +237,15 @@ import {
   stripStrokeColor,
   stringifyAnnotation,
 } from "./scene-graph/index";
-import { sleep } from "./viewer-api";
+import { storeProfessionalViewerTarget } from "./professional-pipeline";
 import { VIEWER_LANGUAGE_EVENT, applyViewerTranslations, loadViewerLanguage, translateViewerKey, translateViewerLiteral } from "./viewer-i18n";
 import type { ScenarioDesign, ScenarioDesignCatalogPayload } from "./viewer-types";
 import type { WorkflowController } from "./workflow-controller";
 import {
   extractSceneSource,
   loadOsmSceneSource,
-  loadSceneJob,
   loadWorkflowCapabilities,
   normalizeSceneSource,
-  submitWorkflowSceneJob,
   toNormalizedSceneSource,
 } from "./workflow-api";
 import type {
@@ -2591,7 +2589,7 @@ export function mountSceneGraphPage(
 
   function renderSourceWorkflow(): void {
     const snapshot = workflow.getSnapshot();
-    const reviewVisible = snapshot.step === "review" && Boolean(snapshot.normalized);
+    const reviewVisible = snapshot.step !== "source" && Boolean(snapshot.normalized);
     sourceWorkflowEl.dataset.step = reviewVisible ? "review" : "source";
     const sourcePanel = sourceWorkflowEl.querySelector<HTMLElement>('[data-workflow-panel="source"]');
     const reviewPanel = sourceWorkflowEl.querySelector<HTMLElement>('[data-workflow-panel="review"]');
@@ -2614,7 +2612,7 @@ export function mountSceneGraphPage(
         ? normalized.warnings.map((warning) => `<div class="scene-source-warning">${escapeHtml(warning)}</div>`).join("")
         : '<div class="scene-source-warning" data-tone="ok">No normalization warnings.</div>';
       sourceReviewStatusEl.textContent = snapshot.approvedSourceRevision === snapshot.sourceRevision
-        ? "Approved. Generate & Load will submit the inline annotation and aligned context."
+        ? "Approved. Continue to 3D generation to choose the asset strategy and confirm the run."
         : "Review is ready for approval.";
       sourceReviewStatusEl.dataset.tone = snapshot.approvedSourceRevision === snapshot.sourceRevision ? "success" : "neutral";
     }
@@ -2630,10 +2628,18 @@ export function mountSceneGraphPage(
 
     sourceNormalizeButton.disabled = Boolean(snapshot.busy.normalize);
     sourceOsmImportButton.disabled = Boolean(snapshot.busy.osm);
-    sourceApproveButton.disabled = !normalized || Boolean(snapshot.busy.generate);
+    sourceApproveButton.disabled = !normalized
+      || snapshot.approvedSourceRevision === snapshot.sourceRevision
+      || Boolean(snapshot.busy.generate);
     sourceGenerateButton.disabled = courseMode
       ? state.annotation.centerlines.length === 0 || Boolean(snapshot.busy.generate)
-      : !normalized || Boolean(snapshot.busy.generate);
+      : !normalized
+        || snapshot.approvedSourceRevision !== snapshot.sourceRevision
+        || Boolean(snapshot.busy.generate);
+    if (!courseMode) {
+      sourceGenerateButton.textContent = translateViewerKey(loadViewerLanguage(), "professional.annotation.continueGeneration") ?? "Continue to 3D generation…";
+      sourceGenerateButton.title = translateViewerKey(loadViewerLanguage(), "professional.annotation.continueGenerationHint") ?? "Open the 3D Scene Workbench to choose an asset strategy and confirm generation.";
+    }
     if (snapshot.lastError && root.isConnected) {
       sourceStatusEl.textContent = snapshot.lastError;
       sourceStatusEl.dataset.tone = "error";
@@ -2791,37 +2797,9 @@ export function mountSceneGraphPage(
       setStatus(sourceReviewStatusEl, "Approve the reviewed source before generation.", "error");
       return;
     }
-    const normalized = workflow.getSnapshot().normalized;
-    if (!normalized || !workflow.setGenerationStarted().ok) return;
-    const token = workflow.beginRequest("generate");
-    try {
-      const created = await submitWorkflowSceneJob({
-        normalized,
-        prompt: "Generate and load the approved student reference annotation.",
-        presetId: "custom",
-        signal: token.signal,
-      });
-      for (let attempt = 0; attempt < 360; attempt += 1) {
-        if (!token.isCurrent()) return;
-        const payload = await loadSceneJob(created.job_id, token.signal);
-        if (payload.status === "succeeded" && payload.result?.scene_layout_path) {
-          workflow.setGeneratedScene({
-            layoutPath: payload.result.scene_layout_path,
-            contextMassing: {
-              aligned_building_count: normalized.sourceContext.aligned_buildings?.length ?? 0,
-              source_alignment: normalized.sourceContext.source_alignment ?? null,
-            },
-          });
-          workflow.endRequest(token);
-          return;
-        }
-        if (payload.status === "failed") throw new Error(payload.error || "Scene generation failed.");
-        await sleep(1000);
-      }
-      throw new Error("Scene generation timed out.");
-    } catch (error) {
-      workflow.endRequest(token, error);
-    }
+    setStatus(sourceReviewStatusEl, "Annotation approved. Configure the 3D asset strategy before generation.", "success");
+    storeProfessionalViewerTarget("generate");
+    window.location.hash = "";
   }
 
   const unsubscribeWorkflow = workflow.subscribe(renderSourceWorkflow);

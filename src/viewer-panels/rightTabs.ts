@@ -12,9 +12,12 @@ function reactContent(component: ComponentType): string {
   return `<div class="desktop-shell-react-content">${renderToStaticMarkup(createElement(component))}</div>`;
 }
 
+export function renderEvaluatePanelContent(): string {
+  return reactContent(EvaluatePanelShell);
+}
+
 export function createViewerRightTabs(t: ViewerPanelText): ViewerRightTab[] {
   return [
-    { id: "evaluate", label: t("Evaluate", "评估"), content: reactContent(EvaluatePanelShell) },
     { id: "compare", label: t("Compare", "对比"), content: reactContent(ComparePanelShell) },
     { id: "history", label: t("History", "历史"), content: reactContent(HistoryPanelShell) },
     {

@@ -30,6 +30,12 @@ export type WorkflowSceneRef =
   | Readonly<{ kind: "local_layout"; layoutPath: string }>
   | Readonly<{ kind: "project_revision"; projectId: string; revisionId: string }>;
 
+export type ProfessionalPipelineStage = "prepare" | "generate" | "review" | "edit" | "deliver";
+
+export type AssetPreparationChoice = "current_manifest" | "default_transparent_massing" | null;
+
+export type SceneReviewStatus = "not_available" | "pending" | "changes_requested" | "accepted";
+
 export type NormalizedSceneSource = Readonly<{
   referenceAnnotation: ReferenceAnnotation;
   graph: Readonly<Record<string, unknown>> | null;
@@ -80,6 +86,8 @@ export type WorkflowSnapshot = Readonly<{
   editPending: boolean;
   undoCommand: LayoutEditCommand | null;
   evaluation: EvaluationResult | null;
+  assetPreparationChoice: AssetPreparationChoice;
+  sceneReviewStatus: SceneReviewStatus;
   capabilities: WorkflowCapabilities | null;
   busy: Readonly<Partial<Record<WorkflowRequestKind, boolean>>>;
   lastError: string | null;
@@ -118,6 +126,8 @@ export type WorkflowController = {
   setSceneRevision(revision: SceneRevision, undoCommand?: LayoutEditCommand | null): void;
   setEditPending(pending: boolean): void;
   setEvaluation(result: EvaluationResult): void;
+  setAssetPreparationChoice(choice: Exclude<AssetPreparationChoice, null>): void;
+  setSceneReviewStatus(status: Exclude<SceneReviewStatus, "not_available">): TransitionResult;
   setCapabilities(capabilities: WorkflowCapabilities): void;
   reportError(error: unknown): void;
   clearError(): void;
@@ -156,6 +166,8 @@ function initialSnapshot(): WorkflowSnapshot {
     editPending: false,
     undoCommand: null,
     evaluation: null,
+    assetPreparationChoice: null,
+    sceneReviewStatus: "not_available",
     capabilities: null,
     busy: INITIAL_BUSY,
     lastError: null,
@@ -233,6 +245,7 @@ export function createWorkflowController(): WorkflowController {
         editPending: false,
         undoCommand: null,
         evaluation: null,
+        sceneReviewStatus: "not_available",
         lastError: null,
       });
     },
@@ -250,6 +263,7 @@ export function createWorkflowController(): WorkflowController {
         editPending: false,
         undoCommand: null,
         evaluation: null,
+        sceneReviewStatus: "not_available",
         lastError: null,
       });
     },
@@ -288,7 +302,7 @@ export function createWorkflowController(): WorkflowController {
     setGenerationStarted() {
       const result = controller.transition("generate");
       if (!result.ok) return result;
-      publish({ sceneRef: null, sceneLayoutPath: null, sceneRevision: null, undoCommand: null, evaluation: null, lastError: null });
+      publish({ sceneRef: null, sceneLayoutPath: null, sceneRevision: null, undoCommand: null, evaluation: null, sceneReviewStatus: "not_available", lastError: null });
       return result;
     },
     setGeneratedScene(input) {
@@ -307,17 +321,21 @@ export function createWorkflowController(): WorkflowController {
         editPending: false,
         undoCommand: null,
         evaluation: null,
+        sceneReviewStatus: "pending",
         lastError: null,
       });
       return true;
     },
     setSceneRevision(revision, undoCommand = null) {
+      const sameRevision = snapshot.sceneRevision?.sha256 === revision.sha256
+        && snapshot.sceneRevision?.revision === revision.revision;
       publish({
         sceneLayoutPath: revision.layout_path || snapshot.sceneLayoutPath,
         sceneRevision: immutableCopy(revision),
         undoCommand: undoCommand ? immutableCopy(undoCommand) : null,
         editPending: false,
-        evaluation: null,
+        evaluation: sameRevision ? snapshot.evaluation : null,
+        sceneReviewStatus: sameRevision ? snapshot.sceneReviewStatus : "pending",
         lastError: null,
       });
     },
@@ -326,6 +344,22 @@ export function createWorkflowController(): WorkflowController {
     },
     setEvaluation(result) {
       publish({ step: "evaluate", evaluation: immutableCopy(result), lastError: null });
+    },
+    setAssetPreparationChoice(choice) {
+      publish({ assetPreparationChoice: choice, lastError: null });
+    },
+    setSceneReviewStatus(status) {
+      if (!snapshot.sceneLayoutPath) {
+        const reason = "Generate and load a scene before reviewing the result.";
+        publish({ lastError: reason });
+        return Object.freeze({ ok: false, reason });
+      }
+      publish({
+        step: status === "changes_requested" ? "edit" : snapshot.step,
+        sceneReviewStatus: status,
+        lastError: null,
+      });
+      return Object.freeze({ ok: true });
     },
     setCapabilities(capabilities) {
       publish({ capabilities: immutableCopy(capabilities) });

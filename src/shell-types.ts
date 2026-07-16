@@ -25,7 +25,13 @@ export type WorkbenchShellMode =
   | "course_single_left"
   | "legacy_dual";
 
-export type WorkbenchSidebarGroup = "navigation" | "workspace" | "analysis" | "system";
+export type WorkbenchSidebarGroup = "flow" | "navigation" | "workspace" | "analysis" | "inspection" | "system";
+
+export type WorkbenchSidebarFlow = {
+  stage: "01" | "02" | "03" | "04" | "05";
+  branch?: "annotation" | "assets";
+  status?: "pending" | "ready" | "active" | "warning" | "accepted";
+};
 
 export type WorkbenchSidebarPage = {
   id: string;
@@ -35,6 +41,7 @@ export type WorkbenchSidebarPage = {
   content: HTMLElement | string;
   disabled?: boolean;
   badge?: string;
+  flow?: WorkbenchSidebarFlow;
   /** Marks a durable navigation location without opening a drawer. */
   current?: boolean;
   /** Action-only pages reuse an existing controller instead of duplicating its panel DOM. */

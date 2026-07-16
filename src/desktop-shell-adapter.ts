@@ -307,7 +307,7 @@ export function bindDesktopShell(
     ].filter((page) => !page.disabled);
     const deduped = new Map<string, WorkbenchSidebarPage>();
     pages.forEach((page) => deduped.set(page.id, page));
-    const groupOrder = { navigation: 0, workspace: 1, analysis: 2, system: 3 };
+    const groupOrder = { flow: 0, navigation: 1, workspace: 2, analysis: 3, inspection: 4, system: 5 };
     return Array.from(deduped.values()).sort((a, b) => groupOrder[a.group] - groupOrder[b.group]);
   }
 
@@ -350,6 +350,12 @@ export function bindDesktopShell(
       button.dataset.shellTab = page.id;
       button.dataset.sidebarGroup = page.group;
       button.dataset.current = page.current ? "true" : "false";
+      if (page.flow) {
+        button.classList.add("workbench-sidebar-flow-button");
+        button.dataset.flowStage = page.flow.stage;
+        button.dataset.flowStatus = page.flow.status ?? "pending";
+        if (page.flow.branch) button.dataset.flowBranch = page.flow.branch;
+      }
       button.dataset.open = "false";
       button.title = page.label;
       button.setAttribute("aria-label", page.label);
@@ -432,6 +438,7 @@ export function bindDesktopShell(
       const implicitId = button.dataset.viewerCenterControl === "browser" ? "viewer-scene-browser-toggle" : button.id;
       const mapped = idMap[implicitId];
       if (!mapped || button.id === "viewer-floating-lane-toggle") return;
+      if (mode === "single_left_overlay" && ["annotation", "assets", "design", "edit"].includes(mapped.id)) return;
       if (mode === "course_single_left" && !["scene", "edit", "settings"].includes(mapped.id)) return;
       const label = button.querySelector("strong")?.textContent?.trim() || mapped.id;
       const icon = button.querySelector(".viewer-control-menu-code")?.textContent?.trim();

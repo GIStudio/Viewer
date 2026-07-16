@@ -209,6 +209,7 @@ export async function submitWorkflowSceneJob(input: {
   normalized: NormalizedSceneSource;
   prompt: string;
   presetId: string;
+  configPatch?: Record<string, unknown>;
   randomSeed?: number;
   signal?: AbortSignal;
 }): Promise<SceneJobCreatePayload> {
@@ -218,7 +219,7 @@ export async function submitWorkflowSceneJob(input: {
     body: JSON.stringify({
       draft: {
         normalized_scene_query: normalizedPrompt,
-        compose_config_patch: {},
+        compose_config_patch: input.configPatch ?? {},
         citations_by_field: {},
         design_summary: normalizedPrompt,
         risk_notes: input.normalized.warnings,

@@ -13,6 +13,7 @@
     "test:plan-export": "node tests/plan-export.test.mjs",
     "test:annotation-viewport": "node tests/annotation-viewport.test.mjs",
     "test:professional-navigation": "node tests/professional-navigation.test.mjs",
+    "test:professional-pipeline": "node tests/professional-pipeline.test.mjs",
     "test:single-left-shell": "node tests/single-left-shell.test.mjs",
     "typecheck": "tsc --noEmit"
   },

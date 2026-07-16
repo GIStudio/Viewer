@@ -7,6 +7,7 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { CSS2DRenderer, CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import type { DesktopShell } from "./desktop-shell";
 import { VIEWER_LANGUAGE_EVENT, applyViewerTranslations, loadViewerLanguage, translateViewerKey } from "./viewer-i18n";
+import type { WorkflowController } from "./workflow-controller";
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -2189,7 +2190,7 @@ function showToast(root: HTMLElement, message: string, type: "success" | "error"
 
 /* ── Main Mount ────────────────────────────────────────────────────── */
 
-export function mountAssetEditor(shell: DesktopShell): () => void {
+export function mountAssetEditor(shell: DesktopShell, workflow?: WorkflowController): () => void {
   const root = shell.root;
   const state: AssetEditorState = {
     manifestName: "",
@@ -2249,6 +2250,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
             <select id="ae-manifest-select" class="ae-manifest-select" title="Manifest" data-i18n-title-key="assetEditor.manifest">
               <option value="">-- Select Manifest --</option>
             </select>
+            <button id="ae-use-manifest-for-generation" class="ae-action-btn ae-btn-primary" type="button" disabled data-i18n-key="professional.assets.useManifest">Use this manifest for generation</button>
+            <span id="ae-generation-manifest-status" class="desktop-shell-field-note" data-i18n-key="professional.assets.useManifestHint">Select and inspect a manifest, then confirm it as the 3D preparation branch.</span>
           </label>
           <input id="ae-search" type="text" placeholder="Search assets..." class="ae-search-input" />
           <select id="ae-category-filter" class="ae-filter-select">
@@ -2404,6 +2407,8 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
 
   /* ── DOM refs ──────────────────────────────────────────────────── */
   const manifestSelect = qs<HTMLSelectElement>(root, "#ae-manifest-select");
+  const useManifestBtn = qs<HTMLButtonElement>(root, "#ae-use-manifest-for-generation");
+  const generationManifestStatus = qs<HTMLElement>(root, "#ae-generation-manifest-status");
   const backBtn = qs<HTMLButtonElement>(root, "#ae-back-btn");
   const searchInput = qs<HTMLInputElement>(root, "#ae-search");
   const categoryFilter = qs<HTMLSelectElement>(root, "#ae-category-filter");
@@ -2497,6 +2502,7 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
 
   manifestSelect.addEventListener("change", async () => {
     const name = manifestSelect.value;
+    useManifestBtn.disabled = !name || !workflow;
     if (!name) return;
     state.manifestName = name;
     state.selectedAssetId = null;
@@ -2521,6 +2527,15 @@ export function mountAssetEditor(shell: DesktopShell): () => void {
     } catch (err) {
       showToast(root, `Failed to load manifest: ${err}`, "error");
     }
+  });
+
+  useManifestBtn.addEventListener("click", () => {
+    if (!workflow || !state.manifestName) return;
+    workflow.setAssetPreparationChoice("current_manifest");
+    generationManifestStatus.textContent = `${state.manifestName} · ${translateViewerKey(currentLanguage, "professional.assets.manifestReady") ?? "ready for generation"}`;
+    generationManifestStatus.dataset.tone = "success";
+    shell.setStatusSummary({ key: "professional.assets.manifestReady" });
+    showToast(root, translateViewerKey(currentLanguage, "professional.assets.manifestReady") ?? "Asset preparation is ready.");
   });
 
   /* ── Load More ─────────────────────────────────────────────────── */

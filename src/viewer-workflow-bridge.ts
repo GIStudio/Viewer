@@ -67,6 +67,11 @@ export function createViewerWorkflowBridge(deps: ViewerWorkflowBridgeDeps): View
       deps.setStatus("Approve the reviewed source before generation.");
       return;
     }
+    if (!snapshot.assetPreparationChoice) {
+      deps.workflow.reportError("Choose a 3D asset preparation strategy before generation.");
+      deps.setStatus("Choose a 3D asset preparation strategy before generation.");
+      return;
+    }
     const normalized = deps.workflow.getSnapshot().normalized;
     if (!normalized || !deps.workflow.setGenerationStarted().ok) return;
 
@@ -77,6 +82,12 @@ export function createViewerWorkflowBridge(deps: ViewerWorkflowBridgeDeps): View
         normalized,
         prompt: deps.getPrompt(),
         presetId: deps.getPresetId(),
+        configPatch: {
+          asset_curation_mode: "scene_ready_first",
+          building_representation: snapshot.assetPreparationChoice === "default_transparent_massing"
+            ? "transparent_massing"
+            : "asset",
+        },
         signal: token.signal,
       });
       for (let attempt = 0; attempt < 360; attempt += 1) {

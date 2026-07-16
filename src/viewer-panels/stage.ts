@@ -100,6 +100,19 @@ export function createViewerStageHtml(): string {
               <strong data-i18n-key="viewer.generationDialog.outputRevision">Create a new scene result and load it into the 3D Viewer without overwriting the current scene</strong>
             </div>
           </div>
+          <fieldset class="viewer-generation-asset-policy" id="viewer-generation-asset-policy">
+            <legend data-i18n-key="professional.assets.policyTitle">3D asset preparation</legend>
+            <p data-i18n-key="professional.assets.policyDescription">Confirm the asset source that will join the approved 2D annotation.</p>
+            <label>
+              <input type="radio" name="viewer-generation-asset-policy" value="current_manifest" />
+              <span><strong data-i18n-key="professional.assets.currentManifest">Use the current checked asset manifest</strong><small data-i18n-key="professional.assets.currentManifestHint">Use scene-eligible trees and street furniture from the professional asset library.</small></span>
+            </label>
+            <label>
+              <input type="radio" name="viewer-generation-asset-policy" value="default_transparent_massing" />
+              <span><strong data-i18n-key="professional.assets.defaultMassing">Use default assets and transparent massing</strong><small data-i18n-key="professional.assets.defaultMassingHint">Skip custom asset preparation; buildings remain transparent white context.</small></span>
+            </label>
+            <div id="viewer-generation-readiness" class="viewer-generation-readiness" data-tone="warning" role="status"></div>
+          </fieldset>
           <div class="viewer-generation-dialog-body">
             ${renderDesignPanelHtml()}
           </div>
