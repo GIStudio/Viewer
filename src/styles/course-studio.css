@@ -115,6 +115,49 @@
 .course-quality-chips span { padding: 7px 9px; border: 1px solid #69808a; font: 11px/1.2 monospace; }
 .course-quality-chips span[data-ok="true"]::before { content: "✓ "; color: var(--course-yellow); }
 
+.course-osm-study-stage,
+.course-osm-road-study-map {
+  width: 100%;
+  min-height: 680px;
+}
+
+.course-osm-road-study-map > .osm-road-study-picker { min-height: 680px; }
+
+.course-osm-job-board {
+  display: grid;
+  min-height: 620px;
+  place-items: center;
+  padding: 40px;
+  background:
+    linear-gradient(rgba(23, 75, 100, .06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 75, 100, .06) 1px, transparent 1px),
+    var(--course-paper);
+  background-size: 24px 24px;
+}
+
+.course-osm-job-board > section {
+  display: grid;
+  gap: 18px;
+  width: min(680px, 100%);
+  padding: 30px;
+  border: 1px solid var(--course-ink);
+  background: white;
+  box-shadow: 8px 8px 0 var(--course-yellow), 9px 9px 0 var(--course-ink);
+}
+.course-osm-job-board h2 { margin: 0; font: 700 30px/1.08 Georgia, "Songti SC", serif; }
+.course-osm-job-track { position: relative; height: 18px; overflow: hidden; border: 1px solid var(--course-ink); background: #dfe7e6; }
+.course-osm-job-track i { display: block; height: 100%; background: var(--course-blue); transition: width .18s ease-out; }
+.course-osm-job-track[data-indeterminate="true"] i { position: absolute; width: 32% !important; background: repeating-linear-gradient(135deg, var(--course-blue) 0 10px, var(--course-yellow) 10px 20px); animation: course-osm-scan 1.15s linear infinite; }
+@keyframes course-osm-scan { from { left: -32%; } to { left: 100%; } }
+.course-osm-job-meta { display: grid; grid-template-columns: auto repeat(3, 1fr); align-items: baseline; gap: 16px; color: #607177; font: 700 11px/1.2 monospace; }
+.course-osm-job-meta strong { color: var(--course-coral); font-size: 20px; }
+.course-osm-job-board ol { margin: 0; padding: 0; border: 1px solid rgba(16,45,58,.35); list-style: none; }
+.course-osm-job-board li { display: grid; grid-template-columns: 145px minmax(0,1fr); gap: 12px; padding: 10px; border-bottom: 1px solid rgba(16,45,58,.2); font-size: 11px; }
+.course-osm-job-board li:last-child { border-bottom: 0; }
+.course-osm-job-board li b { font-family: monospace; text-transform: uppercase; }
+.course-osm-job-board li span { color: #607177; }
+.course-osm-job-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
 .course-annotation-layout { display: grid; grid-template-columns: 1fr 320px; gap: 26px; }
 .course-annotation-layout > section { padding: 34px; border: 1px solid var(--course-ink); background: white; }
 .course-annotation-layout h2 { max-width: 620px; font: 700 30px/1.1 Georgia, "Songti SC", serif; }

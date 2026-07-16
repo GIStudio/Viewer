@@ -7,6 +7,7 @@ import type {
   WorkflowSourceDescriptor,
 } from "./workflow-controller";
 import type { SceneJobCreatePayload, SceneJobStatusPayload } from "./viewer-types";
+import type { Feature, FeatureCollection } from "geojson";
 import { apiJson, postApiJson } from "./viewer-api";
 
 export type Wgs84Bbox = readonly [number, number, number, number];
@@ -86,6 +87,59 @@ export type OsmBuildingsRequest = {
 };
 
 export type OsmSceneSourceRequest = OsmBuildingsRequest & { force_refetch?: boolean };
+
+export type OsmJobOperation = {
+  timestamp: string;
+  stage: string;
+  progress: number;
+  message: string;
+  detail: Record<string, unknown>;
+};
+
+export type OsmRoadPreview = {
+  preview_id: string;
+  source_id: string;
+  retrieval_bbox: [number, number, number, number];
+  logical_roads: FeatureCollection;
+  context_geojson: FeatureCollection;
+  feature_counts: Record<string, number>;
+  cache_hit: boolean;
+  fingerprint: string;
+  raw_artifact_id?: string;
+};
+
+export type OsmAcquisitionJob = {
+  id: string;
+  kind: "osm_acquisition" | "osm_preview";
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  stage: string;
+  progress: number;
+  progress_mode?: "determinate" | "indeterminate";
+  message: string;
+  detail: Record<string, unknown>;
+  operations: OsmJobOperation[];
+  result: Partial<OsmRoadPreview>;
+  error: string;
+};
+
+export type OsmRoadStudySelection = {
+  seed_logical_road_id: string;
+  hop_count: 1 | 2;
+  context_buffer_m: number;
+};
+
+export type OsmRoadStudyResponse = NormalizedSceneSourceResponse & {
+  osm_study: {
+    selection: OsmRoadStudySelection;
+    selected_way_ids: number[];
+    hop_layers: Record<string, 0 | 1 | 2>;
+    study_area: Feature;
+    included_feature_counts: Record<string, number>;
+    annotation_bbox: [number, number, number, number];
+    retrieval_bbox: [number, number, number, number];
+    warnings: string[];
+  };
+};
 
 export type OsmBuildingsResponse = {
   source: WorkflowSourceDescriptor;
@@ -196,6 +250,41 @@ export async function loadOsmSceneSource(
   return apiJson<NormalizedSceneSourceResponse>("/api/scene-sources/osm", {
     method: "POST",
     body: JSON.stringify(request),
+    signal,
+  });
+}
+
+export async function createOsmAcquisitionJob(
+  request: OsmSceneSourceRequest,
+  signal?: AbortSignal,
+): Promise<OsmAcquisitionJob> {
+  return apiJson<OsmAcquisitionJob>("/api/scene-sources/osm/jobs", {
+    method: "POST",
+    body: JSON.stringify(request),
+    signal,
+  });
+}
+
+export async function loadOsmAcquisitionJob(jobId: string, signal?: AbortSignal): Promise<OsmAcquisitionJob> {
+  return apiJson<OsmAcquisitionJob>(`/api/scene-sources/osm/jobs/${encodeURIComponent(jobId)}`, { signal });
+}
+
+export async function cancelOsmAcquisitionJob(jobId: string): Promise<OsmAcquisitionJob> {
+  return apiJson<OsmAcquisitionJob>(`/api/scene-sources/osm/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+}
+
+export async function retryOsmAcquisitionJob(jobId: string): Promise<OsmAcquisitionJob> {
+  return apiJson<OsmAcquisitionJob>(`/api/scene-sources/osm/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+}
+
+export async function selectOsmRoadStudyArea(
+  previewId: string,
+  selection: OsmRoadStudySelection & { source_id?: string },
+  signal?: AbortSignal,
+): Promise<OsmRoadStudyResponse> {
+  return apiJson<OsmRoadStudyResponse>(`/api/scene-sources/osm/previews/${encodeURIComponent(previewId)}/selection`, {
+    method: "POST",
+    body: JSON.stringify(selection),
     signal,
   });
 }

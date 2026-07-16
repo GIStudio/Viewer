@@ -260,6 +260,109 @@
   border-radius: 0;
 }
 
+.scene-osm-aoi-picker > .osm-road-study-picker,
+.scene-osm-aoi-picker > .osm-acquisition-progress {
+  min-height: 100%;
+}
+
+.osm-acquisition-progress {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  padding: 2rem;
+  background:
+    linear-gradient(rgba(23, 75, 100, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 75, 100, 0.06) 1px, transparent 1px),
+    var(--rg-paper, #f3f0e7);
+  background-size: 24px 24px;
+}
+
+.osm-acquisition-progress-card {
+  display: grid;
+  gap: 1rem;
+  width: min(42rem, 100%);
+  padding: 1.4rem;
+  border: 1px solid var(--rg-ink, #102d3a);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 8px 8px 0 var(--rg-yellow, #f4c430), 9px 9px 0 var(--rg-ink, #102d3a);
+}
+
+.osm-acquisition-kicker {
+  color: var(--rg-coral, #df654f);
+  font: 800 0.62rem/1.2 var(--rg-mono-font, ui-monospace, monospace);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.osm-acquisition-progress-card h2 {
+  margin: 0;
+  font: 700 1.7rem/1.1 var(--rg-display-font, Georgia, "Songti SC", serif);
+}
+
+.osm-acquisition-progress-track {
+  position: relative;
+  height: 1.15rem;
+  overflow: hidden;
+  border: 1px solid var(--rg-ink, #102d3a);
+  background: #dfe7e6;
+}
+
+.osm-acquisition-progress-track i {
+  display: block;
+  width: var(--osm-progress, 0%);
+  height: 100%;
+  background: var(--rg-blue, #174b64);
+  transition: width 180ms ease-out;
+}
+
+.osm-acquisition-progress-track[data-indeterminate="true"] i {
+  position: absolute;
+  width: 32%;
+  background: repeating-linear-gradient(135deg, var(--rg-blue, #174b64) 0 10px, var(--rg-yellow, #f4c430) 10px 20px);
+  animation: osm-progress-scan 1.15s linear infinite;
+}
+
+@keyframes osm-progress-scan {
+  from { left: -32%; }
+  to { left: 100%; }
+}
+
+.osm-acquisition-progress-meta {
+  display: grid;
+  grid-template-columns: auto repeat(3, 1fr);
+  align-items: baseline;
+  gap: 0.8rem;
+  font: 700 0.65rem/1.2 var(--rg-mono-font, ui-monospace, monospace);
+}
+.osm-acquisition-progress-meta strong { font-size: 1.2rem; color: var(--rg-coral, #df654f); }
+.osm-acquisition-progress-meta span { color: #607177; }
+
+.osm-acquisition-progress-card ol {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(16, 45, 58, 0.4);
+  list-style: none;
+}
+.osm-acquisition-progress-card li {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  gap: 0.65rem;
+  padding: 0.55rem;
+  border-bottom: 1px solid rgba(16, 45, 58, 0.22);
+  font-size: 0.68rem;
+}
+.osm-acquisition-progress-card li:last-child { border-bottom: 0; }
+.osm-acquisition-progress-card li b { font-family: var(--rg-mono-font, ui-monospace, monospace); text-transform: uppercase; }
+.osm-acquisition-progress-card li span { color: #607177; }
+
+.osm-acquisition-error { padding: 0.65rem; border-left: 4px solid var(--rg-coral, #df654f); background: #fff0ed; color: #863526; font-size: 0.7rem; }
+.osm-acquisition-progress-actions { display: flex; justify-content: flex-end; gap: 0.55rem; }
+.osm-acquisition-progress-actions button { min-height: 2.3rem; padding: 0.55rem 0.75rem; border: 1px solid var(--rg-ink, #102d3a); background: #fff; color: var(--rg-ink, #102d3a); font: 800 0.64rem/1 var(--rg-mono-font, ui-monospace, monospace); cursor: pointer; }
+.osm-acquisition-progress-actions button:last-child { color: #fff; background: var(--rg-blue, #174b64); box-shadow: 3px 3px 0 var(--rg-yellow, #f4c430); }
+
 .scene-canvas-viewport-controls {
   position: absolute;
   top: 0.65rem;

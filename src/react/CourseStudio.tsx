@@ -20,7 +20,9 @@ import {
 import type { ViewerLanguage } from "../viewer-i18n";
 import type { WorkflowController } from "../workflow-controller";
 import type { OsmAoiSelection } from "../osm-aoi-picker";
+import type { OsmRoadPreview, OsmRoadStudyResponse, OsmRoadStudySelection } from "../workflow-api";
 import { AoiMap } from "./AoiMap";
+import { OsmRoadStudyMap } from "./OsmRoadStudyMap";
 import { CourseReferenceWorkbench, CourseViewerWorkbench, type CourseWorkbenchNavigation } from "./CourseSharedWorkbenches";
 import { StudioBrandHeader } from "./StudioBrandHeader";
 
@@ -245,8 +247,83 @@ function AreaStage({ project, language }: { project: CourseProject; language: Vi
 
 function DataStage({ api, project, latestSource, language, act, onRefresh, onNext }: { api: CourseApi; project: CourseProject; latestSource: SceneSource | null; language: ViewerLanguage; act: any; onRefresh: () => Promise<void>; onNext: () => void }) {
   const zh = language === "zh";
+  const [osmJob, setOsmJob] = useState<PlatformJob | null>(null);
+  const [preview, setPreview] = useState<OsmRoadPreview | null>(null);
   const upload = (file: File) => act(zh ? "正在规范化 GeoJSON…" : "Normalizing GeoJSON…", async () => { const payload = JSON.parse(await file.text()); await api.post(`/api/v1/projects/${project.id}/sources/geojson`, { geojson: payload }); await onRefresh(); });
-  return <div className="course-data-layout"><section className="course-action-ledger"><div className="course-action-row"><span>01</span><div><strong>{zh ? "从 OpenStreetMap 获取" : "Fetch from OpenStreetMap"}</strong><p>{zh ? "道路、建筑、POI与土地利用；保存来源和处理日志。" : "Roads, buildings, POI and land use with provenance."}</p></div><Button type="primary" onClick={() => void act(zh ? "正在获取并标注 OSM…" : "Fetching and annotating OSM…", async () => { const job = await api.post<PlatformJob>(`/api/v1/projects/${project.id}/sources/osm`, {}); const done = await waitForJob(api, job); if (done.status !== "succeeded") throw new Error(done.error); await onRefresh(); })}>{zh ? "获取街区" : "Fetch area"}</Button></div><div className="course-action-row"><span>02</span><div><strong>{zh ? "导入普通 GeoJSON" : "Import standard GeoJSON"}</strong><p>EPSG:4326 · stable IDs · automatic roles</p></div><label className="course-file-button"><input type="file" accept=".geojson,.json,application/geo+json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} />{zh ? "选择文件" : "Choose file"}</label></div></section><section className="course-quality-panel"><span className="course-eyebrow">NORMALIZATION GATE</span>{latestSource ? <><h2>{latestSource.kind.toUpperCase()}</h2><div className="course-quality-chips"><span data-ok={String(latestSource.quality_report.conversion_ok)}>conversion_ok</span><span data-ok={String(latestSource.quality_report.topology_ok)}>topology_ok</span><span>geo_delta {String(latestSource.quality_report.geo_delta)}m</span></div><Button onClick={() => void api.downloadArtifact(latestSource.normalized_artifact_id, "normalized.geojson")}>{zh ? "下载标准 GeoJSON" : "Download GeoJSON"}</Button><Button type="primary" onClick={onNext}>{zh ? "进入2D检查" : "Review in 2D"}</Button></> : <p>{zh ? "尚未导入数据。" : "No source imported yet."}</p>}</section></div>;
+  const refreshOsmJob = useCallback(async (initial: PlatformJob) => {
+    let current = initial;
+    setOsmJob(current);
+    while (["queued", "running"].includes(current.status)) {
+      await new Promise((resolve) => setTimeout(resolve, 650));
+      current = await api.request<PlatformJob>(`/api/v1/jobs/${current.id}`);
+      setOsmJob(current);
+    }
+    if (current.status === "succeeded" && current.result.preview_id) {
+      setPreview(current.result as OsmRoadPreview);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    let active = true;
+    void api.request<{ items: PlatformJob[] }>(`/api/v1/projects/${project.id}/jobs?kind=osm_preview&limit=1`)
+      .then(({ items }) => {
+        if (!active || !items[0]) return;
+        const job = items[0];
+        if (job.status === "succeeded" && job.result.preview_id) {
+          setOsmJob(job);
+          setPreview(job.result as OsmRoadPreview);
+        } else if (["queued", "running"].includes(job.status)) {
+          void refreshOsmJob(job);
+        }
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [api, project.id, refreshOsmJob]);
+
+  const startOsm = () => void act(zh ? "正在启动 OSM 获取…" : "Starting OSM acquisition…", async () => {
+    setPreview(null);
+    const job = await api.post<PlatformJob>(`/api/v1/projects/${project.id}/osm-previews`, {});
+    await refreshOsmJob(job);
+  });
+  const cancelOsm = () => void act(zh ? "正在取消 OSM 获取…" : "Cancelling OSM acquisition…", async () => {
+    if (!osmJob) return;
+    const cancelled = await api.post<PlatformJob>(`/api/v1/jobs/${osmJob.id}/cancel`, {});
+    setOsmJob(cancelled);
+  });
+
+  if (preview?.preview_id && preview.raw_artifact_id) {
+    return <div className="course-osm-study-stage"><OsmRoadStudyMap
+      preview={preview}
+      language={zh ? "zh" : "en"}
+      bufferReadonly
+      onResolve={(selection: OsmRoadStudySelection) => api.post<OsmRoadStudyResponse>(`/api/v1/projects/${project.id}/osm-previews/${preview.preview_id}/selection-preview`, {
+        ...selection,
+        preview_id: preview.preview_id,
+        raw_artifact_id: preview.raw_artifact_id,
+      })}
+      onApply={async (result) => {
+        await act(zh ? "正在保存道路研究区…" : "Saving the road study area…", async () => {
+          await api.post(`/api/v1/projects/${project.id}/osm-previews/${preview.preview_id}/selection`, {
+            ...result.osm_study.selection,
+            preview_id: preview.preview_id,
+            raw_artifact_id: preview.raw_artifact_id,
+          });
+          await onRefresh();
+          onNext();
+        });
+      }}
+      onBack={() => { setPreview(null); setOsmJob(null); }}
+    /></div>;
+  }
+
+  if (osmJob && ["queued", "running", "failed", "cancelled"].includes(osmJob.status)) {
+    const indeterminate = String(osmJob.detail?.progress_mode ?? "") === "indeterminate";
+    const elapsed = Math.max(0, Math.floor((Date.now() - new Date(osmJob.created_at).getTime()) / 1000));
+    const active = ["queued", "running"].includes(osmJob.status);
+    return <div className="course-osm-job-board"><section><span className="course-eyebrow">OSM ACQUISITION · {osmJob.stage.replace(/_/g, " ")}</span><h2>{osmJob.message}</h2><div className="course-osm-job-track" data-indeterminate={String(indeterminate)}><i style={{ width: `${osmJob.progress}%` }} /></div><div className="course-osm-job-meta"><strong>{indeterminate ? "—" : `${osmJob.progress}%`}</strong><span>{String(osmJob.detail?.element_count ?? "—")} elements</span><span>{String(osmJob.detail?.attempt ?? "—")} / {String(osmJob.detail?.max_attempts ?? "—")} attempts</span><span>{elapsed}s elapsed</span></div><ol>{osmJob.operations.slice(-3).reverse().map((operation) => <li key={`${operation.timestamp}-${operation.stage}`}><b>{operation.stage.replace(/_/g, " ")}</b><span>{operation.message}</span></li>)}</ol>{osmJob.error ? <div className="course-notice" data-tone="error">{osmJob.error}</div> : null}<div className="course-osm-job-actions">{active ? <Button danger onClick={cancelOsm}>{zh ? "取消任务" : "Cancel"}</Button> : <Button onClick={() => { setOsmJob(null); setPreview(null); }}>{zh ? "返回" : "Back"}</Button>}{["failed", "cancelled"].includes(osmJob.status) ? <Button type="primary" onClick={startOsm}>{zh ? "重试获取" : "Retry"}</Button> : null}</div></section></div>;
+  }
+
+  return <div className="course-data-layout"><section className="course-action-ledger"><div className="course-action-row"><span>01</span><div><strong>{zh ? "获取 OSM 检索快照" : "Fetch OSM retrieval snapshot"}</strong><p>{zh ? "先获取矩形范围内的道路、建筑、POI与土地利用，再选择真正的道路研究区。" : "Fetch the rectangular context first, then select the actual road-centred study area."}</p></div><Button type="primary" onClick={startOsm}>{zh ? "获取并选择道路" : "Fetch and select road"}</Button></div><div className="course-action-row"><span>02</span><div><strong>{zh ? "导入普通 GeoJSON" : "Import standard GeoJSON"}</strong><p>EPSG:4326 · stable IDs · automatic roles</p></div><label className="course-file-button"><input type="file" accept=".geojson,.json,application/geo+json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} />{zh ? "选择文件" : "Choose file"}</label></div></section><section className="course-quality-panel"><span className="course-eyebrow">NORMALIZATION GATE</span>{latestSource ? <><h2>{latestSource.kind.toUpperCase()}</h2><div className="course-quality-chips"><span data-ok={String(latestSource.quality_report.conversion_ok)}>conversion_ok</span><span data-ok={String(latestSource.quality_report.topology_ok)}>topology_ok</span><span>geo_delta {String(latestSource.quality_report.geo_delta)}m</span></div><Button onClick={() => void api.downloadArtifact(latestSource.normalized_artifact_id, "normalized.geojson")}>{zh ? "下载标准 GeoJSON" : "Download GeoJSON"}</Button><Button type="primary" onClick={onNext}>{zh ? "进入2D检查" : "Review in 2D"}</Button></> : <p>{zh ? "尚未选择最终道路研究区。" : "No final road study area selected yet."}</p>}</section></div>;
 }
 
 function AnnotationStage({ api, project, source, language, workflow, navigation, onGenerationStarted }: { api: CourseApi; project: CourseProject; source: SceneSource | null; language: ViewerLanguage; workflow: WorkflowController; navigation: CourseWorkbenchNavigation; onGenerationStarted: (job: PlatformJob) => void }) {

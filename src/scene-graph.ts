@@ -10,6 +10,10 @@ import {
   type OsmMapView,
   type Wgs84Bbox as EditableWgs84Bbox,
 } from "./osm-aoi-picker";
+import {
+  mountOsmRoadStudyPicker,
+  type OsmRoadStudyPickerController,
+} from "./osm-road-study-picker";
 
 import type {
   AnnotationPoint,
@@ -251,14 +255,21 @@ import { VIEWER_LANGUAGE_EVENT, applyViewerTranslations, loadViewerLanguage, tra
 import type { ScenarioDesign, ScenarioDesignCatalogPayload } from "./viewer-types";
 import type { WorkflowController } from "./workflow-controller";
 import {
+  cancelOsmAcquisitionJob,
+  createOsmAcquisitionJob,
   extractSceneSource,
-  loadOsmSceneSource,
+  loadOsmAcquisitionJob,
   loadWorkflowCapabilities,
   normalizeSceneSource,
+  retryOsmAcquisitionJob,
+  selectOsmRoadStudyArea,
   toNormalizedSceneSource,
 } from "./workflow-api";
 import type {
   NormalizedSceneSourceResponse,
+  OsmAcquisitionJob,
+  OsmRoadPreview,
+  OsmRoadStudyResponse,
   SourceImageReference,
 } from "./workflow-api";
 
@@ -267,6 +278,7 @@ const ANNOTATION_MIN_ZOOM = 0.25;
 const ANNOTATION_MAX_ZOOM = 6;
 const ANNOTATION_ZOOM_STEP = 1.25;
 const PROFESSIONAL_OSM_VIEW_KEY = "roadgen3d:professional-osm-view-v1";
+const PROFESSIONAL_OSM_JOB_KEY = "roadgen3d:professional-osm-job-v1";
 
 type SceneGraphStatusText = string | {
   key: string;
@@ -2471,6 +2483,9 @@ export function mountSceneGraphPage(
   const osmPickerHostEl = root.querySelector<HTMLElement>("#scene-osm-aoi-picker");
   let annotationOsmMap: MapLibreMap | null = null;
   let osmPicker: OsmAoiPickerController | null = null;
+  let osmRoadStudyPicker: OsmRoadStudyPickerController | null = null;
+  let professionalOsmStage: "aoi" | "progress" | "study" | "annotation" = "aoi";
+  let professionalOsmPreview: OsmRoadPreview | null = null;
 
   const state = {
     referencePlans: [FALLBACK_REFERENCE_PLAN] as ReferencePlan[],
@@ -2796,6 +2811,135 @@ export function mountSceneGraphPage(
     }
   }
 
+  function storeProfessionalOsmJob(jobId: string | null): void {
+    try {
+      if (jobId) window.sessionStorage.setItem(PROFESSIONAL_OSM_JOB_KEY, jobId);
+      else window.sessionStorage.removeItem(PROFESSIONAL_OSM_JOB_KEY);
+    } catch {
+      // Job recovery is a convenience; the current stage remains usable.
+    }
+  }
+
+  function renderOsmJobProgress(job: OsmAcquisitionJob): void {
+    if (!osmPickerHostEl) return;
+    professionalOsmStage = "progress";
+    osmPicker?.destroy();
+    osmPicker = null;
+    osmRoadStudyPicker?.destroy();
+    osmRoadStudyPicker = null;
+    const indeterminate = job.progress_mode === "indeterminate"
+      || String(job.detail?.progress_mode ?? "") === "indeterminate";
+    const recent = [...(job.operations ?? [])].slice(-3).reverse();
+    osmPickerHostEl.innerHTML = `
+      <section class="osm-acquisition-progress" data-status="${escapeHtml(job.status)}">
+        <div class="osm-acquisition-progress-card">
+          <span class="osm-acquisition-kicker">OSM ACQUISITION · ${escapeHtml(job.stage.replace(/_/g, " "))}</span>
+          <h2>${escapeHtml(job.message || "Preparing OSM data…")}</h2>
+          <div class="osm-acquisition-progress-track" data-indeterminate="${String(indeterminate)}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${job.progress}">
+            <i style="--osm-progress:${job.progress}%"></i>
+          </div>
+          <div class="osm-acquisition-progress-meta">
+            <strong>${indeterminate ? "—" : `${job.progress}%`}</strong>
+            <span>${escapeHtml(String(job.detail?.element_count ?? "—"))} elements</span>
+            <span>${escapeHtml(String(job.detail?.attempt ?? "—"))} / ${escapeHtml(String(job.detail?.max_attempts ?? "—"))} attempts</span>
+            <span>${escapeHtml(String(job.detail?.elapsed_seconds ?? "—"))} s elapsed</span>
+          </div>
+          <ol>${recent.map((operation) => `<li><b>${escapeHtml(operation.stage.replace(/_/g, " "))}</b><span>${escapeHtml(operation.message)}</span></li>`).join("") || "<li><span>Waiting for the first operation…</span></li>"}</ol>
+          ${job.error ? `<div class="osm-acquisition-error">${escapeHtml(job.error)}</div>` : ""}
+          <div class="osm-acquisition-progress-actions">
+            <button type="button" data-osm-job-action="back">返回修改检索范围</button>
+            ${job.status === "failed" || job.status === "cancelled"
+              ? '<button type="button" data-osm-job-action="retry">重试获取</button>'
+              : '<button type="button" data-osm-job-action="cancel">取消任务</button>'}
+          </div>
+        </div>
+      </section>
+    `;
+    osmPickerHostEl.querySelector<HTMLButtonElement>("[data-osm-job-action='back']")?.addEventListener("click", () => mountProfessionalAoiPicker());
+    osmPickerHostEl.querySelector<HTMLButtonElement>("[data-osm-job-action='cancel']")?.addEventListener("click", () => {
+      void cancelOsmAcquisitionJob(job.id).then(renderOsmJobProgress);
+    });
+    osmPickerHostEl.querySelector<HTMLButtonElement>("[data-osm-job-action='retry']")?.addEventListener("click", () => {
+      void retryOsmAcquisitionJob(job.id).then((next) => {
+        storeProfessionalOsmJob(next.id);
+        void pollProfessionalOsmJob(next);
+      });
+    });
+    updateOsmPickerVisibility();
+  }
+
+  function mountProfessionalRoadStudy(preview: OsmRoadPreview): void {
+    if (!osmPickerHostEl) return;
+    professionalOsmStage = "study";
+    professionalOsmPreview = preview;
+    osmPicker?.destroy();
+    osmPicker = null;
+    osmRoadStudyPicker?.destroy();
+    osmRoadStudyPicker = mountOsmRoadStudyPicker(osmPickerHostEl, {
+      preview,
+      language: loadViewerLanguage(),
+      onResolve: (selection) => selectOsmRoadStudyArea(
+        preview.preview_id,
+        { ...selection, source_id: `${state.annotation.plan_id || "source"}_osm_road_study` },
+      ),
+      onApply: (result: OsmRoadStudyResponse) => {
+        pendingOsmNormalization = result;
+        workflow.setSourceDraft({
+          kind: "osm",
+          fileName: `${result.source.source_id}.geojson`,
+          geojson: result.geojson,
+        });
+        professionalOsmStage = "annotation";
+        storeProfessionalOsmJob(null);
+        applyNormalizedSourcePayload(
+          result,
+          `Road study area loaded with ${result.annotation.centerlines.length} roads and ${result.aligned_buildings.length} buildings.`,
+        );
+        updateOsmPickerVisibility();
+      },
+      onBack: () => mountProfessionalAoiPicker(),
+    });
+    updateOsmPickerVisibility();
+  }
+
+  function mountProfessionalAoiPicker(): void {
+    if (!osmPickerHostEl || courseMode) return;
+    professionalOsmStage = "aoi";
+    professionalOsmPreview = null;
+    osmRoadStudyPicker?.destroy();
+    osmRoadStudyPicker = null;
+    osmPicker?.destroy();
+    osmPicker = mountOsmAoiPicker(osmPickerHostEl, {
+      initialView: storedProfessionalOsmView(),
+      initialSelection: professionalOsmSelection,
+      language: loadViewerLanguage(),
+      showCityPicker: true,
+      showConfirm: true,
+      confirmLabel: "获取完整 OSM 并选择道路",
+      onViewChange: persistProfessionalOsmView,
+      onSelectionChange: (next) => {
+        professionalOsmSelection = next;
+        renderProfessionalAoiSummary();
+      },
+      onConfirm: importOsmContext,
+    });
+    updateOsmPickerVisibility();
+  }
+
+  async function pollProfessionalOsmJob(initial: OsmAcquisitionJob): Promise<void> {
+    let job = initial;
+    renderOsmJobProgress(job);
+    while (job.status === "queued" || job.status === "running") {
+      await new Promise((resolve) => window.setTimeout(resolve, 450));
+      job = await loadOsmAcquisitionJob(job.id);
+      renderOsmJobProgress(job);
+    }
+    if (job.status === "succeeded" && job.result.preview_id) {
+      storeProfessionalOsmJob(null);
+      mountProfessionalRoadStudy(job.result as OsmRoadPreview);
+    }
+  }
+
   async function importOsmContext(explicitSelection?: OsmAoiSelection): Promise<void> {
     const selected = explicitSelection ?? professionalOsmSelection;
     const bbox = selected?.bbox;
@@ -2807,30 +2951,22 @@ export function mountSceneGraphPage(
     renderProfessionalAoiSummary();
     const token = workflow.beginRequest("osm");
     workflow.clearError();
-    setStatus(sourceStatusEl, "Loading OSM roads, buildings, land use and POI…", "neutral");
+    setStatus(sourceStatusEl, "Starting the OSM acquisition job…", "neutral");
     try {
-      const osmNormalized = await loadOsmSceneSource({
+      const job = await createOsmAcquisitionJob({
         source_id: `${state.annotation.plan_id || "source"}_osm_context`,
         aoi_bbox: bbox,
       }, token.signal);
       if (!token.isCurrent()) return;
-      workflow.setSourceDraft({
-        kind: "osm",
-        fileName: `${osmNormalized.source.source_id}.geojson`,
-        geojson: osmNormalized.geojson,
-      });
-      pendingOsmNormalization = osmNormalized;
-      applyNormalizedSourcePayload(
-        osmNormalized,
-        `OSM loaded into ReferenceAnnotation with ${osmNormalized.annotation.centerlines.length} roads and ${osmNormalized.aligned_buildings.length} locked building masses.`,
-      );
+      storeProfessionalOsmJob(job.id);
+      await pollProfessionalOsmJob(job);
       workflow.endRequest(token);
     } catch (error) {
       if (workflow.endRequest(token, error)) {
         setStatus(sourceStatusEl, error instanceof Error ? error.message : "OSM import failed.", "error");
         renderSourceWorkflow();
       }
-      throw error;
+      mountProfessionalAoiPicker();
     }
   }
 
@@ -3162,12 +3298,16 @@ export function mountSceneGraphPage(
   function updateOsmPickerVisibility(): void {
     if (!osmPickerHostEl || courseMode) return;
     const snapshot = workflow.getSnapshot();
-    const visible = snapshot.normalized ? snapshot.step === "source" : !hasAnnotationCanvas();
+    const visible = professionalOsmStage !== "annotation"
+      && (snapshot.step === "source" || !snapshot.normalized);
     osmPickerHostEl.hidden = !visible;
     stageEl.hidden = visible;
     const viewportShellEl = stageEl.closest<HTMLElement>(".scene-canvas-viewport-shell");
     if (viewportShellEl) viewportShellEl.dataset.osmPicker = String(visible);
-    if (visible) window.requestAnimationFrame(() => osmPicker?.resize());
+    if (visible) window.requestAnimationFrame(() => {
+      osmPicker?.resize();
+      osmRoadStudyPicker?.resize();
+    });
   }
 
   function renderViewportControls(): void {
@@ -5686,8 +5826,8 @@ export function mountSceneGraphPage(
       const sourceBbox = normalizedOsmBboxFromWorkflow();
       if (sourceBbox) {
         professionalOsmSelection = { bbox: [...sourceBbox], source: "coordinates" };
-        osmPicker?.setSelection(professionalOsmSelection, { fit: true });
       }
+      mountProfessionalAoiPicker();
       shell.activateRightTab("source");
       renderSourceWorkflow();
       updateOsmPickerVisibility();
@@ -6682,19 +6822,18 @@ export function mountSceneGraphPage(
   renderScenarioDesignOptions();
   const initialWorkflowSnapshot = workflow.getSnapshot();
   if (!courseMode && osmPickerHostEl) {
-    osmPicker = mountOsmAoiPicker(osmPickerHostEl, {
-      initialView: storedProfessionalOsmView(),
-      initialSelection: initialWorkflowSnapshot.normalized ? professionalOsmSelection : null,
-      language: loadViewerLanguage(),
-      showCityPicker: true,
-      showConfirm: true,
-      onViewChange: persistProfessionalOsmView,
-      onSelectionChange: (next) => {
-        professionalOsmSelection = next;
-        renderProfessionalAoiSummary();
-      },
-      onConfirm: importOsmContext,
-    });
+    if (initialWorkflowSnapshot.normalized) professionalOsmStage = "annotation";
+    else mountProfessionalAoiPicker();
+    let retainedJobId = "";
+    try { retainedJobId = window.sessionStorage.getItem(PROFESSIONAL_OSM_JOB_KEY) ?? ""; } catch { retainedJobId = ""; }
+    if (!initialWorkflowSnapshot.normalized && retainedJobId) {
+      void loadOsmAcquisitionJob(retainedJobId)
+        .then((job) => pollProfessionalOsmJob(job))
+        .catch(() => {
+          storeProfessionalOsmJob(null);
+          mountProfessionalAoiPicker();
+        });
+    }
   }
   if (courseMode) {
     sourceGenerateButton.textContent = "批准完整标注并生成 3D 基线";
