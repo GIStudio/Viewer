@@ -1,0 +1,29 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const app = fs.readFileSync(new URL("../src/app.ts", import.meta.url), "utf8");
+const routeIsland = fs.readFileSync(new URL("../src/react/RouteIsland.tsx", import.meta.url), "utf8");
+const stage = fs.readFileSync(new URL("../src/viewer-panels/stage.ts", import.meta.url), "utf8");
+const starter = fs.readFileSync(new URL("../src/starter-scene.ts", import.meta.url), "utf8");
+const workflow = fs.readFileSync(new URL("../src/workflow-controller.ts", import.meta.url), "utf8");
+const draftStore = fs.readFileSync(new URL("../src/professional-draft-store.ts", import.meta.url), "utf8");
+const selection = fs.readFileSync(new URL("../src/viewer-scene-selection-controller.ts", import.meta.url), "utf8");
+const panelElements = fs.readFileSync(new URL("../src/viewer-panels/elements.ts", import.meta.url), "utf8");
+
+assert.match(workflow, /kind: "starter_demo"; demoId: string/, "workflow scene refs must distinguish immutable starter previews");
+assert.match(workflow, /materializeStarterDemo\(input\)/, "workflow controller must atomically materialize a starter scene");
+assert.match(draftStore, /sceneLayoutPath: snapshot\.sceneLayoutPath/, "a materialized starter layout must survive browser refresh");
+assert.match(starter, /\/api\/starter-scenes\/default/, "starter discovery must use the registered server contract");
+assert.match(starter, /\/materialize`/, "starter materialization must use the idempotent server endpoint");
+assert.match(starter, /await saveProfessionalWorkflowDraft\(workflow\.getSnapshot\(\)\)/, "materialization must be durable before the preview is dismissed");
+assert.match(stage, /id="viewer-starter-demo-banner"/, "the main stage must identify the bundled demo");
+assert.match(stage, /data-starter-action="materialize"/, "the demo banner must offer an explicit copy action");
+assert.match(stage, /data-starter-action="source"/, "the demo banner must link to the user's OSM workflow");
+assert.match(app, /await loadStarterScenePreview\(\)/, "an empty professional workflow must load the starter preview");
+assert.doesNotMatch(app, /fallbackCandidates/, "startup must never silently substitute an arbitrary recent scene");
+assert.match(app, /The scene contains no usable road geometry or has invalid bounds/, "starter loading must reject empty or invalid scene bounds");
+assert.match(selection, /persistSelectionInUrl !== false/, "preview loading must not write its manifest into the URL");
+assert.match(routeIsland, /materializeDefaultStarterScene\(workflow\)/, "01A and editing must materialize the preview before mutation");
+assert.doesNotMatch(panelElements, /#viewer-design-close/, "the paged generation dialog must not require its removed legacy close button");
+
+console.log("starter scene: preview priority, explicit materialization, and empty-scene protection verified");

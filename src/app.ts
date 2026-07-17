@@ -184,6 +184,13 @@ import { WORKFLOW_UNDO_EVENT } from "./workflow-controller";
 import type { WorkflowController } from "./workflow-controller";
 import { loadWorkflowCapabilities, normalizeSceneSource, toNormalizedSceneSource } from "./workflow-api";
 import { createViewerWorkflowBridge } from "./viewer-workflow-bridge";
+import {
+  applyMaterializedStarterScene,
+  loadDefaultStarterScene,
+  requestStarterSceneMaterialization,
+  type ActiveSceneOrigin,
+  type StarterScenePackage,
+} from "./starter-scene";
 import { renderWorkflowCapabilities } from "./viewer-capabilities";
 import {
   parseSceneCommandEnvelope,
@@ -319,7 +326,6 @@ const AVATAR_HEIGHT_M = 1.7;
 const AVATAR_EYE_HEIGHT_M = 1.62;
 const THIRD_PERSON_DISTANCE_M = 3.6;
 const THIRD_PERSON_VERTICAL_OFFSET_M = 1.1;
-const INITIAL_RECENT_LAYOUT_LIMIT = 1;
 const RECENT_LAYOUT_BACKGROUND_LIMIT = 20;
 const RECENT_LAYOUT_BACKGROUND_BATCH = 8;
 
@@ -542,7 +548,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     generationSourceSummaryEl,
     generationStrategySummaryEl,
     designReviewRunEl,
-    designCloseEl,
     designPresetEl,
     designPromptEl,
     designCountEl,
@@ -643,6 +648,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   const reviewAssetsEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-assets");
   const emptyStateEl = root.querySelector<HTMLElement>("#viewer-empty-state");
   const viewerShellEl = root.querySelector<HTMLElement>(".viewer-shell-embedded");
+  const starterDemoBannerEl = root.querySelector<HTMLElement>("#viewer-starter-demo-banner");
+  let activeSceneOrigin: ActiveSceneOrigin | null = workflow.getSnapshot().sceneLayoutPath ? "workflow" : null;
+  let activeStarterScene: StarterScenePackage | null = null;
+  let starterLoading = false;
+  let starterLoadError = "";
   let generationWizard: ReturnType<typeof createViewerGenerationWizardController> | null = null;
   const renderCapabilityStatus = (): void => {
     const capabilities = workflow.getSnapshot().capabilities;
@@ -774,7 +784,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     updateGenerationDialogContract();
     renderUsedAssetProvenance();
     const snapshot = workflow.getSnapshot();
-    const hasScene = Boolean(snapshot.sceneLayoutPath);
+    const hasWorkflowScene = Boolean(snapshot.sceneLayoutPath);
+    const hasScene = hasWorkflowScene || activeSceneOrigin === "starter_demo";
     const baseline = snapshot.baselineRun;
     const baselineBusy = baseline.sourceRevision === snapshot.sourceRevision
       && (baseline.status === "queued" || baseline.status === "running");
@@ -793,7 +804,22 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
             : operation.message ?? operation.stage ?? operation.name ?? "operation";
           return `<li>${escapeHtml(String(message))}</li>`;
         }).join("");
-        if (baselineBusy) {
+        if (starterLoading) {
+          emptyStateEl.innerHTML = `
+            <div class="viewer-empty-card" data-tone="running">
+              <span class="viewer-empty-kicker">BUILT-IN DEMO · GUANGZHOU</span>
+              <h2>${currentLang === "zh" ? "正在载入广州道路骨架" : "Loading the Guangzhou road skeleton"}</h2>
+              <p>${currentLang === "zh" ? "读取内置 OSM 快照与无家具道路场景，不会请求 Overpass 或资产仓库。" : "Reading the bundled OSM snapshot and furniture-free scene without requesting Overpass or the asset repository."}</p>
+            </div>`;
+        } else if (starterLoadError && !approved) {
+          emptyStateEl.innerHTML = `
+            <div class="viewer-empty-card" data-tone="error">
+              <span class="viewer-empty-kicker">STARTER DEMO FAILED</span>
+              <h2>${currentLang === "zh" ? "默认道路骨架载入失败" : "The starter road skeleton could not be loaded"}</h2>
+              <p>${escapeHtml(starterLoadError)}</p>
+              <div class="viewer-empty-actions"><button type="button" data-starter-action="retry">${currentLang === "zh" ? "重新载入示例" : "Reload demo"}</button><button type="button" data-starter-action="source">${currentLang === "zh" ? "选择自己的 OSM" : "Choose my own OSM"}</button></div>
+            </div>`;
+        } else if (baselineBusy) {
           emptyStateEl.innerHTML = `
             <div class="viewer-empty-card" data-tone="running">
               <span class="viewer-empty-kicker">AUTO BASELINE · SOURCE REV ${baseline.sourceRevision}</span>
@@ -823,6 +849,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         }
       }
     }
+    if (starterDemoBannerEl) {
+      starterDemoBannerEl.hidden = activeSceneOrigin !== "starter_demo";
+      const label = starterDemoBannerEl.querySelector<HTMLElement>("[data-starter-demo-label]");
+      if (label && activeStarterScene) label.textContent = `${currentLang === "zh" ? "内置示例" : "Built-in demo"} · ${activeStarterScene.label}`;
+    }
     if (reviewStateEl) {
       const strong = reviewStateEl.querySelector<HTMLElement>("strong");
       const detail = reviewStateEl.querySelector<HTMLElement>("span");
@@ -846,7 +877,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       }
     }
     [reviewAcceptEl, reviewChangesEl, reviewAnnotationEl, reviewAssetsEl].forEach((button) => {
-      if (button) button.disabled = !hasScene;
+      if (button) button.disabled = !hasWorkflowScene;
     });
     if (!hostOptions.embedded) {
       evaluateRunEl.disabled = snapshot.sceneReviewStatus !== "accepted" || Boolean(snapshot.busy.evaluate);
@@ -1798,6 +1829,66 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     },
   });
 
+  async function materializeActiveStarterScene(): Promise<boolean> {
+    if (activeSceneOrigin !== "starter_demo" || !activeStarterScene) return true;
+    setStatus(currentLang === "zh" ? "正在复制内置示例到专业工作流…" : "Copying the starter demo into the professional workflow…");
+    try {
+      const materialized = await requestStarterSceneMaterialization(activeStarterScene.id, signal);
+      await sceneSelectionController.loadLayoutSelection(materialized.layout_path, {
+        persistSelectionInUrl: false,
+        defaultSceneOptionKey: "final_scene",
+      });
+      frameSceneOverview();
+      await applyMaterializedStarterScene(workflow, materialized);
+      activeSceneOrigin = "workflow";
+      activeStarterScene = null;
+      starterLoadError = "";
+      renderProfessionalWorkflowState();
+      flashStatus(currentLang === "zh" ? "广州道路骨架已复制，可继续审阅或编辑。" : "The Guangzhou road skeleton is now an editable workflow scene.");
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      starterLoadError = message;
+      workflow.reportError(error);
+      setStatus(message);
+      renderProfessionalWorkflowState();
+      return false;
+    }
+  }
+
+  async function loadStarterScenePreview(): Promise<void> {
+    starterLoading = true;
+    starterLoadError = "";
+    activeSceneOrigin = null;
+    renderProfessionalWorkflowState();
+    try {
+      const starter = await loadDefaultStarterScene(signal);
+      await sceneSelectionController.loadLayoutSelection(starter.viewer_manifest_url, {
+        persistSelectionInUrl: false,
+        defaultSceneOptionKey: "final_scene",
+      });
+      frameSceneOverview();
+      activeStarterScene = starter;
+      activeSceneOrigin = "starter_demo";
+      setStatus(currentLang === "zh" ? "正在预览内置广州道路骨架。" : "Viewing the built-in Guangzhou road skeleton.");
+    } catch (error) {
+      activeStarterScene = null;
+      activeSceneOrigin = null;
+      starterLoadError = error instanceof Error ? error.message : String(error);
+      setStatus(starterLoadError);
+    } finally {
+      starterLoading = false;
+      renderProfessionalWorkflowState();
+    }
+  }
+
+  root.addEventListener("click", (event) => {
+    const action = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-starter-action]")?.dataset.starterAction;
+    if (action === "materialize") void materializeActiveStarterScene();
+    if (action === "source") window.location.hash = "scene-graph";
+    if (action === "retry") void loadStarterScenePreview();
+  }, { signal });
+
   const workflowBridge = createViewerWorkflowBridge({
     workflow,
     getPrompt: () => designPromptEl.value,
@@ -2306,6 +2397,20 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     syncCameraRig();
   }
 
+  function frameSceneOverview(): void {
+    if (!currentSceneBounds) return;
+    const extent = Math.max(12, currentSceneBounds.extent);
+    const center = currentSceneBounds.center;
+    currentCameraMode = "frame";
+    avatarFigure.visible = false;
+    camera.position.set(
+      center.x + extent * 0.72,
+      center.y + extent * 0.62,
+      center.z + extent * 0.72,
+    );
+    camera.lookAt(center.x, center.y, center.z);
+  }
+
   function updateOverlay(): void {
     const shouldShow = !isRoamMovementActive();
     overlayEl.hidden = !shouldShow;
@@ -2772,6 +2877,18 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
 
     const boundsStart = performance.now();
     const bbox = sceneContentBounds(currentRoot);
+    const validatedSize = new THREE.Vector3();
+    bbox.getSize(validatedSize);
+    if (
+      bbox.isEmpty()
+      || ![validatedSize.x, validatedSize.y, validatedSize.z].every(Number.isFinite)
+      || Math.max(validatedSize.x, validatedSize.z) < 0.5
+    ) {
+      scene.remove(currentRoot);
+      disposeObject(currentRoot);
+      currentRoot = null;
+      throw new Error("The scene contains no usable road geometry or has invalid bounds.");
+    }
     const spawnCenter = new THREE.Vector3();
     bbox.getCenter(spawnCenter);
     const spawn = inferSpawnFromBbox({ center: spawnCenter }, currentManifest ?? {
@@ -3193,7 +3310,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       panelController.setOpen("settings", true);
     }
   }, { signal });
-  root.querySelector<HTMLButtonElement>("#viewer-edit-toggle")?.addEventListener("click", () => {
+  root.querySelector<HTMLButtonElement>("#viewer-edit-toggle")?.addEventListener("click", async () => {
+    if (!(await materializeActiveStarterScene())) return;
     panelController.closeAll();
     panelController.setOpen("settings", true);
     window.requestAnimationFrame(() => {
@@ -3322,7 +3440,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     }, { signal });
   });
   designReviewRunEl.addEventListener("click", reviewLastDesignRun, { signal });
-  designCloseEl.addEventListener("click", () => panelController.setOpen("design", false), { signal });
   designPresetEl.addEventListener("change", () => {
     const currentPrompt = designPromptEl.value.trim();
     const presetPromptValues = new Set(VIEWER_DESIGN_PRESETS.map((item) => item.prompt.trim()).filter(Boolean));
@@ -3950,31 +4067,21 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (captureMode) {
       setStatus("Capture API ready");
     } else {
-      const requestedLayoutPath = hostOptions.embedded
-        ? workflow.getSnapshot().sceneLayoutPath
-        : parseQueryLayoutPath();
-      const hasActiveWorkflowSource = Boolean(workflow.getSnapshot().normalized);
-      let recentLayouts: RecentLayout[] = [];
-      let initialLayoutCandidates = requestedLayoutPath ? [requestedLayoutPath] : [];
-
-      if (!requestedLayoutPath && !hostOptions.embedded && !hasActiveWorkflowSource) {
-        try {
-          recentLayouts = await loadRecentLayouts(INITIAL_RECENT_LAYOUT_LIMIT);
-        } catch (error) {
-          shell.pushActivity(
-            error instanceof Error ? `Recent scenes unavailable: ${error.message}` : "Recent scenes unavailable.",
-            "warning",
-          );
-          recentLayouts = [];
-        }
-        initialLayoutCandidates = recentLayouts.map((item) => item.layout_path);
-      }
+      const explicitLayoutPath = hostOptions.embedded ? null : parseQueryLayoutPath();
+      const workflowLayoutPath = workflow.getSnapshot().sceneLayoutPath;
+      const requestedLayoutPath = explicitLayoutPath || workflowLayoutPath;
+      const recentLayouts: RecentLayout[] = [];
+      const initialLayoutCandidates = requestedLayoutPath ? [requestedLayoutPath] : [];
 
       if (initialLayoutCandidates.length === 0) {
         animate();
         updateOverlay();
-        setStatus(t("Ready for a road baseline.", "等待道路基线。"));
-        renderProfessionalWorkflowState();
+        if (hostOptions.embedded) {
+          setStatus(t("Ready for a road baseline.", "等待道路基线。"));
+          renderProfessionalWorkflowState();
+        } else {
+          await loadStarterScenePreview();
+        }
       } else {
         let initialLayoutPath = initialLayoutCandidates[0];
         let lastLayoutError = "";
@@ -3991,36 +4098,28 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         }
         }
 
-        // If user passed ?layout=... and it failed, fallback to latest recent layouts.
-        if (requestedLayoutPath && lastLayoutError && !hostOptions.embedded) {
-        recentLayouts = await loadRecentLayouts(RECENT_LAYOUT_BACKGROUND_LIMIT);
-        const fallbackCandidates = recentLayouts
-          .map((item) => item.layout_path)
-          .filter((item) => item !== requestedLayoutPath);
-        for (const candidate of fallbackCandidates) {
-          try {
-            populateRecentLayoutOptions(recentLayouts, candidate);
-            await sceneSelectionController.loadLayoutSelection(candidate);
-            initialLayoutPath = candidate;
-            lastLayoutError = "";
-            break;
-          } catch (error) {
-            lastLayoutError = error instanceof Error ? error.message : "Failed to load scene layout.";
-            console.warn(`Skipping fallback scene layout ${candidate}:`, error);
-          }
-        }
-        }
-
         if (lastLayoutError) {
-          throw new Error(`No viewable scene layouts were found. Last error: ${lastLayoutError}`);
-        }
-        animate();
-        updateOverlay();
-        if (initialLayoutPath && !hostOptions.embedded) {
-          const initialLoaded = recentLayouts.some((item) => item.layout_path === initialLayoutPath)
-            ? recentLayouts.length
-            : 0;
-          scheduleRecentLayoutHydration(initialLayoutPath, initialLoaded);
+          if (hostOptions.embedded) {
+            throw new Error(`No viewable project scene was found. Last error: ${lastLayoutError}`);
+          }
+          shell.pushActivity(
+            t(
+              "The requested scene could not be loaded. Showing the bundled Guangzhou starter instead.",
+              "请求的场景无法加载，已改为展示内置广州起始示例。",
+            ),
+            "warning",
+          );
+          animate();
+          updateOverlay();
+          await loadStarterScenePreview();
+        } else {
+          animate();
+          updateOverlay();
+          if (initialLayoutPath && !hostOptions.embedded) {
+            scheduleRecentLayoutHydration(initialLayoutPath, 0);
+          }
+          activeSceneOrigin = explicitLayoutPath ? "explicit_layout" : "workflow";
+          renderProfessionalWorkflowState();
         }
       }
     }

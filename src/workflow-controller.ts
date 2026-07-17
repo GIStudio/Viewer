@@ -31,7 +31,8 @@ export type WorkflowSourceContext = Readonly<Record<string, unknown> & {
 
 export type WorkflowSceneRef =
   | Readonly<{ kind: "local_layout"; layoutPath: string }>
-  | Readonly<{ kind: "project_revision"; projectId: string; revisionId: string }>;
+  | Readonly<{ kind: "project_revision"; projectId: string; revisionId: string }>
+  | Readonly<{ kind: "starter_demo"; demoId: string }>;
 
 export type ProfessionalPipelineStage = "prepare" | "generate" | "review" | "edit" | "deliver";
 
@@ -84,6 +85,11 @@ export type ProfessionalWorkflowDraft = Readonly<{
   annotationDraft: ProfessionalAnnotationDraft;
   normalized: NormalizedSceneSource | null;
   approvedSourceRevision: number | null;
+  sceneRef?: WorkflowSceneRef | null;
+  sceneLayoutPath?: string | null;
+  sceneRevision?: SceneRevision | null;
+  sceneReviewStatus?: SceneReviewStatus;
+  baselineRun?: WorkflowBaselineRun;
 }>;
 
 export type WorkflowBaselineRun = Readonly<{
@@ -191,6 +197,13 @@ export type WorkflowController = {
     sceneRef?: WorkflowSceneRef | null;
     sceneRevision?: SceneRevision | null;
     contextMassing?: Record<string, unknown> | null;
+  }): boolean;
+  materializeStarterDemo(input: {
+    source: NormalizedSceneSource;
+    sourceFingerprint: string;
+    layoutPath: string;
+    sceneRevision?: SceneRevision | null;
+    demoId: string;
   }): boolean;
   setSceneRevision(revision: SceneRevision, undoCommand?: LayoutEditCommand | null): void;
   setEditPending(pending: boolean): void;
@@ -521,8 +534,9 @@ export function createWorkflowController(): WorkflowController {
     restoreProfessionalDraft(draft) {
       const revision = Math.max(0, Number(draft.sourceRevision) || 0);
       const approvedRevision = draft.approvedSourceRevision === revision ? revision : null;
+      const restoredLayoutPath = String(draft.sceneLayoutPath || "").trim() || null;
       publish({
-        step: draft.normalized ? "review" : "source",
+        step: restoredLayoutPath ? "edit" : draft.normalized ? "review" : "source",
         sourceRevision: revision,
         sourceKind: draft.sourceKind,
         sourceImageDataUrl: draft.sourceImageDataUrl,
@@ -531,6 +545,20 @@ export function createWorkflowController(): WorkflowController {
         annotationDraft: immutableCopy(draft.annotationDraft),
         normalized: draft.normalized ? immutableCopy(draft.normalized) : null,
         approvedSourceRevision: approvedRevision,
+        sceneRef: restoredLayoutPath
+          ? immutableCopy(draft.sceneRef ?? { kind: "local_layout" as const, layoutPath: restoredLayoutPath })
+          : null,
+        sceneLayoutPath: restoredLayoutPath,
+        sceneRevision: draft.sceneRevision ? immutableCopy(draft.sceneRevision) : null,
+        sceneReviewStatus: restoredLayoutPath ? draft.sceneReviewStatus ?? "pending" : "not_available",
+        baselineRun: draft.baselineRun
+          ? immutableCopy(draft.baselineRun)
+          : Object.freeze({
+              ...snapshot.baselineRun,
+              sourceRevision: revision,
+              status: restoredLayoutPath ? "succeeded" as const : "idle" as const,
+              progress: restoredLayoutPath ? 100 : 0,
+            }),
         lastError: null,
       });
     },
@@ -589,6 +617,58 @@ export function createWorkflowController(): WorkflowController {
         undoCommand: null,
         evaluation: null,
         sceneReviewStatus: "pending",
+        lastError: null,
+      });
+      return true;
+    },
+    materializeStarterDemo(input) {
+      const layoutPath = input.layoutPath.trim();
+      const sourceFingerprint = input.sourceFingerprint.trim();
+      if (!layoutPath || !sourceFingerprint || !input.demoId.trim()) {
+        publish({ lastError: "The starter scene response is incomplete." });
+        return false;
+      }
+      if (
+        snapshot.annotationDraft?.fingerprint === sourceFingerprint
+        && snapshot.sceneLayoutPath === layoutPath
+      ) {
+        return true;
+      }
+      const nextRevision = snapshot.sourceRevision + 1;
+      publish({
+        step: "edit",
+        sourceRevision: nextRevision,
+        sourceKind: "osm",
+        sourceImageDataUrl: null,
+        sourceFileName: `${input.demoId}.osm.geojson`,
+        sourceGeojson: input.source.geojson ? immutableCopy(input.source.geojson) : null,
+        normalized: immutableCopy(input.source),
+        annotationDraft: immutableCopy({
+          annotation: input.source.referenceAnnotation,
+          fingerprint: sourceFingerprint,
+          sourceRevision: nextRevision,
+          status: "saved" as const,
+          savedAt: new Date().toISOString(),
+          validationErrors: [],
+        }),
+        approvedSourceRevision: nextRevision,
+        sceneRef: Object.freeze({ kind: "local_layout" as const, layoutPath }),
+        sceneLayoutPath: layoutPath,
+        sceneRevision: input.sceneRevision ? immutableCopy(input.sceneRevision) : null,
+        contextMassing: null,
+        editPending: false,
+        undoCommand: null,
+        evaluation: null,
+        sceneReviewStatus: "pending",
+        baselineRun: Object.freeze({
+          sourceRevision: nextRevision,
+          jobId: null,
+          status: "succeeded" as const,
+          stage: "starter_demo_materialized",
+          progress: 100,
+          message: "The bundled Guangzhou road skeleton is ready for review.",
+          operations: Object.freeze([]),
+        }),
         lastError: null,
       });
       return true;

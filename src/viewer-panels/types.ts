@@ -58,7 +58,6 @@ export type ViewerPanelElements = {
   generationSourceSummaryEl: HTMLElement;
   generationStrategySummaryEl: HTMLElement;
   designReviewRunEl: HTMLButtonElement;
-  designCloseEl: HTMLButtonElement;
   designPresetEl: HTMLSelectElement;
   designPromptEl: HTMLTextAreaElement;
   designCountEl: HTMLSelectElement;

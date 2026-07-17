@@ -32,6 +32,11 @@ function draftFromSnapshot(snapshot: WorkflowSnapshot): ProfessionalWorkflowDraf
     annotationDraft: snapshot.annotationDraft,
     normalized: snapshot.normalized,
     approvedSourceRevision: snapshot.approvedSourceRevision,
+    sceneRef: snapshot.sceneRef,
+    sceneLayoutPath: snapshot.sceneLayoutPath,
+    sceneRevision: snapshot.sceneRevision,
+    sceneReviewStatus: snapshot.sceneReviewStatus,
+    baselineRun: snapshot.baselineRun,
   };
 }
 
@@ -80,6 +85,9 @@ export function persistProfessionalWorkflowDraft(workflow: WorkflowController): 
       snapshot.annotationDraft?.fingerprint ?? "",
       snapshot.annotationDraft?.status ?? "",
       snapshot.approvedSourceRevision ?? "",
+      snapshot.sceneLayoutPath ?? "",
+      snapshot.sceneRevision?.sha256 ?? "",
+      snapshot.sceneReviewStatus,
     ].join(":");
     if (!snapshot.annotationDraft || signature === lastSignature) return;
     lastSignature = signature;

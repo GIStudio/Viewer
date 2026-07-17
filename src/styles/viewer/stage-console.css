@@ -231,6 +231,36 @@
 .viewer-shell-embedded[data-empty="true"] .viewer-overlay,
 .viewer-shell-embedded[data-empty="true"] .viewer-axis-hud { display: none; }
 
+.viewer-starter-demo-banner {
+  position: absolute;
+  z-index: 24;
+  top: 4.45rem;
+  left: 0.85rem;
+  right: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #102d3a;
+  background: rgba(243, 240, 231, 0.96);
+  box-shadow: 4px 4px 0 #f4c430;
+}
+
+.viewer-starter-demo-banner[hidden] { display: none; }
+.viewer-starter-demo-banner > div:first-child { display: grid; gap: 0.12rem; min-width: 0; }
+.viewer-starter-demo-banner span { color: #df654f; font: 800 0.58rem/1 ui-monospace, monospace; letter-spacing: 0.13em; }
+.viewer-starter-demo-banner strong { color: #102d3a; font: 700 0.92rem/1.15 Georgia, "Songti SC", serif; }
+.viewer-starter-demo-banner small { color: #53666d; font: 650 0.62rem/1.25 ui-monospace, monospace; }
+.viewer-starter-demo-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.45rem; }
+.viewer-starter-demo-actions button { min-height: 2rem; padding: 0.38rem 0.65rem; border: 1px solid #102d3a; border-radius: 3px; background: #174b64; color: white; font-weight: 800; cursor: pointer; }
+.viewer-starter-demo-actions button + button { background: white; color: #102d3a; }
+
+@media (max-width: 760px) {
+  .viewer-starter-demo-banner { align-items: stretch; flex-direction: column; }
+  .viewer-starter-demo-actions { justify-content: flex-start; }
+}
+
 
 .viewer-center-controls {
   display: none;

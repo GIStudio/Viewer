@@ -17,6 +17,7 @@
     "test:professional-pipeline": "node tests/professional-pipeline.test.mjs",
     "test:professional-draft": "node tests/professional-annotation-draft.test.mjs",
     "test:generation-wizard": "node tests/generation-wizard.test.mjs",
+    "test:starter-scene": "node tests/starter-scene.test.mjs",
     "test:single-left-shell": "node tests/single-left-shell.test.mjs",
     "typecheck": "tsc --noEmit"
   },

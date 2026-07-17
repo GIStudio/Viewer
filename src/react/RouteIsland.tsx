@@ -28,6 +28,7 @@ import type { WorkbenchShellMode } from "../shell-types";
 import { renderEvaluatePanelContent } from "../viewer-panels/rightTabs";
 import { ViewerDesktopShell } from "./ViewerDesktopShell";
 import { CourseStudio } from "./CourseStudio";
+import { materializeDefaultStarterScene } from "../starter-scene";
 
 type Teardown = () => void;
 
@@ -58,6 +59,17 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator }: 
     const activateViewerTarget = (target: "generate" | "review" | "edit" | "deliver"): void => {
       const snapshot = workflow.getSnapshot();
       if (target !== "generate" && !snapshot.sceneLayoutPath) {
+        if (target === "edit" && !snapshot.normalized) {
+          shell.setStatusSummary(tr("viewer.starter.materializing", "正在复制内置道路骨架…"));
+          void materializeDefaultStarterScene(workflow)
+            .then(() => activateViewerTarget("edit"))
+            .catch((error: unknown) => {
+              const message = error instanceof Error ? error.message : String(error);
+              shell.setStatusSummary(message);
+              shell.pushActivity(message, "error");
+            });
+          return;
+        }
         const message = tr("professional.pipeline.sceneRequired", "Generate and load a scene first.");
         shell.setStatusSummary(message);
         shell.pushActivity(message, "warning");
@@ -100,7 +112,19 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator }: 
         content: "",
         flow: { stage: "01" as const, branch: "annotation" as const, status: annotationPreparationStatus(workflow.getSnapshot()) },
         badge: "—",
-        action: () => navigateTo("scene-graph"),
+        action: () => {
+          if (workflow.getSnapshot().normalized) {
+            navigateTo("scene-graph");
+            return;
+          }
+          shell.setStatusSummary(tr("viewer.starter.materializing", "正在复制内置道路骨架…"));
+          void materializeDefaultStarterScene(workflow)
+            .catch((error: unknown) => {
+              const message = error instanceof Error ? error.message : String(error);
+              shell.pushActivity(message, "warning");
+            })
+            .finally(() => navigateTo("scene-graph"));
+        },
       },
       {
         id: "prepare-assets",

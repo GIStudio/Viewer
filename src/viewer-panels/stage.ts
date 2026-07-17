@@ -35,6 +35,18 @@ export function createViewerStageHtml(): string {
 
       <section id="viewer-empty-state" class="viewer-empty-state" aria-live="polite" hidden></section>
 
+      <aside id="viewer-starter-demo-banner" class="viewer-starter-demo-banner" aria-live="polite" hidden>
+        <div>
+          <span>BUILT-IN DEMO</span>
+          <strong data-starter-demo-label>内置示例 · 广州道路骨架</strong>
+          <small>真实 OSM 快照 · 无家具 · 不占用 01B 素材仓库</small>
+        </div>
+        <div class="viewer-starter-demo-actions">
+          <button type="button" data-starter-action="materialize">使用此示例开始</button>
+          <button type="button" data-starter-action="source">选择自己的 OSM 研究区</button>
+        </div>
+      </aside>
+
       <div id="viewer-design-workspace" class="viewer-design-workspace" hidden></div>
 
       <section id="viewer-center-controls" class="viewer-center-controls" data-open="false" aria-labelledby="viewer-center-controls-title">
