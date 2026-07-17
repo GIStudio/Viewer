@@ -250,10 +250,9 @@ import {
   stripStrokeColor,
   stringifyAnnotation,
 } from "./scene-graph/index";
-import { storeProfessionalViewerTarget } from "./professional-pipeline";
-import { VIEWER_LANGUAGE_EVENT, applyViewerTranslations, loadViewerLanguage, translateViewerKey, translateViewerLiteral } from "./viewer-i18n";
+import { VIEWER_LANGUAGE_EVENT, applyViewerTranslations, formatViewerKey, loadViewerLanguage, translateViewerKey, translateViewerLiteral } from "./viewer-i18n";
 import type { ScenarioDesign, ScenarioDesignCatalogPayload } from "./viewer-types";
-import type { WorkflowController } from "./workflow-controller";
+import type { NormalizedSceneSource, WorkflowController } from "./workflow-controller";
 import {
   cancelOsmAcquisitionJob,
   createOsmAcquisitionJob,
@@ -2371,7 +2370,7 @@ async function readImageFileDataUrl(file: File): Promise<string> {
 export type SceneGraphHostOptions = {
   mode?: "expert" | "course";
   onApproveAndGenerate?: (annotation: ReferenceAnnotation) => Promise<void>;
-  onApproveProfessionalBaseline?: () => Promise<void>;
+  onEnterProfessionalScene?: () => Promise<void>;
 };
 
 export function mountSceneGraphPage(
@@ -2474,7 +2473,6 @@ export function mountSceneGraphPage(
     sourceCountsEl,
     sourceWarningsEl,
     sourceBackButton,
-    sourceApproveButton,
     sourceGenerateButton,
     sourceReviewStatusEl,
   } = collectSceneGraphElements(root);
@@ -2616,12 +2614,14 @@ export function mountSceneGraphPage(
   }
 
   function renderProfessionalAoiSummary(): void {
+    const language = loadViewerLanguage();
+    const tr = (key: string, fallback: string): string => translateViewerKey(language, key) ?? fallback;
     sourceAoiSummaryEl.dataset.ready = String(Boolean(professionalOsmSelection));
     if (!professionalOsmSelection) {
-      sourceAoiSummaryEl.innerHTML = "<strong>尚未截取研究区</strong><span>在主舞台浏览 OSM，然后使用当前视野或精确框选。</span>";
+      sourceAoiSummaryEl.innerHTML = `<strong>${escapeHtml(tr("sceneGraph.source.noArea", "No study area captured"))}</strong><span>${escapeHtml(tr("sceneGraph.source.noAreaAction", "Browse OSM on the stage, then capture the viewport or draw precisely."))}</span>`;
       return;
     }
-    sourceAoiSummaryEl.innerHTML = `<strong>候选研究区已截取</strong><span>${professionalOsmSelection.bbox.map((value) => Number(value).toFixed(6)).join(" · ")}</span>`;
+    sourceAoiSummaryEl.innerHTML = `<strong>${escapeHtml(tr("sceneGraph.source.areaReady", "Candidate study area captured"))}</strong><span>${professionalOsmSelection.bbox.map((value) => Number(value).toFixed(6)).join(" · ")}</span>`;
   }
 
   function sourceImageReference(requireBbox: boolean): SourceImageReference {
@@ -2653,6 +2653,8 @@ export function mountSceneGraphPage(
   }
 
   function renderSourceWorkflow(): void {
+    const language = loadViewerLanguage();
+    const tr = (key: string, fallback: string): string => translateViewerKey(language, key) ?? fallback;
     const snapshot = workflow.getSnapshot();
     renderProfessionalAoiSummary();
     const reviewVisible = snapshot.step !== "source" && Boolean(snapshot.normalized);
@@ -2668,19 +2670,51 @@ export function mountSceneGraphPage(
       sourceProvenanceEl.innerHTML = `
         <strong>${escapeHtml(String(source.source_id ?? (state.annotation.plan_id || "source")))}</strong>
         <span>${escapeHtml(String(source.kind ?? "reference_annotation"))} · ${escapeHtml(String(source.producer ?? "manual"))}</span>
-        <span>annotation ${escapeHtml(String(source.normalized_annotation_version ?? state.annotation.version))} · normalized ${escapeHtml(normalized.normalizedAt)}</span>
-        <span>alignment ${escapeHtml(String((normalized.sourceContext.source_alignment as Record<string, unknown> | null)?.status ?? "n/a"))}</span>
+        <span>${escapeHtml(tr("sceneGraph.review.annotationVersion", "annotation"))} ${escapeHtml(String(source.normalized_annotation_version ?? state.annotation.version))} · ${escapeHtml(tr("sceneGraph.review.normalizedAt", "normalized"))} ${escapeHtml(normalized.normalizedAt)}</span>
+        <span>${escapeHtml(tr("sceneGraph.review.alignment", "alignment"))} ${escapeHtml(String((normalized.sourceContext.source_alignment as Record<string, unknown> | null)?.status ?? "n/a"))}</span>
       `;
-      sourceCountsEl.innerHTML = Object.entries(normalized.featureCounts)
-        .map(([label, count]) => `<div class="scene-metric-card"><span>${escapeHtml(label.replace(/_/g, " "))}</span><strong>${count}</strong></div>`)
+      const displayedCounts = snapshot.annotationDraft
+        ? featureCountsForAnnotation(snapshot.annotationDraft.annotation)
+        : normalized.featureCounts;
+      sourceCountsEl.innerHTML = Object.entries(displayedCounts)
+        .map(([label, count]) => {
+          const key = ({
+            roads: "sceneGraph.metric.roads",
+            junctions: "sceneGraph.metric.junctions",
+            regions: "sceneGraph.metric.regions",
+            buildings: "sceneGraph.metric.buildings",
+            functional_zones: "sceneGraph.metric.functionalZones",
+            furniture: "sceneGraph.metric.sourceFurniture",
+          } as Record<string, string>)[label];
+          const translated = key ? tr(key, label.replace(/_/g, " ")) : label.replace(/_/g, " ");
+          return `<div class="scene-metric-card"><span>${escapeHtml(translated)}</span><strong>${count}</strong></div>`;
+        })
         .join("");
       sourceWarningsEl.innerHTML = normalized.warnings.length
-        ? normalized.warnings.map((warning) => `<div class="scene-source-warning">${escapeHtml(warning)}</div>`).join("")
-        : '<div class="scene-source-warning" data-tone="ok">No normalization warnings.</div>';
-      sourceReviewStatusEl.textContent = snapshot.approvedSourceRevision === snapshot.sourceRevision
-        ? "Approved. Continue to 3D generation to choose the asset strategy and confirm the run."
-        : "Review is ready for approval.";
-      sourceReviewStatusEl.dataset.tone = snapshot.approvedSourceRevision === snapshot.sourceRevision ? "success" : "neutral";
+        ? normalized.warnings.map((warning) => {
+          const translated = warning.toLowerCase().includes("touches the osm retrieval boundary")
+            ? tr("sceneGraph.review.boundaryWarning", warning)
+            : translateViewerLiteral(language, warning) ?? warning;
+          return `<div class="scene-source-warning">${escapeHtml(translated)}</div>`;
+        }).join("")
+        : `<div class="scene-source-warning" data-tone="ok">${escapeHtml(tr("sceneGraph.review.noWarnings", "No normalization warnings."))}</div>`;
+      const draft = snapshot.annotationDraft;
+      const status = draft?.status ?? "saved";
+      if (status === "validation_error") {
+        const reason = draft?.validationErrors[0] ?? snapshot.lastError ?? "Validation failed.";
+        sourceReviewStatusEl.textContent = formatViewerKey(language, "sceneGraph.review.validationError", { reason }) ?? reason;
+        sourceReviewStatusEl.dataset.tone = "error";
+      } else if (status === "dirty" || status === "saving" || status === "validating") {
+        sourceReviewStatusEl.textContent = tr(`sceneGraph.review.${status}`, status);
+        sourceReviewStatusEl.dataset.tone = "neutral";
+      } else if (snapshot.approvedSourceRevision === snapshot.sourceRevision) {
+        sourceReviewStatusEl.textContent = formatViewerKey(language, "sceneGraph.review.saved", { revision: snapshot.sourceRevision })
+          ?? `Saved and approved · revision ${snapshot.sourceRevision}`;
+        sourceReviewStatusEl.dataset.tone = "success";
+      } else {
+        sourceReviewStatusEl.textContent = tr("sceneGraph.review.waiting", "Waiting for a valid annotation.");
+        sourceReviewStatusEl.dataset.tone = "neutral";
+      }
     }
 
     const llm = snapshot.capabilities?.llm as Record<string, unknown> | undefined;
@@ -2698,17 +2732,18 @@ export function mountSceneGraphPage(
       && (snapshot.step === "source" || !snapshot.normalized);
     sourceNormalizeButton.hidden = browsingOsm;
     sourceNormalizeButton.setAttribute("aria-hidden", String(browsingOsm));
-    sourceApproveButton.disabled = !normalized
-      || snapshot.approvedSourceRevision === snapshot.sourceRevision
-      || Boolean(snapshot.busy.generate);
     sourceGenerateButton.disabled = courseMode
       ? state.annotation.centerlines.length === 0 || Boolean(snapshot.busy.generate)
       : !normalized
         || snapshot.approvedSourceRevision !== snapshot.sourceRevision
+        || snapshot.annotationDraft?.status !== "saved"
         || Boolean(snapshot.busy.generate);
     if (!courseMode) {
-      sourceGenerateButton.textContent = translateViewerKey(loadViewerLanguage(), "professional.annotation.continueGeneration") ?? "Continue to 3D generation…";
-      sourceGenerateButton.title = translateViewerKey(loadViewerLanguage(), "professional.annotation.continueGenerationHint") ?? "Open the 3D Scene Workbench to choose an asset strategy and confirm generation.";
+      sourceGenerateButton.textContent = tr("sceneGraph.review.enter3d", "Enter 3D scene");
+      sourceGenerateButton.title = tr("sceneGraph.review.enter3dHint", "Start or resume the road baseline for the current approved revision.");
+    } else {
+      sourceGenerateButton.textContent = tr("sceneGraph.review.courseGenerate", "Approve annotation and generate 3D baseline");
+      sourceGenerateButton.title = tr("sceneGraph.review.courseGenerateHint", "Save this ReferenceAnnotation to the project and start the course baseline job.");
     }
     if (snapshot.lastError && root.isConnected) {
       sourceStatusEl.textContent = snapshot.lastError;
@@ -2717,6 +2752,7 @@ export function mountSceneGraphPage(
   }
 
   function applyNormalizedSourcePayload(payload: NormalizedSceneSourceResponse, status: string): void {
+    const expectedDraftFingerprint = comparableAnnotationSnapshot(state.annotation);
     state.annotation = normalizeAnnotation(payload.annotation);
     state.graphResult = {
       ...payload,
@@ -2725,7 +2761,10 @@ export function mountSceneGraphPage(
     state.selectedScenarioId = "";
     clearAnnotationEditingState();
     updateCleanAnnotationSnapshot();
-    workflow.setNormalizedSource(toNormalizedSceneSource(payload));
+    const normalized = toNormalizedSceneSource(payload);
+    const fingerprint = comparableAnnotationSnapshot(state.annotation);
+    if (courseMode) workflow.setNormalizedSource(normalized);
+    else workflow.setValidatedAnnotation(normalized, fingerprint, { autoApprove: true, expectedDraftFingerprint });
     state.isReferenceImageLoading = false;
     setStatus(sourceStatusEl, status, "success");
     setStatus(graphStatusEl, "Graph conversion complete through the shared source normalizer.", "success");
@@ -2999,9 +3038,17 @@ export function mountSceneGraphPage(
       setStatus(sourceReviewStatusEl, "Approve the reviewed source before generation.", "error");
       return;
     }
-    setStatus(sourceReviewStatusEl, "Annotation approved. Configure the 3D asset strategy before generation.", "success");
-    storeProfessionalViewerTarget("generate");
-    window.location.hash = "";
+    setStatus(
+      sourceReviewStatusEl,
+      translateViewerKey(loadViewerLanguage(), "sceneGraph.review.startingBaseline") ?? "Opening the 3D scene and preparing the road baseline…",
+      "neutral",
+    );
+    try {
+      await hostOptions.onEnterProfessionalScene?.();
+    } catch (error) {
+      setStatus(sourceReviewStatusEl, error instanceof Error ? error.message : "Unable to enter the 3D scene.", "error");
+      renderSourceWorkflow();
+    }
   }
 
   const unsubscribeWorkflow = workflow.subscribe(renderSourceWorkflow);
@@ -3031,6 +3078,49 @@ export function mountSceneGraphPage(
     return state.annotation.centerlines.length > 0;
   }
 
+  function featureCountsForAnnotation(annotation: ReferenceAnnotation): Record<string, number> {
+    return {
+      roads: annotation.centerlines.length,
+      junctions: annotation.junctions.length,
+      regions: annotation.regions.length + (annotation.derived_regions?.length ?? 0),
+      buildings: annotation.building_regions.length + (workflow.getSnapshot().normalized?.sourceContext.aligned_buildings?.length ?? 0),
+      functional_zones: annotation.functional_zones.length,
+      furniture: annotation.centerlines.reduce(
+        (total, centerline) => total + centerline.street_furniture_instances.length,
+        annotation.functional_zones.reduce((total, zone) => total + zone.furniture_instances.length, 0),
+      ),
+    };
+  }
+
+  function normalizedSourceForAnnotation(annotation: ReferenceAnnotation, graph: ConvertedGraphPayload["graph"]): NormalizedSceneSource {
+    const previous = workflow.getSnapshot().normalized;
+    return {
+      referenceAnnotation: cloneAnnotation(annotation),
+      graph: structuredClone(graph),
+      source: previous?.source ?? {
+        schema_version: "roadgen3d_scene_source_v1",
+        source_id: annotation.plan_id || "manual_reference_annotation",
+        kind: workflow.getSnapshot().sourceKind ?? "manual_annotation",
+        producer: "manual",
+        normalized_annotation_version: annotation.version,
+      },
+      geojson: previous?.geojson ?? null,
+      warnings: previous?.warnings ?? [],
+      sourceContext: previous?.sourceContext ?? {},
+      featureCounts: featureCountsForAnnotation(annotation),
+      normalizedAt: new Date().toISOString(),
+    };
+  }
+
+  function markProfessionalAnnotationDirty(): string {
+    const fingerprint = comparableAnnotationSnapshot(state.annotation);
+    if (courseMode) return fingerprint;
+    workflow.setAnnotationDraft(cloneAnnotation(state.annotation), fingerprint);
+    workflow.setAnnotationDraftStatus(fingerprint, "saving");
+    renderSourceWorkflow();
+    return fingerprint;
+  }
+
   function scheduleAutoGraphConversion(delayMs = 900): void {
     if (!canConvertGraph()) {
       return;
@@ -3058,11 +3148,28 @@ export function mountSceneGraphPage(
     }
     autoGraphInFlight = true;
     autoGraphPending = false;
+    const fingerprint = markProfessionalAnnotationDirty();
+    if (!courseMode) workflow.setAnnotationDraftStatus(fingerprint, "validating");
     renderAll();
     try {
-      await convertAnnotationToGraph({ automatic: true });
+      const converted = await convertAnnotationToGraph({ automatic: true, expectedFingerprint: fingerprint });
+      if (!courseMode && converted && state.graphResult) {
+        workflow.setValidatedAnnotation(
+          normalizedSourceForAnnotation(state.graphResult.annotation, state.graphResult.graph),
+          fingerprint,
+          { autoApprove: true },
+        );
+      } else if (!courseMode && !converted && comparableAnnotationSnapshot(state.annotation) === fingerprint) {
+        workflow.setAnnotationDraftStatus(
+          fingerprint,
+          "validation_error",
+          [graphStatusEl.textContent?.trim() || "Road graph validation failed."],
+        );
+      }
     } catch (error) {
-      setStatus(graphStatusEl, error instanceof Error ? error.message : "Failed to convert annotation.", "error");
+      const message = error instanceof Error ? error.message : "Failed to convert annotation.";
+      setStatus(graphStatusEl, message, "error");
+      if (!courseMode) workflow.setAnnotationDraftStatus(fingerprint, "validation_error", [message]);
     } finally {
       autoGraphInFlight = false;
       renderAll();
@@ -3130,6 +3237,14 @@ export function mountSceneGraphPage(
     graphTextarea.value = "";
     graphSummaryEl.innerHTML = buildGraphSummaryMarkup(null);
     const shouldAutoConvert = options.autoConvert ?? true;
+    if (!courseMode) {
+      const fingerprint = markProfessionalAnnotationDirty();
+      if (shouldAutoConvert && !canConvertGraph()) {
+        const reason = translateViewerKey(loadViewerLanguage(), "sceneGraph.review.requiresRoad")
+          ?? "Add at least one road centerline before validation.";
+        workflow.setAnnotationDraftStatus(fingerprint, "validation_error", [reason]);
+      }
+    }
     setStatus(graphStatusEl, shouldAutoConvert && canConvertGraph() ? "Road graph will update automatically after edits." : reason, "neutral");
     if (shouldAutoConvert) {
       scheduleAutoGraphConversion();
@@ -4520,6 +4635,10 @@ export function mountSceneGraphPage(
         geojson: null,
       });
       renderSourceWorkflow();
+      if (!courseMode) {
+        professionalOsmStage = "annotation";
+        updateOsmPickerVisibility();
+      }
       setStatus(statusEl, `Selected reference plan ${planId}, but no image URL was provided.`, "neutral");
       renderAll();
       return;
@@ -4536,6 +4655,10 @@ export function mountSceneGraphPage(
       fileName: plan.image_url,
       geojson: null,
     });
+    if (!courseMode) {
+      professionalOsmStage = "annotation";
+      updateOsmPickerVisibility();
+    }
     renderSourceWorkflow();
   }
 
@@ -4891,25 +5014,26 @@ export function mountSceneGraphPage(
     renderAll();
   }
 
-  async function convertAnnotationToGraph(options: { automatic?: boolean } = {}): Promise<void> {
+  async function convertAnnotationToGraph(options: { automatic?: boolean; expectedFingerprint?: string } = {}): Promise<boolean> {
     if (state.annotation.centerlines.length === 0) {
       setStatus(graphStatusEl, "Add at least one centerline before converting.", "error");
-      return;
+      return false;
     }
     const modelIssues = validateAnnotationForExplicitJunctionModel(state.annotation);
     if (modelIssues.length > 0) {
       setStatus(graphStatusEl, modelIssues[0].message, "error");
-      return;
+      return false;
     }
     setStatus(graphStatusEl, options.automatic ? "Updating road graph automatically..." : "Converting annotation to graph...", "neutral");
-    for (const centerline of state.annotation.centerlines) {
+    const annotationRequest = cloneAnnotation(state.annotation);
+    for (const centerline of annotationRequest.centerlines) {
       syncCenterlineDerivedFields(centerline);
     }
     const response = await fetch(`${API_BASE}/api/reference-annotations/convert`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        annotation: state.annotation,
+        annotation: annotationRequest,
         compose_config: {
           sidewalk_width_m: Math.max(1, asNumber(sidewalkWidthInput.value, DEFAULT_SIDEWALK_WIDTH_M)),
           segment_length_m: Math.max(4, asNumber(segmentLengthInput.value, DEFAULT_SEGMENT_LENGTH_M)),
@@ -4920,8 +5044,13 @@ export function mountSceneGraphPage(
     if (!response.ok) {
       throw new Error(typeof payload === "object" && payload && "detail" in payload ? String(payload.detail) : "Graph conversion failed.");
     }
+    const requestFingerprint = options.expectedFingerprint ?? comparableAnnotationSnapshot(annotationRequest);
+    if (comparableAnnotationSnapshot(state.annotation) !== requestFingerprint) {
+      autoGraphPending = true;
+      return false;
+    }
     const convertedPayload = payload as ConvertedGraphPayload;
-    const annotationSnapshot = cloneAnnotation(state.annotation);
+    const annotationSnapshot = cloneAnnotation(annotationRequest);
     state.graphResult = {
       ...convertedPayload,
       annotation: annotationSnapshot,
@@ -4936,6 +5065,7 @@ export function mountSceneGraphPage(
     };
     setStatus(graphStatusEl, "Graph conversion complete.", "success");
     renderAll();
+    return true;
   }
 
   function syncSelectionAfterMutation(): void {
@@ -5837,29 +5967,6 @@ export function mountSceneGraphPage(
       shell.activateRightTab("source");
       renderSourceWorkflow();
       updateOsmPickerVisibility();
-    },
-    { signal },
-  );
-  sourceApproveButton.addEventListener(
-    "click",
-    async () => {
-      const result = workflow.approveReview();
-      if (!result.ok) {
-        setStatus(sourceReviewStatusEl, result.reason, "error");
-        return;
-      }
-      if (!courseMode && hostOptions.onApproveProfessionalBaseline) {
-        setStatus(sourceReviewStatusEl, "Annotation approved. Starting a deterministic road baseline…", "neutral");
-        try {
-          await hostOptions.onApproveProfessionalBaseline();
-        } catch (error) {
-          setStatus(
-            sourceReviewStatusEl,
-            error instanceof Error ? error.message : "Road baseline failed to start.",
-            "error",
-          );
-        }
-      }
     },
     { signal },
   );
@@ -6856,13 +6963,13 @@ export function mountSceneGraphPage(
         });
     }
   }
-  if (courseMode) {
-    sourceGenerateButton.textContent = "批准完整标注并生成 3D 基线";
-    sourceGenerateButton.title = "Persist this ReferenceAnnotation and start the course generation job.";
-  }
-  if (initialWorkflowSnapshot.normalized) {
-    state.annotation = normalizeAnnotation(initialWorkflowSnapshot.normalized.referenceAnnotation);
-    if (initialWorkflowSnapshot.normalized.graph) {
+  if (initialWorkflowSnapshot.normalized || initialWorkflowSnapshot.annotationDraft) {
+    state.annotation = normalizeAnnotation(
+      initialWorkflowSnapshot.annotationDraft?.annotation
+        ?? initialWorkflowSnapshot.normalized?.referenceAnnotation
+        ?? state.annotation,
+    );
+    if (initialWorkflowSnapshot.normalized?.graph) {
       state.graphResult = {
         annotation: cloneAnnotation(state.annotation),
         graph: initialWorkflowSnapshot.normalized.graph as ConvertedGraphPayload["graph"],
@@ -6892,6 +6999,14 @@ export function mountSceneGraphPage(
   }
   renderAll();
   renderSourceWorkflow();
+  if (
+    !courseMode
+    && initialWorkflowSnapshot.annotationDraft
+    && initialWorkflowSnapshot.annotationDraft.status !== "saved"
+    && canConvertGraph()
+  ) {
+    scheduleAutoGraphConversion(120);
+  }
   mountAnnotationOsmBackground();
   if (!courseMode) {
     const capabilityToken = workflow.beginRequest("capabilities");
@@ -6920,6 +7035,16 @@ export function mountSceneGraphPage(
   function refreshSceneGraphLanguage(): void {
     const language = loadViewerLanguage();
     applyViewerTranslations(root, language);
+    const sourceLabel = translateViewerKey(language, "sceneGraph.source.drawer") ?? "Source / Status";
+    const sourceTab = root.querySelector<HTMLButtonElement>('[data-shell-tab="source"]');
+    if (sourceTab) {
+      sourceTab.title = sourceLabel;
+      sourceTab.setAttribute("aria-label", sourceLabel);
+      const label = sourceTab.querySelector<HTMLElement>(".workbench-sidebar-label");
+      if (label) label.textContent = sourceLabel;
+    }
+    const sourceDrawerTitle = root.querySelector<HTMLElement>('[data-shell-tab-panel="source"] .workbench-sidebar-drawer-header strong');
+    if (sourceDrawerTitle) sourceDrawerTitle.textContent = sourceLabel;
     renderAll();
     renderSourceWorkflow();
     renderInspector();

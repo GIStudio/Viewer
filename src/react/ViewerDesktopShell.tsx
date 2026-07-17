@@ -67,7 +67,9 @@ export function ViewerDesktopShell({
     edit: Boolean(workflowSnapshot.sceneLayoutPath),
     evaluate: Boolean(workflowSnapshot.sceneLayoutPath) && !workflowSnapshot.editPending,
   };
-  const professionalStage = professionalPipelineStage(workflowSnapshot);
+  const professionalStage = route === "scene-graph" || route === "asset-editor"
+    ? "prepare"
+    : professionalPipelineStage(workflowSnapshot);
   const professionalStageLabel = t(`professional.stage.${professionalStage}`, professionalStage);
   const railKeys = route === "scene-graph"
     ? {

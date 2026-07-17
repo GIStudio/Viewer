@@ -75,14 +75,14 @@ try {
   await page.locator(".studio-brand-header").waitFor();
   assert.deepEqual(pageErrors, [], `viewer initialization errors: ${pageErrors.join(" | ")}`);
 
-  assert.equal((await page.locator(".studio-header-context > span").textContent())?.trim(), "Current context");
-  await page.getByRole("button", { name: "Course Studio", exact: true }).waitFor();
+  assert.equal((await page.locator(".studio-header-context > span").textContent())?.trim(), "当前上下文");
+  await page.getByRole("button", { name: "课程教学", exact: true }).waitFor();
   assert.equal(await page.locator(".desktop-shell-workbench-select").count(), 0, "professional tool switching must live only in the left rail");
-  await page.getByText("3D Scene Workbench", { exact: true }).waitFor();
+  await page.getByText("3D 场景工作台", { exact: true }).waitFor();
 
   const groupLabels = (await page.locator(".workbench-sidebar-group-label").allTextContents()).map((value) => value.trim());
-  assert.ok(groupLabels.includes("Production flow"), "left rail must expose the Y-shaped production flow");
-  assert.ok(groupLabels.includes("Inspection"), "model input audit must be a cross-cutting inspection tool");
+  assert.ok(groupLabels.includes("生产流程"), "left rail must expose the Y-shaped production flow");
+  assert.ok(groupLabels.includes("检查工具"), "model input audit must be a cross-cutting inspection tool");
   assert.equal(await page.locator('[data-shell-tab^="workflow-"]').count(), 0, "legacy workflow steps must not remain in the professional rail");
   assert.equal(await page.locator('[data-shell-tab="prepare-annotation"]').getAttribute("data-flow-branch"), "annotation");
   assert.equal(await page.locator('[data-shell-tab="prepare-assets"]').getAttribute("data-flow-branch"), "assets");
@@ -94,9 +94,9 @@ try {
   }
 
   const openGeneration = page.locator("#viewer-generate-and-load");
-  await page.waitForFunction(() => document.querySelector("#viewer-generate-and-load")?.textContent?.trim() === "New generation…");
+  await page.waitForFunction(() => document.querySelector("#viewer-generate-and-load")?.textContent?.trim() === "新建生成…");
   assert.deepEqual(pageErrors, [], `viewer initialization errors: ${pageErrors.join(" | ")}`);
-  assert.equal((await openGeneration.textContent())?.trim(), "New generation…");
+  assert.equal((await openGeneration.textContent())?.trim(), "新建生成…");
   assert.equal(await openGeneration.getAttribute("aria-haspopup"), "dialog");
   await openGeneration.click();
   const generationDialog = page.locator("#viewer-generation-dialog");

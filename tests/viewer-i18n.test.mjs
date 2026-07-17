@@ -21,10 +21,13 @@ let browser;
 try {
   const i18nSource = await fs.readFile(new URL("../src/viewer-i18n.ts", import.meta.url), "utf8");
   const languageToggleSource = await fs.readFile(new URL("../src/react/StudioLanguageToggle.tsx", import.meta.url), "utf8");
-  assert.match(i18nSource, /return value === "zh" \? "zh" : "en";/, "stale mixed language values must normalize to English");
+  const sceneGraphShellSource = await fs.readFile(new URL("../src/scene-graph/shell.ts", import.meta.url), "utf8");
+  assert.match(i18nSource, /return value === "en" \? "en" : "zh";/, "missing or stale language values must normalize to Chinese");
   assert.doesNotMatch(i18nSource, /"mixed"/, "the localization core must not retain a mixed locale");
   assert.match(languageToggleSource, /role="radiogroup"/);
   assert.match(languageToggleSource, /role="radio"/);
+  assert.doesNotMatch(sceneGraphShellSource, /Approve & Continue|继续配置 3D 生成/, "01A must not expose a separate approval or duplicate generation action");
+  assert.match(sceneGraphShellSource, /sceneGraph\.review\.enter3d/, "01A exposes the explicit enter-3D action");
 
   await server.listen();
   const address = server.httpServer?.address();
@@ -48,6 +51,7 @@ try {
   await page.evaluate(() => localStorage.removeItem("viewer-lang"));
   await page.reload();
   await page.locator(".studio-language-toggle").waitFor();
+  assert.equal(await page.locator('.studio-language-toggle [role="radio"][aria-checked="true"]').textContent(), "中文", "first use defaults to Chinese");
   const optionTexts = await page.locator('.studio-language-toggle [role="radio"]').allTextContents();
   assert.deepEqual(optionTexts.map((value) => value.trim()), ["中文", "EN"], "the header exposes a direct Chinese/English switch");
   await selectLanguage(page, "zh");
@@ -76,6 +80,7 @@ try {
     window.dispatchEvent(new CustomEvent("roadgen3d:viewer-language-change", { detail: { language: "zh" } }));
   });
   await page.locator(".studio-professional-context-tool strong").getByText("2D 标注", { exact: true }).waitFor();
+  await page.getByText("浏览地图并截取研究区", { exact: true }).waitFor({ state: "attached" });
   await page.evaluate(() => {
     localStorage.setItem("viewer-lang", "en");
     window.dispatchEvent(new CustomEvent("roadgen3d:viewer-language-change", { detail: { language: "en" } }));

@@ -269,7 +269,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator }: 
       switch (route) {
         case "scene-graph":
           routeTeardown = mountSceneGraphPage(shell, workflow, {
-            onApproveProfessionalBaseline: async () => {
+            onEnterProfessionalScene: async () => {
               await baselineCoordinator.start();
               navigateTo("viewer");
             },

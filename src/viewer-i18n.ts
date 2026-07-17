@@ -100,8 +100,8 @@ const TRANSLATIONS: Record<string, Translation> = {
     zh: "导入地图、图片、标注或 GeoJSON；手工描绘或使用已配置的视觉模型，然后标准化。",
   },
   "workflow.context.review": {
-    en: "Inspect provenance, warnings, feature counts, and the converted road graph before explicit approval.",
-    zh: "检查来源、警告、要素数量及转换后的道路图，再显式批准。",
+    en: "Inspect provenance, warnings, feature counts, and the automatically validated road graph.",
+    zh: "检查来源、警告、要素数量及自动校验后的道路 Graph。",
   },
   "workflow.context.generate": {
     en: "Generate from the approved inline reference annotation and aligned context, then load the durable layout.",
@@ -118,6 +118,75 @@ const TRANSLATIONS: Record<string, Translation> = {
   "workflow.navigation": { en: "RoadGen3D student workflow", zh: "RoadGen3D 学生工作流" },
   "workflow.professionalNavigation": { en: "RoadGen3D professional workflow", zh: "RoadGen3D 专业工作流" },
   "workflow.undoPlacement": { en: "Undo placement", zh: "撤销放置" },
+  "sceneGraph.source.kicker": { en: "01A / OSM FIRST", zh: "01A / OSM 优先" },
+  "sceneGraph.source.drawer": { en: "Source / Status", zh: "输入与状态" },
+  "sceneGraph.source.title": { en: "Browse the map and capture a study area", zh: "浏览地图并截取研究区" },
+  "sceneGraph.source.description": {
+    en: "Browse OSM freely on the stage. After capturing the viewport or drawing precisely, roads and context enter one ReferenceAnnotation.",
+    zh: "在主舞台自由浏览 OSM；使用当前视野或精确框选后，道路、建筑、土地利用、树木和 POI 将进入同一个 ReferenceAnnotation。",
+  },
+  "sceneGraph.source.noArea": { en: "No study area captured", zh: "尚未截取研究区" },
+  "sceneGraph.source.noAreaHint": {
+    en: "Browsing does not request the server; coordinates are available under Advanced location.",
+    zh: "地图浏览不会请求服务器；坐标输入位于地图的“高级定位”中。",
+  },
+  "sceneGraph.source.noAreaAction": { en: "Browse OSM on the stage, then capture the viewport or draw precisely.", zh: "在主舞台浏览 OSM，然后使用当前视野或精确框选。" },
+  "sceneGraph.source.areaReady": { en: "Candidate study area captured", zh: "候选研究区已截取" },
+  "sceneGraph.source.otherSources": { en: "Other data sources", zh: "其他数据来源" },
+  "sceneGraph.source.referenceSources": { en: "Reference image, GeoJSON and templates", zh: "参考图片、GeoJSON 与模板库" },
+  "sceneGraph.source.referenceImage": { en: "Reference Image", zh: "参考图片" },
+  "sceneGraph.source.coordinateSpace": { en: "GeoJSON coordinate space", zh: "GeoJSON 坐标空间" },
+  "sceneGraph.source.imagePixels": { en: "Image pixels (x right, y down)", zh: "图像像素（x 向右，y 向下）" },
+  "sceneGraph.source.wgs84": { en: "EPSG:4326 (longitude, latitude)", zh: "EPSG:4326（经度，纬度）" },
+  "sceneGraph.source.templateHint": {
+    en: "HKUST-GZ and other reference plans load only when explicitly selected as templates.",
+    zh: "HKUST-GZ 等参考图仅保留为模板；选择模板后才会加载，不再作为默认数据源。",
+  },
+  "sceneGraph.source.aiAdvanced": { en: "AI extraction (advanced)", zh: "AI 提取（高级）" },
+  "sceneGraph.source.extractionGuidance": { en: "Extraction guidance", zh: "提取要求" },
+  "sceneGraph.source.extractionPlaceholder": {
+    en: "Trace visible road centerlines, junctions, and scene boundary.",
+    zh: "提取可见道路中心线、路口和场景边界。",
+  },
+  "sceneGraph.source.extract": { en: "Extract with configured vision model", zh: "使用已配置视觉模型提取" },
+  "sceneGraph.source.checkingVision": { en: "Checking vision capability…", zh: "正在检查视觉模型能力…" },
+  "sceneGraph.source.normalize": { en: "Normalize & Review", zh: "规范化并检查" },
+  "sceneGraph.source.initialStatus": {
+    en: "Trace manually, import annotation JSON/GeoJSON, or use configured AI extraction.",
+    zh: "可手工标注、导入 Annotation JSON/GeoJSON，或使用已配置的 AI 提取。",
+  },
+  "sceneGraph.review.kicker": { en: "ANNOTATION STATUS", zh: "标注状态" },
+  "sceneGraph.review.title": { en: "Saved and validated annotation", zh: "已保存并校验的标注" },
+  "sceneGraph.review.description": {
+    en: "Edits are saved automatically. A valid revision is approved for generation without an extra confirmation step.",
+    zh: "所有编辑都会自动保存；通过校验的 revision 会自动获准参与生成，无需再次确认。",
+  },
+  "sceneGraph.review.backToArea": { en: "Choose another study area", zh: "返回重新选择研究区" },
+  "sceneGraph.review.enter3d": { en: "Enter 3D scene", zh: "进入 3D 场景" },
+  "sceneGraph.review.courseGenerate": { en: "Approve annotation and generate 3D baseline", zh: "批准完整标注并生成 3D 基线" },
+  "sceneGraph.review.courseGenerateHint": { en: "Save this ReferenceAnnotation to the project and start the course baseline job.", zh: "将完整 ReferenceAnnotation 保存到项目并启动课程基线任务。" },
+  "sceneGraph.review.waiting": { en: "Waiting for a valid annotation.", zh: "等待有效标注。" },
+  "sceneGraph.review.dirty": { en: "Changes detected. Saving draft…", zh: "检测到修改，正在保存草稿…" },
+  "sceneGraph.review.saving": { en: "Saving the latest annotation draft…", zh: "正在保存最新标注草稿…" },
+  "sceneGraph.review.validating": { en: "Draft saved. Validating the road graph…", zh: "草稿已保存，正在校验道路 Graph…" },
+  "sceneGraph.review.saved": { en: "Saved, validated and approved automatically · revision {revision}", zh: "已保存、通过校验并自动批准 · revision {revision}" },
+  "sceneGraph.review.validationError": { en: "Draft saved, but validation failed: {reason}", zh: "草稿已保存，但校验失败：{reason}" },
+  "sceneGraph.review.noWarnings": { en: "No normalization warnings.", zh: "没有规范化警告。" },
+  "sceneGraph.review.boundaryWarning": {
+    en: "The selected road neighborhood touches the OSM retrieval boundary; adjacent roads may be truncated.",
+    zh: "所选道路邻域触及 OSM 检索边界；相邻道路可能被截断。",
+  },
+  "sceneGraph.review.startingBaseline": { en: "Opening the 3D scene and preparing the road baseline…", zh: "正在进入 3D 场景并准备道路基线…" },
+  "sceneGraph.review.enter3dHint": { en: "Start or resume the road baseline for the current approved revision.", zh: "为当前已批准 revision 启动或恢复道路基线。" },
+  "sceneGraph.review.requiresRoad": { en: "Add at least one road centerline before validation.", zh: "至少需要一条道路中心线才能完成校验。" },
+  "sceneGraph.review.annotationVersion": { en: "annotation", zh: "标注版本" },
+  "sceneGraph.review.normalizedAt": { en: "normalized", zh: "规范化时间" },
+  "sceneGraph.review.alignment": { en: "alignment", zh: "坐标对齐" },
+  "sceneGraph.metric.junctions": { en: "Junctions", zh: "路口" },
+  "sceneGraph.metric.regions": { en: "Regions", zh: "区域" },
+  "sceneGraph.metric.buildings": { en: "Buildings", zh: "建筑" },
+  "sceneGraph.metric.functionalZones": { en: "Functional zones", zh: "功能区" },
+  "sceneGraph.metric.sourceFurniture": { en: "Furniture", zh: "街道家具" },
   "professional.stage.prepare": { en: "01 Preparation", zh: "01 准备" },
   "professional.stage.generate": { en: "02 Scene generation", zh: "02 场景生成" },
   "professional.stage.review": { en: "03 Result review", zh: "03 结果审核" },
@@ -132,8 +201,6 @@ const TRANSLATIONS: Record<string, Translation> = {
   "professional.pipeline.audit": { en: "Model input audit", zh: "模型输入审计" },
   "professional.pipeline.sceneRequired": { en: "Generate and load a scene first.", zh: "请先生成并加载场景。" },
   "professional.pipeline.reviewRequired": { en: "Accept the generated result before evaluation.", zh: "请先接受生成结果，再进入评价。" },
-  "professional.annotation.continueGeneration": { en: "Continue to 3D generation…", zh: "继续配置 3D 生成…" },
-  "professional.annotation.continueGenerationHint": { en: "Open the 3D Scene Workbench to choose an asset strategy and confirm generation.", zh: "进入 3D 场景工作台，选择素材策略并确认生成。" },
   "route.model-input-browser.label": { en: "Model Input Browser", zh: "模型输入浏览器" },
   "shell.model-input-browser.kicker": { en: "Viewer / Raw Evidence", zh: "查看器 / 原始证据" },
   "shell.model-input-browser.title": { en: "Model Input Browser", zh: "模型输入浏览器" },
@@ -793,7 +860,7 @@ const TRANSLATIONS: Record<string, Translation> = {
 };
 
 export function normalizeViewerLanguage(value: unknown): ViewerLanguage {
-  return value === "zh" ? "zh" : "en";
+  return value === "en" ? "en" : "zh";
 }
 
 export function loadViewerLanguage(): ViewerLanguage {

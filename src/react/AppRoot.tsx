@@ -10,12 +10,17 @@ import {
   normalizeViewerLanguage,
 } from "../viewer-i18n";
 import type { ViewerLanguage } from "../viewer-i18n";
+import {
+  loadProfessionalWorkflowDraft,
+  persistProfessionalWorkflowDraft,
+} from "../professional-draft-store";
 import { RouteIsland } from "./RouteIsland";
 import { antdTheme, resolveRoute } from "./shellModel";
 
 export function AppRoot() {
   const [route, setRoute] = useState<AppRoute>(() => resolveRoute());
   const [language, setLanguage] = useState<ViewerLanguage>(() => loadViewerLanguage());
+  const [draftReady, setDraftReady] = useState(false);
   const [workflow] = useState(() => createWorkflowController());
   const [baselineCoordinator] = useState(() => createProfessionalBaselineCoordinator(workflow));
 
@@ -24,6 +29,24 @@ export function AppRoot() {
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadProfessionalWorkflowDraft()
+      .then((draft) => {
+        if (!cancelled && draft) workflow.restoreProfessionalDraft(draft);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setDraftReady(true);
+      });
+    return () => { cancelled = true; };
+  }, [workflow]);
+
+  useEffect(() => {
+    if (!draftReady || route === "course-studio") return undefined;
+    return persistProfessionalWorkflowDraft(workflow);
+  }, [draftReady, route, workflow]);
 
   useEffect(() => {
     const handleLanguageChange = (event: Event) => {
@@ -38,6 +61,8 @@ export function AppRoot() {
     baselineCoordinator.dispose();
     workflow.dispose();
   }, [baselineCoordinator, workflow]);
+
+  if (!draftReady) return null;
 
   return (
     <ConfigProvider theme={antdTheme}>

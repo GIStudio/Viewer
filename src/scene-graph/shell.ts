@@ -1,4 +1,5 @@
 import type { ShellSection, ShellTab } from "../desktop-shell";
+import { loadViewerLanguage, translateViewerKey } from "../viewer-i18n";
 import {
   DEFAULT_PIXELS_PER_METER,
   DEFAULT_ROUNDABOUT_RADIUS_PX,
@@ -89,71 +90,70 @@ export function createSceneGraphRightTabs(): ShellTab[] {
   return [
     {
       id: "source",
-      label: "Source / Review",
+      label: translateViewerKey(loadViewerLanguage(), "sceneGraph.source.drawer") ?? "Source / Status",
       content: `
         <div id="scene-source-workflow" class="scene-source-workflow" data-step="source">
           <section class="scene-source-step" data-workflow-panel="source">
             <div class="scene-source-heading">
               <div>
-                <span>01A / OSM FIRST</span>
-                <strong>浏览地图并截取研究区</strong>
+                <span data-i18n-key="sceneGraph.source.kicker">01A / OSM FIRST</span>
+                <strong data-i18n-key="sceneGraph.source.title">Browse the map and capture a study area</strong>
               </div>
-              <p>在主舞台自由浏览 OSM；使用当前视野或精确框选后，道路、建筑、土地利用、树木和 POI 将进入同一个 ReferenceAnnotation。</p>
+              <p data-i18n-key="sceneGraph.source.description">Browse OSM freely on the stage. After capturing the viewport or drawing precisely, roads and context enter one ReferenceAnnotation.</p>
             </div>
             <div id="scene-source-aoi-summary" class="scene-source-aoi-summary" data-ready="false">
-              <strong>尚未截取研究区</strong>
-              <span>地图浏览不会请求服务器；坐标输入位于地图的“高级定位”中。</span>
+              <strong data-i18n-key="sceneGraph.source.noArea">No study area captured</strong>
+              <span data-i18n-key="sceneGraph.source.noAreaHint">Browsing does not request the server; coordinates are available under Advanced location.</span>
             </div>
-            <div class="scene-source-divider"><span>其他数据来源</span></div>
+            <div class="scene-source-divider"><span data-i18n-key="sceneGraph.source.otherSources">Other data sources</span></div>
             <details class="scene-collapsible-panel">
-              <summary class="scene-collapsible-summary">参考图片、GeoJSON 与模板库</summary>
+              <summary class="scene-collapsible-summary" data-i18n-key="sceneGraph.source.referenceSources">Reference image, GeoJSON and templates</summary>
               <div class="scene-collapsible-body">
                 <div class="scene-import-toolbar scene-import-toolbar-compact">
-                  <button id="scene-source-image-import" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Reference Image</button>
+                  <button id="scene-source-image-import" class="scene-toolbar-button scene-toolbar-button-secondary" type="button" data-i18n-key="sceneGraph.source.referenceImage">Reference Image</button>
                   <label class="scene-file-button" for="scene-source-geojson-input">GeoJSON</label>
                   <input id="scene-source-geojson-input" class="scene-file-input" type="file" accept=".geojson,.json,application/geo+json,application/json" />
                 </div>
                 <label class="scene-form-field">
-                  <span>GeoJSON coordinate space</span>
+                  <span data-i18n-key="sceneGraph.source.coordinateSpace">GeoJSON coordinate space</span>
                   <select id="scene-source-coordinate-space" class="scene-select">
-                    <option value="image_px">Image pixels (x right, y down)</option>
-                    <option value="EPSG:4326">EPSG:4326 (longitude, latitude)</option>
+                    <option value="image_px" data-i18n-key="sceneGraph.source.imagePixels">Image pixels (x right, y down)</option>
+                    <option value="EPSG:4326" data-i18n-key="sceneGraph.source.wgs84">EPSG:4326 (longitude, latitude)</option>
                   </select>
                 </label>
-                <p class="scene-micro-note">HKUST-GZ 等参考图仅保留为模板；选择模板后才会加载，不再作为默认数据源。</p>
+                <p class="scene-micro-note" data-i18n-key="sceneGraph.source.templateHint">HKUST-GZ and other reference plans load only when explicitly selected as templates.</p>
               </div>
             </details>
             <details class="scene-collapsible-panel">
-              <summary class="scene-collapsible-summary">AI extraction (advanced)</summary>
+              <summary class="scene-collapsible-summary" data-i18n-key="sceneGraph.source.aiAdvanced">AI extraction (advanced)</summary>
               <div class="scene-collapsible-body">
                 <label class="scene-form-field">
-                  <span>Extraction guidance</span>
-                  <textarea id="scene-source-ai-prompt" class="scene-json-input" rows="3" placeholder="Trace visible road centerlines, junctions, and scene boundary."></textarea>
+                  <span data-i18n-key="sceneGraph.source.extractionGuidance">Extraction guidance</span>
+                  <textarea id="scene-source-ai-prompt" class="scene-json-input" rows="3" placeholder="Trace visible road centerlines, junctions, and scene boundary." data-i18n-placeholder-key="sceneGraph.source.extractionPlaceholder"></textarea>
                 </label>
-                <button id="scene-source-ai-extract" class="scene-toolbar-button" type="button" disabled>Extract with configured vision model</button>
-                <div id="scene-source-ai-status" class="scene-status" data-tone="neutral">Checking vision capability…</div>
+                <button id="scene-source-ai-extract" class="scene-toolbar-button" type="button" disabled data-i18n-key="sceneGraph.source.extract">Extract with configured vision model</button>
+                <div id="scene-source-ai-status" class="scene-status" data-tone="neutral" data-i18n-key="sceneGraph.source.checkingVision">Checking vision capability…</div>
               </div>
             </details>
-            <button id="scene-source-normalize" class="scene-toolbar-button" type="button">Normalize & Review</button>
-            <div id="scene-source-status" class="scene-status" data-tone="neutral">Trace manually, import annotation JSON/GeoJSON, or use configured AI extraction.</div>
+            <button id="scene-source-normalize" class="scene-toolbar-button" type="button" data-i18n-key="sceneGraph.source.normalize">Normalize & Review</button>
+            <div id="scene-source-status" class="scene-status" data-tone="neutral" data-i18n-key="sceneGraph.source.initialStatus">Trace manually, import annotation JSON/GeoJSON, or use configured AI extraction.</div>
           </section>
           <section class="scene-source-step" data-workflow-panel="review" hidden>
             <div class="scene-source-heading">
               <div>
-                <span>STEP 2</span>
-                <strong>Review normalized source</strong>
+                <span data-i18n-key="sceneGraph.review.kicker">ANNOTATION STATUS</span>
+                <strong data-i18n-key="sceneGraph.review.title">Saved and validated annotation</strong>
               </div>
-              <p>Approve only after checking coordinate provenance, warnings, feature counts, and converted graph.</p>
+              <p data-i18n-key="sceneGraph.review.description">Edits are saved automatically. A valid revision is approved for generation without an extra confirmation step.</p>
             </div>
             <div id="scene-source-provenance" class="scene-source-provenance"></div>
             <div id="scene-source-counts" class="scene-metric-grid scene-metric-grid-compact"></div>
             <div id="scene-source-warnings" class="scene-source-warnings"></div>
             <div class="scene-import-toolbar scene-import-toolbar-compact">
-              <button id="scene-source-back" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Back to Source</button>
-              <button id="scene-source-approve" class="scene-toolbar-button" type="button">Approve & Continue</button>
-              <button id="scene-source-generate" class="scene-toolbar-button" type="button">Generate & Load</button>
+              <button id="scene-source-back" class="scene-toolbar-button scene-toolbar-button-secondary" type="button" data-i18n-key="sceneGraph.review.backToArea">Choose another study area</button>
+              <button id="scene-source-generate" class="scene-toolbar-button" type="button" data-i18n-key="sceneGraph.review.enter3d">Enter 3D scene</button>
             </div>
-            <div id="scene-source-review-status" class="scene-status" data-tone="neutral">Normalize a source to begin review.</div>
+            <div id="scene-source-review-status" class="scene-status" data-tone="neutral" data-i18n-key="sceneGraph.review.waiting">Waiting for a valid annotation.</div>
           </section>
         </div>
       `,

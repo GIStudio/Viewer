@@ -63,6 +63,29 @@ export type AssetPreparationState =
 
 export type SceneReviewStatus = "not_available" | "pending" | "changes_requested" | "accepted";
 
+export type AnnotationDraftStatus = "dirty" | "saving" | "validating" | "saved" | "validation_error";
+
+export type ProfessionalAnnotationDraft = Readonly<{
+  annotation: ReferenceAnnotation;
+  fingerprint: string;
+  sourceRevision: number;
+  status: AnnotationDraftStatus;
+  savedAt: string | null;
+  validationErrors: readonly string[];
+}>;
+
+export type ProfessionalWorkflowDraft = Readonly<{
+  version: 1;
+  sourceRevision: number;
+  sourceKind: WorkflowSourceKind | null;
+  sourceImageDataUrl: string | null;
+  sourceFileName: string | null;
+  sourceGeojson: Readonly<Record<string, unknown>> | null;
+  annotationDraft: ProfessionalAnnotationDraft;
+  normalized: NormalizedSceneSource | null;
+  approvedSourceRevision: number | null;
+}>;
+
 export type WorkflowBaselineRun = Readonly<{
   sourceRevision: number;
   jobId: string | null;
@@ -116,6 +139,7 @@ export type WorkflowSnapshot = Readonly<{
   sourceFileName: string | null;
   sourceGeojson: Readonly<Record<string, unknown>> | null;
   normalized: NormalizedSceneSource | null;
+  annotationDraft: ProfessionalAnnotationDraft | null;
   approvedSourceRevision: number | null;
   sceneRef: WorkflowSceneRef | null;
   sceneLayoutPath: string | null;
@@ -154,6 +178,10 @@ export type WorkflowController = {
     geojson?: Record<string, unknown> | null;
   }): void;
   setNormalizedSource(source: NormalizedSceneSource): void;
+  setAnnotationDraft(annotation: ReferenceAnnotation, fingerprint: string): number;
+  setAnnotationDraftStatus(fingerprint: string, status: AnnotationDraftStatus, validationErrors?: readonly string[]): boolean;
+  setValidatedAnnotation(source: NormalizedSceneSource, fingerprint: string, options?: { autoApprove?: boolean; expectedDraftFingerprint?: string }): boolean;
+  restoreProfessionalDraft(draft: ProfessionalWorkflowDraft): void;
   approveReview(): TransitionResult;
   beginRequest(kind: WorkflowRequestKind): WorkflowRequestToken;
   endRequest(token: WorkflowRequestToken, error?: unknown): boolean;
@@ -259,6 +287,7 @@ function initialSnapshot(): WorkflowSnapshot {
     sourceFileName: null,
     sourceGeojson: null,
     normalized: null,
+    annotationDraft: null,
     approvedSourceRevision: null,
     sceneRef: null,
     sceneLayoutPath: null,
@@ -348,6 +377,7 @@ export function createWorkflowController(): WorkflowController {
         sourceFileName: input.fileName === undefined ? snapshot.sourceFileName : input.fileName,
         sourceGeojson: input.geojson === undefined ? snapshot.sourceGeojson : immutableCopy(input.geojson),
         normalized: null,
+        annotationDraft: null,
         approvedSourceRevision: null,
         sceneRef: null,
         sceneLayoutPath: null,
@@ -371,6 +401,14 @@ export function createWorkflowController(): WorkflowController {
         step: "review",
         sourceRevision: nextRevision,
         normalized: immutableCopy(source),
+        annotationDraft: immutableCopy({
+          annotation: source.referenceAnnotation,
+          fingerprint: "",
+          sourceRevision: nextRevision,
+          status: "saved" as const,
+          savedAt: new Date().toISOString(),
+          validationErrors: [],
+        }),
         approvedSourceRevision: null,
         sceneRef: null,
         sceneLayoutPath: null,
@@ -385,6 +423,114 @@ export function createWorkflowController(): WorkflowController {
           status: snapshot.baselineRun.jobId ? "stale" : "idle",
           message: snapshot.baselineRun.jobId ? "The source changed; the previous baseline is stale." : "",
         }),
+        lastError: null,
+      });
+    },
+    setAnnotationDraft(annotation, fingerprint) {
+      const cleanFingerprint = fingerprint.trim();
+      if (!cleanFingerprint) return snapshot.sourceRevision;
+      if (snapshot.annotationDraft?.fingerprint === cleanFingerprint) {
+        return snapshot.sourceRevision;
+      }
+      const nextRevision = snapshot.sourceRevision + 1;
+      publish({
+        sourceRevision: nextRevision,
+        annotationDraft: immutableCopy({
+          annotation,
+          fingerprint: cleanFingerprint,
+          sourceRevision: nextRevision,
+          status: "dirty" as const,
+          savedAt: null,
+          validationErrors: [],
+        }),
+        approvedSourceRevision: null,
+        sceneRef: null,
+        sceneLayoutPath: null,
+        sceneRevision: null,
+        contextMassing: null,
+        evaluation: null,
+        sceneReviewStatus: "not_available",
+        baselineRun: Object.freeze({
+          ...snapshot.baselineRun,
+          sourceRevision: nextRevision,
+          status: snapshot.baselineRun.jobId ? "stale" : "idle",
+          message: snapshot.baselineRun.jobId ? "The annotation changed; the previous baseline is stale." : "",
+        }),
+        lastError: null,
+      });
+      return nextRevision;
+    },
+    setAnnotationDraftStatus(fingerprint, status, validationErrors = []) {
+      if (!snapshot.annotationDraft || snapshot.annotationDraft.fingerprint !== fingerprint) return false;
+      publish({
+        annotationDraft: immutableCopy({
+          ...snapshot.annotationDraft,
+          status,
+          savedAt: status === "saved" ? new Date().toISOString() : snapshot.annotationDraft.savedAt,
+          validationErrors: [...validationErrors],
+        }),
+        ...(status === "validation_error" ? { approvedSourceRevision: null } : {}),
+      });
+      return true;
+    },
+    setValidatedAnnotation(source, fingerprint, options = {}) {
+      const cleanFingerprint = fingerprint.trim();
+      if (!cleanFingerprint) return false;
+      if (
+        snapshot.annotationDraft?.fingerprint
+        && snapshot.annotationDraft.fingerprint !== cleanFingerprint
+        && snapshot.annotationDraft.fingerprint !== options.expectedDraftFingerprint
+      ) return false;
+      let revision = snapshot.sourceRevision;
+      const revisionChanged = !snapshot.annotationDraft;
+      if (revisionChanged) {
+        revision += 1;
+      }
+      const autoApprove = options.autoApprove === true;
+      publish({
+        step: "review",
+        sourceRevision: revision,
+        normalized: immutableCopy(source),
+        annotationDraft: immutableCopy({
+          annotation: source.referenceAnnotation,
+          fingerprint: cleanFingerprint,
+          sourceRevision: revision,
+          status: "saved" as const,
+          savedAt: new Date().toISOString(),
+          validationErrors: [],
+        }),
+        approvedSourceRevision: autoApprove ? revision : null,
+        ...(revisionChanged ? {
+          sceneRef: null,
+          sceneLayoutPath: null,
+          sceneRevision: null,
+          contextMassing: null,
+          evaluation: null,
+          sceneReviewStatus: "not_available" as const,
+          baselineRun: Object.freeze({
+            ...snapshot.baselineRun,
+            sourceRevision: revision,
+            status: snapshot.baselineRun.jobId ? "stale" as const : "idle" as const,
+            message: snapshot.baselineRun.jobId ? "The annotation changed; the previous baseline is stale." : "",
+          }),
+        } : {}),
+        lastError: null,
+      });
+      return true;
+    },
+    restoreProfessionalDraft(draft) {
+      const revision = Math.max(0, Number(draft.sourceRevision) || 0);
+      const approvedRevision = draft.approvedSourceRevision === revision ? revision : null;
+      publish({
+        step: draft.normalized ? "review" : "source",
+        sourceRevision: revision,
+        sourceKind: draft.sourceKind,
+        sourceImageDataUrl: draft.sourceImageDataUrl,
+        sourceFileName: draft.sourceFileName,
+        sourceGeojson: draft.sourceGeojson ? immutableCopy(draft.sourceGeojson) : null,
+        annotationDraft: immutableCopy(draft.annotationDraft),
+        normalized: draft.normalized ? immutableCopy(draft.normalized) : null,
+        approvedSourceRevision: approvedRevision,
         lastError: null,
       });
     },
