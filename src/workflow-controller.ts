@@ -222,6 +222,13 @@ export type WorkflowController = {
 const INITIAL_BUSY: WorkflowSnapshot["busy"] = Object.freeze({});
 const ASSET_PREPARATION_SESSION_KEY = "roadgen3d:professional-asset-preparation-v2";
 
+function defaultAssetPreparationState(): AssetPreparationState {
+  return Object.freeze({
+    mode: "default_transparent_massing" as const,
+    manifests: Object.freeze([]) as readonly [],
+  });
+}
+
 function assetChoiceForState(state: AssetPreparationState): AssetPreparationChoice {
   if (!state) return null;
   return state.mode === "default_transparent_massing" ? "default_transparent_massing" : "current_manifest";
@@ -260,10 +267,12 @@ function normalizeAssetPreparationState(value: unknown): AssetPreparationState {
 
 function loadAssetPreparationState(): AssetPreparationState {
   try {
-    if (typeof sessionStorage === "undefined") return null;
-    return normalizeAssetPreparationState(JSON.parse(sessionStorage.getItem(ASSET_PREPARATION_SESSION_KEY) ?? "null"));
+    if (typeof sessionStorage === "undefined") return defaultAssetPreparationState();
+    const stored = sessionStorage.getItem(ASSET_PREPARATION_SESSION_KEY);
+    if (!stored) return defaultAssetPreparationState();
+    return normalizeAssetPreparationState(JSON.parse(stored)) ?? defaultAssetPreparationState();
   } catch {
-    return null;
+    return defaultAssetPreparationState();
   }
 }
 

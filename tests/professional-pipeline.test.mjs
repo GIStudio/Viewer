@@ -19,6 +19,9 @@ assert.match(workflow, /type AssetPreparationChoice = "current_manifest" \| "def
 assert.match(workflow, /export type AssetCandidateManifest/);
 assert.match(workflow, /export type AssetPreparationState/);
 assert.match(workflow, /mode: "candidate_manifests"/);
+assert.match(workflow, /function defaultAssetPreparationState/);
+assert.match(workflow, /if \(!stored\) return defaultAssetPreparationState\(\)/);
+assert.match(workflow, /normalizeAssetPreparationState\(JSON\.parse\(stored\)\) \?\? defaultAssetPreparationState\(\)/);
 assert.match(workflow, /type SceneReviewStatus = "not_available" \| "pending" \| "changes_requested" \| "accepted"/);
 assert.match(workflow, /export type WorkflowBaselineRun/);
 assert.match(workflow, /setGeneratedScene[\s\S]*sceneReviewStatus: "pending"/);

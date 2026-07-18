@@ -25,6 +25,20 @@ type GenerationSchemeResult = {
   error?: string;
 };
 
+function explainGenerationFailure(message: string): string {
+  const raw = String(message || "场景生成失败。")
+    .replace(/^LLM parameter derivation failed:\s*/i, "")
+    .trim();
+  const junctionQa = raw.match(
+    /Junction surface QA failed for ([^:]+): overlap=([0-9.e+-]+)m2, uncovered=([0-9.e+-]+)m2, invalid=(\d+), slivers=(\d+)/i,
+  );
+  if (junctionQa) {
+    const [, junctionId, overlap, uncovered, invalid, slivers] = junctionQa;
+    return `路口 ${junctionId} 的表面几何检查未通过：共面重叠 ${overlap}㎡，未覆盖 ${uncovered}㎡，无效面 ${invalid}，碎片 ${slivers}。`;
+  }
+  return raw || "场景生成失败。";
+}
+
 type ViewerGenerationRunnerDeps = {
   resultEl: HTMLElement;
   statusEl: HTMLElement;
@@ -97,7 +111,7 @@ export function createViewerGenerationRunner(deps: ViewerGenerationRunnerDeps): 
           break;
         }
         row.status = "failed";
-        row.error = error instanceof Error ? error.message : "Generation failed.";
+        row.error = explainGenerationFailure(error instanceof Error ? error.message : "场景生成失败。");
       } finally {
         activeJobId = "";
       }
@@ -116,8 +130,14 @@ export function createViewerGenerationRunner(deps: ViewerGenerationRunnerDeps): 
     const successful = lastResults.filter((row) => row.status === "succeeded" && row.result);
     if (!successful.length) {
       deps.retryEl.hidden = false;
-      deps.statusEl.textContent = "Generation failed. Review the failed scheme and retry.";
-      renderOverview(progressForRows(), "没有方案生成成功。", null);
+      deps.statusEl.textContent = "场景生成失败。请查看具体诊断后重试。";
+      renderOverview(
+        progressForRows(),
+        lastResults.length === 1
+          ? "场景生成失败，请查看下方诊断。"
+          : "全部方案生成失败，请查看各方案诊断。",
+        null,
+      );
       return;
     }
 

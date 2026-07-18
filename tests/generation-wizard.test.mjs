@@ -36,6 +36,9 @@ assert.doesNotMatch(spec, /DEFAULT_GRAPH_TEMPLATE_ID|hkust_gz_gate/);
 assert.match(runner, /cancelGenerationJob/);
 assert.match(runner, /onLoadResult/);
 assert.match(runner, /payload\?\.operations\?\.slice\(-3\)/);
+assert.match(runner, /function explainGenerationFailure/);
+assert.match(runner, /场景生成失败，请查看下方诊断/);
+assert.doesNotMatch(runner, /没有方案生成成功/);
 assert.match(app, /buildGenerationRequestSpec/);
 assert.match(app, /generationRunner\.run\(spec\)/);
 assert.match(
