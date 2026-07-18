@@ -1895,6 +1895,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     getPresetId: () => selectedDesignPreset()?.id || "custom",
     getCurrentLayoutPath: () => currentLayoutPath,
     getCurrentManifest: () => currentManifest,
+    shouldSyncGeneratedLayout: () => !parseQueryLayoutPath(),
     loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
     setStatus,
     flashStatus,
@@ -2098,6 +2099,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         ...(result.scene_glb_path ? { sceneGlbPath: result.scene_glb_path } : {}),
         defaultSceneOptionKey: "final_scene",
       });
+      // A freshly generated OSM study area can span hundreds of metres. The
+      // walk-through camera is intentionally near eye level, which makes the
+      // road plane appear as a thin horizon and transparent massing disappear
+      // into the sky. Start result review from a fitted oblique overview; the
+      // first click can still enter the road-level walk-through position.
+      frameSceneOverview();
       workflow.setGeneratedScene({
         layoutPath,
         ...(currentManifest?.layout_revision ? {
@@ -2739,6 +2746,27 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         }
       } else if (mesh.material && "depthWrite" in mesh.material && mesh.material.transparent) {
         mesh.material.depthWrite = false;
+      }
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const isTransparentMassing = materials.some((material) => (
+        material?.name === "roadgen3d_transparent_massing"
+      ));
+      if (isTransparentMassing && !mesh.userData.roadgenMassingOutlineAdded) {
+        const outline = new THREE.LineSegments(
+          new THREE.EdgesGeometry(mesh.geometry, 20),
+          new THREE.LineBasicMaterial({
+            color: 0x6f8792,
+            transparent: true,
+            opacity: 0.72,
+            depthWrite: false,
+          }),
+        );
+        outline.name = `${mesh.name || "transparent_massing"}__outline`;
+        outline.renderOrder = 4;
+        outline.userData.isRenderHelper = true;
+        outline.raycast = () => undefined;
+        mesh.userData.roadgenMassingOutlineAdded = true;
+        mesh.add(outline);
       }
     });
   }
@@ -3644,8 +3672,13 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
 
   // Stage toolbar view modes and actions
   syncCameraEl.addEventListener("click", () => {
-    resetView();
-    flashStatus("Camera reset to spawn.");
+    if (currentCameraMode === "frame") {
+      frameSceneOverview();
+      flashStatus("Camera reset to scene overview.");
+    } else {
+      resetView();
+      flashStatus("Camera reset to road-level spawn.");
+    }
   }, { signal });
 
   mode3dEl.addEventListener("click", () => {
@@ -4089,6 +4122,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         try {
           populateRecentLayoutOptions(recentLayouts, candidate);
           await sceneSelectionController.loadLayoutSelection(candidate);
+          frameSceneOverview();
           initialLayoutPath = candidate;
           lastLayoutError = "";
           break;

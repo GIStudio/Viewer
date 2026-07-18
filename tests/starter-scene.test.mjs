@@ -20,6 +20,11 @@ assert.match(stage, /id="viewer-starter-demo-banner"/, "the main stage must iden
 assert.match(stage, /data-starter-action="materialize"/, "the demo banner must offer an explicit copy action");
 assert.match(stage, /data-starter-action="source"/, "the demo banner must link to the user's OSM workflow");
 assert.match(app, /await loadStarterScenePreview\(\)/, "an empty professional workflow must load the starter preview");
+assert.match(
+  app,
+  /shouldSyncGeneratedLayout:\s*\(\) => !parseQueryLayoutPath\(\)/,
+  "an explicit layout URL must not be overwritten by a restored workflow scene",
+);
 assert.doesNotMatch(app, /fallbackCandidates/, "startup must never silently substitute an arbitrary recent scene");
 assert.match(app, /The scene contains no usable road geometry or has invalid bounds/, "starter loading must reject empty or invalid scene bounds");
 assert.match(selection, /persistSelectionInUrl !== false/, "preview loading must not write its manifest into the URL");

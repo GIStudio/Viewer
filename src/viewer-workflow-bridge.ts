@@ -15,6 +15,7 @@ export type ViewerWorkflowBridgeDeps = {
   getPresetId: () => string;
   getCurrentLayoutPath: () => string;
   getCurrentManifest: () => ViewerManifest | null;
+  shouldSyncGeneratedLayout?: () => boolean;
   loadLayoutSelection: (layoutPath: string) => Promise<void>;
   setStatus: (message: string) => void;
   flashStatus: (message: string) => void;
@@ -28,6 +29,7 @@ export function createViewerWorkflowBridge(deps: ViewerWorkflowBridgeDeps): View
     const layoutPath = deps.workflow.getSnapshot().sceneLayoutPath;
     if (
       disposed
+      || deps.shouldSyncGeneratedLayout?.() === false
       || !layoutPath
       || loadingLayoutPath === layoutPath
       || deps.getCurrentLayoutPath() === layoutPath

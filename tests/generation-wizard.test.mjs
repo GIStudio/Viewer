@@ -38,6 +38,11 @@ assert.match(runner, /onLoadResult/);
 assert.match(runner, /payload\?\.operations\?\.slice\(-3\)/);
 assert.match(app, /buildGenerationRequestSpec/);
 assert.match(app, /generationRunner\.run\(spec\)/);
+assert.match(
+  app,
+  /onLoadResult:[\s\S]*?loadLayoutSelection\(layoutPath,[\s\S]*?frameSceneOverview\(\)/,
+  "a generated OSM scene must open in a fitted overview instead of an eye-level horizon view",
+);
 assert.doesNotMatch(app, /workflowSnapshot\.normalized\s*\?\s*workflowBridge\.runGeneration/);
 assert.match(css, /grid-template-rows: minmax\(0, 1fr\) auto/);
 assert.match(css, /\.viewer-generation-primary-panel\[hidden\]/);
