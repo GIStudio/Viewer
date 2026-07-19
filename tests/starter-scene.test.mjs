@@ -6,12 +6,15 @@ const routeIsland = fs.readFileSync(new URL("../src/react/RouteIsland.tsx", impo
 const stage = fs.readFileSync(new URL("../src/viewer-panels/stage.ts", import.meta.url), "utf8");
 const starter = fs.readFileSync(new URL("../src/starter-scene.ts", import.meta.url), "utf8");
 const workflow = fs.readFileSync(new URL("../src/workflow-controller.ts", import.meta.url), "utf8");
+const pipeline = fs.readFileSync(new URL("../src/professional-pipeline.ts", import.meta.url), "utf8");
 const draftStore = fs.readFileSync(new URL("../src/professional-draft-store.ts", import.meta.url), "utf8");
 const selection = fs.readFileSync(new URL("../src/viewer-scene-selection-controller.ts", import.meta.url), "utf8");
 const panelElements = fs.readFileSync(new URL("../src/viewer-panels/elements.ts", import.meta.url), "utf8");
 
 assert.match(workflow, /kind: "starter_demo"; demoId: string/, "workflow scene refs must distinguish immutable starter previews");
+assert.match(workflow, /setStarterPreview\(demoId\)/, "the read-only demo must be represented without materializing a workflow");
 assert.match(workflow, /materializeStarterDemo\(input\)/, "workflow controller must atomically materialize a starter scene");
+assert.match(pipeline, /snapshot\.sceneRef\?\.kind === "starter_demo"\) return "review"/, "the read-only demo must land on 03 result review");
 assert.match(draftStore, /sceneLayoutPath: snapshot\.sceneLayoutPath/, "a materialized starter layout must survive browser refresh");
 assert.match(starter, /\/api\/starter-scenes\/default/, "starter discovery must use the registered server contract");
 assert.match(starter, /\/materialize`/, "starter materialization must use the idempotent server endpoint");
@@ -19,7 +22,13 @@ assert.match(starter, /await saveProfessionalWorkflowDraft\(workflow\.getSnapsho
 assert.match(stage, /id="viewer-starter-demo-banner"/, "the main stage must identify the bundled demo");
 assert.match(stage, /data-starter-action="materialize"/, "the demo banner must offer an explicit copy action");
 assert.match(stage, /data-starter-action="source"/, "the demo banner must link to the user's OSM workflow");
+assert.match(stage, /透明建筑白模/, "the starter banner must describe its complete intersection context");
+assert.doesNotMatch(stage, /无家具/, "the complete starter must not be described as furniture-free");
 assert.match(app, /await loadStarterScenePreview\(\)/, "an empty professional workflow must load the starter preview");
+assert.match(app, /workflow\.setStarterPreview\(starter\.id\)/, "starter loading must publish the transient review state");
+assert.match(app, /frameSceneFocus\(starter\.focus_xz, starter\.focus_extent_m\)/, "starter loading must frame the cross junction rather than the full corridor");
+assert.match(app, /shell\.sidebar\.activate\("review"\)/, "first-open onboarding must activate the 03 review page");
+assert.match(pipeline, /id="viewer-starter-review-guide"/, "03 must explain how 01A, 01B and 02 produce a user scene");
 assert.match(
   app,
   /shouldSyncGeneratedLayout:\s*\(\) => !parseQueryLayoutPath\(\)/,

@@ -27,6 +27,7 @@ assert.match(workflow, /export type WorkflowBaselineRun/);
 assert.match(workflow, /setGeneratedScene[\s\S]*sceneReviewStatus: "pending"/);
 assert.match(workflow, /setSceneRevision[\s\S]*sceneReviewStatus: "pending"/);
 assert.match(pipeline, /if \(snapshot\.sceneReviewStatus === "changes_requested"\) return "edit"/);
+assert.match(pipeline, /snapshot\.sceneRef\?\.kind === "starter_demo"\) return "review"/);
 assert.match(pipeline, /if \(snapshot\.sceneReviewStatus === "accepted" \|\| snapshot\.evaluation\) return "deliver"/);
 assert.match(routeIsland, /01A/);
 assert.match(routeIsland, /01B/);

@@ -642,6 +642,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   const reviewUsedAssetsEl = root.querySelector<HTMLElement>("#viewer-review-used-assets");
   const evaluateUsedAssetsEl = root.querySelector<HTMLElement>("#viewer-evaluate-used-assets");
   const reviewStateEl = root.querySelector<HTMLElement>("#viewer-result-review-state");
+  const reviewRootEl = root.querySelector<HTMLElement>("#viewer-result-review");
+  const starterReviewGuideEl = root.querySelector<HTMLElement>("#viewer-starter-review-guide");
   const reviewAcceptEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-accept");
   const reviewChangesEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-changes");
   const reviewAnnotationEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-annotation");
@@ -808,8 +810,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
           emptyStateEl.innerHTML = `
             <div class="viewer-empty-card" data-tone="running">
               <span class="viewer-empty-kicker">BUILT-IN DEMO · GUANGZHOU</span>
-              <h2>${currentLang === "zh" ? "正在载入广州道路骨架" : "Loading the Guangzhou road skeleton"}</h2>
-              <p>${currentLang === "zh" ? "读取内置 OSM 快照与无家具道路场景，不会请求 Overpass 或资产仓库。" : "Reading the bundled OSM snapshot and furniture-free scene without requesting Overpass or the asset repository."}</p>
+              <h2>${currentLang === "zh" ? "正在载入广州完整十字路口" : "Loading the complete Guangzhou intersection"}</h2>
+              <p>${currentLang === "zh" ? "读取内置 OSM、透明建筑白模与代表性街道设施，不会请求 Overpass。" : "Reading bundled OSM, transparent building massing, and representative street assets without requesting Overpass."}</p>
             </div>`;
         } else if (starterLoadError && !approved) {
           emptyStateEl.innerHTML = `
@@ -852,13 +854,27 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (starterDemoBannerEl) {
       starterDemoBannerEl.hidden = activeSceneOrigin !== "starter_demo";
       const label = starterDemoBannerEl.querySelector<HTMLElement>("[data-starter-demo-label]");
+      const summary = starterDemoBannerEl.querySelector<HTMLElement>("[data-starter-demo-summary]");
       if (label && activeStarterScene) label.textContent = `${currentLang === "zh" ? "内置示例" : "Built-in demo"} · ${activeStarterScene.label}`;
+      if (summary && activeStarterScene) {
+        const counts = activeStarterScene.category_counts;
+        summary.textContent = currentLang === "zh"
+          ? `真实 OSM 十字路口 · ${counts.building ?? 0} 个透明建筑白模 · ${Object.values(counts).reduce((sum, count) => sum + count, 0) - (counts.building ?? 0)} 个代表性街道设施`
+          : `Real OSM intersection · ${counts.building ?? 0} transparent buildings · ${Object.values(counts).reduce((sum, count) => sum + count, 0) - (counts.building ?? 0)} representative street assets`;
+      }
     }
+    const starterPreview = activeSceneOrigin === "starter_demo";
+    if (reviewRootEl) reviewRootEl.dataset.mode = starterPreview ? "starter" : "workflow";
+    if (starterReviewGuideEl) starterReviewGuideEl.hidden = !starterPreview;
     if (reviewStateEl) {
       const strong = reviewStateEl.querySelector<HTMLElement>("strong");
       const detail = reviewStateEl.querySelector<HTMLElement>("span");
       const revision = snapshot.sceneRevision ? ` · rev ${snapshot.sceneRevision.revision}` : "";
-      if (snapshot.sceneReviewStatus === "accepted") {
+      if (starterPreview) {
+        reviewStateEl.dataset.tone = "ready";
+        if (strong) strong.textContent = currentLang === "zh" ? "正在查看内置完整十字路口" : "Viewing the complete built-in intersection";
+        if (detail) detail.textContent = currentLang === "zh" ? "这是只读产品示例；下方说明如何生成你自己的 03 结果。" : "This is a read-only product example; follow the guide below to create your own 03 result.";
+      } else if (snapshot.sceneReviewStatus === "accepted") {
         reviewStateEl.dataset.tone = "ready";
         if (strong) strong.textContent = translateViewerKey(currentLang, "professional.review.accepted") ?? "Result accepted";
         if (detail) detail.textContent = `${translateViewerKey(currentLang, "professional.review.acceptedHint") ?? "Evaluation and delivery are now available."}${revision}`;
@@ -1867,10 +1883,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         persistSelectionInUrl: false,
         defaultSceneOptionKey: "final_scene",
       });
-      frameSceneOverview();
       activeStarterScene = starter;
       activeSceneOrigin = "starter_demo";
-      setStatus(currentLang === "zh" ? "正在预览内置广州道路骨架。" : "Viewing the built-in Guangzhou road skeleton.");
+      workflow.setStarterPreview(starter.id);
+      frameSceneFocus(starter.focus_xz, starter.focus_extent_m);
+      shell.sidebar.activate("review");
+      setStatus(currentLang === "zh" ? "正在预览内置广州完整十字路口。" : "Viewing the built-in complete Guangzhou intersection.");
     } catch (error) {
       activeStarterScene = null;
       activeSceneOrigin = null;
@@ -2416,6 +2434,23 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       center.z + extent * 0.72,
     );
     camera.lookAt(center.x, center.y, center.z);
+  }
+
+  function frameSceneFocus(centerXZ: readonly [number, number], requestedExtent: number): void {
+    if (centerXZ.length !== 2 || !Number.isFinite(centerXZ[0]) || !Number.isFinite(centerXZ[1])) {
+      frameSceneOverview();
+      return;
+    }
+    const extent = Math.max(24, Number.isFinite(requestedExtent) ? requestedExtent : 80);
+    const centerY = currentSceneBounds?.center.y ?? 0;
+    currentCameraMode = "frame";
+    avatarFigure.visible = false;
+    camera.position.set(
+      centerXZ[0] + extent * 0.72,
+      centerY + extent * 0.58,
+      centerXZ[1] + extent * 0.72,
+    );
+    camera.lookAt(centerXZ[0], centerY, centerXZ[1]);
   }
 
   function updateOverlay(): void {

@@ -38,8 +38,8 @@ export function createViewerStageHtml(): string {
       <aside id="viewer-starter-demo-banner" class="viewer-starter-demo-banner" aria-live="polite" hidden>
         <div>
           <span>BUILT-IN DEMO</span>
-          <strong data-starter-demo-label>内置示例 · 广州道路骨架</strong>
-          <small>真实 OSM 快照 · 无家具 · 不占用 01B 素材仓库</small>
+          <strong data-starter-demo-label>内置示例 · 广州完整十字路口</strong>
+          <small data-starter-demo-summary>真实 OSM · 透明建筑白模 · 代表性街道设施</small>
         </div>
         <div class="viewer-starter-demo-actions">
           <button type="button" data-starter-action="materialize">使用此示例开始</button>

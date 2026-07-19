@@ -198,6 +198,7 @@ export type WorkflowController = {
     sceneRevision?: SceneRevision | null;
     contextMassing?: Record<string, unknown> | null;
   }): boolean;
+  setStarterPreview(demoId: string): void;
   materializeStarterDemo(input: {
     source: NormalizedSceneSource;
     sourceFingerprint: string;
@@ -629,6 +630,15 @@ export function createWorkflowController(): WorkflowController {
         lastError: null,
       });
       return true;
+    },
+    setStarterPreview(demoId) {
+      const cleanId = demoId.trim();
+      if (!cleanId || snapshot.sceneLayoutPath) return;
+      publish({
+        sceneRef: Object.freeze({ kind: "starter_demo" as const, demoId: cleanId }),
+        sceneReviewStatus: "not_available",
+        lastError: null,
+      });
     },
     materializeStarterDemo(input) {
       const layoutPath = input.layoutPath.trim();

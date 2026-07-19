@@ -13,6 +13,9 @@ export type StarterScenePackage = Readonly<{
   source_fingerprint: string;
   scene_fingerprint: string;
   retrieval_bbox: readonly [number, number, number, number];
+  focus_xz: readonly [number, number];
+  focus_extent_m: number;
+  category_counts: Readonly<Record<string, number>>;
   normalized_source: NormalizedSceneSourceResponse;
   viewer_manifest_url: string;
 }>;
