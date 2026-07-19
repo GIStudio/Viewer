@@ -875,6 +875,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       legacyStarterWarningEl.hidden = !activeLegacyStarterSceneId;
       const title = legacyStarterWarningEl.querySelector<HTMLElement>("[data-legacy-starter-title]");
       const summary = legacyStarterWarningEl.querySelector<HTMLElement>("[data-legacy-starter-summary]");
+      const upgrade = legacyStarterWarningEl.querySelector<HTMLButtonElement>("[data-starter-action='upgrade']");
       if (title) {
         title.textContent = currentLang === "zh"
           ? "旧版示例存在已知几何问题"
@@ -884,6 +885,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         summary.textContent = currentLang === "zh"
           ? `${activeLegacyStarterSceneId} 可能出现道路缺角、针状铺装或背景地面暴露。`
           : `${activeLegacyStarterSceneId} may contain road gaps, needle surfaces, or exposed background ground.`;
+      }
+      if (upgrade) {
+        upgrade.textContent = currentLang === "zh"
+          ? "进入已修复的广州 v6 示例"
+          : "Open the repaired Guangzhou v6 starter";
       }
     }
     const starterPreview = activeSceneOrigin === "starter_demo";

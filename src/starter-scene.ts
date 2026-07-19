@@ -31,6 +31,8 @@ const LEGACY_STARTER_SCENE_IDS = Object.freeze([
   "guangzhou_road_skeleton_v1",
   "guangzhou_road_skeleton_v2",
   "guangzhou_complete_intersection_v3",
+  "guangzhou_complete_intersection_v4",
+  "guangzhou_complete_intersection_v5",
 ]);
 
 export function legacyStarterSceneIdFromPath(value: string | null | undefined): string | null {

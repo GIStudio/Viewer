@@ -27,6 +27,8 @@ assert.match(stage, /透明建筑白模/, "the starter banner must describe its 
 assert.doesNotMatch(stage, /无家具/, "the complete starter must not be described as furniture-free");
 assert.match(stage, /id="viewer-legacy-starter-warning"/, "legacy starters must display a geometry warning in the stage");
 assert.match(stage, /data-starter-action="upgrade"/, "the legacy warning must link to the repaired default starter");
+assert.match(stage, /广州 v6 示例/, "the legacy warning must name the repaired v6 starter");
+assert.match(starter, /guangzhou_complete_intersection_v5/, "v5 must remain classified as a legacy starter");
 assert.match(app, /await loadStarterScenePreview\(\)/, "an empty professional workflow must load the starter preview");
 assert.match(
   app,
