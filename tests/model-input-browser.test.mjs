@@ -52,6 +52,7 @@ try {
   const origin = `http://127.0.0.1:${address.port}`;
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
+  await page.addInitScript(() => localStorage.setItem("viewer-lang", "en"));
   const methods = [];
   page.on("request", (request) => { if (request.url().includes("/api/model-input-")) methods.push(request.method()); });
   await page.goto(`${origin}/#model-input-browser`);

@@ -64,6 +64,7 @@ import {
   saveSceneLayoutEdits,
 } from "./viewer-api";
 import type {
+  SceneAssetRef,
   SceneEditCommand,
   SceneLayoutEditResponse,
 } from "./viewer-api";
@@ -90,6 +91,9 @@ import {
 } from "./viewer-scene-bounds";
 import { createSceneObjectEditorController } from "./viewer-scene-object-editor";
 import { createSceneEditAutosaveCoordinator } from "./viewer-scene-edit-autosave";
+import { createLocalAssetPaletteAdapter, type SceneAssetPaletteAdapter } from "./viewer-asset-palette";
+import { createSceneAssetDialog } from "./viewer-scene-asset-dialog";
+import { createViewerCommandRegistry } from "./viewer-command-registry";
 import { createViewerPanelController, type ViewerPanelController } from "./viewer-panel-controller";
 import {
   sceneBoundsFromManifest,
@@ -478,6 +482,7 @@ function createAvatarFigure(): THREE.Group {
 export type ViewerHostOptions = {
   embedded?: boolean;
   persistSceneCommands?: (commands: SceneEditCommand[]) => Promise<SceneLayoutEditResponse>;
+  assetPaletteAdapter?: SceneAssetPaletteAdapter;
   sidebarPages?: WorkbenchSidebarPage[];
   baselineCoordinator?: ProfessionalBaselineCoordinator;
 };
@@ -2682,6 +2687,128 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     enqueue: (command, options) => editAutosave.enqueue(command, options),
   });
 
+  const paletteBackingAdapter = hostOptions.assetPaletteAdapter ?? createLocalAssetPaletteAdapter();
+  const workflowPaletteAdapter: SceneAssetPaletteAdapter = {
+    async load() {
+      const palette = await paletteBackingAdapter.load();
+      workflow.setAssetPalette(palette);
+      return palette;
+    },
+    async save(palette) {
+      const saved = await paletteBackingAdapter.save(palette);
+      workflow.setAssetPalette(saved);
+      return saved;
+    },
+  };
+  const sceneAssetDialog = createSceneAssetDialog({
+    adapter: workflowPaletteAdapter,
+    language: () => currentLang,
+    flashStatus,
+  });
+  const openSceneAssetsEl = root.querySelector<HTMLButtonElement>("#viewer-open-scene-assets");
+  const openSceneAssets = (): void => { void sceneAssetDialog.open().catch((error) => flashStatus(String(error))); };
+  openSceneAssetsEl?.addEventListener("click", openSceneAssets);
+  const assetDropGhost = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.48, 0.48, 0.04, 28),
+    new THREE.MeshBasicMaterial({ color: 0xb9d9cc, transparent: true, opacity: 0.78, depthWrite: false }),
+  );
+  assetDropGhost.name = "roadgen3d-asset-drop-ghost";
+  assetDropGhost.visible = false;
+  assetDropGhost.userData.viewerHelper = true;
+  scene.add(assetDropGhost);
+
+  function surfaceRoleForObject(object: THREE.Object3D): string {
+    const roles = currentManifest?.surface_diagnostic?.node_roles ?? {};
+    let cursor: THREE.Object3D | null = object;
+    while (cursor) {
+      const direct = String(roles[cursor.name] ?? cursor.userData?.surfaceRole ?? "");
+      if (direct) return direct;
+      cursor = cursor.parent;
+    }
+    return "";
+  }
+
+  function assetDropPoint(event: DragEvent, asset: SceneAssetRef | null): { point: THREE.Vector3; valid: boolean; role: string } | null {
+    if (!currentRoot) return null;
+    const rect = renderer.domElement.getBoundingClientRect();
+    raycaster.setFromCamera(new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    ), camera);
+    const hit = raycaster.intersectObject(currentRoot, true).find((candidate) => !candidate.object.userData?.viewerHelper);
+    if (!hit) return null;
+    const role = surfaceRoleForObject(hit.object);
+    const allowed = String(asset?.category ?? "").toLowerCase() === "tree"
+      ? new Set(["planting", "furnishing", "frontage"])
+      : new Set(["sidewalk", "furnishing", "frontage"]);
+    return { point: hit.point.clone(), valid: allowed.has(role), role };
+  }
+
+  let draggedAsset: SceneAssetRef | null = null;
+  renderer.domElement.addEventListener("dragenter", (event) => {
+    const raw = event.dataTransfer?.getData("application/x-roadgen3d-scene-asset");
+    if (raw) {
+      try { draggedAsset = JSON.parse(raw) as SceneAssetRef; } catch { draggedAsset = null; }
+    }
+  });
+  renderer.domElement.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (!draggedAsset) {
+      const raw = event.dataTransfer?.getData("application/x-roadgen3d-scene-asset");
+      if (raw) try { draggedAsset = JSON.parse(raw) as SceneAssetRef; } catch { draggedAsset = null; }
+    }
+    const placement = assetDropPoint(event, draggedAsset);
+    assetDropGhost.visible = Boolean(placement);
+    if (!placement) return;
+    assetDropGhost.position.copy(placement.point);
+    (assetDropGhost.material as THREE.MeshBasicMaterial).color.set(placement.valid ? 0x41a86d : 0xdf654f);
+    if (event.dataTransfer) event.dataTransfer.dropEffect = placement.valid ? "copy" : "none";
+  });
+  renderer.domElement.addEventListener("dragleave", () => { assetDropGhost.visible = false; });
+  renderer.domElement.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const raw = event.dataTransfer?.getData("application/x-roadgen3d-scene-asset");
+    let asset: SceneAssetRef | null = draggedAsset;
+    if (raw) try { asset = JSON.parse(raw) as SceneAssetRef; } catch { asset = null; }
+    const placement = assetDropPoint(event, asset);
+    assetDropGhost.visible = false;
+    draggedAsset = null;
+    if (!asset || !placement?.valid) {
+      flashStatus(`该地物不能放在 ${placement?.role || "未知承载面"}；请选择人行道、设施带、种植带或临街区。`);
+      return;
+    }
+    const instanceId = `${asset.category}-${asset.assetId}-${Date.now().toString(36)}`;
+    editAutosave.enqueue({
+      command_id: globalThis.crypto?.randomUUID?.() ?? `add-${Date.now()}`,
+      op: "add_instance",
+      instance_id: instanceId,
+      asset_id: asset.assetId,
+      category: asset.category,
+      asset_ref: asset,
+      position_xyz: [placement.point.x, 0, placement.point.z],
+      yaw_deg: 0,
+      scale: 1,
+      height_offset_m: 0,
+    });
+    sceneAssetDialog.close();
+    flashStatus(`正在添加 ${asset.label}；保存成功后转为正式对象。`);
+  });
+
+  const commandRegistry = createViewerCommandRegistry({
+    "edit.move": () => sceneObjectEditor.setMode("translate"),
+    "edit.rotate": () => sceneObjectEditor.setMode("rotate"),
+    "edit.scale": () => sceneObjectEditor.setMode("scale"),
+    "edit.duplicate": () => sceneObjectEditor.duplicateSelected(),
+    "edit.delete": () => sceneObjectEditor.deleteSelected(),
+    "edit.assets": () => void sceneAssetDialog.open().catch((error) => flashStatus(String(error))),
+    "edit.cancel": () => sceneObjectEditor.cancel(),
+    "edit.undo": () => void undoLastSceneEdit(),
+    "edit.redo": () => void undoLastSceneEdit(),
+    "viewer.settings": () => panelController.toggle("settings", { restoreRoam: true }),
+    "viewer.overlay": () => floatingLaneSystem.toggleOverlay(),
+    "viewer.reset": resetView,
+  });
+
   async function copyCurrentLaserTargetDetails(): Promise<void> {
     if (!laserToggleEl.checked && !sceneObjectEditor.isEnabled()) {
       flashStatus("Laser pointer and asset move mode are off.");
@@ -2702,6 +2829,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   }
 
   function handleKey(event: KeyboardEvent, active: boolean): void {
+    if (active && event.code === "Escape" && sceneAssetDialog.isOpen()) {
+      event.preventDefault();
+      sceneAssetDialog.close();
+      return;
+    }
     if (
       active
       && !event.repeat
@@ -2713,7 +2845,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       && lastSceneEditUndo
     ) {
       event.preventDefault();
-      void undoLastSceneEdit();
+      commandRegistry.execute(event.shiftKey ? "edit.redo" : "edit.undo");
       return;
     }
     const editShortcutActive = sceneObjectEditor.isEnabled()
@@ -2723,32 +2855,37 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (active && !event.repeat && editShortcutActive) {
       if (event.code === "KeyG") {
         event.preventDefault();
-        sceneObjectEditor.setMode("translate");
+        commandRegistry.execute("edit.move");
         return;
       }
       if (event.code === "KeyR" && !event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
-        sceneObjectEditor.setMode("rotate");
+        commandRegistry.execute("edit.rotate");
         return;
       }
       if (event.code === "KeyS" && !event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
-        sceneObjectEditor.setMode("scale");
+        commandRegistry.execute("edit.scale");
         return;
       }
       if (event.code === "KeyD" && event.shiftKey) {
         event.preventDefault();
-        sceneObjectEditor.duplicateSelected();
+        commandRegistry.execute("edit.duplicate");
         return;
       }
       if (event.code === "Delete" || event.code === "Backspace") {
         event.preventDefault();
-        sceneObjectEditor.deleteSelected();
+        commandRegistry.execute("edit.delete");
         return;
       }
       if (event.code === "Escape") {
         event.preventDefault();
-        sceneObjectEditor.cancel();
+        commandRegistry.execute("edit.cancel");
+        return;
+      }
+      if (event.code === "KeyA" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        commandRegistry.execute("edit.assets");
         return;
       }
     }
@@ -2810,17 +2947,17 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         break;
       case "KeyR":
         if (active) {
-          resetView();
+          commandRegistry.execute("viewer.reset");
         }
         break;
       case "KeyP":
         if (active && !event.repeat) {
-          panelController.toggle("settings", { restoreRoam: true });
+          commandRegistry.execute("viewer.settings");
         }
         break;
       case "KeyL":
         if (active && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) {
-          floatingLaneSystem.toggleOverlay();
+          commandRegistry.execute("viewer.overlay");
         }
         break;
       case "Digit1":
@@ -4395,6 +4532,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     structuredEvaluationController?.abort();
     editAutosave.dispose();
     sceneObjectEditor.dispose();
+    sceneAssetDialog.dispose();
+    openSceneAssetsEl?.removeEventListener("click", openSceneAssets);
+    scene.remove(assetDropGhost);
+    assetDropGhost.geometry.dispose();
+    (assetDropGhost.material as THREE.Material).dispose();
     environmentController.dispose();
     expandedMapController.dispose();
     renderPipeline.dispose();

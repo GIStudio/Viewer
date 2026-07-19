@@ -22,3 +22,100 @@
 .viewer-benchmark-method-dot[data-method="parametric"] {
   background: #059669;
 }
+/* Shared keyboard-launched workbench dialogs. They overlay the stage and never resize it. */
+.viewer-workbench-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 14000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(16, 45, 58, 0.45);
+}
+
+.viewer-workbench-modal[hidden] { display: none; }
+.viewer-workbench-modal[data-dragging="true"] { pointer-events: none; background: rgba(16, 45, 58, 0.18); }
+.viewer-workbench-modal[data-dragging="true"] .viewer-workbench-dialog { pointer-events: none; opacity: 0.42; }
+
+.viewer-workbench-dialog {
+  width: min(1040px, calc(100vw - 48px));
+  height: min(720px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  color: #102d3a;
+  background-color: #f3f0e7;
+  background-image:
+    linear-gradient(rgba(23, 75, 100, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 75, 100, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+  border: 2px solid #102d3a;
+  border-radius: 4px;
+  box-shadow: 10px 10px 0 #f4c430;
+  overflow: hidden;
+}
+
+.viewer-workbench-dialog > header,
+.viewer-workbench-dialog > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 20px;
+  background: rgba(243, 240, 231, 0.96);
+  border-bottom: 2px solid #102d3a;
+}
+
+.viewer-workbench-dialog > footer { border-top: 2px solid #102d3a; border-bottom: 0; }
+.viewer-workbench-dialog header span { color: #df654f; font: 700 11px/1.2 ui-monospace, monospace; letter-spacing: 0.12em; }
+.viewer-workbench-dialog h2 { margin: 4px 0 0; font: 700 25px/1.1 Georgia, "Songti SC", serif; }
+.viewer-workbench-dialog button,
+.viewer-workbench-dialog input,
+.viewer-workbench-dialog select {
+  min-height: 38px;
+  color: #102d3a;
+  background: #fffdf7;
+  border: 1px solid #174b64;
+  border-radius: 3px;
+  font: 650 13px/1.2 Inter, system-ui, sans-serif;
+}
+.viewer-workbench-dialog button { padding: 8px 14px; cursor: pointer; }
+.viewer-workbench-dialog button:hover,
+.viewer-workbench-dialog button:focus-visible { outline: 3px solid rgba(223, 101, 79, 0.28); border-color: #df654f; }
+.viewer-workbench-dialog button[disabled] { cursor: default; opacity: 0.55; }
+.viewer-workbench-dialog header [data-action="close"] { width: 42px; border-radius: 50%; color: #fff; background: #174b64; font-size: 22px; }
+
+.viewer-dialog-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid #102d3a; }
+.viewer-dialog-tabs button { border: 0; border-right: 1px solid #102d3a; border-radius: 0; background: rgba(255, 253, 247, 0.92); }
+.viewer-dialog-tabs button[aria-selected="true"] { color: #fff; background: #174b64; box-shadow: inset 0 -4px #df654f; }
+.viewer-dialog-tabs em { margin-left: 8px; padding: 2px 7px; color: #102d3a; background: #f4c430; border-radius: 999px; font-style: normal; }
+
+.viewer-scene-assets-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: 10px; padding: 12px 20px; border-bottom: 1px solid #102d3a; }
+.viewer-scene-assets-toolbar input,
+.viewer-scene-assets-toolbar select { padding: 8px 10px; }
+.viewer-scene-assets-toolbar button { color: #fff; background: #174b64; }
+.viewer-scene-assets-modal main { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr); }
+.viewer-scene-assets-list { min-height: 0; overflow: auto; padding: 14px 18px; border-right: 1px solid #102d3a; }
+.viewer-scene-asset-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-bottom: 9px; padding: 12px; background: rgba(255, 253, 247, 0.94); border: 1px solid #174b64; box-shadow: 3px 3px 0 #b9d9cc; }
+.viewer-scene-asset-card[draggable="true"] { cursor: grab; }
+.viewer-scene-asset-card div:first-child { display: grid; gap: 3px; min-width: 0; }
+.viewer-scene-asset-card span { width: fit-content; color: #df654f; font: 700 10px/1 ui-monospace, monospace; text-transform: uppercase; }
+.viewer-scene-asset-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #58707a; }
+.viewer-scene-asset-card-actions { display: flex; gap: 6px; }
+.viewer-scene-assets-preview { min-height: 0; padding: 16px; background: rgba(185, 217, 204, 0.24); overflow: auto; }
+.viewer-scene-assets-preview [data-preview-canvas] { min-height: 220px; display: grid; place-items: center; border: 1px solid #102d3a; background: #eef3ef; }
+.viewer-scene-assets-preview canvas { max-width: 100%; height: auto; }
+.viewer-scene-assets-empty { padding: 34px; text-align: center; border: 1px dashed #174b64; background: rgba(255, 253, 247, 0.8); }
+.viewer-shortcuts-modal .viewer-workbench-dialog { width: min(760px, calc(100vw - 48px)); height: min(680px, calc(100vh - 48px)); grid-template-rows: auto minmax(0, 1fr) auto; }
+.roadgen-shortcut-modal { min-height: 0; overflow: auto; padding: 18px 22px; display: grid; gap: 18px; }
+.roadgen-shortcut-modal section { padding: 14px; background: rgba(255, 253, 247, 0.92); border: 1px solid #174b64; box-shadow: 4px 4px 0 #b9d9cc; }
+.roadgen-shortcut-modal h3 { margin: 0 0 10px; color: #df654f; font: 700 12px/1 ui-monospace, monospace; letter-spacing: 0.1em; text-transform: uppercase; }
+.roadgen-shortcut-modal section > div { display: grid; grid-template-columns: minmax(120px, 0.35fr) 1fr; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid rgba(16, 45, 58, 0.16); }
+.roadgen-shortcut-modal kbd { width: fit-content; padding: 4px 7px; color: #fff; background: #174b64; border: 1px solid #102d3a; border-radius: 2px; box-shadow: 2px 2px 0 #f4c430; font: 700 11px/1.2 ui-monospace, monospace; }
+
+@media (max-width: 760px) {
+  .viewer-workbench-modal { padding: 10px; }
+  .viewer-workbench-dialog { width: calc(100vw - 20px); height: calc(100vh - 20px); }
+  .viewer-scene-assets-modal main { grid-template-columns: 1fr; }
+  .viewer-scene-assets-preview { display: none; }
+  .viewer-scene-assets-toolbar { grid-template-columns: 1fr; }
+}

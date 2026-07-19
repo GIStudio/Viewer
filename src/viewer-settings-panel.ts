@@ -116,6 +116,11 @@ export function renderViewerSettingsPanelHtml(): string {
           <input id="audio-enabled" class="viewer-toggle-input" type="checkbox" />
         </div>
       </div>
+      <div class="viewer-settings-section viewer-settings-section-divider">
+        <div class="viewer-settings-group-title">Scene object editing / 场景地物编辑</div>
+        <p class="viewer-settings-note">选择可编辑树木或街具后使用 G / R / S；每次操作自动保存为不可变 revision。</p>
+        <button id="viewer-open-scene-assets" class="stage-toolbar-button stage-toolbar-button-primary" type="button">A · 打开场景资产</button>
+      </div>
       <details class="viewer-settings-section viewer-settings-section-divider viewer-advanced-settings">
         <summary>Advanced workflow / 高级工作流</summary>
         <div class="viewer-settings-advanced-body">

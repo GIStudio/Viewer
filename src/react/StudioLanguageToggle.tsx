@@ -3,7 +3,8 @@ import { setViewerLanguage, translateViewerKey, type ViewerLanguage } from "../v
 export function StudioLanguageToggle({ language }: { language: ViewerLanguage }) {
   const languages: ViewerLanguage[] = ["zh", "en"];
   const select = (next: ViewerLanguage): void => {
-    if (next !== language) setViewerLanguage(next);
+    // Persist an explicit choice even when it matches the first-use Chinese default.
+    setViewerLanguage(next);
   };
   return (
     <div

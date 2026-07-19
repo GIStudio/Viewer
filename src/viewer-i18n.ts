@@ -336,7 +336,7 @@ const TRANSLATIONS: Record<string, Translation> = {
   "viewer.settings.thirdPerson": { en: "Third Person", zh: "第三人称" },
   "viewer.settings.frame": { en: "Frame", zh: "边界框" },
   "viewer.settings.bboxes": { en: "BBoxes", zh: "包围盒" },
-  "viewer.settings.move": { en: "Move", zh: "移动" },
+  "viewer.settings.move": { en: "Object Editor", zh: "地物编辑" },
   "viewer.settings.laser": { en: "Laser", zh: "激光" },
   "viewer.settings.graph": { en: "Graph", zh: "图形" },
   "viewer.settings.scene": { en: "Scene", zh: "场景" },

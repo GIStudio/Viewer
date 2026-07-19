@@ -1,5 +1,6 @@
 import type { ReferenceAnnotation } from "./sg-types";
 import type { SceneEditCommand } from "./viewer-api";
+import type { SceneAssetPalette } from "./viewer-asset-palette";
 import type { EvaluationResult } from "./viewer-evaluation";
 import type { SceneJobOperation } from "./viewer-types";
 
@@ -148,6 +149,7 @@ export type WorkflowSnapshot = Readonly<{
   editPending: boolean;
   undoCommand: LayoutEditCommand | null;
   evaluation: EvaluationResult | null;
+  assetPalette: SceneAssetPalette | null;
   assetPreparation: AssetPreparationState;
   /** @deprecated Read assetPreparation instead. */
   assetPreparationChoice: AssetPreparationChoice;
@@ -203,6 +205,7 @@ export type WorkflowController = {
   setSceneRevision(revision: SceneRevision, undoCommand?: LayoutEditCommand | null): void;
   setEditPending(pending: boolean): void;
   setEvaluation(result: EvaluationResult): void;
+  setAssetPalette(palette: SceneAssetPalette): void;
   setAssetPreparation(state: AssetPreparationState): void;
   setAssetPreparationChoice(choice: Exclude<AssetPreparationChoice, null>): void;
   setSceneReviewStatus(status: Exclude<SceneReviewStatus, "not_available">): TransitionResult;
@@ -313,6 +316,7 @@ function initialSnapshot(): WorkflowSnapshot {
     editPending: false,
     undoCommand: null,
     evaluation: null,
+    assetPalette: null,
     assetPreparation,
     assetPreparationChoice: assetChoiceForState(assetPreparation),
     sceneReviewStatus: "not_available",
@@ -704,6 +708,9 @@ export function createWorkflowController(): WorkflowController {
     },
     setEvaluation(result) {
       publish({ step: "evaluate", evaluation: immutableCopy(result), lastError: null });
+    },
+    setAssetPalette(palette) {
+      publish({ assetPalette: immutableCopy(palette), lastError: null });
     },
     setAssetPreparation(state) {
       const normalized = normalizeAssetPreparationState(state);

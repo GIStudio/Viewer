@@ -7,6 +7,7 @@ import { bindDesktopShell } from "../desktop-shell";
 import { mountSceneGraphPage } from "../scene-graph";
 import type { ReferenceAnnotation } from "../sg-types";
 import type { SceneLayoutEditResponse } from "../viewer-api";
+import type { SceneAssetPalette, SceneAssetPaletteAdapter } from "../viewer-asset-palette";
 import type { ViewerManifest } from "../viewer-types";
 import type { ViewerLanguage } from "../viewer-i18n";
 import type { NormalizedSceneSourceResponse } from "../workflow-api";
@@ -283,9 +284,16 @@ export function CourseViewerWorkbench({
       },
     };
   }, [addMaterialized, api, onRevisionCreated, project.id]);
+  const assetPaletteAdapter = useMemo<SceneAssetPaletteAdapter>(() => ({
+    load: () => api.request<SceneAssetPalette>(`/api/v1/projects/${project.id}/asset-palette`),
+    save: (palette) => api.request<SceneAssetPalette>(`/api/v1/projects/${project.id}/asset-palette`, {
+      method: "PUT",
+      body: JSON.stringify(palette),
+    }),
+  }), [api, project.id]);
   const viewerOptions = useMemo<ViewerHostOptions>(
-    () => ({ embedded: true, persistSceneCommands, sidebarPages }),
-    [persistSceneCommands, sidebarPages],
+    () => ({ embedded: true, persistSceneCommands, assetPaletteAdapter, sidebarPages }),
+    [assetPaletteAdapter, persistSceneCommands, sidebarPages],
   );
 
   if (error) return <div className="course-empty"><h2>3D 道路查看器载入失败</h2><p>{error}</p></div>;

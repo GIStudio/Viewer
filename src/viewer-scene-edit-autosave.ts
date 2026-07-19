@@ -29,10 +29,11 @@ const STORE_NAME = "scene-edit-queues";
 
 function openQueueDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = indexedDB.open(DB_NAME, 2);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+      if (!db.objectStoreNames.contains("asset-palettes")) db.createObjectStore("asset-palettes");
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("Could not open edit queue storage."));
