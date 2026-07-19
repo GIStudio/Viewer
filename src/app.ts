@@ -101,6 +101,11 @@ import {
   exportTopDownMapPng,
   exportTopDownMapSvg,
 } from "./viewer-export";
+import {
+  exportCameraSurfaceDiagnostic,
+  renderCameraSurfaceDiagnosticControls,
+  type SurfaceDiagnosticColorMode,
+} from "./viewer-camera-surface-diagnostic";
 import { createExpandedMapController } from "./viewer-expanded-map";
 import { createSchemeCompareController } from "./viewer-scheme-compare";
 import {
@@ -3339,7 +3344,18 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
           ${escapeHtml(String(summary?.loss_digest ?? solverMetrics.loss_digest ?? "Geometry positions may shift within tolerance; road topology remains consistent."))}
         </div>
       </details>
+      ${renderCameraSurfaceDiagnosticControls(t, Boolean(currentRoot && currentManifest))}
     `;
+    const modeEl = consistencyContentEl.querySelector<HTMLSelectElement>("#viewer-surface-diagnostic-mode");
+    if (modeEl) {
+      modeEl.value = cameraDiagnosticColorMode;
+      modeEl.addEventListener("change", () => {
+        cameraDiagnosticColorMode = modeEl.value === "patch" ? "patch" : "role";
+      }, { signal });
+    }
+    consistencyContentEl
+      .querySelector<HTMLButtonElement>("#viewer-export-camera-surface-diagnostic")
+      ?.addEventListener("click", () => void exportCurrentCameraSurfaceDiagnostic(), { signal });
   }
 
   function updateMetricsPanel(): void {
@@ -3390,6 +3406,30 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       exportTopDownMapPng(context);
     } else {
       exportTopDownMapSvg(context);
+    }
+  }
+
+  let cameraDiagnosticColorMode: SurfaceDiagnosticColorMode = "role";
+
+  async function exportCurrentCameraSurfaceDiagnostic(): Promise<void> {
+    try {
+      setStatus(t("Exporting final GLB surface diagnostic…", "正在导出最终 GLB 表面诊断…"));
+      const result = await exportCameraSurfaceDiagnostic({
+        root: currentRoot,
+        camera,
+        manifest: currentManifest,
+        colorMode: cameraDiagnosticColorMode,
+        text: t,
+      });
+      const violations = result.triangles.filter((triangle) => triangle.qa_flags.length > 0).length;
+      flashStatus(t(
+        `Exported ${result.triangles.length} final GLB triangles (${violations} flagged).`,
+        `已导出 ${result.triangles.length} 个最终 GLB 三角面（${violations} 个异常）。`,
+      ));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? "");
+      flashStatus(t(`Diagnostic export failed: ${message}`, `诊断导出失败：${message}`));
+      alert(t(`Diagnostic export failed: ${message}`, `诊断导出失败：${message}`));
     }
   }
 
@@ -3680,6 +3720,13 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   historyAnalysisCloseEl.addEventListener("click", () => panelController.setOpen("history", false), { signal });
 
   consistencyCloseEl.addEventListener("click", () => panelController.setOpen("consistency", false), { signal });
+  root.querySelector<HTMLButtonElement>("#viewer-open-camera-surface-diagnostic")?.addEventListener("click", () => {
+    panelController.closeAll();
+    panelController.setOpen("consistency", true);
+    window.requestAnimationFrame(() => {
+      consistencyContentEl.querySelector<HTMLElement>(".viewer-surface-diagnostic-card")?.scrollIntoView({ block: "start" });
+    });
+  }, { signal });
 
   presetsToggleEl.addEventListener("click", () => panelController.setOpen("presets", !panelController.isOpen("presets")), { signal });
   presetsCloseEl.addEventListener("click", () => panelController.setOpen("presets", false), { signal });

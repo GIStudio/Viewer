@@ -24,6 +24,7 @@ export function createViewerStageHtml(): string {
           <button class="stage-toolbar-button" type="button" id="viewer-sync-camera" data-i18n-key="viewer.stage.resetView">Reset View</button>
         </div>
         <div class="stage-toolbar-group stage-toolbar-output" data-od-id="toolbar-right">
+          <button class="stage-toolbar-button" type="button" id="viewer-open-camera-surface-diagnostic" title="相机局部几何诊断">QA 100m</button>
           <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-map" data-shell-action="file-export-png">PNG</button>
           <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-svg" data-shell-action="file-export-svg">SVG</button>
           <span class="stage-pill" data-tone="ok" id="viewer-topology-pill">topology_ok</span>

@@ -38,6 +38,84 @@
   justify-content: flex-end;
 }
 
+.viewer-surface-diagnostic-card {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--studio-ink, #102d3a);
+  border-left: 5px solid var(--studio-coral, #df654f);
+  background: rgba(243, 240, 231, 0.92);
+  box-shadow: 5px 5px 0 rgba(16, 45, 58, 0.12);
+}
+
+.viewer-surface-diagnostic-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.viewer-surface-diagnostic-heading > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.viewer-surface-diagnostic-heading strong {
+  color: var(--studio-ink, #102d3a);
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 1.02rem;
+}
+
+.viewer-surface-diagnostic-heading small,
+.viewer-surface-diagnostic-card p {
+  color: var(--color-text-secondary, #52636b);
+  line-height: 1.45;
+}
+
+.viewer-surface-diagnostic-heading > span {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--studio-ink, #102d3a);
+  background: var(--studio-yellow, #f4c430);
+  color: var(--studio-ink, #102d3a);
+  font: 700 0.68rem ui-monospace, monospace;
+}
+
+.viewer-surface-diagnostic-field {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--studio-ink, #102d3a);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.viewer-surface-diagnostic-field select,
+.viewer-surface-diagnostic-export {
+  min-height: 2.45rem;
+  border: 1px solid var(--studio-ink, #102d3a);
+  border-radius: 4px;
+  background: #fffef9;
+  color: var(--studio-ink, #102d3a);
+  font-weight: 750;
+}
+
+.viewer-surface-diagnostic-export {
+  background: var(--studio-blue, #174b64);
+  color: white;
+  cursor: pointer;
+}
+
+.viewer-surface-diagnostic-export:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.viewer-surface-diagnostic-card p {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
 .stage-flow-step {
   display: inline-flex;
   align-items: center;

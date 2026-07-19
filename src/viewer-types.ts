@@ -43,6 +43,39 @@ export type ViewerLayoutRevision = {
   sha256: string;
 };
 
+export type SurfaceDiagnosticRole =
+  | "context_ground"
+  | "carriageway"
+  | "curb"
+  | "sidewalk"
+  | "furnishing"
+  | "frontage"
+  | "planting"
+  | "crossing"
+  | "lane_mark"
+  | "building";
+
+export type SurfaceDiagnosticPatch = {
+  patch_id: string;
+  junction_id?: string;
+  surface_role?: string;
+  strip_kind?: string;
+  quadrant_id?: string;
+  from_road_id?: number;
+  to_road_id?: number;
+  rings_xz?: Array<Array<[number, number]>>;
+};
+
+export type SurfaceDiagnosticManifest = {
+  schema_version: "roadgen3d.surface-diagnostic.v1";
+  coordinate_space: "local_xz_m";
+  source?: "final_glb_top_faces" | string;
+  node_roles: Record<string, SurfaceDiagnosticRole | string>;
+  patch_provenance?: SurfaceDiagnosticPatch[];
+  junction_arm_profiles?: Array<Record<string, unknown>>;
+  geometry_qa?: Record<string, unknown>;
+};
+
 
 export type ViewerManifest = {
   layout_path?: string;
@@ -62,6 +95,7 @@ export type ViewerManifest = {
   summary?: ViewerSummary;
   visual_style?: Record<string, unknown>;
   solver_metrics?: Record<string, unknown>;
+  surface_diagnostic?: SurfaceDiagnosticManifest;
   final_scene: {
     glb_url: string;
     label: string;
