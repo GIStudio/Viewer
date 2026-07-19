@@ -256,9 +256,34 @@
 .viewer-starter-demo-actions button { min-height: 2rem; padding: 0.38rem 0.65rem; border: 1px solid #102d3a; border-radius: 3px; background: #174b64; color: white; font-weight: 800; cursor: pointer; }
 .viewer-starter-demo-actions button + button { background: white; color: #102d3a; }
 
+.viewer-legacy-starter-warning {
+  position: absolute;
+  z-index: 25;
+  top: 4.45rem;
+  left: 0.85rem;
+  right: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #102d3a;
+  border-left: 5px solid #df654f;
+  background: rgba(243, 240, 231, 0.98);
+  box-shadow: 4px 4px 0 #df654f;
+}
+.viewer-legacy-starter-warning[hidden] { display: none; }
+.viewer-legacy-starter-warning > div { display: grid; gap: 0.12rem; min-width: 0; }
+.viewer-legacy-starter-warning span { color: #df654f; font: 850 0.58rem/1 ui-monospace, monospace; letter-spacing: 0.13em; }
+.viewer-legacy-starter-warning strong { color: #102d3a; font: 700 0.92rem/1.15 Georgia, "Songti SC", serif; }
+.viewer-legacy-starter-warning small { color: #53666d; font: 650 0.62rem/1.3 ui-monospace, monospace; }
+.viewer-legacy-starter-warning button { min-height: 2rem; flex: 0 0 auto; padding: 0.38rem 0.65rem; border: 1px solid #102d3a; border-radius: 3px; background: #174b64; color: white; font-weight: 800; cursor: pointer; }
+
 @media (max-width: 760px) {
   .viewer-starter-demo-banner { align-items: stretch; flex-direction: column; }
   .viewer-starter-demo-actions { justify-content: flex-start; }
+  .viewer-legacy-starter-warning { align-items: stretch; flex-direction: column; }
+  .viewer-legacy-starter-warning button { align-self: start; }
 }
 
 

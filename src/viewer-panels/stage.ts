@@ -47,6 +47,15 @@ export function createViewerStageHtml(): string {
         </div>
       </aside>
 
+      <aside id="viewer-legacy-starter-warning" class="viewer-legacy-starter-warning" role="status" aria-live="polite" hidden>
+        <div>
+          <span>GEOMETRY NOTICE</span>
+          <strong data-legacy-starter-title>旧版示例存在已知几何问题</strong>
+          <small data-legacy-starter-summary>当前场景可能出现道路缺角、针状铺装或背景地面暴露。</small>
+        </div>
+        <button type="button" data-starter-action="upgrade">进入已修复的广州 v4 示例</button>
+      </aside>
+
       <div id="viewer-design-workspace" class="viewer-design-workspace" hidden></div>
 
       <section id="viewer-center-controls" class="viewer-center-controls" data-open="false" aria-labelledby="viewer-center-controls-title">

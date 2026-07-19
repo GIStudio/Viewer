@@ -5,6 +5,7 @@ import type {
   StaticObjectDescription,
   ViewerManifest,
 } from "./viewer-types";
+import type { ViewerLanguage } from "./viewer-i18n";
 import { escapeHtml, finiteOrNull } from "./viewer-utils";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -90,13 +91,27 @@ const SYSTEM_NODE_DESCRIPTIONS: Record<string, StaticObjectDescription> = {
     category: "road",
     intro: "Template-mode road surface slab.",
   },
-  context_ground: {
-    match: "exact",
-    title: "Ground Context",
-    category: "scene_object",
-    intro: "Surrounding ground plane.",
-  },
 };
+
+const GROUND_CONTEXT_NODE_NAMES = new Set(["context_ground", "context_ground_base"]);
+
+function groundContextDescription(language: ViewerLanguage): StaticObjectDescription {
+  return language === "zh"
+    ? {
+      match: "exact",
+      title: "背景地面",
+      category: "scene_object",
+      intro: "场景底板；正常情况下仅在道路与铺装范围之外可见。",
+      design_note: "若在道路范围内选中该对象，通常表示上层表面存在缺口。",
+    }
+    : {
+      match: "exact",
+      title: "Background Ground",
+      category: "scene_object",
+      intro: "Scene base plane; it should normally be visible only outside roads and paving.",
+      design_note: "Selecting this object inside the road area usually indicates a gap in the surfaces above.",
+    };
+}
 
 export interface HitDescriptor {
   kind: "instance" | "static" | "generic";
@@ -290,17 +305,20 @@ function composeStaticInfoHtml(
   description: StaticObjectDescription,
   hitPoint?: THREE.Vector3,
   manifest?: ViewerManifest,
+  language: ViewerLanguage = "zh",
 ): string {
   const subtitle = [
-    `类别：${categoryLabel(description.category)}`,
-    description.source ? `来源：${prettifySource(description.source)}` : "来源：系统构件",
+    language === "zh" ? `类别：${categoryLabel(description.category)}` : `Category: ${description.category.replace(/_/g, " ")}`,
+    description.source
+      ? (language === "zh" ? `来源：${prettifySource(description.source)}` : `Source: ${prettifySource(description.source)}`)
+      : (language === "zh" ? "来源：系统构件" : "Source: system component"),
   ].join(" · ");
   const analysis = hitPoint && manifest ? buildRoadAnalysisHtml(hitPoint, manifest) : "";
   return `
     <div class="viewer-card-title">${escapeHtml(description.title)}</div>
     <div class="viewer-card-subtitle">${escapeHtml(subtitle)}</div>
-    <div class="viewer-card-section">${escapeHtml(description.intro || "这是场景中的基础构件。")}</div>
-    <div class="viewer-card-section viewer-card-highlight">${escapeHtml(description.design_note || "用于支撑街道空间组织与交通可读性。")}</div>
+    <div class="viewer-card-section">${escapeHtml(description.intro || (language === "zh" ? "这是场景中的基础构件。" : "This is a base scene component."))}</div>
+    <div class="viewer-card-section viewer-card-highlight">${escapeHtml(description.design_note || (language === "zh" ? "用于支撑街道空间组织与交通可读性。" : "Supports street-space organization and traffic legibility."))}</div>
     ${analysis}
     <dl class="viewer-card-metrics">
       <div><dt>node</dt><dd>${escapeHtml(nodeName)}</dd></div>
@@ -308,16 +326,22 @@ function composeStaticInfoHtml(
   `;
 }
 
-function composeStaticInfoText(nodeName: string, description: StaticObjectDescription): string {
+function composeStaticInfoText(
+  nodeName: string,
+  description: StaticObjectDescription,
+  language: ViewerLanguage = "zh",
+): string {
   const subtitle = [
-    `类别：${categoryLabel(description.category)}`,
-    description.source ? `来源：${prettifySource(description.source)}` : "来源：系统构件",
+    language === "zh" ? `类别：${categoryLabel(description.category)}` : `Category: ${description.category.replace(/_/g, " ")}`,
+    description.source
+      ? (language === "zh" ? `来源：${prettifySource(description.source)}` : `Source: ${prettifySource(description.source)}`)
+      : (language === "zh" ? "来源：系统构件" : "Source: system component"),
   ].join(" · ");
   return [
     description.title,
     subtitle,
-    description.intro || "这是场景中的基础构件。",
-    description.design_note || "用于支撑街道空间组织与交通可读性。",
+    description.intro || (language === "zh" ? "这是场景中的基础构件。" : "This is a base scene component."),
+    description.design_note || (language === "zh" ? "用于支撑街道空间组织与交通可读性。" : "Supports street-space organization and traffic legibility."),
     `node: ${nodeName}`,
   ].filter(Boolean).join("\n");
 }
@@ -345,6 +369,7 @@ function composeGenericInfoText(nodeName: string): string {
 export function buildInfoCardContent(
   descriptor: HitDescriptor,
   manifest?: ViewerManifest,
+  language: ViewerLanguage = "zh",
 ): { html: string; text: string } {
   if (descriptor.kind === "instance") {
     return {
@@ -362,8 +387,8 @@ export function buildInfoCardContent(
   }
   if (descriptor.kind === "static") {
     return {
-      html: composeStaticInfoHtml(descriptor.nodeName, descriptor.staticDescription!, descriptor.hitPoint, manifest),
-      text: composeStaticInfoText(descriptor.nodeName, descriptor.staticDescription!),
+      html: composeStaticInfoHtml(descriptor.nodeName, descriptor.staticDescription!, descriptor.hitPoint, manifest, language),
+      text: composeStaticInfoText(descriptor.nodeName, descriptor.staticDescription!, language),
     };
   }
   return {
@@ -401,7 +426,14 @@ export function resolveInstanceIdFromName(name: string, manifest?: ViewerManifes
   return legacyMatch ? legacyMatch[1] : null;
 }
 
-function staticDescriptionForNode(nodeName: string, manifest?: ViewerManifest): StaticObjectDescription | null {
+function staticDescriptionForNode(
+  nodeName: string,
+  manifest?: ViewerManifest,
+  language: ViewerLanguage = "zh",
+): StaticObjectDescription | null {
+  if (GROUND_CONTEXT_NODE_NAMES.has(nodeName)) {
+    return groundContextDescription(language);
+  }
   const descriptions = manifest?.static_object_descriptions ?? {};
   for (const [pattern, description] of Object.entries(descriptions)) {
     if (!description) continue;
@@ -427,6 +459,7 @@ export function resolveHitDescriptor(
   object: THREE.Object3D,
   hitPoint?: THREE.Vector3,
   manifest?: ViewerManifest,
+  language: ViewerLanguage = "zh",
 ): HitDescriptor | null {
   let cursor: THREE.Object3D | null = object;
   const names: string[] = [];
@@ -456,7 +489,7 @@ export function resolveHitDescriptor(
   }
 
   for (const nodeName of names) {
-    const description = staticDescriptionForNode(nodeName, manifest);
+    const description = staticDescriptionForNode(nodeName, manifest, language);
     if (description) {
       return {
         kind: "static",

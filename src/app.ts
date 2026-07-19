@@ -186,6 +186,7 @@ import { loadWorkflowCapabilities, normalizeSceneSource, toNormalizedSceneSource
 import { createViewerWorkflowBridge } from "./viewer-workflow-bridge";
 import {
   applyMaterializedStarterScene,
+  legacyStarterSceneIdFromPath,
   loadDefaultStarterScene,
   requestStarterSceneMaterialization,
   type ActiveSceneOrigin,
@@ -651,8 +652,10 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   const emptyStateEl = root.querySelector<HTMLElement>("#viewer-empty-state");
   const viewerShellEl = root.querySelector<HTMLElement>(".viewer-shell-embedded");
   const starterDemoBannerEl = root.querySelector<HTMLElement>("#viewer-starter-demo-banner");
+  const legacyStarterWarningEl = root.querySelector<HTMLElement>("#viewer-legacy-starter-warning");
   let activeSceneOrigin: ActiveSceneOrigin | null = workflow.getSnapshot().sceneLayoutPath ? "workflow" : null;
   let activeStarterScene: StarterScenePackage | null = null;
+  let activeLegacyStarterSceneId: string | null = legacyStarterSceneIdFromPath(workflow.getSnapshot().sceneLayoutPath);
   let starterLoading = false;
   let starterLoadError = "";
   let generationWizard: ReturnType<typeof createViewerGenerationWizardController> | null = null;
@@ -861,6 +864,21 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         summary.textContent = currentLang === "zh"
           ? `真实 OSM 十字路口 · ${counts.building ?? 0} 个透明建筑白模 · ${Object.values(counts).reduce((sum, count) => sum + count, 0) - (counts.building ?? 0)} 个代表性街道设施`
           : `Real OSM intersection · ${counts.building ?? 0} transparent buildings · ${Object.values(counts).reduce((sum, count) => sum + count, 0) - (counts.building ?? 0)} representative street assets`;
+      }
+    }
+    if (legacyStarterWarningEl) {
+      legacyStarterWarningEl.hidden = !activeLegacyStarterSceneId;
+      const title = legacyStarterWarningEl.querySelector<HTMLElement>("[data-legacy-starter-title]");
+      const summary = legacyStarterWarningEl.querySelector<HTMLElement>("[data-legacy-starter-summary]");
+      if (title) {
+        title.textContent = currentLang === "zh"
+          ? "旧版示例存在已知几何问题"
+          : "This legacy starter has known geometry issues";
+      }
+      if (summary && activeLegacyStarterSceneId) {
+        summary.textContent = currentLang === "zh"
+          ? `${activeLegacyStarterSceneId} 可能出现道路缺角、针状铺装或背景地面暴露。`
+          : `${activeLegacyStarterSceneId} may contain road gaps, needle surfaces, or exposed background ground.`;
       }
     }
     const starterPreview = activeSceneOrigin === "starter_demo";
@@ -1825,6 +1843,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       applyAudioProfile();
       scheduleDesignMatrixRefresh();
       syncSceneCommandEditor();
+      activeLegacyStarterSceneId = legacyStarterSceneIdFromPath(currentLayoutPath);
       const workflowSnapshot = workflow.getSnapshot();
       const standaloneLayout = new URLSearchParams(window.location.search).has("layout");
       if (
@@ -1842,6 +1861,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
           layout_path: currentLayoutPath || currentManifest.layout_path,
         }, workflowSnapshot.undoCommand);
       }
+      renderProfessionalWorkflowState();
     },
   });
 
@@ -1858,6 +1878,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       await applyMaterializedStarterScene(workflow, materialized);
       activeSceneOrigin = "workflow";
       activeStarterScene = null;
+      activeLegacyStarterSceneId = legacyStarterSceneIdFromPath(materialized.layout_path);
       starterLoadError = "";
       renderProfessionalWorkflowState();
       flashStatus(currentLang === "zh" ? "广州道路骨架已复制，可继续审阅或编辑。" : "The Guangzhou road skeleton is now an editable workflow scene.");
@@ -1885,6 +1906,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       });
       activeStarterScene = starter;
       activeSceneOrigin = "starter_demo";
+      activeLegacyStarterSceneId = null;
       workflow.setStarterPreview(starter.id);
       frameSceneFocus(starter.focus_xz, starter.focus_extent_m);
       shell.sidebar.activate("review");
@@ -1905,6 +1927,13 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (action === "materialize") void materializeActiveStarterScene();
     if (action === "source") window.location.hash = "scene-graph";
     if (action === "retry") void loadStarterScenePreview();
+    if (action === "upgrade") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("layout");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      activeLegacyStarterSceneId = null;
+      void loadStarterScenePreview();
+    }
   }, { signal });
 
   const workflowBridge = createViewerWorkflowBridge({
@@ -2873,13 +2902,13 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
 
     const targetKey = `scene:${hit.object.uuid}`;
     if (lastLaserTargetKey === targetKey) return;
-    const descriptor = resolveHitDescriptor(hit.object, hit.point.clone(), currentManifest ?? undefined);
+    const descriptor = resolveHitDescriptor(hit.object, hit.point.clone(), currentManifest ?? undefined, currentLang);
     if (!descriptor) {
       lastLaserTargetKey = "";
       clearInfoCard();
       return;
     }
-    const content = buildHitDescriptorContent(descriptor, currentManifest ?? undefined);
+    const content = buildHitDescriptorContent(descriptor, currentManifest ?? undefined, currentLang);
     currentLaserCopyText = content.text;
     setInfoCardContent(content.html);
     lastLaserTargetKey = targetKey;
@@ -3434,6 +3463,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     shell.setHints(localizedViewerHints());
     compareMode.refreshLanguage();
     void historyPanelController.refreshLanguage();
+    lastLaserTargetKey = "";
+    clearInfoCard();
+    renderProfessionalWorkflowState();
   }
 
   window.addEventListener(VIEWER_LANGUAGE_EVENT, (event) => {

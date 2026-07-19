@@ -27,6 +27,17 @@ export type MaterializedStarterScene = StarterScenePackage & Readonly<{
 
 export type ActiveSceneOrigin = "starter_demo" | "workflow" | "explicit_layout";
 
+const LEGACY_STARTER_SCENE_IDS = Object.freeze([
+  "guangzhou_road_skeleton_v1",
+  "guangzhou_road_skeleton_v2",
+  "guangzhou_complete_intersection_v3",
+]);
+
+export function legacyStarterSceneIdFromPath(value: string | null | undefined): string | null {
+  const path = String(value || "");
+  return LEGACY_STARTER_SCENE_IDS.find((sceneId) => path.includes(sceneId)) ?? null;
+}
+
 export async function loadDefaultStarterScene(signal?: AbortSignal): Promise<StarterScenePackage> {
   return apiJson<StarterScenePackage>("/api/starter-scenes/default", { signal });
 }
