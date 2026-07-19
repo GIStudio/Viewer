@@ -10,6 +10,12 @@ export type SceneRevision = { id: string; revision_number: number; branch_kind: 
 export type EvaluationRun = { id: string; revision_id: string; status: string; weights: Record<string, number>; result: Record<string, unknown>; error: string };
 export type EvaluationProfile = { id: string; name: string; weights: Record<string, number>; is_default: boolean };
 export type JobOperation = { timestamp: string; stage: string; progress: number; message: string; detail: Record<string, unknown> };
+export type PublicJobFailure = {
+  code: "scene_generation_failed" | "invalid_scene_source" | "service_unavailable";
+  user_message: string;
+  retryable: boolean;
+  debug_reference: string;
+};
 export type PlatformJob = {
   id: string;
   kind: string;
@@ -24,6 +30,19 @@ export type PlatformJob = {
   created_at: string;
   updated_at: string;
 };
+
+export function platformJobFailure(job: PlatformJob): PublicJobFailure | null {
+  const candidate = job.detail?.failure;
+  if (!candidate || typeof candidate !== "object") return null;
+  const failure = candidate as Partial<PublicJobFailure>;
+  if (
+    !["scene_generation_failed", "invalid_scene_source", "service_unavailable"].includes(String(failure.code))
+    || typeof failure.user_message !== "string"
+    || typeof failure.retryable !== "boolean"
+    || typeof failure.debug_reference !== "string"
+  ) return null;
+  return failure as PublicJobFailure;
+}
 export type PlatformCapabilities = { llm: { configured: boolean; provider?: string; text?: { configured: boolean; model?: string } }; design_generation: { baseline: string; redesign_default: "llm" | "parametric"; parametric_fallback: boolean } };
 
 export class CourseApi {

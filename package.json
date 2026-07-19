@@ -21,6 +21,7 @@
     "test:starter-scene": "node tests/starter-scene.test.mjs",
     "test:single-left-shell": "node tests/single-left-shell.test.mjs",
     "test:scene-edit-loop": "node tests/scene-edit-loop.test.mjs",
+    "test:course-failure": "node tests/course-generation-failure.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -175,13 +175,14 @@ export function CourseReferenceWorkbench({
     onGenerationStarted(job);
   }, [api, onGenerationStarted, project.design_goal, project.id, source.id]);
 
-  if (status === "loading") return <div className="course-empty"><Spin /><p>正在把项目 OSM 载入参考图标注工作台…</p></div>;
-  if (status === "error") return <div className="course-empty"><h2>无法载入参考图标注</h2><p>{error}</p></div>;
+  const zh = language === "zh";
+  if (status === "loading") return <div className="course-empty"><Spin /><p>{zh ? "正在把项目地图数据载入2D标注工具…" : "Loading the project map data into the annotation workbench…"}</p></div>;
+  if (status === "error") return <div className="course-empty"><h2>{zh ? "无法载入2D标注" : "Unable to load annotation"}</h2><p>{error}</p></div>;
   return <div className="course-embedded-workbench course-embedded-annotation">
     <div className="course-workbench-caption">
-      <span>SHARED WORKBENCH / OSM → REFERENCE ANNOTATION</span>
-      <strong>{project.city} AOI 已进入现有参考图标注能力</strong>
-      <small>建筑保持锁定；道路、横断面、功能区、树木和街道设施可继续审阅。</small>
+      <span>{zh ? "共享标注工具 · 公共地图数据 → 2D标注" : "SHARED WORKBENCH / OSM → REFERENCE ANNOTATION"}</span>
+      <strong>{zh ? `${project.city}研究区已进入2D标注工具` : `${project.city} study area is ready for annotation`}</strong>
+      <small>{zh ? "推荐先检查道路连接和建筑位置；道路横断面、功能区、树木和街道设施都可继续修改。" : "Buildings remain locked; roads, sections, zones, trees and furniture can be reviewed."}</small>
     </div>
     <MountedWorkbench
       route="scene-graph"
@@ -297,7 +298,7 @@ export function CourseViewerWorkbench({
   );
 
   if (error) return <div className="course-empty"><h2>3D 道路查看器载入失败</h2><p>{error}</p></div>;
-  if (!ready) return <div className="course-empty"><Spin /><p>正在用项目 revision 启动 3D 道路查看器…</p></div>;
+  if (!ready) return <div className="course-empty"><Spin /><p>{language === "zh" ? "正在载入当前3D版本…" : "Loading the current 3D revision…"}</p></div>;
   return <div className="course-embedded-workbench course-embedded-viewer">
     <MountedWorkbench
       route="viewer"
