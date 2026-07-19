@@ -1,4 +1,4 @@
-import type { SceneMoveInstanceCommand } from "./viewer-api";
+import type { SceneAssetRef, SceneEditCommand } from "./viewer-api";
 import type { ViewerManifest } from "./viewer-types";
 
 export type SceneCommandEnvelope = {
@@ -7,7 +7,7 @@ export type SceneCommandEnvelope = {
     revision: number;
     sha256: string;
   };
-  commands: SceneMoveInstanceCommand[];
+  commands: SceneEditCommand[];
 };
 
 function editableInstanceByCommandId(
@@ -70,40 +70,78 @@ export function parseSceneCommandEnvelope(
     throw new Error("The command base revision/hash is stale. Reload the authoritative scene before editing.");
   }
   if (!Array.isArray(record.commands) || record.commands.length === 0) {
-    throw new Error("The command envelope requires at least one move_instance command.");
+    throw new Error("The command envelope requires at least one scene edit command.");
   }
   const commandIds = new Set<string>();
-  const commands = record.commands.map((value, index): SceneMoveInstanceCommand => {
+  const commands = record.commands.map((value, index): SceneEditCommand => {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error(`Command ${index + 1} must be an object.`);
     }
     const command = value as Record<string, unknown>;
-    const commandKeys = Object.keys(command);
-    const unsupportedCommandKeys = commandKeys.filter((key) => !["command_id", "op", "instance_id", "position_xyz"].includes(key));
-    if (unsupportedCommandKeys.length > 0 || command.op !== "move_instance") {
-      throw new Error(`Command ${index + 1} must be exactly one move_instance command.`);
-    }
     const commandId = String(command.command_id ?? "").trim();
     const instanceId = String(command.instance_id ?? "").trim();
-    const position = command.position_xyz;
     if (!commandId || commandIds.has(commandId)) throw new Error(`Command ${index + 1} needs a unique command_id.`);
     commandIds.add(commandId);
-    if (!editableInstanceByCommandId(manifest, instanceId)) {
+    const op = String(command.op ?? "") as SceneEditCommand["op"];
+    if (op !== "add_instance" && !editableInstanceByCommandId(manifest, instanceId)) {
       throw new Error(`Instance ${instanceId || "(missing)"} is not editable placement furniture.`);
     }
-    if (!Array.isArray(position) || position.length !== 3) {
-      throw new Error(`Command ${index + 1} position_xyz must contain exactly three coordinates.`);
-    }
-    const coordinates = position.map(Number);
-    if (coordinates.some((coordinate) => !Number.isFinite(coordinate))) {
-      throw new Error(`Command ${index + 1} position_xyz must contain finite coordinates.`);
-    }
-    return {
-      command_id: commandId,
-      op: "move_instance",
-      instance_id: instanceId,
-      position_xyz: [coordinates[0]!, coordinates[1]!, coordinates[2]!],
+    const vector = (value: unknown, label: string): [number, number, number] => {
+      if (!Array.isArray(value) || value.length !== 3) throw new Error(`${label} must contain exactly three coordinates.`);
+      const coordinates = value.map(Number);
+      if (coordinates.some((coordinate) => !Number.isFinite(coordinate))) throw new Error(`${label} must contain finite coordinates.`);
+      return [coordinates[0]!, coordinates[1]!, coordinates[2]!];
     };
+    const assetRef = (value: unknown): SceneAssetRef => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Command ${index + 1} asset_ref is required.`);
+      const source = value as Record<string, unknown>;
+      const result = {
+        manifestName: String(source.manifestName ?? "").trim(),
+        assetId: String(source.assetId ?? "").trim(),
+        fingerprint: String(source.fingerprint ?? "").trim(),
+        category: String(source.category ?? "").trim(),
+        label: String(source.label ?? source.assetId ?? "Asset").trim(),
+      };
+      if (!result.manifestName || !result.assetId || !result.fingerprint || !result.category) {
+        throw new Error(`Command ${index + 1} asset_ref is incomplete.`);
+      }
+      return result;
+    };
+    const base = { command_id: commandId, instance_id: instanceId };
+    if (op === "move_instance") {
+      return { ...base, op, position_xyz: vector(command.position_xyz, `Command ${index + 1} position_xyz`), height_offset_m: Number(command.height_offset_m ?? 0) };
+    }
+    if (op === "rotate_instance") {
+      const yaw = Number(command.yaw_deg);
+      if (!Number.isFinite(yaw)) throw new Error(`Command ${index + 1} yaw_deg must be finite.`);
+      return { ...base, op, yaw_deg: yaw };
+    }
+    if (op === "scale_instance") {
+      const scale = Number(command.scale);
+      if (!Number.isFinite(scale) || scale < 0.25 || scale > 4) throw new Error(`Command ${index + 1} scale must be within 0.25..4.`);
+      return { ...base, op, scale };
+    }
+    if (op === "delete_instance") return { ...base, op };
+    if (op === "duplicate_instance") {
+      const newInstanceId = String(command.new_instance_id ?? "").trim();
+      if (!newInstanceId) throw new Error(`Command ${index + 1} new_instance_id is required.`);
+      return {
+        ...base,
+        op,
+        new_instance_id: newInstanceId,
+        ...(command.position_xyz ? { position_xyz: vector(command.position_xyz, `Command ${index + 1} position_xyz`) } : {}),
+      };
+    }
+    if (op === "add_instance" || op === "replace_asset") {
+      const ref = assetRef(command.asset_ref);
+      if (ref.assetId !== String(command.asset_id ?? "")) throw new Error(`Command ${index + 1} asset_id must match asset_ref.assetId.`);
+      if (op === "replace_asset") return { ...base, op, asset_id: ref.assetId, category: ref.category, asset_ref: ref };
+      const scale = Number(command.scale ?? 1);
+      const yaw = Number(command.yaw_deg ?? 0);
+      if (!Number.isFinite(scale) || scale < 0.25 || scale > 4 || !Number.isFinite(yaw)) throw new Error(`Command ${index + 1} has invalid scale or yaw.`);
+      return { ...base, op, asset_id: ref.assetId, category: ref.category, asset_ref: ref, position_xyz: vector(command.position_xyz, `Command ${index + 1} position_xyz`), yaw_deg: yaw, scale };
+    }
+    throw new Error(`Command ${index + 1} has unsupported op '${op}'.`);
   });
   return {
     layout_path: layoutPath,

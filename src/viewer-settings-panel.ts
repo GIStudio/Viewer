@@ -88,7 +88,7 @@ export function renderViewerSettingsPanelHtml(): string {
           <input id="asset-bbox-enabled" class="viewer-toggle-input" type="checkbox" />
         </div>
         <div class="viewer-settings-toggle-section">
-          <button id="asset-move-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="asset-move-enabled" aria-pressed="false" aria-label="Asset Move Mode" data-i18n-key="viewer.settings.move" data-i18n-aria-label-key="viewer.settings.move">Move</button>
+          <button id="asset-move-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="asset-move-enabled" aria-pressed="false" aria-label="Scene Object Editor" data-i18n-key="viewer.settings.move" data-i18n-aria-label-key="viewer.settings.move">Edit Objects</button>
           <input id="asset-move-enabled" class="viewer-toggle-input" type="checkbox" />
         </div>
         <div class="viewer-settings-toggle-section">
@@ -121,8 +121,8 @@ export function renderViewerSettingsPanelHtml(): string {
         <div class="viewer-settings-advanced-body">
           <div class="viewer-settings-group-title">Server capabilities</div>
           <div id="viewer-capability-status" class="viewer-capability-status">Checking server capabilities…</div>
-          <div class="viewer-settings-group-title">Persistent placement command</div>
-          <p class="viewer-settings-note">Only <code>move_instance</code> commands are accepted. Roads and OSM white masses are regenerated or read-only.</p>
+          <div class="viewer-settings-group-title">Persistent scene edit commands / 场景编辑命令</div>
+          <p class="viewer-settings-note">支持移动、旋转、缩放、新增、复制、删除和替换。道路、路口、OSM 建筑白模与背景地面保持锁定。</p>
           <textarea id="viewer-scene-command-json" class="viewer-command-json" rows="12" spellcheck="false">{
   "layout_path": "",
   "base": { "revision": 0, "sha256": "" },

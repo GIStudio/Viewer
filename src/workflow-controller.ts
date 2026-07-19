@@ -1,4 +1,5 @@
 import type { ReferenceAnnotation } from "./sg-types";
+import type { SceneEditCommand } from "./viewer-api";
 import type { EvaluationResult } from "./viewer-evaluation";
 import type { SceneJobOperation } from "./viewer-types";
 
@@ -122,14 +123,7 @@ export type SceneRevision = Readonly<{
   lineage_id?: string;
 }>;
 
-export type MoveInstanceCommand = Readonly<{
-  command_id: string;
-  op: "move_instance";
-  instance_id: string;
-  position_xyz: readonly [number, number, number];
-}>;
-
-export type LayoutEditCommand = MoveInstanceCommand;
+export type LayoutEditCommand = Readonly<SceneEditCommand>;
 
 export type WorkflowCapabilities = Readonly<Record<string, unknown> & {
   llm?: Readonly<Record<string, unknown>>;

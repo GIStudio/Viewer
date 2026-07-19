@@ -64,8 +64,8 @@ import {
   saveSceneLayoutEdits,
 } from "./viewer-api";
 import type {
+  SceneEditCommand,
   SceneLayoutEditResponse,
-  SceneMoveInstanceCommand,
 } from "./viewer-api";
 import {
   categoryLabel,
@@ -88,7 +88,8 @@ import {
   prepareEnvironmentSkyDomes,
   sceneContentBounds,
 } from "./viewer-scene-bounds";
-import { createAssetMoveController } from "./viewer-asset-move-controller";
+import { createSceneObjectEditorController } from "./viewer-scene-object-editor";
+import { createSceneEditAutosaveCoordinator } from "./viewer-scene-edit-autosave";
 import { createViewerPanelController, type ViewerPanelController } from "./viewer-panel-controller";
 import {
   sceneBoundsFromManifest,
@@ -476,7 +477,7 @@ function createAvatarFigure(): THREE.Group {
 
 export type ViewerHostOptions = {
   embedded?: boolean;
-  persistSceneCommands?: (commands: SceneMoveInstanceCommand[]) => Promise<SceneLayoutEditResponse>;
+  persistSceneCommands?: (commands: SceneEditCommand[]) => Promise<SceneLayoutEditResponse>;
   sidebarPages?: WorkbenchSidebarPage[];
   baselineCoordinator?: ProfessionalBaselineCoordinator;
 };
@@ -2520,6 +2521,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   }
 
   let lastSceneEditUndo: SceneLayoutEditResponse["undo"] & { layoutPath: string } | null = null;
+  let structuredEvaluationController: AbortController | null = null;
 
   function syncSceneCommandEditor(): void {
     const layoutPath = currentLayoutPath || currentManifest?.layout_path || "";
@@ -2552,7 +2554,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   async function saveFocusedSceneCommands(
     layoutPath: string,
     base: { revision: number; sha256: string },
-    commands: SceneMoveInstanceCommand[],
+    commands: SceneEditCommand[],
   ): Promise<void> {
     workflow.setEditPending(true);
     syncSceneCommandEditor();
@@ -2563,6 +2565,25 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       lastSceneEditUndo = { ...result.undo, layoutPath: result.revision.layout_path };
       await loadSceneEditRevision(result);
       sceneCommandStatusEl.textContent = `Saved immutable revision ${result.revision.revision}.`;
+      if (!hostOptions.embedded) {
+        const savedRevision = result.revision.revision;
+        structuredEvaluationController?.abort();
+        structuredEvaluationController = new AbortController();
+        const evaluationController = structuredEvaluationController;
+        window.dispatchEvent(new CustomEvent("roadgen3d:structured-evaluation", { detail: { status: "running", revision: savedRevision } }));
+        void postApiJson<Record<string, unknown>>("/api/design/evaluate/unified", {
+          layout_path: result.revision.layout_path,
+          evaluation_mode: "structured",
+        }).then((evaluation) => {
+          if (evaluationController.signal.aborted || currentManifest?.layout_revision?.revision !== savedRevision) return;
+          window.dispatchEvent(new CustomEvent("roadgen3d:structured-evaluation", { detail: { status: "succeeded", revision: savedRevision, evaluation } }));
+          flashStatus("结构化指标已自动更新；视觉指标等待完整评价。");
+        }).catch((error) => {
+          if (evaluationController.signal.aborted) return;
+          window.dispatchEvent(new CustomEvent("roadgen3d:structured-evaluation", { detail: { status: "failed", revision: savedRevision, error: String(error) } }));
+          flashStatus("场景已保存；结构化评分暂时失败，可稍后重试。");
+        });
+      }
     } catch (error) {
       workflow.setEditPending(false);
       workflow.reportError(error);
@@ -2571,11 +2592,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     }
   }
 
-  async function persistSceneMove(move: {
-    instanceId: string;
-    before: [number, number, number];
-    position: [number, number, number];
-  }): Promise<void> {
+  async function persistCurrentSceneCommands(commands: SceneEditCommand[]): Promise<void> {
     const revision = currentManifest?.layout_revision;
     const layoutPath = currentLayoutPath || currentManifest?.layout_path || "";
     if (!layoutPath || !revision) {
@@ -2584,12 +2601,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     await saveFocusedSceneCommands(
       layoutPath,
       { revision: revision.revision, sha256: revision.sha256 },
-      [{
-        command_id: globalThis.crypto?.randomUUID?.() ?? `move-${Date.now()}`,
-        op: "move_instance",
-        instance_id: move.instanceId,
-        position_xyz: move.position,
-      }],
+      commands,
     );
   }
 
@@ -2629,23 +2641,49 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     }
   }
 
-  const assetMoveController = createAssetMoveController({
+  const editAutosave = createSceneEditAutosaveCoordinator({
+    storageKey: hostOptions.embedded ? "course-current" : "expert-current",
+    submit: persistCurrentSceneCommands,
+    async replayConflict(commands, error): Promise<void> {
+      const current = (error as { detail?: { current?: Record<string, unknown> } })?.detail?.current;
+      const layoutPath = String(current?.layout_path ?? "");
+      if (!layoutPath) throw error;
+      await sceneSelectionController.loadLayoutSelection(layoutPath, {
+        sceneGlbPath: String(current?.scene_glb_path ?? "") || undefined,
+      });
+      await persistCurrentSceneCommands(commands.filter((command) => {
+        if (command.op === "add_instance") return true;
+        const record = currentManifest?.instances?.[command.instance_id];
+        return Boolean(record && record.editable !== false);
+      }));
+    },
+    onStatus(status, message): void {
+      sceneCommandStatusEl.dataset.saveStatus = status;
+      sceneCommandStatusEl.textContent = message;
+      window.dispatchEvent(new CustomEvent("roadgen3d:scene-edit-status", { detail: { status, message } }));
+    },
+    onError(error): void {
+      workflow.reportError(error);
+    },
+  });
+  void editAutosave.restore();
+
+  const sceneObjectEditor = createSceneObjectEditorController({
     scene,
     camera,
     renderer,
+    courseMode: Boolean(hostOptions.embedded),
     getCurrentRoot: () => currentRoot,
     getManifest: () => currentManifest,
     controlsAreLocked: () => controls.isLocked,
     unlockControls: () => controls.unlock(),
-    setInfoCardContent,
-    setLaserCopyText: (text) => { currentLaserCopyText = text; },
     flashStatus,
-    updateAssetBboxHelpers: () => updateAssetBboxHelpers(scene),
-    persistMove: persistSceneMove,
+    updateHelpers: () => updateAssetBboxHelpers(scene),
+    enqueue: (command, options) => editAutosave.enqueue(command, options),
   });
 
   async function copyCurrentLaserTargetDetails(): Promise<void> {
-    if (!laserToggleEl.checked && !assetMoveController.isEnabled()) {
+    if (!laserToggleEl.checked && !sceneObjectEditor.isEnabled()) {
       flashStatus("Laser pointer and asset move mode are off.");
       return;
     }
@@ -2670,13 +2708,49 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       && event.code === "KeyZ"
       && (event.ctrlKey || event.metaKey)
       && !event.altKey
-      && !event.shiftKey
+      && (!event.shiftKey || (event.ctrlKey || event.metaKey))
       && !isEditableTarget(event.target)
       && lastSceneEditUndo
     ) {
       event.preventDefault();
       void undoLastSceneEdit();
       return;
+    }
+    const editShortcutActive = sceneObjectEditor.isEnabled()
+      && !isPointerLookActive()
+      && !isEditableTarget(event.target)
+      && !panelController.isAnyOpen();
+    if (active && !event.repeat && editShortcutActive) {
+      if (event.code === "KeyG") {
+        event.preventDefault();
+        sceneObjectEditor.setMode("translate");
+        return;
+      }
+      if (event.code === "KeyR" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        sceneObjectEditor.setMode("rotate");
+        return;
+      }
+      if (event.code === "KeyS" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        sceneObjectEditor.setMode("scale");
+        return;
+      }
+      if (event.code === "KeyD" && event.shiftKey) {
+        event.preventDefault();
+        sceneObjectEditor.duplicateSelected();
+        return;
+      }
+      if (event.code === "Delete" || event.code === "Backspace") {
+        event.preventDefault();
+        sceneObjectEditor.deleteSelected();
+        return;
+      }
+      if (event.code === "Escape") {
+        event.preventDefault();
+        sceneObjectEditor.cancel();
+        return;
+      }
     }
     const movementKey = isRoamMovementKey(event.code);
     const sceneRoamActive = isPointerLookActive() || isThirdPersonKeyboardRoamActive();
@@ -3376,7 +3450,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   }
 
   const requestPointerLock = (): void => {
-    if (!assetMoveController.isEnabled() && !panelController.isOpen("settings") && !isPointerLookActive()) {
+    if (!sceneObjectEditor.isEnabled() && !panelController.isOpen("settings") && !isPointerLookActive()) {
       renderer.domElement.focus();
       controls.lock();
     }
@@ -3988,7 +4062,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   assetMoveToggleEl.addEventListener(
     "change",
     () => {
-      assetMoveController.setEnabled(assetMoveToggleEl.checked);
+      sceneObjectEditor.setEnabled(assetMoveToggleEl.checked);
       if (assetMoveToggleEl.checked) {
         setToggleInput(assetBboxToggleEl, true);
         createAssetBboxHelpers(scene, currentRoot, currentManifest);
@@ -4318,7 +4392,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     }
     clearGraphOverlay();
     floatingLaneSystem.clearOverlay();
-    assetMoveController.dispose();
+    structuredEvaluationController?.abort();
+    editAutosave.dispose();
+    sceneObjectEditor.dispose();
     environmentController.dispose();
     expandedMapController.dispose();
     renderPipeline.dispose();

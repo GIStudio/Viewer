@@ -256,6 +256,7 @@ export function CourseViewerWorkbench({
         label: "Student 3D edit",
         provenance: { editor: "shared_3d_road_viewer" },
         auto_evaluate: true,
+        auto_evaluate_mode: "structured",
       },
     );
     revisionRef.current = created;

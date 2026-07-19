@@ -248,7 +248,78 @@ export type SceneMoveInstanceCommand = {
   op: "move_instance";
   instance_id: string;
   position_xyz: [number, number, number];
+  height_offset_m?: number;
 };
+
+export type SceneRotateInstanceCommand = {
+  command_id: string;
+  op: "rotate_instance";
+  instance_id: string;
+  yaw_deg: number;
+};
+
+export type SceneScaleInstanceCommand = {
+  command_id: string;
+  op: "scale_instance";
+  instance_id: string;
+  scale: number;
+};
+
+export type SceneDeleteInstanceCommand = {
+  command_id: string;
+  op: "delete_instance";
+  instance_id: string;
+};
+
+export type SceneDuplicateInstanceCommand = {
+  command_id: string;
+  op: "duplicate_instance";
+  instance_id: string;
+  new_instance_id: string;
+  position_xyz?: [number, number, number];
+  height_offset_m?: number;
+};
+
+export type SceneAssetRef = {
+  manifestName: string;
+  assetId: string;
+  fingerprint: string;
+  category: string;
+  label: string;
+};
+
+export type SceneAddInstanceCommand = {
+  command_id: string;
+  op: "add_instance";
+  instance_id: string;
+  asset_id: string;
+  category: string;
+  asset_ref: SceneAssetRef;
+  position_xyz: [number, number, number];
+  yaw_deg: number;
+  scale: number;
+  height_offset_m?: number;
+};
+
+export type SceneReplaceAssetCommand = {
+  command_id: string;
+  op: "replace_asset";
+  instance_id: string;
+  asset_id: string;
+  category: string;
+  asset_ref: SceneAssetRef;
+};
+
+export type SceneEditCommand =
+  | SceneMoveInstanceCommand
+  | SceneRotateInstanceCommand
+  | SceneScaleInstanceCommand
+  | SceneAddInstanceCommand
+  | SceneDeleteInstanceCommand
+  | SceneDuplicateInstanceCommand
+  | SceneReplaceAssetCommand;
+
+export type SceneEditSaveStatus = "clean" | "dirty" | "saving" | "saved" | "failed" | "conflict";
 
 export type SceneLayoutEditResponse = {
   source: {
@@ -268,14 +339,15 @@ export type SceneLayoutEditResponse = {
   applied_commands: Array<Record<string, unknown>>;
   undo: {
     base: { revision: number; sha256: string };
-    commands: SceneMoveInstanceCommand[];
+    commands: SceneEditCommand[];
   };
 };
 
 export async function saveSceneLayoutEdits(
   layoutPath: string,
   base: { revision: number; sha256: string },
-  commands: SceneMoveInstanceCommand[],
+  commands: SceneEditCommand[],
+  transformPolicy: "expert_grounded" | "course_grounded" = "expert_grounded",
 ): Promise<SceneLayoutEditResponse> {
   const response = await fetch(resolveApiUrl("/api/design/scene-layout-edits"), {
     method: "POST",
@@ -284,6 +356,7 @@ export async function saveSceneLayoutEdits(
       layout_path: layoutPath,
       base,
       commands,
+      transform_policy: transformPolicy,
     }),
   });
   const payload = await response.json().catch(() => ({})) as Record<string, any>;
