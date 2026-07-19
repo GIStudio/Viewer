@@ -1851,7 +1851,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     try {
       const materialized = await requestStarterSceneMaterialization(activeStarterScene.id, signal);
       await sceneSelectionController.loadLayoutSelection(materialized.layout_path, {
-        persistSelectionInUrl: false,
+        persistSelectionInUrl: true,
         defaultSceneOptionKey: "final_scene",
       });
       frameSceneOverview();
@@ -4137,7 +4137,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     } else {
       const explicitLayoutPath = hostOptions.embedded ? null : parseQueryLayoutPath();
       const workflowLayoutPath = workflow.getSnapshot().sceneLayoutPath;
-      const requestedLayoutPath = explicitLayoutPath || workflowLayoutPath;
+      // The standalone root URL is the stable product entry point and must
+      // always show the bundled starter. A restored local workflow remains
+      // available in the scene browser, but only an explicit layout query may
+      // take over the standalone stage. Embedded/project viewers still restore
+      // their persisted revision because the project owns that route.
+      const requestedLayoutPath = hostOptions.embedded ? workflowLayoutPath : explicitLayoutPath;
       const recentLayouts: RecentLayout[] = [];
       const initialLayoutCandidates = requestedLayoutPath ? [requestedLayoutPath] : [];
 

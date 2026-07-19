@@ -25,6 +25,16 @@ assert.match(stage, /data-starter-action="source"/, "the demo banner must link t
 assert.match(stage, /透明建筑白模/, "the starter banner must describe its complete intersection context");
 assert.doesNotMatch(stage, /无家具/, "the complete starter must not be described as furniture-free");
 assert.match(app, /await loadStarterScenePreview\(\)/, "an empty professional workflow must load the starter preview");
+assert.match(
+  app,
+  /const requestedLayoutPath = hostOptions\.embedded \? workflowLayoutPath : explicitLayoutPath/,
+  "a restored local draft must not rewrite the standalone root URL to an old layout",
+);
+assert.doesNotMatch(
+  app,
+  /const requestedLayoutPath = explicitLayoutPath \|\| workflowLayoutPath/,
+  "the standalone root URL must remain the stable starter entry point",
+);
 assert.match(app, /workflow\.setStarterPreview\(starter\.id\)/, "starter loading must publish the transient review state");
 assert.match(app, /frameSceneFocus\(starter\.focus_xz, starter\.focus_extent_m\)/, "starter loading must frame the cross junction rather than the full corridor");
 assert.match(app, /shell\.sidebar\.activate\("review"\)/, "first-open onboarding must activate the 03 review page");
