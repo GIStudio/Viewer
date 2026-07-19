@@ -54,7 +54,7 @@ export function createViewerStageHtml(): string {
           <strong data-legacy-starter-title>旧版示例存在已知几何问题</strong>
           <small data-legacy-starter-summary>当前场景可能出现道路缺角、针状铺装或背景地面暴露。</small>
         </div>
-        <button type="button" data-starter-action="upgrade">进入已修复的广州 v4 示例</button>
+        <button type="button" data-starter-action="upgrade">进入已修复的广州 v5 示例</button>
       </aside>
 
       <div id="viewer-design-workspace" class="viewer-design-workspace" hidden></div>
