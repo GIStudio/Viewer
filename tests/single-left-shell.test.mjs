@@ -16,6 +16,7 @@ const course = read("src/react/CourseStudio.tsx");
 const routeIsland = read("src/react/RouteIsland.tsx");
 const brand = read("src/react/StudioBrandHeader.tsx");
 const menus = read("src/react/ShellMenus.tsx");
+const viewerOverlays = read("src/styles/viewer/menus-overlays.css");
 
 for (const mode of ["single_left_overlay", "course_single_left", "legacy_dual"]) {
   assert.match(types, new RegExp(`\\| \\"${mode}\\"`), `missing shell mode ${mode}`);
@@ -52,5 +53,7 @@ assert.match(course, /sidebarPages=\{sidebarPages\}/);
 assert.match(course, /useState<OsmAoiSelection \| null>\(null\)/, "new course projects must begin without a preselected AOI");
 assert.match(course, /disabled=\{!selection\}/, "course project creation must wait for map capture");
 assert.doesNotMatch(course, /course-coordinate-grid">\{bbox\.map/, "coordinates must not be the default course workflow");
+assert.match(viewerOverlays, /\.viewer-minimap \{[\s\S]*right: 1rem;/, "scene map should stay in the lower-right corner");
+assert.doesNotMatch(viewerOverlays, /\.viewer-minimap \{[\s\S]*left: 1rem;/, "scene map must not return to the lower-left corner");
 
 console.log("single-left shell contract: ok");

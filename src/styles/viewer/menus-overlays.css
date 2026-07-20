@@ -228,7 +228,7 @@
 
 .viewer-minimap {
   position: absolute;
-  left: 1rem;
+  right: 1rem;
   bottom: 4.1rem;
   z-index: 16;
   width: 240px;
