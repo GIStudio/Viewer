@@ -9,14 +9,22 @@
 }
 
 .desktop-shell[data-sidebar-rail-expanded="true"] .desktop-shell-rail-right {
-  inset-block-start: calc(-1 * var(--workbench-brand-header-height));
-  inline-size: var(--workbench-menu-expanded);
-  box-shadow: 7px 0 0 rgba(244, 196, 48, 0.88);
+  /* The rail never participates in the stage grid.  Its expanded navigation
+     is an absolutely positioned sheet inside the fixed-width rail below. */
+  inline-size: var(--workbench-menu-track);
+  box-shadow: none;
 }
 
 .desktop-shell[data-sidebar-rail-expanded="true"] .desktop-shell-tab-list {
+  position: absolute;
+  z-index: 1;
+  inset: calc(-1 * var(--workbench-brand-header-height)) auto 0 0;
   width: var(--workbench-menu-expanded);
+  height: auto;
   padding-block-start: calc(var(--workbench-brand-header-height) + 0.35rem);
+  border-right: 1px solid rgba(16, 45, 58, 0.18);
+  background: #102d3a;
+  box-shadow: 7px 0 0 rgba(244, 196, 48, 0.88);
 }
 
 .desktop-shell[data-sidebar-rail-expanded="true"] .desktop-shell-right-panels {
@@ -336,11 +344,8 @@
     --workbench-drawer-width: min(20.5rem, calc(100vw - var(--workbench-menu-track)));
   }
 
-  .desktop-shell[data-sidebar-rail-expanded="true"] .desktop-shell-rail-right {
-    inset-block-start: 0;
-  }
-
   .desktop-shell[data-sidebar-rail-expanded="true"] .desktop-shell-tab-list {
+    inset: 0 auto 0 0;
     padding-block-start: 0.35rem;
   }
 
