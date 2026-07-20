@@ -21,6 +21,13 @@ export function isEnvironmentSkyDomeObject(object: THREE.Object3D): boolean {
 }
 
 export function prepareEnvironmentSkyDomeObject(object: THREE.Object3D): void {
+  // The shared Viewer always renders its own continuous atmospheric sky. Older
+  // generated GLBs may also contain a low-poly sky-dome asset. Rendering both
+  // makes the imported dome intersect the atmospheric sky and exposes its
+  // polygon boundary at some sun angles. Keep the node for provenance and
+  // inspection, but never render it in the shared Viewer.
+  object.visible = false;
+  object.userData.viewerSuppressedByAtmosphericSky = true;
   const mesh = object as THREE.Mesh;
   if (!mesh.isMesh) {
     return;

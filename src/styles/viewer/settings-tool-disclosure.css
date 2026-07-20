@@ -1,0 +1,70 @@
+.viewer-settings-primary-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.viewer-settings-primary-tools .viewer-settings-toggle-section,
+.viewer-settings-primary-tools .viewer-toggle-button {
+  width: 100%;
+}
+
+.viewer-settings-tool-disclosure {
+  width: 100%;
+  margin-top: 0.65rem;
+  border: 1px solid var(--rg-line);
+  border-radius: 3px;
+  background: rgba(243, 240, 231, 0.7);
+}
+
+.viewer-settings-tool-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 36px;
+  padding: 0.55rem 0.68rem;
+  color: var(--rg-ink);
+  cursor: pointer;
+  font: 700 0.7rem/1.2 var(--rg-mono-font);
+  letter-spacing: 0.05em;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.viewer-settings-tool-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.viewer-settings-tool-disclosure > summary::after {
+  content: "+";
+  color: var(--rg-coral);
+  font-size: 1rem;
+}
+
+.viewer-settings-tool-disclosure[open] > summary {
+  border-bottom: 1px solid var(--rg-line);
+  background: var(--rg-mint);
+}
+
+.viewer-settings-tool-disclosure[open] > summary::after {
+  content: "−";
+}
+
+.viewer-settings-tool-disclosure-body {
+  padding: 0.65rem;
+}
+
+.viewer-settings-tool-disclosure-note {
+  margin: 0 0 0.55rem;
+  color: var(--rg-muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.viewer-settings-tool-disclosure-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}

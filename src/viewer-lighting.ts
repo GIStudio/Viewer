@@ -102,16 +102,21 @@ export const LIGHTING_PRESETS: Record<string, LightingPresetValues> = {
   },
 };
 
-export const LIGHTING_PRESET_LABELS: Record<string, string> = {
-  analytical_diorama: "Analytical Diorama",
-  cinematic_day: "Cinematic Day",
-  neutral_studio: "Neutral Studio",
-  bright_day: "Bright Day",
-  overcast: "Overcast",
-  golden_hour: "Golden Hour",
-  night_presentation: "Night Presentation",
-  custom: "Custom",
+export const LIGHTING_PRESET_LABELS: Record<string, { en: string; zh: string }> = {
+  analytical_diorama: { en: "Analytical Diorama", zh: "分析模型" },
+  cinematic_day: { en: "Cinematic Day", zh: "电影日景" },
+  neutral_studio: { en: "Neutral Studio", zh: "中性工作室" },
+  bright_day: { en: "Bright Day", zh: "明亮日景" },
+  overcast: { en: "Overcast", zh: "阴天" },
+  golden_hour: { en: "Golden Hour", zh: "黄金时刻" },
+  night_presentation: { en: "Night Presentation", zh: "夜景展示" },
+  custom: { en: "Custom", zh: "自定义" },
 };
+
+export function lightingPresetLabel(preset: string, language: "en" | "zh"): string {
+  const labels = LIGHTING_PRESET_LABELS[preset];
+  return labels?.[language] ?? labels?.en ?? preset;
+}
 
 export const DEFAULT_LIGHTING_STATE: LightingState = {
   preset: "analytical_diorama",

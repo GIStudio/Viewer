@@ -95,6 +95,7 @@ import { createLocalAssetPaletteAdapter, type SceneAssetPaletteAdapter } from ".
 import { createSceneAssetDialog } from "./viewer-scene-asset-dialog";
 import { createViewerCommandRegistry } from "./viewer-command-registry";
 import { createViewerPanelController, type ViewerPanelController } from "./viewer-panel-controller";
+import { organizeViewerSettingsTools } from "./viewer-settings-tool-disclosure";
 import {
   sceneBoundsFromManifest,
   updateMinimapCamera,
@@ -142,8 +143,8 @@ import { createViewerSceneSelectionController } from "./viewer-scene-selection-c
 import {
   completeLightingValues,
   DEFAULT_LIGHTING_STATE,
-  LIGHTING_PRESET_LABELS,
   LIGHTING_PRESETS,
+  lightingPresetLabel,
   type LightingState,
 } from "./viewer-lighting";
 import {
@@ -517,6 +518,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   shell.setStatusSummary({ key: "viewer.status.loading" });
   shell.statusActivityHost.innerHTML = `<div class="desktop-shell-log-entry" data-tone="neutral" data-i18n-key="viewer.status.initialized">${t("Viewer shell initialized.", "查看器框架已初始化。")}</div>`;
   shell.centerStage.innerHTML = createViewerStageHtml();
+  organizeViewerSettingsTools(root, signal);
 
   const {
     canvasHost,
@@ -2335,6 +2337,18 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     applyLightingState();
   }
 
+  function syncLightingPresetOptions(language: ViewerLanguage): void {
+    const selectedPreset = lightingState.preset;
+    lightingPresetEl.replaceChildren();
+    for (const presetKey of [...Object.keys(LIGHTING_PRESETS), "custom"]) {
+      const optionEl = document.createElement("option");
+      optionEl.value = presetKey;
+      optionEl.textContent = lightingPresetLabel(presetKey, language);
+      lightingPresetEl.appendChild(optionEl);
+    }
+    lightingPresetEl.value = selectedPreset;
+  }
+
   function syncEnvironmentUi(options: { applyMaterials?: boolean } = {}): void {
     environmentController.sync(options);
   }
@@ -3752,6 +3766,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     currentLang = language;
     root.dataset.viewerLanguage = language;
     applyViewerTranslations(root, language);
+    syncLightingPresetOptions(language);
     updateShellSectionTexts();
     updateGenerationDialogContract();
     shell.setHints(localizedViewerHints());
@@ -4132,13 +4147,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     },
     { signal },
   );
-
-  for (const [presetKey, presetLabel] of Object.entries(LIGHTING_PRESET_LABELS)) {
-    const optionEl = document.createElement("option");
-    optionEl.value = presetKey;
-    optionEl.textContent = presetLabel;
-    lightingPresetEl.appendChild(optionEl);
-  }
 
   lightingPresetEl.addEventListener(
     "change",

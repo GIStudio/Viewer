@@ -17,7 +17,7 @@ export function createViewerStageHtml(): string {
             <div class="stage-segmented" aria-label="Canvas mode" data-i18n-aria-label-key="viewer.stage.canvasMode">
               <button type="button" aria-pressed="true" id="viewer-mode-3d">3D</button>
               <button type="button" aria-pressed="false" id="viewer-mode-2d">2D</button>
-              <button type="button" aria-pressed="false" id="viewer-mode-graph">Graph</button>
+              <button type="button" aria-pressed="false" id="viewer-mode-graph" hidden aria-hidden="true" tabindex="-1">Graph</button>
             </div>
           </div>
           <span class="stage-toolbar-divider" aria-hidden="true"></span>
