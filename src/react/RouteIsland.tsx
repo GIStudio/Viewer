@@ -62,6 +62,15 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
     const tr = (key: string, fallback: string): string => translateViewerKey(loadViewerLanguage(), key) ?? fallback;
     const activateViewerTarget = (target: "generate" | "review" | "edit" | "deliver"): void => {
       const snapshot = workflow.getSnapshot();
+      if (target !== "review" && professionalSession.getSnapshot().status !== "authenticated") {
+        const message = language === "zh"
+          ? "请先登录，再创建、生成、编辑或评价个人场景。"
+          : "Sign in before creating, generating, editing, or evaluating a personal scene.";
+        shell.setStatusSummary(message);
+        shell.pushActivity(message, "warning");
+        shell.sidebar.activate("account");
+        return;
+      }
       if (target !== "generate" && !snapshot.sceneLayoutPath) {
         if (target === "edit" && !snapshot.normalized) {
           shell.setStatusSummary(tr("viewer.starter.materializing", "正在复制内置道路骨架…"));
@@ -117,6 +126,10 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         flow: { stage: "01" as const, branch: "annotation" as const, status: annotationPreparationStatus(workflow.getSnapshot()) },
         badge: "—",
         action: () => {
+          if (professionalSession.getSnapshot().status !== "authenticated") {
+            shell.sidebar.activate("account");
+            return;
+          }
           if (workflow.getSnapshot().normalized) {
             navigateTo("scene-graph");
             return;
@@ -138,7 +151,13 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         content: "",
         flow: { stage: "01" as const, branch: "assets" as const, status: assetPreparationStatus(workflow.getSnapshot()) },
         badge: "—",
-        action: () => navigateTo("asset-editor"),
+        action: () => {
+          if (professionalSession.getSnapshot().status !== "authenticated") {
+            shell.sidebar.activate("account");
+            return;
+          }
+          navigateTo("asset-editor");
+        },
       },
       {
         id: "generate",
