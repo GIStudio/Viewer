@@ -91,6 +91,7 @@ import {
 } from "./viewer-scene-bounds";
 import { createSceneObjectEditorController } from "./viewer-scene-object-editor";
 import { createSceneEditAutosaveCoordinator } from "./viewer-scene-edit-autosave";
+import { createSceneObjectEditStatusController } from "./viewer-object-edit-status";
 import { createLocalAssetPaletteAdapter, type SceneAssetPaletteAdapter } from "./viewer-asset-palette";
 import { createSceneAssetDialog } from "./viewer-scene-asset-dialog";
 import { createViewerCommandRegistry } from "./viewer-command-registry";
@@ -2697,6 +2698,13 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     }
   }
 
+  const objectEditStatusController = createSceneObjectEditStatusController({
+    root,
+    getLanguage: () => currentLang,
+    onExit: () => setObjectEditingEnabled(false),
+    signal,
+  });
+
   const editAutosave = createSceneEditAutosaveCoordinator({
     storageKey: hostOptions.embedded ? "course-current" : "expert-current",
     submit: persistCurrentSceneCommands,
@@ -2716,6 +2724,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     onStatus(status, message): void {
       sceneCommandStatusEl.dataset.saveStatus = status;
       sceneCommandStatusEl.textContent = message;
+      objectEditStatusController.setSaveStatus(status);
       window.dispatchEvent(new CustomEvent("roadgen3d:scene-edit-status", { detail: { status, message } }));
     },
     onError(error): void {
@@ -2736,7 +2745,51 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     flashStatus,
     updateHelpers: () => updateAssetBboxHelpers(scene),
     enqueue: (command, options) => editAutosave.enqueue(command, options),
+    onInteractionStateChange: (state) => objectEditStatusController.setInteractionState(state),
   });
+
+  let assetBboxEnabledBeforeEditing: boolean | null = null;
+
+  function setObjectEditingEnabled(enabled: boolean, options: { announce?: boolean } = {}): void {
+    const announce = options.announce ?? true;
+    if (enabled) {
+      if (!sceneObjectEditor.isEnabled()) {
+        assetBboxEnabledBeforeEditing = assetBboxToggleEl.checked;
+      }
+      sceneObjectEditor.setEnabled(true);
+      setToggleInput(assetMoveToggleEl, true);
+      setToggleInput(assetBboxToggleEl, true);
+      createAssetBboxHelpers(scene, currentRoot, currentManifest);
+      if (laserToggleEl.checked) {
+        setToggleInput(laserToggleEl, false);
+        crosshairEl.hidden = true;
+        laserBeam.visible = false;
+        laserHitDot.visible = false;
+        currentLaserHitPoint = null;
+        lastLaserTargetKey = "";
+      }
+      resetMoveState();
+      updateOverlay();
+      if (announce) flashStatus(currentLang === "zh" ? "地物编辑已开启；选择树木或街具进行编辑。" : "Object editing enabled. Select a tree or street object.");
+      return;
+    }
+
+    const wasEnabled = sceneObjectEditor.isEnabled();
+    sceneObjectEditor.exit();
+    setToggleInput(assetMoveToggleEl, false);
+    if (assetBboxEnabledBeforeEditing !== null) {
+      setToggleInput(assetBboxToggleEl, assetBboxEnabledBeforeEditing);
+      if (assetBboxEnabledBeforeEditing) createAssetBboxHelpers(scene, currentRoot, currentManifest);
+      else removeAssetBboxHelpers(scene);
+    }
+    assetBboxEnabledBeforeEditing = null;
+    resetMoveState();
+    renderer.domElement.focus();
+    updateOverlay();
+    if (announce && wasEnabled) {
+      flashStatus(currentLang === "zh" ? "已退出地物编辑；点击场景即可恢复漫游。" : "Object editing exited. Click the scene to resume roaming.");
+    }
+  }
 
   const paletteBackingAdapter = hostOptions.assetPaletteAdapter ?? createLocalAssetPaletteAdapter();
   const workflowPaletteAdapter: SceneAssetPaletteAdapter = {
@@ -2852,7 +2905,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     "edit.duplicate": () => sceneObjectEditor.duplicateSelected(),
     "edit.delete": () => sceneObjectEditor.deleteSelected(),
     "edit.assets": () => void sceneAssetDialog.open().catch((error) => flashStatus(String(error))),
-    "edit.cancel": () => sceneObjectEditor.cancel(),
+    "edit.cancel": () => sceneObjectEditor.cancelStep(),
+    "edit.exit": () => setObjectEditingEnabled(false),
     "edit.undo": () => void undoLastSceneEdit(),
     "edit.redo": () => void undoLastSceneEdit(),
     "viewer.settings": () => panelController.toggle("settings", { restoreRoam: true }),
@@ -2883,6 +2937,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (active && event.code === "Escape" && sceneAssetDialog.isOpen()) {
       event.preventDefault();
       sceneAssetDialog.close();
+      return;
+    }
+    if (active && event.code === "Escape" && panelController.isAnyOpen()) {
+      event.preventDefault();
+      panelController.closeAll();
       return;
     }
     if (
@@ -2931,7 +2990,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       }
       if (event.code === "Escape") {
         event.preventDefault();
-        commandRegistry.execute("edit.cancel");
+        const result = sceneObjectEditor.cancelStep();
+        if (result === "nothing_to_cancel") {
+          commandRegistry.execute("edit.exit");
+        } else if (result === "transform_cancelled") {
+          flashStatus(currentLang === "zh" ? "已取消本次变换；再次按 Esc 取消选择。" : "Transform cancelled. Press Esc again to clear the selection.");
+        } else {
+          flashStatus(currentLang === "zh" ? "已取消选择；再次按 Esc 退出地物编辑。" : "Selection cleared. Press Esc again to exit object editing.");
+        }
         return;
       }
       if (event.code === "KeyA" && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -3191,6 +3257,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     const loadStart = performance.now();
     clearError(errorEl);
     setStatus(`Loading ${option.label}…`);
+    setObjectEditingEnabled(false, { announce: false });
     if (controls.isLocked) {
       controls.unlock();
     }
@@ -3774,6 +3841,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     void historyPanelController.refreshLanguage();
     lastLaserTargetKey = "";
     clearInfoCard();
+    objectEditStatusController.refreshLanguage();
     renderProfessionalWorkflowState();
   }
 
@@ -4245,22 +4313,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   assetMoveToggleEl.addEventListener(
     "change",
     () => {
-      sceneObjectEditor.setEnabled(assetMoveToggleEl.checked);
-      if (assetMoveToggleEl.checked) {
-        setToggleInput(assetBboxToggleEl, true);
-        createAssetBboxHelpers(scene, currentRoot, currentManifest);
-        if (laserToggleEl.checked) {
-          setToggleInput(laserToggleEl, false);
-          crosshairEl.hidden = true;
-          laserBeam.visible = false;
-          laserHitDot.visible = false;
-          currentLaserHitPoint = null;
-          lastLaserTargetKey = "";
-        }
-        flashStatus("Asset move mode enabled. Drag assets in the 3D scene.");
-      } else {
-        flashStatus("Asset move mode disabled.");
-      }
+      setObjectEditingEnabled(assetMoveToggleEl.checked);
     },
     { signal },
   );
@@ -4577,6 +4630,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     clearGraphOverlay();
     floatingLaneSystem.clearOverlay();
     structuredEvaluationController?.abort();
+    setObjectEditingEnabled(false, { announce: false });
     editAutosave.dispose();
     sceneObjectEditor.dispose();
     sceneAssetDialog.dispose();

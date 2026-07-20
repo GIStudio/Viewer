@@ -5,6 +5,7 @@
 @import "./viewer/expanded-map-controls.css";
 @import "./viewer/settings-history.css";
 @import "./viewer/settings-tool-disclosure.css";
+@import "./viewer/object-edit-status.css";
 @import "./viewer/history-scores.css";
 @import "./viewer/metrics-evaluate-presets.css";
 @import "./viewer/compare-panel.css";

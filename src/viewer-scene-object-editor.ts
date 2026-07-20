@@ -7,6 +7,18 @@ import type { ViewerManifest } from "./viewer-types";
 
 export type SceneObjectEditMode = "translate" | "rotate" | "scale";
 
+export type SceneObjectEditorCancelResult =
+  | "transform_cancelled"
+  | "selection_cleared"
+  | "nothing_to_cancel";
+
+export type SceneObjectEditorInteractionState = {
+  enabled: boolean;
+  mode: SceneObjectEditMode;
+  selectedInstanceId: string | null;
+  transforming: boolean;
+};
+
 export type SceneObjectEditorController = {
   setEnabled(enabled: boolean): void;
   isEnabled(): boolean;
@@ -15,6 +27,10 @@ export type SceneObjectEditorController = {
   selectedInstanceId(): string | null;
   duplicateSelected(): void;
   deleteSelected(): void;
+  getInteractionState(): SceneObjectEditorInteractionState;
+  cancelStep(): SceneObjectEditorCancelResult;
+  exit(): void;
+  /** @deprecated Use cancelStep() for hierarchical Escape handling. */
   cancel(): void;
   dispose(): void;
 };
@@ -31,6 +47,7 @@ type EditorOptions = {
   enqueue(command: SceneEditCommand, options?: { debounceMs?: number }): void;
   flashStatus(message: string): void;
   updateHelpers(): void;
+  onInteractionStateChange?(state: SceneObjectEditorInteractionState): void;
 };
 
 type TransformSnapshot = {
@@ -111,6 +128,17 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
   let normalizingScale = false;
   let altPressed = false;
 
+  const interactionState = (): SceneObjectEditorInteractionState => ({
+    enabled,
+    mode,
+    selectedInstanceId: selectedId,
+    transforming: snapshot !== null,
+  });
+
+  const notifyInteractionState = (): void => {
+    options.onInteractionStateChange?.(interactionState());
+  };
+
   const configureAxes = (): void => {
     controls.setMode(mode);
     if (mode === "translate") {
@@ -145,6 +173,7 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
       (selectionBox.material as THREE.Material).dispose();
       selectionBox = null;
     }
+    notifyInteractionState();
   };
 
   const select = (instanceId: string, object: THREE.Object3D): void => {
@@ -157,6 +186,7 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
     selectionBox.userData.viewerHelper = true;
     scene.add(selectionBox);
     configureAxes();
+    notifyInteractionState();
     options.flashStatus(`已选择 ${instanceId} · G移动 / R旋转 / S缩放`);
   };
 
@@ -177,6 +207,7 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
   controls.addEventListener("mouseDown", () => {
     snapshot = capture();
     if (options.controlsAreLocked()) options.unlockControls();
+    notifyInteractionState();
   });
   controls.addEventListener("objectChange", () => {
     if (!selectedObject || !snapshot) return;
@@ -219,6 +250,7 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
     }
     options.enqueue(command);
     snapshot = null;
+    notifyInteractionState();
   });
 
   const onPointerDown = (event: PointerEvent): void => {
@@ -250,17 +282,52 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
   window.addEventListener("keydown", onKey);
   window.addEventListener("keyup", onKey);
 
+  const cancelTransform = (): boolean => {
+    if (!selectedObject || !snapshot) return false;
+    selectedObject.position.copy(snapshot.objectPosition);
+    selectedObject.rotation.y = snapshot.objectRotationY;
+    selectedObject.scale.copy(snapshot.objectScale);
+    selectionBox?.update();
+    options.updateHelpers();
+    snapshot = null;
+    notifyInteractionState();
+    return true;
+  };
+
+  const cancelStep = (): SceneObjectEditorCancelResult => {
+    if (cancelTransform()) return "transform_cancelled";
+    if (selectedId) {
+      clearSelection();
+      return "selection_cleared";
+    }
+    return "nothing_to_cancel";
+  };
+
+  const exit = (): void => {
+    cancelTransform();
+    enabled = false;
+    helper.visible = false;
+    clearSelection();
+    notifyInteractionState();
+  };
+
   return {
     setEnabled(next): void {
-      enabled = next;
-      helper.visible = next;
-      if (!next) clearSelection();
-      else if (options.controlsAreLocked()) options.unlockControls();
+      if (!next) {
+        exit();
+        return;
+      }
+      enabled = true;
+      helper.visible = true;
+      if (options.controlsAreLocked()) options.unlockControls();
+      notifyInteractionState();
     },
     isEnabled: () => enabled,
+    getInteractionState: interactionState,
     setMode(next): void {
       mode = next;
       configureAxes();
+      notifyInteractionState();
       options.flashStatus(next === "translate" ? "移动模式：XZ 平面，Shift 吸附。" : next === "rotate" ? "旋转模式：仅绕 Y 轴。" : "缩放模式：等比 0.25–4×。");
     },
     getMode: () => mode,
@@ -283,17 +350,13 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
       options.enqueue({ command_id: commandId("delete"), op: "delete_instance", instance_id: selectedId });
       clearSelection();
     },
+    cancelStep,
+    exit,
     cancel(): void {
-      if (selectedObject && snapshot) {
-        selectedObject.position.copy(snapshot.objectPosition);
-        selectedObject.rotation.y = snapshot.objectRotationY;
-        selectedObject.scale.copy(snapshot.objectScale);
-      }
-      snapshot = null;
-      clearSelection();
+      cancelStep();
     },
     dispose(): void {
-      clearSelection();
+      exit();
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("keyup", onKey);

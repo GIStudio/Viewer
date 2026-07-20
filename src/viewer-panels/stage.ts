@@ -99,6 +99,15 @@ export function createViewerStageHtml(): string {
 
       <div id="viewer-overlay" class="viewer-overlay" data-i18n-key="viewer.overlay.capture">Click scene to capture mouse</div>
 
+      <aside id="viewer-object-edit-status" class="viewer-object-edit-status" aria-live="polite" aria-label="Scene object editing status" hidden>
+        <div class="viewer-object-edit-copy">
+          <strong data-object-edit-title>Editing objects</strong>
+          <span data-object-edit-detail>Select a tree or street object</span>
+          <small data-object-edit-save>No pending edits</small>
+        </div>
+        <button id="viewer-object-edit-exit" class="viewer-object-edit-exit" type="button">Exit editing</button>
+      </aside>
+
 
       <div id="viewer-generation-dialog" class="viewer-generation-dialog" data-open="false" role="dialog" aria-modal="true" aria-labelledby="viewer-generation-dialog-title" tabindex="-1">
         <div class="viewer-generation-dialog-backdrop" data-close-generation></div>
