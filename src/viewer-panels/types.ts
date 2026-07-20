@@ -57,6 +57,9 @@ export type ViewerPanelElements = {
   generationDialogEl: HTMLElement;
   generationSourceSummaryEl: HTMLElement;
   generationStrategySummaryEl: HTMLElement;
+  parameterSkeletonHostEl: HTMLElement;
+  parameterFurnitureHostEl: HTMLElement;
+  parameterSummaryEl: HTMLElement;
   designReviewRunEl: HTMLButtonElement;
   designPresetEl: HTMLSelectElement;
   designPromptEl: HTMLTextAreaElement;

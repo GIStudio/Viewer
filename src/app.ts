@@ -131,6 +131,7 @@ import { createViewerDesignMatrixController } from "./viewer-design-matrix";
 import { createViewerGenerationWizardController } from "./viewer-generation-wizard";
 import { buildGenerationRequestSpec, type GenerationRequestSpec } from "./viewer-generation-spec";
 import { createViewerGenerationRunner } from "./viewer-generation-runner";
+import { createViewerParameterDesignController, type ViewerParameterDesignController } from "./viewer-parameter-design";
 import {
   compactUiLabel,
   makeDirectLayoutLabel,
@@ -559,6 +560,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     generationDialogEl,
     generationSourceSummaryEl,
     generationStrategySummaryEl,
+    parameterSkeletonHostEl,
+    parameterFurnitureHostEl,
+    parameterSummaryEl,
     designReviewRunEl,
     designPresetEl,
     designPromptEl,
@@ -670,6 +674,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   let starterLoading = false;
   let starterLoadError = "";
   let generationWizard: ReturnType<typeof createViewerGenerationWizardController> | null = null;
+  let parameterDesignController: ViewerParameterDesignController | null = null;
   const renderCapabilityStatus = (): void => {
     const capabilities = workflow.getSnapshot().capabilities;
     capabilityStatusEl.innerHTML = renderWorkflowCapabilities(capabilities);
@@ -720,8 +725,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   };
   const updateGenerationDialogContract = (): void => {
     const snapshot = workflow.getSnapshot();
-    const llm = snapshot.capabilities?.llm as Record<string, unknown> | undefined;
-    const text = llm?.text as Record<string, unknown> | undefined;
     const hasApprovedSource = Boolean(
       snapshot.normalized
       && snapshot.approvedSourceRevision === snapshot.sourceRevision,
@@ -731,13 +734,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       : snapshot.normalized
         ? translateViewerKey(currentLang, "viewer.generationDialog.sourceAwaitingApproval")
         : translateViewerKey(currentLang, "viewer.generationDialog.sourceMissing");
-    generationStrategySummaryEl.textContent = text?.configured === true
-      ? translateViewerKey(currentLang, "viewer.generationDialog.strategyLlm")
-      : translateViewerKey(currentLang, "viewer.generationDialog.strategyParametric");
+    generationStrategySummaryEl.textContent = "确定性参数化生成";
     if (generationStrategyModeEl) {
-      generationStrategyModeEl.textContent = text?.configured === true
-        ? "LLM 服务已连接：用于参数推导；所有人工选择仍具有更高优先级。"
-        : "LLM 服务未配置：本次使用确定性参数化规则，不伪造智能推荐。";
+      generationStrategyModeEl.textContent = "本次只使用明确的道路骨架与家具参数，不调用 LLM 或 RAG。";
     }
     generationDialogEl.dataset.sourceMode = snapshot.normalized ? "reference_annotation" : "graph_template";
     if (generationSourceKindEl) {
@@ -767,7 +766,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     const assetReady = snapshot.assetPreparation?.mode === "default_transparent_massing"
       || (snapshot.assetPreparation?.mode === "candidate_manifests"
         && snapshot.assetPreparation.manifests.some((manifest) => manifest.readyCount > 0));
-    const { spec, issues } = currentGenerationSpecBuild();
+    const built = currentGenerationSpecBuild();
+    const spec = built.spec;
+    const issues = [...built.issues, ...(parameterDesignController?.validationIssues() ?? [])];
     const sourceReady = hasApprovedSource || (spec.sourceMode === "graph_template" && Boolean(spec.graphTemplateId));
     const preparationReady = assetReady || hostOptions.embedded;
     const generationReady = sourceReady && preparationReady && issues.length === 0;
@@ -790,15 +791,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     generationWizard?.setPrimaryStatus("strategy", issues.length ? "error" : preparationReady ? "complete" : "warning");
     generationWizard?.setPrimaryStatus("output", generationReady ? "complete" : "pending");
     generationWizard?.setStrategyStatus("assets", preparationReady ? "complete" : "warning");
-    generationWizard?.setStrategyStatus("structure", issues.length ? "error" : "complete");
+    generationWizard?.setStrategyStatus("skeleton", issues.length ? "error" : "complete");
     generationWizard?.setStrategyStatus("furniture", "complete");
-    generationWizard?.setStrategyStatus("notes", designPromptEl.value.trim() ? "complete" : "pending");
-    generationWizard?.setStrategyStatus("matrix", "pending");
   };
   const renderProfessionalWorkflowState = (): void => {
     renderCapabilityStatus();
     updateGenerationDialogContract();
     renderUsedAssetProvenance();
+    parameterDesignController?.refreshSource();
     const snapshot = workflow.getSnapshot();
     const hasWorkflowScene = Boolean(snapshot.sceneLayoutPath);
     const hasScene = hasWorkflowScene || activeSceneOrigin === "starter_demo";
@@ -1148,12 +1148,15 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     return buildGenerationRequestSpec({
       normalizedSource: snapshot.normalized,
       graphTemplateId: designTemplateEl.value,
-      scenario: selectedScenarioDesign(),
-      preset: selectedDesignPreset(),
-      prompt: designPromptEl.value,
-      semanticConfigPatch: selectedDesignSemanticConfigPatch(),
-      generationOptions: selectedAssetGenerationOptions(),
-      variantCount: Number(designCountEl.value),
+      scenario: null,
+      preset: null,
+      prompt: "",
+      semanticConfigPatch: {},
+      generationOptions: {
+        ...selectedAssetGenerationOptions(),
+        ...(parameterDesignController?.generationOptions() ?? {}),
+      },
+      variantCount: 1,
       baseSeed: designSeedEl.valueAsNumber,
     });
   }
@@ -1167,15 +1170,19 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       : preparation?.mode === "default_transparent_massing"
         ? "默认参数化素材 + 透明建筑白模"
         : "尚未选择素材策略";
-    const scenarioLabel = spec.scenario?.title_zh || spec.scenario?.scenario_id
-      || (spec.sourceMode === "reference_annotation" ? "保持已批准 ReferenceAnnotation" : `Graph Template · ${spec.graphTemplateId || "未选择"}`);
+    const parameterSpec = parameterDesignController?.currentSpec();
+    const skeleton = parameterSpec?.skeleton;
+    const enabledFurniture = parameterSpec
+      ? Object.values(parameterSpec.furniture.categories).filter((item) => item.enabled)
+      : [];
+    const scenarioLabel = spec.sourceMode === "reference_annotation" ? "保持已批准2D标注" : `Graph Template · ${spec.graphTemplateId || "未选择"}`;
     const rows = [
       ["输入", spec.sourceMode === "reference_annotation" ? "已批准 ReferenceAnnotation" : "本地 Graph Template"],
       ["素材", assetLabel],
-      ["结构", scenarioLabel],
-      ["家具", selectedDesignPreset()?.name || "Custom / LLM-Driven"],
-      ["要求", spec.prompt || "无额外要求"],
-      ["输出", `${spec.variantCount} 个方案 · base seed ${spec.baseSeed}`],
+      ["道路骨架", skeleton ? `${skeleton.laneCount} × ${skeleton.laneWidthM}m 车道 · 人行道 ${skeleton.sidewalkWidthM}m · 设施带 ${skeleton.furnishingWidthM}m` : scenarioLabel],
+      ["中岛 / 公交", skeleton ? `${skeleton.median.enabled ? `${skeleton.median.kind} ${skeleton.median.widthM}m` : "无中岛"} · ${skeleton.busStop.enabled ? skeleton.busStop.placement : "无额外公交站"}` : "—"],
+      ["家具", parameterSpec ? `${enabledFurniture.length} 类开启 · 密度 ${parameterSpec.furniture.globalDensity} · ${parameterSpec.furniture.style}` : "全部关闭"],
+      ["输出", `1 个确定性场景版本 · seed ${spec.baseSeed}`],
     ];
     generationOutputSummaryEl.innerHTML = `
       <dl>${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
@@ -1752,8 +1759,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     },
     onDesignOpen: () => {
       updateGenerationDialogContract();
-      populateDesignPresets();
-      scheduleDesignMatrixRefresh({ force: true });
       generationWizard?.open();
     },
     onCompareOpen: populateCompareSelectors,
@@ -1776,9 +1781,41 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     dialogEl: generationDialogEl,
     triggerEl: generationRunEl,
     onClose: () => panelController.setOpen("design", false),
-    onStepChange: () => {
-      if (generationWizard?.activeStrategy() === "matrix") scheduleDesignMatrixRefresh({ force: true });
+    onStepChange: updateGenerationDialogContract,
+  });
+  parameterDesignController = createViewerParameterDesignController({
+    skeletonHostEl: parameterSkeletonHostEl,
+    furnitureHostEl: parameterFurnitureHostEl,
+    summaryEl: parameterSummaryEl,
+    seedEl: designSeedEl,
+    allowCustom: !hostOptions.embedded,
+    getSource: () => {
+      const snapshot = workflow.getSnapshot();
+      if (!snapshot.normalized || snapshot.approvedSourceRevision !== snapshot.sourceRevision) return null;
+      const sourceFingerprint = String(
+        snapshot.annotationDraft?.fingerprint
+        || snapshot.normalized.source.fingerprint
+        || snapshot.normalized.normalizedAt,
+      ).trim();
+      if (!sourceFingerprint) return null;
+      const centerline = snapshot.normalized.referenceAnnotation.centerlines?.[0] as Record<string, unknown> | undefined;
+      const forward = Number(centerline?.forward_drive_lane_count ?? 0);
+      const reverse = Number(centerline?.reverse_drive_lane_count ?? 0);
+      const laneCount = forward + reverse;
+      const roadWidth = Number(centerline?.road_width_m);
+      return {
+        revision: snapshot.sourceRevision,
+        fingerprint: sourceFingerprint,
+        values: {
+          ...(laneCount > 0 ? { laneCount } : {}),
+          ...(laneCount > 0 && Number.isFinite(roadWidth) ? { laneWidthM: roadWidth / laneCount } : {}),
+        },
+      };
     },
+    onChange: updateGenerationDialogContract,
+  });
+  void parameterDesignController.initialize().then(updateGenerationDialogContract).catch((error) => {
+    parameterSummaryEl.innerHTML = `<strong>参数注册表加载失败</strong><small>${escapeHtml(error instanceof Error ? error.message : String(error))}</small>`;
   });
   root.addEventListener("roadgen:workbench-close-active-panel", () => panelController.closeAll(), { signal });
   const centerControlsEl = root.querySelector<HTMLElement>("#viewer-center-controls");
@@ -3850,6 +3887,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       || (snapshot.assetPreparation?.mode === "candidate_manifests" && snapshot.assetPreparation.manifests.some((manifest) => manifest.readyCount > 0));
     const validationIssues = [
       ...issues,
+      ...(parameterDesignController?.validationIssues() ?? []),
       ...(!sourceApproved ? ["请先批准当前 ReferenceAnnotation 或选择明确的 Graph Template。"] : []),
       ...(!assetReady ? ["请先选择 3D 素材策略。"] : []),
     ];
@@ -3859,7 +3897,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       updateGenerationDialogContract();
       return;
     }
-    void generationRunner.run(spec).finally(scheduleDesignMatrixRefresh);
+    void generationRunner.run(spec);
   }, { signal });
   designBenchmarkEl.addEventListener("click", () => void designController.loadBenchmarkExplorer(), { signal });
   designBranchHistoryEl.addEventListener("click", () => void designController.loadBranchRunHistory(), { signal });
@@ -4520,6 +4558,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     unregisterHostSidebarPages();
     generationRunner.dispose();
     generationWizard?.destroy();
+    parameterDesignController?.destroy();
     workflowBridge.dispose();
     unsubscribeCapabilityStatus();
     controls.removeEventListener("lock", handleControlsLock);

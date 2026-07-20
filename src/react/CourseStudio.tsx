@@ -397,8 +397,6 @@ function DesignStage({ api, project, source, revisions, evaluations, profiles, c
   const latestEvaluation = evaluations.find((item) => item.revision_id === latest?.id);
   const [weights, setWeights] = useState({ walkability: 45, safety: 35, beauty: 20 });
   const [coursePanel, setCoursePanel] = useState<"goals" | "versions" | null>(null);
-  const llmReady = Boolean(capabilities?.llm.configured);
-  const resolvedMode = capabilities?.design_generation.redesign_default ?? "parametric";
   const toggleCoursePanel = useCallback((panel: "goals" | "versions") => {
     document.querySelector<HTMLElement>(".course-embedded-viewer .desktop-shell")
       ?.dispatchEvent(new CustomEvent("roadgen:workbench-sidebar-close"));
@@ -411,7 +409,7 @@ function DesignStage({ api, project, source, revisions, evaluations, profiles, c
       icon: "TG",
       group: "analysis" as const,
       content: "",
-      badge: llmReady ? "AI" : "P",
+      badge: "P",
       action: () => toggleCoursePanel("goals"),
     },
     {
@@ -423,7 +421,7 @@ function DesignStage({ api, project, source, revisions, evaluations, profiles, c
       badge: String(revisions.length),
       action: () => toggleCoursePanel("versions"),
     },
-  ], [llmReady, revisions.length, toggleCoursePanel, zh]);
+  ], [revisions.length, toggleCoursePanel, zh]);
   useEffect(() => {
     const closeForWorkbenchPage = (event: Event) => {
       const pageId = (event as CustomEvent<{ pageId?: string | null }>).detail?.pageId;
@@ -457,13 +455,11 @@ function DesignStage({ api, project, source, revisions, evaluations, profiles, c
     timer = window.setTimeout(poll, 450);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [api, generationJob?.id, generationJob?.status]);
-  const generate = async (mode: "baseline" | "auto") => {
+  const generate = async () => {
     const job = await api.post<PlatformJob>(`/api/v1/projects/${project.id}/generate`, {
       source_id: source?.id,
-      prompt: project.design_goal,
-      generation_mode: mode,
-      parent_revision_id: mode === "auto" ? latest?.id : undefined,
-      goal_weights: mode === "auto" ? weights : undefined,
+      prompt: "Generate a deterministic road baseline from the approved 2D annotation.",
+      generation_mode: "baseline",
     });
     onJobChange(job);
   };
@@ -477,17 +473,17 @@ function DesignStage({ api, project, source, revisions, evaluations, profiles, c
       {generationJob ? <GenerationProgress job={generationJob} language={language} onRetry={() => void retry()} onBack={onBackToAnnotation} /> : latest ? <CourseViewerWorkbench api={api} project={project} revision={latest} language={language} workflow={workflow} navigation={navigation} sidebarPages={sidebarPages} onRevisionCreated={onRefresh} /> : <div className="course-empty course-design-awaiting"><p>{zh ? "返回03，在共享参考图标注中批准当前标注。" : "Return to 03 and approve the annotation in the shared workbench."}</p></div>}
       <div className="course-design-viewport-bar">
         <div><span>{latest ? `REV ${String(latest.revision_number).padStart(3, "0")}` : (zh ? "2D标注 → 3D" : "2D → 3D")}</span><strong>{latest?.label ?? (zh ? "还没有初始3D版本" : "No generated scene")}</strong><small>{latest ? `${latest.branch_kind} · ${String(latest.provenance?.generation_method ?? "unknown")}` : (zh ? "返回03检查并保存2D标注，系统会直接生成" : "Approve annotations in 03 to generate directly")}</small></div>
-        {!latest ? <Button type="primary" disabled={!source || Boolean(generationJob)} onClick={() => void act(zh ? "正在建立初始3D版本…" : "Starting parametric baseline…", () => generate("baseline"))}>{zh ? "重新生成初始版本" : "Generate baseline"}</Button> : null}
+        {!latest ? <Button type="primary" disabled={!source || Boolean(generationJob)} onClick={() => void act(zh ? "正在建立初始3D版本…" : "Starting parametric baseline…", generate)}>{zh ? "重新生成初始版本" : "Generate baseline"}</Button> : null}
       </div>
     </section>
 
     {coursePanel ? <aside className="course-design-external-drawer" data-panel={coursePanel}>
       <header><strong>{coursePanel === "goals" ? (zh ? "目标与优化" : "Goals & optimization") : (zh ? "版本账本" : "Revision ledger")}</strong><button type="button" aria-label={zh ? "关闭抽屉" : "Close drawer"} onClick={() => setCoursePanel(null)}>×</button></header>
       {coursePanel === "goals" ? <div className="course-design-console">
-        <header><span className="course-eyebrow">DESIGN LOOP / {resolvedMode.toUpperCase()}</span><h2>{zh ? "从评价目标生成下一版" : "Generate the next version from goals"}</h2><p>{llmReady ? (zh ? `已连接 LLM · ${capabilities?.llm.text?.model ?? "configured model"}` : `LLM connected · ${capabilities?.llm.text?.model ?? "configured model"}`) : (zh ? "未配置 API，将使用可复现的参数化模型" : "No API configured; using the reproducible parametric model")}</p></header>
+        <header><span className="course-eyebrow">PARAMETRIC DESIGN LOOP</span><h2>{zh ? "调整明确参数，生成下一版" : "Adjust explicit parameters for the next version"}</h2><p>{zh ? "道路骨架和每类家具均使用低、中、高控件；生成不调用 LLM 或 RAG。" : "Road skeleton and furniture use explicit low, medium, and high controls. LLM and RAG are not called."}</p></header>
         <div className="course-design-scores">{(["walkability", "safety", "beauty", "overall"] as const).map((key) => <div key={key}><span>{key}</span><strong>{score(latestEvaluation?.result?.[key])}</strong></div>)}</div>
         <div className="course-design-goals"><div><strong>{zh ? "选择最需要的设计目标" : "Choose your design priorities"}</strong><small>{zh ? "非负权重会在服务器归一化为100%" : "Weights are normalized to 100% on the server"}</small></div>{Object.entries(weights).map(([key, value]) => <label key={key}><span>{key}</span><input type="range" min="0" max="100" value={value} onChange={(event) => setWeights({ ...weights, [key]: Number(event.target.value) })} /><InputNumber min={0} max={100} value={value} onChange={(next) => setWeights({ ...weights, [key]: Number(next ?? 0) })} /></label>)}</div>
-        <Button type="primary" size="large" block disabled={Boolean(generationJob) || !latest || !source || Object.values(weights).every((value) => value <= 0)} onClick={() => void act(llmReady ? (zh ? "正在建立 LLM 设计任务…" : "Starting the LLM design task…") : (zh ? "正在建立参数化优化任务…" : "Starting parametric optimization…"), () => generate("auto"))}>{llmReady ? (zh ? "让 LLM 设计下一版" : "Ask LLM to redesign") : (zh ? "用参数化模型优化下一版" : "Optimize parametrically")}</Button>
+        <Button type="primary" size="large" block disabled={Boolean(generationJob) || !latest || !source} onClick={() => { setCoursePanel(null); document.querySelector<HTMLButtonElement>(".course-embedded-viewer #viewer-generate-and-load")?.click(); }}>{zh ? "调整道路与家具参数" : "Adjust road and furniture parameters"}</Button>
         <div className="course-design-secondary"><Button disabled={!latest || !profiles.length} onClick={() => void act(zh ? "正在评价当前版本…" : "Evaluating current revision…", async () => { const payload = await api.post<{ job: PlatformJob }>(`/api/v1/projects/${project.id}/evaluations`, { revision_id: latest?.id, profile_id: profiles[0]?.id, weights }); if (payload.job) await waitForJob(api, payload.job); await onRefresh(); })}>{zh ? "重新评价当前版本" : "Re-evaluate current"}</Button><Button onClick={onNext}>{zh ? "评价详情" : "Metrics detail"}</Button><Button onClick={() => { window.location.hash = "#viewer"; }}>{zh ? "专家编辑器" : "Expert editor"}</Button></div>
       </div> : <div className="course-version-timeline course-design-version-drawer">
         {latest?.glb_artifact_id ? <Button disabled={Boolean(generationJob)} onClick={() => void api.downloadArtifact(latest.glb_artifact_id!, `revision-${latest.revision_number}.glb`)}>{zh ? "下载当前3D场景文件" : "Download current GLB"}</Button> : null}

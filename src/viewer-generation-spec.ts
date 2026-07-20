@@ -10,7 +10,7 @@ import { DESIGN_SCHEME_VARIANTS } from "./viewer-types";
 import type { NormalizedSceneSource } from "./workflow-controller";
 
 export type GenerationPrimaryPage = "source" | "strategy" | "output";
-export type GenerationStrategyPage = "assets" | "structure" | "furniture" | "notes" | "matrix";
+export type GenerationStrategyPage = "assets" | "skeleton" | "furniture";
 
 export type GenerationRequestSpec = Readonly<{
   sourceMode: "reference_annotation" | "graph_template";
@@ -102,6 +102,7 @@ export async function submitGenerationJob(
   const scenario = spec.scenario;
   const scenarioId = scenario?.scenario_id || "";
   const composeConfigPatch = configForDesignVariant({ ...spec.composeConfigPatch }, variant);
+  const usesExplicitParameters = spec.generationOptions.street_design_parameter_spec != null;
   const sceneContext = spec.sourceMode === "reference_annotation"
     ? {
         layout_mode: "reference_annotation",
@@ -140,7 +141,7 @@ export async function submitGenerationJob(
       scene_context: sceneContext,
       patch_overrides: {},
       generation_options: {
-        preset_id: spec.presetId,
+        ...(!usesExplicitParameters ? { preset_id: spec.presetId } : {}),
         random_seed: variant.seed,
         design_variant_id: variant.id,
         design_variant_name: variant.name,

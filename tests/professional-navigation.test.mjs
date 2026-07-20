@@ -52,6 +52,32 @@ try {
       });
       return;
     }
+    if (url.endsWith("/api/design/parameter-controls")) {
+      const values = (low, medium, high, minimum, maximum, unit = "m") => ({ values: { low, medium, high }, minimum, maximum, unit });
+      const furniture = (low, medium, high, minimumSpacingM, roadSetbackM, allowedZones) => ({
+        ...values(low, medium, high, 0, 20, "count_per_100m"), minimumSpacingM, roadSetbackM, allowedZones,
+        preferredSpacingByLevelM: { low: 100 / low, medium: 100 / medium, high: 100 / high },
+      });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        parameter_schema_version: "roadgen3d.street-design-parameters.v2", levels: ["low", "medium", "high"], default_seed: 42,
+        skeleton: {
+          laneCount: values(2, 4, 6, 1, 8, "count"), laneWidthM: values(2.75, 3.25, 3.75, 2.5, 4.5),
+          sidewalkWidthM: values(1.8, 3, 4.5, 1, 12), furnishingWidthM: values(.6, 1.2, 1.8, 0, 5),
+          junctionCornerRadiusM: values(3, 5.5, 8, 1, 20), medianWidthM: values(1.2, 2, 3, .8, 8),
+        },
+        furniture: { globalDensity: values(.6, 1, 1.4, 0, 2, "ratio"), styles: ["civic_clean", "lush_natural", "transit_modern"], categories: {
+          bench: furniture(2, 4, 6, 8, .3, ["sidewalk", "furnishing", "frontage"]),
+          lamp: furniture(4, 6, 8, 10, .3, ["furnishing", "sidewalk"]),
+          trash: furniture(2, 3, 5, 10, .3, ["furnishing", "sidewalk", "frontage"]),
+          tree: furniture(5, 8, 12, 6, .6, ["planting", "furnishing", "frontage"]),
+          bus_stop: furniture(.5, 1, 2, 35, .5, ["transit_edge", "sidewalk"]),
+          mailbox: furniture(.5, 1, 2, 30, .3, ["frontage", "sidewalk"]),
+          hydrant: furniture(1, 2, 3, 20, .3, ["furnishing", "sidewalk"]),
+          bollard: furniture(4, 8, 12, 2, .2, ["furnishing", "sidewalk"]),
+        } },
+      }) });
+      return;
+    }
     if (url.includes("/api/asset-manifest?")) {
       await route.fulfill({
         status: 200,
@@ -106,8 +132,11 @@ try {
   assert.equal(await generationDialog.getByRole("tab", { name: /生成策略/ }).count(), 1);
   assert.equal(await generationDialog.getByRole("tab", { name: /输出结果/ }).count(), 1);
   await generationDialog.getByRole("tab", { name: /生成策略/ }).click();
-  for (const name of [/3D 素材/, /场景结构/, /家具目标/, /补充要求/, /方案矩阵/]) {
+  for (const name of [/3D 素材/, /道路骨架/, /家具参数/]) {
     assert.equal(await generationDialog.getByRole("tab", { name }).count(), 1);
+  }
+  for (const name of [/场景结构/, /家具目标/, /补充要求/, /方案矩阵/, /AI 参数/]) {
+    assert.equal(await generationDialog.getByRole("tab", { name }).count(), 0);
   }
   await generationDialog.getByText("3D 素材准备", { exact: true }).waitFor();
   assert.equal(await generationDialog.locator('[data-generation-primary-panel]:visible').count(), 1, "only one primary page may be visible");
@@ -124,8 +153,8 @@ try {
   await generationDialog.getByRole("tab", { name: /输出结果/ }).click();
   assert.equal(await page.locator('#viewer-design-generate').isVisible(), true, "final generation action belongs only to the output page");
   await generationDialog.getByRole("tab", { name: /生成策略/ }).click();
-  await generationDialog.getByRole("tab", { name: /场景结构/ }).click();
-  assert.equal(await generationDialog.locator('[data-generation-strategy-panel]:visible').getAttribute('data-generation-strategy-panel'), "structure");
+  await generationDialog.getByRole("tab", { name: /道路骨架/ }).click();
+  assert.equal(await generationDialog.locator('[data-generation-strategy-panel]:visible').getAttribute('data-generation-strategy-panel'), "skeleton");
   assert.equal(generationRequestCount, 0, "opening generation setup must not submit a generation job");
   assert.equal(await page.locator(".viewer-generation-dialog-panel .viewer-settings-close:visible").count(), 1, "generation dialog must expose one unambiguous close action");
 

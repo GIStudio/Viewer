@@ -1,5 +1,5 @@
 export type GenerationPrimaryPage = "source" | "strategy" | "output";
-export type GenerationStrategyPage = "assets" | "structure" | "furniture" | "notes" | "matrix";
+export type GenerationStrategyPage = "assets" | "skeleton" | "furniture";
 export type GenerationStepStatus = "pending" | "complete" | "warning" | "error" | "running";
 
 type WizardStep =
@@ -28,7 +28,7 @@ type ViewerGenerationWizardDeps = {
 };
 
 const PRIMARY_ORDER: GenerationPrimaryPage[] = ["source", "strategy", "output"];
-const STRATEGY_ORDER: GenerationStrategyPage[] = ["assets", "structure", "furniture", "notes", "matrix"];
+const STRATEGY_ORDER: GenerationStrategyPage[] = ["assets", "skeleton", "furniture"];
 const WALK_ORDER: WizardStep[] = [
   { primary: "source" },
   ...STRATEGY_ORDER.map((strategy) => ({ primary: "strategy" as const, strategy })),

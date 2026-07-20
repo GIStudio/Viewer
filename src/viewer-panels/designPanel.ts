@@ -1,16 +1,3 @@
-import {
-  SKELETON_DESIGN_PROFILE_OPTIONS,
-  STREET_FURNITURE_PROFILE_OPTIONS,
-} from "../viewer-types";
-import { escapeHtml } from "../viewer-utils";
-
-function profileOptionsHtml(options: ReadonlyArray<{ id: string; label: string }>, autoLabel: string): string {
-  return [
-    `<option value="">${escapeHtml(autoLabel)}</option>`,
-    ...options.map((option) => `<option value="${escapeHtml(option.id)}">${escapeHtml(option.label)}</option>`),
-  ].join("");
-}
-
 function strategyTab(id: string, index: string, label: string, controls: string): string {
   return `
     <button
@@ -76,16 +63,14 @@ export function renderDesignPanelHtml(): string {
       <header class="viewer-generation-strategy-head">
         <div>
           <span>02 / GENERATION STRATEGY</span>
-          <strong id="viewer-generation-strategy-summary">Parameterized generation</strong>
+          <strong id="viewer-generation-strategy-summary">确定性参数化生成</strong>
         </div>
-        <p id="viewer-generation-strategy-mode">根据服务能力选择 LLM 辅助或确定性参数化生成。</p>
+        <p id="viewer-generation-strategy-mode">直接调整可解释参数；生成不调用 LLM 或 RAG。</p>
       </header>
       <div class="viewer-generation-subtabs" role="tablist" aria-label="生成策略子页面">
         ${strategyTab("assets", "01", "3D 素材", "viewer-generation-strategy-assets")}
-        ${strategyTab("structure", "02", "场景结构", "viewer-generation-strategy-structure")}
-        ${strategyTab("furniture", "03", "家具目标", "viewer-generation-strategy-furniture")}
-        ${strategyTab("notes", "04", "补充要求", "viewer-generation-strategy-notes")}
-        ${strategyTab("matrix", "05", "方案矩阵", "viewer-generation-strategy-matrix")}
+        ${strategyTab("skeleton", "02", "道路骨架", "viewer-generation-strategy-skeleton")}
+        ${strategyTab("furniture", "03", "家具参数", "viewer-generation-strategy-furniture")}
       </div>
 
       <aside id="viewer-design-panel" class="viewer-generation-strategy-workspace">
@@ -121,38 +106,17 @@ export function renderDesignPanelHtml(): string {
         </section>
 
         <section
-          id="viewer-generation-strategy-structure"
+          id="viewer-generation-strategy-skeleton"
           class="viewer-generation-strategy-panel viewer-design-flow-section"
           role="tabpanel"
-          aria-labelledby="viewer-generation-strategy-tab-structure"
-          data-generation-strategy-panel="structure"
+          aria-labelledby="viewer-generation-strategy-tab-skeleton"
+          data-generation-strategy-panel="skeleton"
           hidden
         >
           <div class="viewer-design-flow-heading">
-            <span>02</span><div><strong>场景结构</strong><small>ReferenceAnnotation 模式默认保持已批准道路与拓扑。</small></div>
+            <span>02</span><div><strong>道路骨架参数</strong><small>中心线与拓扑保持锁定；只改变横断面、圆角、中岛和公交承载带。</small></div>
           </div>
-          <label class="viewer-settings-label" for="viewer-design-scenario"><span>Street Structure / 街道结构</span></label>
-          <select id="viewer-design-scenario" class="viewer-select viewer-select-compact"><option value="">保持已批准标注</option></select>
-          <div id="viewer-design-scenario-meta" class="viewer-design-scenario-meta">保持已批准标注；Graph Template 模式需明确选择模板。</div>
-          <div id="viewer-design-skeleton-summary" class="viewer-design-layer-summary">A 骨架功能：自动解析（人工标注 &gt; LLM 标注 &gt; OSM/POI）</div>
-          <div class="viewer-design-scenario-actions">
-            <button id="viewer-design-scenario-preview" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>预览结构与建筑</button>
-            <button id="viewer-design-scenario-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>打开标注</button>
-          </div>
-          <details class="viewer-design-advanced-details viewer-design-structure-draft">
-            <summary>从一句话创建临时结构</summary>
-            <div class="viewer-design-scenario-draft">
-              <label class="viewer-settings-label" for="viewer-design-scenario-draft-prompt"><span>结构描述</span></label>
-              <textarea id="viewer-design-scenario-draft-prompt" class="viewer-design-scenario-draft-prompt" rows="3" placeholder="例如：道路中段右侧加公交站，绿色铺装"></textarea>
-              <label class="viewer-design-scenario-llm-toggle"><input id="viewer-design-scenario-use-llm" type="checkbox" checked /><span>使用 LLM 语义解析；不可用时回退确定性编译</span></label>
-              <div class="viewer-design-scenario-draft-actions">
-                <button id="viewer-design-scenario-draft" class="viewer-nav-button viewer-nav-button-secondary" type="button">生成结构草案</button>
-                <button id="viewer-design-scenario-use-draft" class="viewer-nav-button viewer-nav-button-secondary" type="button" disabled>采用此结构草案</button>
-              </div>
-              <div id="viewer-design-scenario-draft-result" class="viewer-design-scenario-draft-result" data-tone="empty">先生成可验证的临时结构，再选择采用。</div>
-            </div>
-          </details>
-          <div class="viewer-generation-return-note"><strong>需要改变道路中心线或拓扑？</strong><button type="button" data-generation-return-source>返回 01A 标注</button></div>
+          <div id="viewer-parameter-skeleton-controls" class="viewer-parameter-control-host" aria-live="polite"></div>
         </section>
 
         <section
@@ -163,46 +127,11 @@ export function renderDesignPanelHtml(): string {
           data-generation-strategy-panel="furniture"
           hidden
         >
-          <div class="viewer-design-flow-heading"><span>03</span><div><strong>街道家具设计目标</strong><small>设置密度、设施优先级和风格，不直接修改道路拓扑。</small></div></div>
-          <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-preset"><span>Street Furniture Design Goal / 街道家具设计目标</span><button class="viewer-help-icon" type="button" data-help="design-preset">?</button></label>
-          <select id="viewer-design-preset" class="viewer-select viewer-select-compact"><option value="__custom__">Custom / LLM-Driven（自定义）</option></select>
-          <div id="viewer-design-furniture-summary" class="viewer-design-layer-summary">B 家具主题：由街道家具设计目标决定。</div>
-          <details class="viewer-design-advanced-details">
-            <summary>高级语义覆盖</summary>
-            <label class="viewer-settings-label" for="viewer-design-skeleton-profile"><span>A Skeleton Override / 骨架功能覆盖</span></label>
-            <select id="viewer-design-skeleton-profile" class="viewer-select viewer-select-compact">${profileOptionsHtml(SKELETON_DESIGN_PROFILE_OPTIONS, "自动解析（人工 > LLM > OSM/POI）")}</select>
-            <label class="viewer-settings-label" for="viewer-design-furniture-profile"><span>B Furniture Override / 家具主题覆盖</span></label>
-            <select id="viewer-design-furniture-profile" class="viewer-select viewer-select-compact">${profileOptionsHtml(STREET_FURNITURE_PROFILE_OPTIONS, "使用上方街道家具设计目标")}</select>
-          </details>
-        </section>
-
-        <section
-          id="viewer-generation-strategy-notes"
-          class="viewer-generation-strategy-panel viewer-design-flow-section"
-          role="tabpanel"
-          aria-labelledby="viewer-generation-strategy-tab-notes"
-          data-generation-strategy-panel="notes"
-          hidden
-        >
-          <div class="viewer-design-flow-heading"><span>04</span><div><strong>补充要求（可选）</strong><small>只写额外偏好，不需要重复已经批准的结构。</small></div></div>
-          <label class="viewer-settings-label viewer-settings-label-with-help" for="viewer-design-prompt"><span>Extra Notes / 补充要求</span><button class="viewer-help-icon" type="button" data-help="design-prompt">?</button></label>
-          <textarea id="viewer-design-prompt" class="viewer-design-prompt" rows="6" placeholder="例如：减少车行感，加强夜间照明，并优先保留连续树荫。"></textarea>
-          <div class="viewer-design-prompt-hint">可留空；LLM 不可用时，这些要求会尽可能映射到参数化规则。</div>
-        </section>
-
-        <section
-          id="viewer-generation-strategy-matrix"
-          class="viewer-generation-strategy-panel viewer-design-flow-section viewer-design-matrix-section"
-          role="tabpanel"
-          aria-labelledby="viewer-generation-strategy-tab-matrix"
-          data-generation-strategy-panel="matrix"
-          hidden
-        >
-          <div class="viewer-design-flow-heading"><span>05</span><div><strong>结构 × 家具方案矩阵</strong><small>专家实验工具；不影响普通生成的完成条件。</small></div></div>
-          <div class="viewer-generation-expert-note">矩阵单元拥有独立生成任务。点击已有结果可加载预览；点击缺失单元按需生成。</div>
-          <div id="viewer-design-matrix" class="viewer-design-matrix" data-state="empty"><div class="viewer-design-matrix-empty">Matrix status will appear here.</div></div>
+          <div class="viewer-design-flow-heading"><span>03</span><div><strong>家具参数</strong><small>逐类开启并调整数量、间距、退界和风格。</small></div></div>
+          <div id="viewer-parameter-furniture-controls" class="viewer-parameter-control-host" aria-live="polite"></div>
         </section>
       </aside>
+      <section class="viewer-parameter-summary-board"><div id="viewer-parameter-summary" class="viewer-parameter-summary" aria-live="polite"></div></section>
     </section>
 
     <section
@@ -220,8 +149,7 @@ export function renderDesignPanelHtml(): string {
       </div>
       <div class="viewer-generation-output-grid">
         <section class="viewer-generation-output-settings">
-          <label class="viewer-settings-label" for="viewer-design-count"><span>Output / 输出数量</span></label>
-          <select id="viewer-design-count" class="viewer-select viewer-select-compact"><option value="1">生成 1 个方案</option><option value="3">生成 3 个轻微变化方案</option></select>
+          <div class="viewer-generation-fixed-output"><span>输出方式</span><strong>生成 1 个确定性场景版本</strong><small>同一来源、参数和 seed 会得到相同结果。</small></div>
           <label class="viewer-settings-label" for="viewer-design-seed"><span>Base Seed / 基础随机种子</span></label>
           <input id="viewer-design-seed" class="viewer-design-input" type="number" step="1" value="42" />
           <details class="viewer-design-advanced-details viewer-generation-template-settings">
@@ -257,12 +185,20 @@ export function renderDesignPanelHtml(): string {
     </section>
 
     <footer class="viewer-generation-dialog-footer">
-      <div class="viewer-generation-footer-position"><span id="viewer-generation-step-position">01 / 07</span><small>可以直接点击任意标签切换</small></div>
+      <div class="viewer-generation-footer-position"><span id="viewer-generation-step-position">01 / 05</span><small>可以直接点击任意标签切换</small></div>
       <div class="viewer-generation-footer-actions">
         <button id="viewer-generation-back" class="viewer-nav-button viewer-nav-button-secondary" type="button">上一步</button>
         <button id="viewer-generation-next" class="viewer-nav-button viewer-nav-button-secondary" type="button">下一步</button>
-        <button id="viewer-design-generate" class="viewer-nav-button" type="button" hidden>确认生成并加载</button>
+        <button id="viewer-design-generate" class="viewer-nav-button" type="button" hidden>生成参数化方案</button>
       </div>
     </footer>
+
+    <div hidden aria-hidden="true">
+      <select id="viewer-design-count"><option value="1">1</option></select>
+      <select id="viewer-design-preset"><option value="__custom__">custom</option></select><textarea id="viewer-design-prompt"></textarea>
+      <select id="viewer-design-scenario"><option value=""></option></select><div id="viewer-design-scenario-meta"></div><div id="viewer-design-skeleton-summary"></div>
+      <button id="viewer-design-scenario-preview"></button><button id="viewer-design-scenario-annotation"></button><textarea id="viewer-design-scenario-draft-prompt"></textarea><input id="viewer-design-scenario-use-llm" type="checkbox"/><button id="viewer-design-scenario-draft"></button><button id="viewer-design-scenario-use-draft"></button><div id="viewer-design-scenario-draft-result"></div>
+      <select id="viewer-design-skeleton-profile"><option value=""></option></select><select id="viewer-design-furniture-profile"><option value=""></option></select><div id="viewer-design-furniture-summary"></div><div id="viewer-design-matrix"></div>
+    </div>
   `;
 }
