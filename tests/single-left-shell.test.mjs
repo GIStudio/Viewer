@@ -17,6 +17,8 @@ const routeIsland = read("src/react/RouteIsland.tsx");
 const brand = read("src/react/StudioBrandHeader.tsx");
 const menus = read("src/react/ShellMenus.tsx");
 const viewerOverlays = read("src/styles/viewer/menus-overlays.css");
+const viewerApp = read("src/app.ts");
+const minimap = read("src/viewer-minimap.ts");
 
 for (const mode of ["single_left_overlay", "course_single_left", "legacy_dual"]) {
   assert.match(types, new RegExp(`\\| \\"${mode}\\"`), `missing shell mode ${mode}`);
@@ -55,5 +57,11 @@ assert.match(course, /disabled=\{!selection\}/, "course project creation must wa
 assert.doesNotMatch(course, /course-coordinate-grid">\{bbox\.map/, "coordinates must not be the default course workflow");
 assert.match(viewerOverlays, /\.viewer-minimap \{[\s\S]*right: 1rem;/, "scene map should stay in the lower-right corner");
 assert.doesNotMatch(viewerOverlays, /\.viewer-minimap \{[\s\S]*left: 1rem;/, "scene map must not return to the lower-left corner");
+assert.match(minimap, /extractFinalSurfaceTriangles/, "scene map must derive its plan from final GLB top faces");
+assert.match(minimap, /SURFACE_ROLE_PALETTE/, "scene map must use the semantic surface palette");
+assert.doesNotMatch(minimap, /renderer\.render\(scene, camera\)/, "scene map must not render a second presentation camera");
+assert.match(viewerApp, /minimapResizeObserver\.observe\(minimapHost\)/, "scene map needs its own resize lifecycle");
+assert.match(viewerApp, /buildMinimapSurfacePlan\(currentRoot, currentManifest, currentSceneBounds\)/);
+assert.doesNotMatch(viewerApp, /const minimapRenderer = new THREE\.WebGLRenderer/);
 
 console.log("single-left shell contract: ok");

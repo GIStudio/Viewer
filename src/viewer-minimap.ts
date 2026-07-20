@@ -1,12 +1,18 @@
 /**
  * Minimap utilities for the RoadGen3D Viewer.
  * 
- * Handles minimap rendering, camera updates, and overlay drawing.
+ * Handles a stable semantic plan view and its dynamic camera overlay.
  */
 
 import * as THREE from "three";
 import { clamp } from "./viewer-utils";
 import type { ViewerManifest } from "./viewer-types";
+import {
+  extractFinalSurfaceTriangles,
+  SURFACE_ROLE_ORDER,
+  SURFACE_ROLE_PALETTE,
+  type CameraSurfaceDiagnosticTriangle,
+} from "./viewer-camera-surface-diagnostic";
 
 export interface SceneBounds {
   minX: number;
@@ -16,6 +22,11 @@ export interface SceneBounds {
   center: THREE.Vector3;
   extent: number;
 }
+
+export type MinimapSurfacePlan = {
+  triangles: CameraSurfaceDiagnosticTriangle[];
+  classificationWarnings: string[];
+};
 
 /**
  * Calculate scene bounds from a Box3.
@@ -63,23 +74,40 @@ export function sceneBoundsFromManifest(box: THREE.Box3, manifest: ViewerManifes
   };
 }
 
-/**
- * Update minimap camera to follow avatar.
- */
-export function updateMinimapCamera(
-  camera: THREE.OrthographicCamera,
+export function buildMinimapSurfacePlan(
+  root: THREE.Object3D,
+  manifest: ViewerManifest | null,
   bounds: SceneBounds,
-  box: THREE.Box3,
-): void {
-  camera.left = -bounds.extent;
-  camera.right = bounds.extent;
-  camera.top = bounds.extent;
-  camera.bottom = -bounds.extent;
-  camera.near = 0.1;
-  camera.far = Math.max(500, box.max.y - box.min.y + bounds.extent * 8);
-  camera.position.set(bounds.center.x, box.max.y + bounds.extent * 2.2 + 10, bounds.center.z);
-  camera.lookAt(bounds.center.x, 0, bounds.center.z);
-  camera.updateProjectionMatrix();
+): MinimapSurfacePlan {
+  const extraction = extractFinalSurfaceTriangles(root, manifest, [
+    bounds.minX,
+    bounds.minZ,
+    bounds.maxX,
+    bounds.maxZ,
+  ]);
+  return {
+    triangles: extraction.triangles,
+    classificationWarnings: extraction.classification_warnings,
+  };
+}
+
+export function resizeMinimapCanvas(
+  canvas: HTMLCanvasElement,
+  cssWidth: number,
+  cssHeight: number,
+  dpr = Math.min(window.devicePixelRatio, 2),
+): boolean {
+  if (cssWidth <= 0 || cssHeight <= 0) return false;
+  const width = Math.max(1, Math.round(cssWidth * dpr));
+  const height = Math.max(1, Math.round(cssHeight * dpr));
+  const changed = canvas.width !== width || canvas.height !== height;
+  if (changed) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  canvas.style.width = `${cssWidth}px`;
+  canvas.style.height = `${cssHeight}px`;
+  return changed;
 }
 
 /**
@@ -116,6 +144,66 @@ export function minimapToWorld(
     x: bounds.minX + u * (bounds.maxX - bounds.minX),
     z: bounds.minZ + v * (bounds.maxZ - bounds.minZ),
   };
+}
+
+/** Draw the actual loaded GLB top faces with a fixed semantic palette. */
+export function drawMinimapSurfacePlan(
+  canvas: HTMLCanvasElement,
+  bounds: SceneBounds | null,
+  plan: MinimapSurfacePlan | null,
+): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const width = canvas.width;
+  const height = canvas.height;
+  const cssWidth = canvas.clientWidth;
+  const cssHeight = canvas.clientHeight;
+  ctx.clearRect(0, 0, width, height);
+  if (cssWidth <= 0 || cssHeight <= 0) return;
+  const dpr = width / Math.max(cssWidth, 1);
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = "#F3F0E7";
+  ctx.fillRect(0, 0, cssWidth, cssHeight);
+  ctx.strokeStyle = "rgba(16,45,58,0.08)";
+  ctx.lineWidth = 0.75;
+  const grid = 24;
+  for (let x = grid; x < cssWidth; x += grid) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, cssHeight); ctx.stroke();
+  }
+  for (let y = grid; y < cssHeight; y += grid) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cssWidth, y); ctx.stroke();
+  }
+  if (bounds && plan) {
+    const triangles = [...plan.triangles].sort(
+      (a, b) => SURFACE_ROLE_ORDER[a.surface_role] - SURFACE_ROLE_ORDER[b.surface_role],
+    );
+    for (const triangle of triangles) {
+      const points = triangle.points_xz.map(([x, z]) => worldToMinimap(x, z, bounds, cssWidth, cssHeight));
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      ctx.lineTo(points[1].x, points[1].y);
+      ctx.lineTo(points[2].x, points[2].y);
+      ctx.closePath();
+      const building = triangle.surface_role === "building";
+      if (!building) {
+        ctx.fillStyle = triangle.qa_flags.length > 0 ? "#DF654F" : SURFACE_ROLE_PALETTE[triangle.surface_role];
+        ctx.globalAlpha = triangle.surface_role === "context_ground" ? 0.55 : 0.96;
+        ctx.fill();
+      }
+      if (building || triangle.qa_flags.length > 0) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = triangle.qa_flags.length > 0 ? "#B42318" : SURFACE_ROLE_PALETTE.building;
+        ctx.lineWidth = triangle.qa_flags.length > 0 ? 1.5 : 0.9;
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = "#102D3A";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, cssWidth - 1, cssHeight - 1);
+  ctx.restore();
 }
 
 /**
@@ -195,23 +283,13 @@ export function drawMinimapOverlay(
   ctx.restore();
 }
 
-/**
- * Render minimap with scene overview.
- */
+/** Draw only the frequently changing camera/laser overlay. */
 export function renderMinimap(
-  renderer: THREE.WebGLRenderer,
-  scene: THREE.Scene,
-  camera: THREE.OrthographicCamera,
-  root: THREE.Object3D | null,
   bounds: SceneBounds | null,
   overlayCanvas: HTMLCanvasElement,
   avatarPosition: THREE.Vector3,
   cameraForwardHorizontal: () => THREE.Vector3,
   laserHitPoint: THREE.Vector3 | null,
 ): void {
-  if (!root || !bounds) {
-    return;
-  }
-  renderer.render(scene, camera);
   drawMinimapOverlay(overlayCanvas, bounds, avatarPosition, cameraForwardHorizontal, laserHitPoint);
 }

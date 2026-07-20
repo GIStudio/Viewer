@@ -98,10 +98,13 @@ import { createViewerCommandRegistry } from "./viewer-command-registry";
 import { createViewerPanelController, type ViewerPanelController } from "./viewer-panel-controller";
 import { organizeViewerSettingsTools } from "./viewer-settings-tool-disclosure";
 import {
+  buildMinimapSurfacePlan,
+  drawMinimapSurfacePlan,
+  resizeMinimapCanvas,
   sceneBoundsFromManifest,
-  updateMinimapCamera,
   minimapToWorld,
   renderMinimap,
+  type MinimapSurfacePlan,
   type SceneBounds,
 } from "./viewer-minimap";
 import {
@@ -1570,13 +1573,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   });
   canvasResizeObserver.observe(canvasHost);
 
-  const minimapRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  minimapRenderer.outputColorSpace = THREE.SRGBColorSpace;
-  minimapRenderer.setPixelRatio(1);
-  minimapRenderer.shadowMap.enabled = false;
-  minimapHost.appendChild(minimapRenderer.domElement);
-  const minimapCamera = new THREE.OrthographicCamera(-20, 20, 20, -20, 0.1, 4000);
-  minimapCamera.up.set(0, 0, -1);
+  const minimapPlanCanvas = document.createElement("canvas");
+  minimapPlanCanvas.className = "viewer-minimap-plan";
+  minimapPlanCanvas.setAttribute("aria-hidden", "true");
+  minimapHost.appendChild(minimapPlanCanvas);
+  const minimapResizeObserver = new ResizeObserver(() => {
+    resizeMinimap();
+  });
+  minimapResizeObserver.observe(minimapHost);
 
   const lightingRig = createViewerLightingRig(scene);
 
@@ -1682,6 +1686,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   let currentAvatarPosition = new THREE.Vector3(0, Math.max(0, 1.65 - AVATAR_EYE_HEIGHT_M), 0);
   let currentCameraMode: CameraMode = "first_person";
   let currentSceneBounds: SceneBounds | null = null;
+  let currentMinimapPlan: MinimapSurfacePlan | null = null;
   let currentLaserHitPoint: THREE.Vector3 | null = null;
   let currentLaserCopyText = "";
   let lastLaserTargetKey = "";
@@ -2463,15 +2468,20 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     renderer.setSize(width, height);
     renderPipeline.setSize(width, height);
 
-    const minimapWidth = Math.max(1, minimapHost.clientWidth);
-    const minimapHeight = Math.max(1, minimapHost.clientHeight);
-    minimapRenderer.setSize(minimapWidth, minimapHeight);
-    const dpr = Math.min(window.devicePixelRatio, 2);
-    minimapOverlayEl.width = Math.max(1, Math.round(minimapWidth * dpr));
-    minimapOverlayEl.height = Math.max(1, Math.round(minimapHeight * dpr));
-    minimapOverlayEl.style.width = `${minimapWidth}px`;
-    minimapOverlayEl.style.height = `${minimapHeight}px`;
+    resizeMinimap();
     expandedMapController.resize();
+  }
+
+  function resizeMinimap(): void {
+    const minimapWidth = minimapHost.clientWidth;
+    const minimapHeight = minimapHost.clientHeight;
+    if (minimapWidth <= 0 || minimapHeight <= 0) return;
+    const dpr = Math.min(window.devicePixelRatio, 2);
+    const planChanged = resizeMinimapCanvas(minimapPlanCanvas, minimapWidth, minimapHeight, dpr);
+    resizeMinimapCanvas(minimapOverlayEl, minimapWidth, minimapHeight, dpr);
+    if (planChanged || currentMinimapPlan) {
+      drawMinimapSurfacePlan(minimapPlanCanvas, currentSceneBounds, currentMinimapPlan);
+    }
   }
 
   function cameraForwardHorizontal(): THREE.Vector3 {
@@ -3267,6 +3277,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       disposeObject(currentRoot);
       currentRoot = null;
     }
+    currentSceneBounds = null;
+    currentMinimapPlan = null;
+    drawMinimapSurfacePlan(minimapPlanCanvas, null, null);
     removeAnalysisOverlayHelpers(scene);
     removeFrameAndAssetHelpers(scene);
 
@@ -3319,6 +3332,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       scene.remove(currentRoot);
       disposeObject(currentRoot);
       currentRoot = null;
+      currentSceneBounds = null;
+      currentMinimapPlan = null;
+      drawMinimapSurfacePlan(minimapPlanCanvas, null, null);
       throw new Error("The scene contains no usable road geometry or has invalid bounds.");
     }
     const spawnCenter = new THREE.Vector3();
@@ -3332,10 +3348,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     currentSpawn = spawn.position;
     currentForward = spawn.forward;
     currentSceneBounds = sceneBoundsFromManifest(bbox, currentManifest);
+    currentMinimapPlan = buildMinimapSurfacePlan(currentRoot, currentManifest, currentSceneBounds);
     const boundsMs = (performance.now() - boundsStart).toFixed(1);
     console.info(`[viewer-timing] loadScene.bounds (${option.label}): ${boundsMs} ms`);
     fitViewerLightingRigToBounds(lightingRig, bbox);
-    updateMinimapCamera(minimapCamera, currentSceneBounds, bbox);
+    resizeMinimap();
     expandedMapController.render();
     resetView();
     const params = currentManifest?.lighting_params as Partial<LightingState> | undefined;
@@ -4502,10 +4519,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     }
 
     renderMinimap(
-      minimapRenderer,
-      scene,
-      minimapCamera,
-      currentRoot,
       currentSceneBounds,
       minimapOverlayEl,
       currentAvatarPosition,
@@ -4616,6 +4629,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       minimapClickHandle = null;
     }
     eventController.abort();
+    minimapResizeObserver.disconnect();
     unregisterHostSidebarPages();
     generationRunner.dispose();
     generationWizard?.destroy();
@@ -4642,7 +4656,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     expandedMapController.dispose();
     renderPipeline.dispose();
     renderer.dispose();
-    minimapRenderer.dispose();
   };
 }
 

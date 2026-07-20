@@ -59,7 +59,7 @@ const HALF_EXTENT_M = 100;
 const PNG_SIZE = 2400;
 const EPSILON = 1e-8;
 
-const ROLE_PALETTE: Record<SurfaceDiagnosticRole, string> = {
+export const SURFACE_ROLE_PALETTE: Record<SurfaceDiagnosticRole, string> = {
   context_ground: "#E8E4D8",
   carriageway: "#8B9196",
   curb: "#102D3A",
@@ -72,7 +72,7 @@ const ROLE_PALETTE: Record<SurfaceDiagnosticRole, string> = {
   building: "#4F91C7",
 };
 
-const ROLE_ORDER: Record<SurfaceDiagnosticRole, number> = {
+export const SURFACE_ROLE_ORDER: Record<SurfaceDiagnosticRole, number> = {
   context_ground: 0,
   planting: 1,
   frontage: 2,
@@ -99,7 +99,7 @@ function normalizeRole(value: unknown): SurfaceDiagnosticRole | null {
   if (role === "pavement") return "sidewalk";
   if (role === "facility" || role === "furniture") return "furnishing";
   if (role === "building_massing") return "building";
-  return Object.prototype.hasOwnProperty.call(ROLE_PALETTE, role)
+  return Object.prototype.hasOwnProperty.call(SURFACE_ROLE_PALETTE, role)
     ? role as SurfaceDiagnosticRole
     : null;
 }
@@ -240,37 +240,27 @@ function triangleQualityFlags(points: [PointXZ, PointXZ, PointXZ]): string[] {
   return flags;
 }
 
-function sceneFingerprint(manifest: ViewerManifest | null): string {
-  return String(
-    manifest?.layout_revision?.sha256
-    ?? (manifest?.summary as Record<string, unknown> | undefined)?.scene_fingerprint
-    ?? manifest?.layout_path
-    ?? manifest?.final_scene?.glb_url
-    ?? "unknown-scene",
-  );
-}
+export type FinalSurfaceTriangleExtraction = {
+  triangles: CameraSurfaceDiagnosticTriangle[];
+  classification_warnings: string[];
+};
 
-export function buildCameraSurfaceDiagnostic(context: CameraSurfaceDiagnosticContext): CameraSurfaceDiagnostic {
-  if (!context.root) throw new Error(context.text("No 3D scene is loaded.", "尚未加载 3D 场景。"));
-  const diagnostic = context.manifest?.surface_diagnostic;
+/**
+ * Extract classified, horizontal top-face triangles from the actual loaded GLB.
+ * Both the export diagnostic and the always-on minimap consume this exact data,
+ * so the small plan cannot drift away from the rendered scene.
+ */
+export function extractFinalSurfaceTriangles(
+  root: THREE.Object3D,
+  manifest: ViewerManifest | null,
+  bounds: [number, number, number, number],
+): FinalSurfaceTriangleExtraction {
+  const diagnostic = manifest?.surface_diagnostic;
   const warnings = new Set<string>();
   if (!diagnostic) warnings.add("missing_surface_diagnostic_manifest");
   if (diagnostic?.source && diagnostic.source !== "final_glb_top_faces") {
     warnings.add(`unexpected_diagnostic_source:${diagnostic.source}`);
   }
-
-  context.root.updateWorldMatrix(true, true);
-  context.camera.updateWorldMatrix(true, false);
-  const cameraPosition = context.camera.getWorldPosition(new THREE.Vector3());
-  const forward = context.camera.getWorldDirection(new THREE.Vector3());
-  const forwardLength = Math.hypot(forward.x, forward.z) || 1;
-  const center: PointXZ = [cameraPosition.x, cameraPosition.z];
-  const bounds: [number, number, number, number] = [
-    center[0] - HALF_EXTENT_M,
-    center[1] - HALF_EXTENT_M,
-    center[0] + HALF_EXTENT_M,
-    center[1] + HALF_EXTENT_M,
-  ];
   const patches = Array.isArray(diagnostic?.patch_provenance) ? diagnostic.patch_provenance : [];
   const triangles: CameraSurfaceDiagnosticTriangle[] = [];
   const a = new THREE.Vector3();
@@ -280,7 +270,8 @@ export function buildCameraSurfaceDiagnostic(context: CameraSurfaceDiagnosticCon
   const ac = new THREE.Vector3();
   const normal = new THREE.Vector3();
 
-  context.root.traverse((object) => {
+  root.updateWorldMatrix(true, true);
+  root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh || object.userData?.viewerHelper) return;
     const resolved = resolveNodeRole(mesh, diagnostic, warnings);
@@ -328,6 +319,41 @@ export function buildCameraSurfaceDiagnostic(context: CameraSurfaceDiagnosticCon
     }
   });
 
+  return {
+    triangles,
+    classification_warnings: [...warnings].sort(),
+  };
+}
+
+function sceneFingerprint(manifest: ViewerManifest | null): string {
+  return String(
+    manifest?.layout_revision?.sha256
+    ?? (manifest?.summary as Record<string, unknown> | undefined)?.scene_fingerprint
+    ?? manifest?.layout_path
+    ?? manifest?.final_scene?.glb_url
+    ?? "unknown-scene",
+  );
+}
+
+export function buildCameraSurfaceDiagnostic(context: CameraSurfaceDiagnosticContext): CameraSurfaceDiagnostic {
+  if (!context.root) throw new Error(context.text("No 3D scene is loaded.", "尚未加载 3D 场景。"));
+  const diagnostic = context.manifest?.surface_diagnostic;
+
+  context.root.updateWorldMatrix(true, true);
+  context.camera.updateWorldMatrix(true, false);
+  const cameraPosition = context.camera.getWorldPosition(new THREE.Vector3());
+  const forward = context.camera.getWorldDirection(new THREE.Vector3());
+  const forwardLength = Math.hypot(forward.x, forward.z) || 1;
+  const center: PointXZ = [cameraPosition.x, cameraPosition.z];
+  const bounds: [number, number, number, number] = [
+    center[0] - HALF_EXTENT_M,
+    center[1] - HALF_EXTENT_M,
+    center[0] + HALF_EXTENT_M,
+    center[1] + HALF_EXTENT_M,
+  ];
+  const extraction = extractFinalSurfaceTriangles(context.root, context.manifest, bounds);
+  const triangles = extraction.triangles;
+
   if (triangles.length === 0) {
     throw new Error(context.text(
       "No classified final GLB top faces were found within 100 m of the camera.",
@@ -355,7 +381,7 @@ export function buildCameraSurfaceDiagnostic(context: CameraSurfaceDiagnosticCon
     role_areas_m2: roleAreas,
     triangles,
     geometry_qa: { ...(diagnostic?.geometry_qa ?? {}) },
-    classification_warnings: [...warnings].sort(),
+    classification_warnings: extraction.classification_warnings,
   };
 }
 
@@ -377,11 +403,11 @@ function stablePatchColor(triangle: CameraSurfaceDiagnosticTriangle): string {
 function triangleFill(triangle: CameraSurfaceDiagnosticTriangle, mode: SurfaceDiagnosticColorMode): string {
   if (triangle.qa_flags.length > 0) return "#DF654F";
   if (mode === "patch" && triangle.surface_role !== "context_ground") return stablePatchColor(triangle);
-  return ROLE_PALETTE[triangle.surface_role];
+  return SURFACE_ROLE_PALETTE[triangle.surface_role];
 }
 
 function orderedTriangles(diagnostic: CameraSurfaceDiagnostic): CameraSurfaceDiagnosticTriangle[] {
-  return [...diagnostic.triangles].sort((a, b) => ROLE_ORDER[a.surface_role] - ROLE_ORDER[b.surface_role]);
+  return [...diagnostic.triangles].sort((a, b) => SURFACE_ROLE_ORDER[a.surface_role] - SURFACE_ROLE_ORDER[b.surface_role]);
 }
 
 function projectPoint(point: PointXZ, bounds: [number, number, number, number], size = PNG_SIZE): PointXZ {
@@ -406,7 +432,7 @@ function buildSvg(diagnostic: CameraSurfaceDiagnostic): string {
       .map((point) => projectPoint(point, diagnostic.bounds_xz).map((value) => value.toFixed(2)).join(","))
       .join(" ");
     const isBuilding = triangle.surface_role === "building";
-    return `<polygon points="${points}" fill="${isBuilding ? "none" : triangleFill(triangle, diagnostic.color_mode)}" fill-opacity="${isBuilding ? 0 : 0.9}" stroke="${triangle.qa_flags.length ? "#B42318" : isBuilding ? ROLE_PALETTE.building : "#40545D"}" stroke-width="${triangle.qa_flags.length ? 3 : 0.45}" data-node="${escapeXml(triangle.node_name)}" data-role="${triangle.surface_role}" data-patch="${escapeXml(triangle.source_patch_id ?? "")}" data-quadrant="${escapeXml(triangle.quadrant_id ?? "")}"/>`;
+    return `<polygon points="${points}" fill="${isBuilding ? "none" : triangleFill(triangle, diagnostic.color_mode)}" fill-opacity="${isBuilding ? 0 : 0.9}" stroke="${triangle.qa_flags.length ? "#B42318" : isBuilding ? SURFACE_ROLE_PALETTE.building : "#40545D"}" stroke-width="${triangle.qa_flags.length ? 3 : 0.45}" data-node="${escapeXml(triangle.node_name)}" data-role="${triangle.surface_role}" data-patch="${escapeXml(triangle.source_patch_id ?? "")}" data-quadrant="${escapeXml(triangle.quadrant_id ?? "")}"/>`;
   }).join("\n  ");
   const camera = projectPoint(diagnostic.center_xz, diagnostic.bounds_xz);
   const arrow = [camera[0] + diagnostic.forward_xz[0] * 90, camera[1] - diagnostic.forward_xz[1] * 90];
@@ -446,7 +472,7 @@ function buildCanvas(diagnostic: CameraSurfaceDiagnostic): HTMLCanvasElement {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = triangle.qa_flags.length ? "#B42318" : triangle.surface_role === "building" ? ROLE_PALETTE.building : "#40545D";
+    ctx.strokeStyle = triangle.qa_flags.length ? "#B42318" : triangle.surface_role === "building" ? SURFACE_ROLE_PALETTE.building : "#40545D";
     ctx.lineWidth = triangle.qa_flags.length ? 3 : 0.45;
     ctx.stroke();
   }
