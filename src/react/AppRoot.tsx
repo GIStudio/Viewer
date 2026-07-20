@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { AppRoute } from "../ui";
 import { createWorkflowController } from "../workflow-controller";
 import { createProfessionalBaselineCoordinator } from "../professional-baseline-coordinator";
+import { createProfessionalSessionController } from "../professional-session";
 import {
   VIEWER_LANGUAGE_EVENT,
   loadViewerLanguage,
@@ -23,6 +24,7 @@ export function AppRoot() {
   const [draftReady, setDraftReady] = useState(false);
   const [workflow] = useState(() => createWorkflowController());
   const [baselineCoordinator] = useState(() => createProfessionalBaselineCoordinator(workflow));
+  const [professionalSession] = useState(() => createProfessionalSessionController());
 
   useEffect(() => {
     const handleHashChange = () => setRoute(resolveRoute());
@@ -42,6 +44,10 @@ export function AppRoot() {
       });
     return () => { cancelled = true; };
   }, [workflow]);
+
+  useEffect(() => {
+    void professionalSession.initialize();
+  }, [professionalSession]);
 
   useEffect(() => {
     if (!draftReady || route === "course-studio") return undefined;
@@ -67,7 +73,7 @@ export function AppRoot() {
   return (
     <ConfigProvider theme={antdTheme}>
       <AntdApp>
-        <RouteIsland key={route} route={route} language={language} workflow={workflow} baselineCoordinator={baselineCoordinator} />
+        <RouteIsland key={route} route={route} language={language} workflow={workflow} baselineCoordinator={baselineCoordinator} professionalSession={professionalSession} />
       </AntdApp>
     </ConfigProvider>
   );

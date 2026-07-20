@@ -29,6 +29,9 @@ import { renderEvaluatePanelContent } from "../viewer-panels/rightTabs";
 import { ViewerDesktopShell } from "./ViewerDesktopShell";
 import { CourseStudio } from "./CourseStudio";
 import { materializeDefaultStarterScene } from "../starter-scene";
+import type { ProfessionalSessionController } from "../professional-session";
+import { createProfessionalAccountPanel, createProfessionalAdminPanel } from "../professional-account-panels";
+import { saveProfessionalSourceToWorkspace } from "../professional-workspace-sync";
 
 type Teardown = () => void;
 
@@ -37,9 +40,10 @@ type RouteIslandProps = {
   language: ViewerLanguage;
   workflow: WorkflowController;
   baselineCoordinator: ProfessionalBaselineCoordinator;
+  professionalSession: ProfessionalSessionController;
 };
 
-export function RouteIsland({ route, language, workflow, baselineCoordinator }: RouteIslandProps) {
+export function RouteIsland({ route, language, workflow, baselineCoordinator, professionalSession }: RouteIslandProps) {
   const hostRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -187,7 +191,31 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator }: 
       },
     ];
 
-    unregisterProfessionalNavigation = shell.sidebar.registerPages(professionalPages);
+    const accountPanel = createProfessionalAccountPanel(professionalSession, language, {
+      onSaveCurrent: async () => { await saveProfessionalSourceToWorkspace(professionalSession, workflow); },
+    });
+    const adminPanel = createProfessionalAdminPanel(professionalSession, language);
+    const registerProfessionalNavigation = (): void => {
+      unregisterProfessionalNavigation?.();
+      const session = professionalSession.getSnapshot();
+      const accountPage = {
+        id: "account",
+        label: language === "zh" ? "账户" : "Account",
+        icon: "AC",
+        group: "system" as const,
+        content: accountPanel.element,
+        badge: session.status === "authenticated" ? "ON" : "—",
+      };
+      const adminPages = session.user?.system_role === "admin" ? [{
+        id: "admin",
+        label: language === "zh" ? "系统管理" : "System admin",
+        icon: "AD",
+        group: "system" as const,
+        content: adminPanel.element,
+      }] : [];
+      unregisterProfessionalNavigation = shell.sidebar.registerPages([...professionalPages, accountPage, ...adminPages]);
+    };
+    registerProfessionalNavigation();
 
     const updatePage = (
       id: string,
@@ -288,6 +316,10 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator }: 
     syncProfessionalNavigation();
     const unsubscribeWorkflow = workflow.subscribe(syncProfessionalNavigation);
     window.addEventListener(VIEWER_LANGUAGE_EVENT, syncProfessionalNavigation);
+    const unsubscribeProfessionalSession = professionalSession.subscribe(() => {
+      registerProfessionalNavigation();
+      syncProfessionalNavigation();
+    });
 
     function mountRoute() {
       switch (route) {
@@ -346,10 +378,13 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator }: 
       window.removeEventListener(VIEWER_LANGUAGE_EVENT, syncProfessionalNavigation);
       unsubscribeWorkflow();
       unregisterProfessionalNavigation?.();
+      unsubscribeProfessionalSession();
+      accountPanel.destroy();
+      adminPanel.destroy();
       routeTeardown?.();
       shell.destroy();
     };
-  }, [baselineCoordinator, route, workflow]);
+  }, [baselineCoordinator, language, professionalSession, route, workflow]);
 
   if (route === "course-studio") {
     return <CourseStudio language={language} workflow={workflow} />;

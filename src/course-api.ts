@@ -1,8 +1,11 @@
 import { describeApiRequest } from "./api-origin";
 
-export const COURSE_TOKEN_KEY = "roadgen3d-course-token";
+export const SESSION_TOKEN_KEY = "roadgen3d-session-token";
+/** @deprecated compatibility alias for existing Course Studio imports. */
+export const COURSE_TOKEN_KEY = SESSION_TOKEN_KEY;
+const LEGACY_COURSE_TOKEN_KEY = "roadgen3d-course-token";
 
-export type CourseUser = { id: string; email: string; display_name: string; system_role: "student" | "teacher" | "admin" };
+export type CourseUser = { id: string; email: string; display_name: string; system_role: "student" | "teacher" | "admin"; is_active?: boolean };
 export type Course = { id: string; name: string; code: string; role: string; invite_code?: string };
 export type CourseProject = { id: string; course_id: string; name: string; city: string; design_goal: string; aoi_bbox: number[] | null; workflow_step: string; role: string };
 export type SceneSource = { id: string; kind: string; quality_report: Record<string, any>; provenance: Record<string, any>; role_counts?: Record<string, number>; warnings?: string[]; normalized_artifact_id: string; annotation_artifact_id?: string };
@@ -48,14 +51,24 @@ export type PlatformCapabilities = { llm: { configured: boolean; provider?: stri
 export class CourseApi {
   token: string;
 
-  constructor(token = window.localStorage.getItem(COURSE_TOKEN_KEY) ?? "") {
-    this.token = token;
+  constructor(token = "") {
+    const stored = window.localStorage.getItem(SESSION_TOKEN_KEY) ?? window.localStorage.getItem(LEGACY_COURSE_TOKEN_KEY) ?? "";
+    this.token = token || stored;
+    if (this.token && !window.localStorage.getItem(SESSION_TOKEN_KEY)) {
+      window.localStorage.setItem(SESSION_TOKEN_KEY, this.token);
+      window.localStorage.removeItem(LEGACY_COURSE_TOKEN_KEY);
+    }
   }
 
   setToken(token: string): void {
     this.token = token;
-    if (token) window.localStorage.setItem(COURSE_TOKEN_KEY, token);
-    else window.localStorage.removeItem(COURSE_TOKEN_KEY);
+    if (token) {
+      window.localStorage.setItem(SESSION_TOKEN_KEY, token);
+      window.localStorage.removeItem(LEGACY_COURSE_TOKEN_KEY);
+    } else {
+      window.localStorage.removeItem(SESSION_TOKEN_KEY);
+      window.localStorage.removeItem(LEGACY_COURSE_TOKEN_KEY);
+    }
   }
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
