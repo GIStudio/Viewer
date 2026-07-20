@@ -119,9 +119,11 @@ export function bindDesktopShell(
   let rightSidebarPages: WorkbenchSidebarPage[] = [];
   const registeredSidebarPages = new Map<symbol, WorkbenchSidebarPage[]>();
   let rememberedSidebarPage: string | null = null;
+  let sidebarRailExpanded = false;
   if (isSingleLeft) {
     try {
       rememberedSidebarPage = sessionStorage.getItem(`roadgen:sidebar:${route}`);
+      sidebarRailExpanded = sessionStorage.getItem(`roadgen:sidebar-expanded:${route}`) === "true";
     } catch {
       rememberedSidebarPage = null;
     }
@@ -323,6 +325,19 @@ export function bindDesktopShell(
     const pages = allSidebarPages();
     rightTabButtons.innerHTML = "";
     rightTabPanels.innerHTML = "";
+    shellRoot.dataset.sidebarRailExpanded = String(sidebarRailExpanded);
+    const railToggle = document.createElement("button");
+    railToggle.type = "button";
+    railToggle.className = "workbench-sidebar-rail-toggle";
+    railToggle.setAttribute("aria-expanded", String(sidebarRailExpanded));
+    railToggle.setAttribute("aria-label", viewerText(currentLanguage, sidebarRailExpanded ? "Collapse sidebar labels" : "Expand sidebar labels", sidebarRailExpanded ? "收起侧边栏文字" : "展开侧边栏文字"));
+    railToggle.innerHTML = `<span aria-hidden="true">${sidebarRailExpanded ? "‹" : "›"}</span><strong>${viewerText(currentLanguage, sidebarRailExpanded ? "Collapse" : "Expand", sidebarRailExpanded ? "收起" : "展开")}</strong>`;
+    railToggle.addEventListener("click", () => {
+      sidebarRailExpanded = !sidebarRailExpanded;
+      try { sessionStorage.setItem(`roadgen:sidebar-expanded:${route}`, String(sidebarRailExpanded)); } catch { /* ignore */ }
+      renderSingleLeftPages(activeRightTab);
+    });
+    rightTabButtons.appendChild(railToggle);
     let previousGroup: WorkbenchSidebarPage["group"] | null = null;
     pages.forEach((page) => {
       if (previousGroup !== page.group) {
