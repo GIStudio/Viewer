@@ -152,15 +152,6 @@ export function renderDesignPanelHtml(): string {
       </details>
     </section>
 
-    <footer class="viewer-generation-dialog-footer">
-      <div class="viewer-generation-footer-position"><span id="viewer-generation-step-position">01 / 04</span><small>可以直接点击任意标签切换</small></div>
-      <div class="viewer-generation-footer-actions">
-        <button id="viewer-generation-back" class="viewer-nav-button viewer-nav-button-secondary" type="button">上一步</button>
-        <button id="viewer-generation-next" class="viewer-nav-button viewer-nav-button-secondary" type="button">下一步</button>
-        <button id="viewer-design-generate" class="viewer-nav-button" type="button" hidden>生成参数化方案</button>
-      </div>
-    </footer>
-
     <div hidden aria-hidden="true">
       <fieldset id="viewer-generation-asset-policy">
         <input type="radio" name="viewer-generation-asset-policy" value="current_manifest" />

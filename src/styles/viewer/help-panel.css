@@ -2,6 +2,33 @@
   color: #0f172a;
 }
 
+.viewer-help-workflow-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.viewer-help-workflow-list li {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.65rem 0.72rem;
+  border-left: 3px solid var(--rg-yellow);
+  background: rgba(243, 240, 231, 0.78);
+}
+
+.viewer-help-workflow-list strong {
+  color: var(--rg-ink);
+  font-size: 0.8rem;
+}
+
+.viewer-help-workflow-list span {
+  color: #526970;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
 .viewer-help-faq {
   display: flex;
   flex-direction: column;

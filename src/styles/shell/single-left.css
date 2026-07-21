@@ -328,7 +328,7 @@
 .desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-right-panels,
 .desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-right-panels {
   position: absolute;
-  z-index: 2;
+  z-index: 50;
   inset: 0 auto 0 var(--workbench-menu-track);
   width: var(--workbench-drawer-width);
   min-height: 0;
@@ -347,9 +347,9 @@
   color: #102d3a;
   border-right: 1px solid rgba(16, 45, 58, 0.34);
   background: rgba(249, 249, 246, 0.985);
-  box-shadow: 18px 0 44px rgba(16, 45, 58, 0.2);
+  box-shadow: none;
   pointer-events: auto;
-  backdrop-filter: blur(18px);
+  backdrop-filter: none;
 }
 
 .desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-drawer.active,
@@ -405,7 +405,7 @@
   right: auto;
   left: 0;
   width: var(--workbench-drawer-width);
-  box-shadow: 18px 0 44px rgba(16, 45, 58, 0.2);
+  box-shadow: none;
   transform: translateX(-105%);
 }
 

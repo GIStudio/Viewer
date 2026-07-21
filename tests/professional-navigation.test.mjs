@@ -40,7 +40,7 @@ try {
         body: JSON.stringify({
           access_token: "fixture-guest-token",
           user: { id: "guest-a", email: "guest-a@public.invalid", display_name: "访客 TEST", system_role: "guest", is_active: true },
-          workspace: { id: "workspace-public", name: "公共空间", scope: "public", role: "owner" },
+          workspace: { id: "workspace-public", name: "小黑板", scope: "public", role: "owner" },
         }),
       });
       return;
@@ -149,7 +149,7 @@ try {
   await page.locator('[data-shell-tab="account"] .workbench-sidebar-badge').filter({ hasText: "PUB" }).waitFor({ timeout: 30_000 });
   assert.deepEqual(pageErrors, [], `viewer initialization errors: ${pageErrors.join(" | ")}`);
 
-  assert.equal((await page.locator(".studio-header-context > span").textContent())?.trim(), "当前上下文");
+  assert.equal((await page.locator(".studio-header-context > span").textContent())?.trim(), "当前状态");
   await page.getByRole("button", { name: "课程教学", exact: true }).waitFor();
   assert.equal(await page.locator(".desktop-shell-workbench-select").count(), 0, "professional tool switching must live only in the left rail");
   await page.getByText("3D 场景工作台", { exact: true }).waitFor();
@@ -163,8 +163,11 @@ try {
   assert.equal(await page.locator('[data-shell-tab="browse-3d"]').getAttribute("data-flow-stage"), "03");
   assert.equal(await page.locator('.desktop-shell-tab-button[data-shell-tab="review"]').count(), 0, "result review must leave the left rail");
   assert.equal(await page.locator('.desktop-shell-tab-button[data-shell-tab="evaluate"]').count(), 0, "evaluation must leave the left rail");
+  assert.equal(await page.locator('.desktop-shell-tab-button[data-shell-tab="consistency"]').count(), 0, "consistency diagnostics must leave the primary navigation rail");
   assert.equal(await page.locator('#viewer-result-review-toggle').getAttribute("aria-haspopup"), "dialog");
   assert.equal(await page.locator('#viewer-evaluate-modal-toggle').getAttribute("aria-haspopup"), "dialog");
+  assert.equal(await page.locator('#viewer-topology-pill').isHidden(), true, "raw topology diagnostics must stay out of the user toolbar");
+  assert.equal(await page.locator('#viewer-geo-pill').isHidden(), true, "raw geometry diagnostics must stay out of the user toolbar");
   assert.equal(await page.locator('[data-shell-tab="prepare-annotation"] .workbench-sidebar-icon').textContent(), "2D");
   assert.equal(await page.locator('[data-shell-tab="browse-3d"] .workbench-sidebar-icon').textContent(), "3D");
   assert.equal(await page.locator('[data-shell-tab="model-input-audit"]').count(), 0, "retired model-input audit must not remain in product navigation");
@@ -173,6 +176,10 @@ try {
   await page.locator("#viewer-direct-edit").waitFor();
   await page.locator("#viewer-top-assets").waitFor();
   await page.locator("#viewer-scenario-workbench-toggle").waitFor();
+  await page.locator("#viewer-consistency-toggle").click();
+  await page.locator("#viewer-consistency-panel[data-open=\"true\"]").waitFor();
+  await page.locator("#viewer-consistency-close").click();
+  await page.locator("#viewer-consistency-panel[data-open=\"false\"]").waitFor();
   const canvasBeforeRailExpand = await rect("#viewer-canvas");
   await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
   await page.waitForTimeout(240);
@@ -217,6 +224,8 @@ try {
   const generationDialog = page.locator("#viewer-generation-dialog");
   await generationDialog.waitFor({ state: "visible" });
   assert.equal(await generationDialog.getAttribute("data-open"), "true");
+  assert.equal(await generationDialog.locator(".viewer-generation-dialog-footer").count(), 0, "step controls must live in the stable dialog header");
+  assert.equal(await generationDialog.locator(".viewer-generation-dialog-head #viewer-generation-step-position").textContent(), "01 / 04");
   assert.equal(await generationDialog.getByRole("tab", { name: /输入来源/ }).count(), 1);
   assert.equal(await generationDialog.getByRole("tab", { name: /生成策略/ }).count(), 1);
   assert.equal(await generationDialog.getByRole("tab", { name: /输出结果/ }).count(), 1);
@@ -238,6 +247,15 @@ try {
   assert.equal(await page.locator('#viewer-design-generate').isDisabled(), true, "generation must wait for approved 2D input");
   await generationDialog.getByRole("tab", { name: /输出结果/ }).click();
   assert.equal(await page.locator('#viewer-design-generate').isVisible(), true, "final generation action belongs only to the output page");
+  await page.locator("#viewer-design-result").evaluate((result) => {
+    const longStatus = "generation-status-".repeat(700);
+    result.innerHTML = `<section class="viewer-generation-run-board"><header><div><small>GENERATION RUN</small><strong>${longStatus}</strong></div><b>100%</b></header><ol class="viewer-generation-operation-list"><li><span>100%</span><strong>${longStatus}</strong></li></ol></section>`;
+  });
+  const dialogHorizontalBounds = await generationDialog.locator(".viewer-generation-dialog-panel").evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return { left: box.left, right: box.right, viewportWidth: window.innerWidth };
+  });
+  assert.ok(dialogHorizontalBounds.left >= 0 && dialogHorizontalBounds.right <= dialogHorizontalBounds.viewportWidth, "long generation status must wrap instead of shifting the dialog beyond the viewport");
   await generationDialog.getByRole("tab", { name: /生成策略/ }).click();
   await generationDialog.getByRole("tab", { name: /道路骨架/ }).click();
   assert.equal(await generationDialog.locator('[data-generation-strategy-panel]:visible').getAttribute('data-generation-strategy-panel'), "skeleton");
@@ -269,7 +287,7 @@ try {
   }
 
   await page.locator("[data-close-generation]").last().click();
-  assert.equal(await page.locator('#viewer-evaluate-modal-toggle').isDisabled(), true, "evaluation stays unavailable until a current 3D scene is accepted");
+  assert.equal(await page.locator('#viewer-evaluate-modal-toggle').getAttribute("aria-disabled"), "true", "evaluation stays unavailable until a current 3D scene is accepted");
   await page.locator('[data-shell-tab="history"]').click();
   await page.locator("#viewer-history-analysis-panel").waitFor({ state: "visible" });
   await page.locator("#viewer-history-load-state").waitFor({ state: "visible" });
@@ -293,7 +311,11 @@ try {
     await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
     await page.waitForTimeout(240);
     const canvasBeforeReview = await rect("#viewer-canvas");
-    assert.equal(await page.locator('#viewer-result-review-toggle').isDisabled(), true, "review stays unavailable until a current 3D scene exists");
+    const reviewToggle = page.locator('#viewer-result-review-toggle');
+    assert.equal(await reviewToggle.getAttribute("aria-disabled"), "true", "review stays unavailable until a current 3D scene exists");
+    await reviewToggle.click();
+    await page.getByText("请先根据当前已批准的标注生成 3D 场景。", { exact: true }).waitFor();
+    assert.equal(await page.locator('[data-shell-modal-tab="review"]').isHidden(), true, "an unavailable review action must explain the requirement instead of opening a modal");
     const canvasDuringReview = await rect("#viewer-canvas");
     assert.ok(canvasBeforeReview && canvasDuringReview);
     assert.ok(Math.abs(canvasBeforeReview.width - canvasDuringReview.width) <= 1, `review availability must not resize the 3D canvas at ${viewport.width}x${viewport.height}`);
@@ -303,6 +325,10 @@ try {
   await page.getByText("3D 场景工作台", { exact: true }).waitFor();
   assert.equal(await page.locator('[data-shell-tab="prepare-annotation"] .workbench-sidebar-icon').textContent(), "2D");
   assert.equal(await page.locator('[data-shell-tab="browse-3d"] .workbench-sidebar-icon').textContent(), "3D");
+  assert.equal((await page.locator('[data-shell-tab="public-space"] .workbench-sidebar-label').textContent())?.trim(), "小黑板");
+  await page.locator('[data-shell-tab="account"]').click();
+  await page.getByText("作者身份如何识别？", { exact: true }).click();
+  await page.getByText("首次访问时，服务器签发仅保存在当前浏览器中的访问凭证。", { exact: false }).waitFor();
   await page.locator("#viewer-top-assets").click();
   await page.locator(".viewer-scene-assets-modal:not([hidden])").waitFor();
   await page.getByRole("heading", { name: "全部可用资产 · 点击放置或原位替换" }).waitFor();

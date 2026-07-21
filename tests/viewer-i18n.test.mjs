@@ -61,12 +61,18 @@ try {
   await page.locator("#viewer-center-controls-title").getByText("场景浏览器", { exact: true }).waitFor();
   await page.locator("#viewer-settings-panel").evaluate((element) => element.setAttribute("data-open", "true"));
   await page.getByText("光照预设、阴影和激光指示器", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "激光笔", exact: true }).waitFor();
+  await page.locator("#viewer-floating-lane-toggle").click();
+  await page.getByText("控制", { exact: true }).waitFor();
+  await page.getByText("启用叠加层", { exact: true }).waitFor();
+  await page.getByText("可见车道类型", { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => localStorage.getItem("viewer-lang")), "zh");
   await page.evaluate(() => {
     localStorage.setItem("viewer-lang", "en");
     window.dispatchEvent(new CustomEvent("roadgen3d:viewer-language-change", { detail: { language: "en" } }));
   });
   await page.getByText("New generation…", { exact: true }).first().waitFor();
+  await page.getByText("Controls", { exact: true }).waitFor();
 
   await page.goto(`${origin}/#scene-graph`);
   await page.locator(".studio-language-toggle").waitFor();

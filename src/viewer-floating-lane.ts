@@ -10,6 +10,7 @@ import type { FloatingLaneConfig, ViewerManifest } from "./viewer-types";
 import { PER_LANE_COLORS } from "./viewer-types";
 import { createTextSprite } from "./viewer-utils";
 import type { DesktopShell } from "./desktop-shell";
+import type { ViewerLanguage } from "./viewer-i18n";
 
 // ── Color Constants ────────────────────────────────────────────
 
@@ -33,6 +34,13 @@ const LANE_LABELS: Record<string, string> = {
   shared: "共享街道", default: "道路", building: "建筑",
 };
 
+const LANE_LABELS_EN: Record<string, string> = {
+  carriageway: "Carriageway", drive_lane: "Drive lane", bike_lane: "Bike lane", bus_lane: "Bus lane",
+  parking_lane: "Parking", clear_path: "Pedestrian zone", furnishing: "Furnishing zone", sidewalk: "Sidewalk",
+  median: "Median", greenzone: "Green belt", buffer: "Buffer", frontage: "Setback",
+  shared: "Shared street", default: "Road", building: "Building",
+};
+
 const CATEGORY_COLORS: Record<string, number> = {
   bench: 0x4ade80, lamp: 0xfbbf24, trash: 0xf87171, tree: 0x22c55e,
   mailbox: 0x60a5fa, hydrant: 0xef4444, bollard: 0xa78bfa, bus_stop: 0xfb923c,
@@ -53,6 +61,7 @@ export interface FloatingLaneDeps {
   panelHost: HTMLElement;
   shell: DesktopShell;
   shouldDeactivateTab: () => boolean;
+  getLanguage: () => ViewerLanguage;
 }
 
 // ── Public API ────────────────────────────────────────────────
@@ -120,7 +129,13 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
     panelHost,
     shell,
     shouldDeactivateTab,
+    getLanguage,
   } = deps;
+
+  const text = (en: string, zh: string): string => getLanguage() === "zh" ? zh : en;
+  const laneLabel = (kind: string): string => getLanguage() === "zh"
+    ? (LANE_LABELS[kind] || kind)
+    : (LANE_LABELS_EN[kind] || kind);
 
   let floatingLaneObjects: THREE.Object3D[] = [];
   let floatingLaneConfig: FloatingLaneConfig = {
@@ -1026,14 +1041,14 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
     const info = selectedOrientationInfo();
     const status = document.getElementById("flp-orientation-copy-status");
     if (!info) return;
-    const text = JSON.stringify(orientationPayload(info), null, 2);
+    const payload = JSON.stringify(orientationPayload(info), null, 2);
     try {
-      await navigator.clipboard.writeText(text);
-      if (status) status.textContent = "Copied";
+      await navigator.clipboard.writeText(payload);
+      if (status) status.textContent = text("Copied", "已复制");
     } catch {
       const textArea = document.getElementById("flp-orientation-payload") as HTMLTextAreaElement | null;
       textArea?.select();
-      if (status) status.textContent = "Select text to copy";
+      if (status) status.textContent = text("Select text to copy", "请选择文本后复制");
     }
   }
 
@@ -1055,7 +1070,7 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
 
     const selected = selectedOrientationInfo();
     if (!allInfos.length) {
-      host.innerHTML = `<div class="flp-empty">No model instances with position data.</div>`;
+      host.innerHTML = `<div class="flp-empty">${text("No model instances with position data.", "没有包含位置数据的模型实例。")}</div>`;
       return;
     }
 
@@ -1063,13 +1078,13 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
     host.innerHTML = `
       <label class="flp-checkbox">
         <input type="checkbox" id="flp-orientation-enabled" ${showOrientationArrows ? "checked" : ""}>
-        Show orientation arrows
+        ${text("Show orientation arrows", "显示朝向箭头")}
       </label>
       <div class="flp-orientation-grid">
         <label>
-          Category
+          ${text("Category", "类别")}
           <select id="flp-orientation-category">
-            <option value="all" ${orientationCategoryFilter === "all" ? "selected" : ""}>All (${allInfos.length})</option>
+            <option value="all" ${orientationCategoryFilter === "all" ? "selected" : ""}>${text("All", "全部")} (${allInfos.length})</option>
             ${categories.map(category => `
               <option value="${escapeHtml(category)}" ${orientationCategoryFilter === category ? "selected" : ""}>
                 ${escapeHtml(category)} (${allInfos.filter(info => info.category === category).length})
@@ -1078,7 +1093,7 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
           </select>
         </label>
         <label>
-          Model Instance
+          ${text("Model instance", "模型实例")}
           <select id="flp-orientation-instance">
             ${filtered.map(info => `
               <option value="${escapeHtml(info.instanceId)}" ${selected?.instanceId === info.instanceId ? "selected" : ""}>
@@ -1090,19 +1105,19 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
       </div>
       <div class="flp-orientation-summary">
         <div><span>ID</span><strong>${escapeHtml(selected?.instanceId ?? "-")}</strong></div>
-        <div><span>Asset</span><strong>${escapeHtml(selected?.assetId || "-")}</strong></div>
-        <div><span>Yaw</span><strong>${selected ? `${normalizeYawDeg(selected.previewYawDeg).toFixed(1)}°` : "-"}</strong></div>
-        <div><span>Delta</span><strong>${selected ? `${normalizeYawDeg(selected.previewYawDeg - selected.yawDeg).toFixed(1)}°` : "-"}</strong></div>
+        <div><span>${text("Asset", "资产")}</span><strong>${escapeHtml(selected?.assetId || "-")}</strong></div>
+        <div><span>${text("Yaw", "偏航角")}</span><strong>${selected ? `${normalizeYawDeg(selected.previewYawDeg).toFixed(1)}°` : "-"}</strong></div>
+        <div><span>${text("Delta", "变化")}</span><strong>${selected ? `${normalizeYawDeg(selected.previewYawDeg - selected.yawDeg).toFixed(1)}°` : "-"}</strong></div>
       </div>
       <div class="flp-orientation-actions">
         <button type="button" data-yaw-delta="-90">-90°</button>
         <button type="button" data-yaw-delta="90">+90°</button>
-        <button type="button" data-yaw-delta="180">Flip</button>
-        <button type="button" id="flp-orientation-reset">Reset</button>
+        <button type="button" data-yaw-delta="180">${text("Flip", "翻转")}</button>
+        <button type="button" id="flp-orientation-reset">${text("Reset", "重置")}</button>
       </div>
       <textarea id="flp-orientation-payload" readonly>${escapeHtml(payloadText)}</textarea>
       <div class="flp-orientation-copy-row">
-        <button type="button" id="flp-orientation-copy">Copy Params</button>
+        <button type="button" id="flp-orientation-copy">${text("Copy parameters", "复制参数")}</button>
         <span id="flp-orientation-copy-status"></span>
       </div>
     `;
@@ -1132,93 +1147,90 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
 
   function mountControlPanel(): void {
     const panelId = "floating-lane-panel";
-    if (document.getElementById(panelId)) {
-      updateControlPanelVisibility();
-      return;
+    let panel = document.getElementById(panelId) as HTMLDivElement | null;
+    if (!panel) {
+      panelHost.innerHTML = "";
+      panel = document.createElement("div");
+      panel.id = panelId;
+      panel.className = "floating-lane-panel";
+      panelHost.appendChild(panel);
     }
-
-    panelHost.innerHTML = "";
-    const panel = document.createElement("div");
-    panel.id = panelId;
-    panel.className = "floating-lane-panel";
     panel.innerHTML = `
       <div class="flp-section">
-        <label>Controls</label>
+        <label>${text("Controls", "控制")}</label>
         <label class="flp-checkbox">
           <input type="checkbox" id="flp-enabled" ${floatingLaneConfig.enabled ? "checked" : ""}>
-          Enable Overlay
+          ${text("Enable overlay", "启用叠加层")}
         </label>
       </div>
       <div class="flp-slider-group">
-        <label>Height: <span id="flp-height-val">${(floatingLaneConfig.height ?? 0.5).toFixed(1)}m</span></label>
+        <label>${text("Height", "高度")}: <span id="flp-height-val">${(floatingLaneConfig.height ?? 0.5).toFixed(1)}m</span></label>
         <input type="range" id="flp-height" min="0.1" max="3" step="0.1" value="${floatingLaneConfig.height ?? 0.5}">
       </div>
       <div class="flp-slider-group">
-        <label>Road Opacity: <span id="flp-opacity-val">${(floatingLaneConfig.opacity! * 100).toFixed(0)}%</span></label>
+        <label>${text("Road opacity", "道路透明度")}: <span id="flp-opacity-val">${(floatingLaneConfig.opacity! * 100).toFixed(0)}%</span></label>
         <input type="range" id="flp-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.opacity}">
       </div>
       <div class="flp-section">
-        <label>Visible Elements</label>
+        <label>${text("Visible elements", "可见元素")}</label>
         <div class="flp-checkboxes-row">
           <label class="flp-checkbox">
             <input type="checkbox" id="flp-buildings" ${floatingLaneConfig.showBuildings ? "checked" : ""}>
-            Buildings
+            ${text("Buildings", "建筑")}
           </label>
           <label class="flp-checkbox">
             <input type="checkbox" id="flp-features" ${floatingLaneConfig.showFeatures ? "checked" : ""}>
-            Features (Trees)
+            ${text("Features (trees)", "要素（树木）")}
           </label>
         </div>
       </div>
       <div class="flp-slider-group" id="flp-building-opacity-group">
-        <label>Building Opacity: <span id="flp-building-opacity-val">${(floatingLaneConfig.buildingOpacity! * 100).toFixed(0)}%</span></label>
+        <label>${text("Building opacity", "建筑透明度")}: <span id="flp-building-opacity-val">${(floatingLaneConfig.buildingOpacity! * 100).toFixed(0)}%</span></label>
         <input type="range" id="flp-building-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.buildingOpacity}">
       </div>
       <div class="flp-slider-group" id="flp-feature-opacity-group">
-        <label>Feature Opacity: <span id="flp-feature-opacity-val">${(floatingLaneConfig.featureOpacity! * 100).toFixed(0)}%</span></label>
+        <label>${text("Feature opacity", "要素透明度")}: <span id="flp-feature-opacity-val">${(floatingLaneConfig.featureOpacity! * 100).toFixed(0)}%</span></label>
         <input type="range" id="flp-feature-opacity" min="0.1" max="1" step="0.05" value="${floatingLaneConfig.featureOpacity}">
       </div>
       <div class="flp-section">
-        <label>Visible Lane Types</label>
+        <label>${text("Visible lane types", "可见车道类型")}</label>
         <div class="flp-checkboxes" id="flp-lane-kinds">
           ${["carriageway", "drive_lane", "bike_lane", "bus_lane", "clear_path", "furnishing", "sidewalk", "greenzone"].map(kind => `
             <label class="flp-checkbox">
               <input type="checkbox" data-kind="${kind}" ${visibleLaneKinds.has(kind) ? "checked" : ""}>
-              ${LANE_LABELS[kind] || kind}
+              ${laneLabel(kind)}
             </label>
           `).join("")}
         </div>
       </div>
       <div class="flp-section">
-        <label>Color Scheme</label>
+        <label>${text("Color scheme", "配色方案")}</label>
         <select id="flp-color-scheme">
-          <option value="semantic" ${floatingLaneConfig.colorScheme === "semantic" ? "selected" : ""}>Semantic</option>
-          <option value="functional" ${floatingLaneConfig.colorScheme === "functional" ? "selected" : ""}>Functional</option>
-          <option value="safety" ${floatingLaneConfig.colorScheme === "safety" ? "selected" : ""}>Safety</option>
+          <option value="semantic" ${floatingLaneConfig.colorScheme === "semantic" ? "selected" : ""}>${text("Semantic", "语义")}</option>
+          <option value="functional" ${floatingLaneConfig.colorScheme === "functional" ? "selected" : ""}>${text("Functional", "功能")}</option>
+          <option value="safety" ${floatingLaneConfig.colorScheme === "safety" ? "selected" : ""}>${text("Safety", "安全")}</option>
         </select>
       </div>
       <div class="flp-checkboxes-row">
         <label class="flp-checkbox">
           <input type="checkbox" id="flp-edges" ${floatingLaneConfig.showEdgeLines ? "checked" : ""}>
-          Edge Lines
+          ${text("Edge lines", "边界线")}
         </label>
         <label class="flp-checkbox">
           <input type="checkbox" id="flp-labels" ${floatingLaneConfig.showLabels ? "checked" : ""}>
-          Labels
+          ${text("Labels", "标签")}
         </label>
       </div>
       <label class="flp-checkbox">
         <input type="checkbox" id="flp-animated" ${floatingLaneConfig.animated ? "checked" : ""}>
-        Animated Pulse
+        ${text("Animated pulse", "动态脉冲")}
       </label>
       <div class="flp-section">
-        <label>Model Orientation</label>
+        <label>${text("Model orientation", "模型朝向")}</label>
         <div id="flp-orientation-inspector"></div>
       </div>
-      <div class="flp-hint">Press L to toggle | Use carriagewayRings</div>
+      <div class="flp-hint">${text("Press L to toggle the overlay.", "按 L 键切换叠加层。")}</div>
     `;
-
-    panelHost.appendChild(panel);
 
     document.getElementById("flp-enabled")?.addEventListener("change", (event) => {
       floatingLaneConfig.enabled = (event.target as HTMLInputElement).checked;
@@ -1333,6 +1345,6 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
     selectLane: selectFloatingLane,
     selectInstance: setSelectedInstance,
     mountControlPanel,
-    getLaneLabel: (kind: string) => LANE_LABELS[kind] || kind,
+    getLaneLabel: laneLabel,
   };
 }

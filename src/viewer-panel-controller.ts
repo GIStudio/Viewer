@@ -56,7 +56,7 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
   }
 
   function activeNonSettingsPanel(): ViewerPanelKey | null {
-    for (const panel of ["design", "evaluate", "compare", "help", "history", "consistency"] as ViewerPanelKey[]) {
+    for (const panel of ["design", "evaluate", "compare", "help", "history"] as ViewerPanelKey[]) {
       if (state[panel]) return panel;
     }
     return null;
@@ -117,7 +117,7 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     state[panel] = true;
     setDataset(panel, true);
     deps.shell.setRightPinned(true);
-    deps.shell.activateRightTab(panel);
+    deps.shell.activateRightTab(panel === "consistency" ? null : panel);
     if (panel === "settings") {
       deps.onSettingsOpen();
     }

@@ -528,6 +528,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   shell.centerStage.innerHTML = createViewerStageHtml();
   root.querySelectorAll<HTMLButtonElement>("[data-viewer-modal-tab]").forEach((button) => {
     button.addEventListener("click", () => {
+      const unavailableMessage = button.dataset.unavailableMessage?.trim();
+      if (button.getAttribute("aria-disabled") === "true" && unavailableMessage) {
+        shell.setStatusSummary(unavailableMessage);
+        shell.pushActivity(unavailableMessage, "warning");
+        return;
+      }
       const modalId = button.dataset.viewerModalTab;
       if (modalId) shell.openModalTab(modalId);
     }, { signal });
@@ -1746,6 +1752,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     panelHost: floatingLanePanelHost,
     shell,
     shouldDeactivateTab: () => !panelController?.isAnyOpen(),
+    getLanguage: () => currentLang,
   });
   const expandedMapController = createExpandedMapController({
     scene,
@@ -4003,6 +4010,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     root.dataset.viewerLanguage = language;
     applyViewerTranslations(root, language);
     syncLightingPresetOptions(language);
+    if (document.getElementById("floating-lane-panel")) floatingLaneSystem.mountControlPanel();
     updateShellSectionTexts();
     updateGenerationDialogContract();
     shell.setHints(localizedViewerHints());
@@ -4212,6 +4220,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   historyAnalysisCloseEl.addEventListener("click", () => panelController.setOpen("history", false), { signal });
 
   consistencyCloseEl.addEventListener("click", () => panelController.setOpen("consistency", false), { signal });
+  root.querySelector<HTMLButtonElement>("#viewer-consistency-toggle")?.addEventListener("click", () => {
+    panelController.setOpen("consistency", !panelController.isOpen("consistency"));
+  }, { signal });
   root.querySelector<HTMLButtonElement>("#viewer-open-camera-surface-diagnostic")?.addEventListener("click", () => {
     panelController.closeAll();
     panelController.setOpen("consistency", true);

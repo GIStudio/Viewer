@@ -19,9 +19,12 @@ const menus = read("src/react/ShellMenus.tsx");
 const viewerOverlays = read("src/styles/viewer/menus-overlays.css");
 const viewerApp = read("src/app.ts");
 const viewerStage = read("src/viewer-panels/stage.ts");
+const stageConsole = read("src/styles/viewer/stage-console.css");
 const expandedMap = read("src/viewer-expanded-map.ts");
 const sceneShell = read("src/scene-graph/shell.ts");
 const sceneGraph = read("src/scene-graph.ts");
+const accountPanels = read("src/professional-account-panels.ts");
+const professionalSession = read("src/professional-session.ts");
 
 for (const mode of ["single_left_overlay", "course_single_left", "legacy_dual"]) {
   assert.match(types, new RegExp(`\\| \\"${mode}\\"`), `missing shell mode ${mode}`);
@@ -44,7 +47,9 @@ assert.match(theme, /--rg-ink: #102d3a/);
 assert.match(theme, /--rg-paper: #f3f0e7/);
 assert.match(professional, /background-image: var\(--rg-grid-paper\)/);
 assert.match(professional, /\.desktop-shell-center-stage/);
-assert.match(professional, /box-shadow: 5px 5px 0 var\(--rg-yellow\)/);
+assert.match(professional, /\.desktop-shell-center-stage \{[\s\S]*box-shadow: none;/, "the stage must not cast a shadow over sidebar drawers");
+assert.match(singleLeft, /\.desktop-shell-right-panels \{[\s\S]*z-index: 50;/, "sidebar drawers must sit above the scene stage");
+assert.doesNotMatch(singleLeft, /box-shadow: 18px 0 44px/, "single-left drawers must not cast a high-contrast shadow over the stage");
 assert.match(professional, /> \.workflow-shell-bar \{[\s\S]*display: none/);
 assert.match(professional, /data-current="true"/);
 assert.doesNotMatch(routeIsland, /WORKFLOW_STEPS\.map/);
@@ -96,6 +101,12 @@ assert.match(sceneShell, /annotation-show-osm-labels/, "annotation controls must
 assert.match(sceneShell, /annotation-show-annotation-labels/, "annotation controls must expose an overlay-label toggle");
 assert.match(sceneShell, /annotation-original-opacity-label/, "original/base-map opacity label must be addressable at runtime");
 assert.match(sceneShell, /id: "inspector",[\s\S]*<details class="scene-collapsible-panel" open>/, "Inspector selected-feature content must be expanded by default");
+assert.match(professionalSession, /\/api\/v1\/auth\/guest/, "public access must create a guest identity without an invite");
+assert.match(accountPanels, /默认公开访问/, "administration must explain the default no-invite public path");
+assert.doesNotMatch(accountPanels, /data-admin-invite/, "the unused one-time-invite action must not remain in the admin panel");
+assert.doesNotMatch(accountPanels, /admin\/registration-invites/, "admin navigation must not expose invite management");
+assert.match(stageConsole, /\.viewer-generation-dialog-panel \{[\s\S]*min-width: 0;/, "generation dialog must shrink within the stage");
+assert.match(stageConsole, /\.viewer-generation-operation-list strong \{[\s\S]*overflow-wrap: anywhere;/, "long generation messages must wrap instead of widening the dialog");
 assert.match(sceneShell, /scene-source-review-step/, "source review status must have a compact layout hook");
 assert.match(sceneGraph, /sceneGraph\.right\.baseMapOpacity/, "OSM sources must relabel original opacity as base-map opacity");
 assert.match(adapter, /currentLanguage === "zh"/, "sidebar abbreviations must respond to the active language");

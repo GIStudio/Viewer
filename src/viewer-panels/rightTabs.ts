@@ -29,24 +29,6 @@ export function createViewerRightTabs(t: ViewerPanelText): ViewerRightTab[] {
         </div>
       `,
     },
-    {
-      id: "consistency",
-      label: t("Consistency", "一致性"),
-      content: `
-        <aside id="viewer-consistency-panel" class="viewer-slide-panel" data-open="false">
-          <div class="viewer-slide-panel-header">
-            <div>
-              <div class="viewer-slide-panel-title" data-i18n-key="viewer.consistency.title">Layout Consistency</div>
-              <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.consistency.subtitle">Conversion and topology checks against the source graph.</div>
-            </div>
-            <button id="viewer-consistency-close" class="viewer-settings-close" type="button" aria-label="Close consistency" data-i18n-aria-label-key="viewer.consistency.close">x</button>
-          </div>
-          <div id="viewer-consistency-content" class="viewer-slide-panel-body">
-            <div class="viewer-consistency-empty" data-i18n-key="viewer.consistency.empty">Load a layout to see consistency metrics.</div>
-          </div>
-        </aside>
-      `,
-    },
   ];
 }
 

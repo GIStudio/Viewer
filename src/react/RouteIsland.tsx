@@ -216,7 +216,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       };
       const publicSpacePage = {
         id: "public-space",
-        label: language === "zh" ? "公共空间" : "Public space",
+        label: language === "zh" ? "小黑板" : "Bulletin board",
         icon: "PS",
         group: "workspace" as const,
         content: publicSpacePanel.element,
@@ -274,14 +274,17 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
 
     const updateToolbarAction = (
       id: "review" | "evaluate",
-      options: { label: string; badge: string; status: string; disabled?: boolean },
+      options: { label: string; badge: string; status: string; disabled?: boolean; unavailableMessage?: string },
     ): void => {
       const button = host.querySelector<HTMLButtonElement>(`[data-viewer-modal-tab="${id}"]`);
       if (!button) return;
       button.dataset.workflowStatus = options.status;
       button.title = options.label;
       button.setAttribute("aria-label", `${options.label} · ${options.badge}`);
-      button.disabled = Boolean(options.disabled);
+      button.disabled = false;
+      button.setAttribute("aria-disabled", String(Boolean(options.disabled)));
+      button.dataset.unavailableMessage = options.disabled ? options.unavailableMessage ?? "" : "";
+      button.classList.toggle("is-unavailable", Boolean(options.disabled));
       const label = button.querySelector<HTMLElement>("[data-stage-modal-label]");
       if (label) label.textContent = options.label;
       const badge = button.querySelector<HTMLElement>("[data-stage-modal-badge]");
@@ -298,6 +301,9 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       const hasCurrentScene = Boolean(snapshot.sceneLayoutPath)
         && snapshot.sceneSourceRevision === snapshot.sourceRevision;
       const canOpenReview = hasCurrentScene || snapshot.sceneRef?.kind === "starter_demo";
+      const currentSceneRequiredMessage = snapshot.sceneLayoutPath
+        ? tr("professional.pipeline.currentSceneReviewRequired", "The available 3D scene is from an earlier annotation. Generate the current scene before review or evaluation.")
+        : tr("professional.pipeline.currentSceneRequired", "Generate the current 3D scene from the approved annotation first.");
       updatePage("prepare-annotation", {
         label: tr("professional.pipeline.annotation", "2D data & annotation"),
         badge: annotationStatus === "ready" ? "OK" : annotationStatus === "warning" ? "!" : "—",
@@ -309,6 +315,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         badge: snapshot.sceneReviewStatus === "accepted" ? "OK" : snapshot.sceneReviewStatus === "pending" ? "!" : "—",
         status: snapshot.sceneReviewStatus === "accepted" ? "accepted" : snapshot.sceneReviewStatus === "pending" ? "warning" : "pending",
         disabled: !canOpenReview,
+        unavailableMessage: currentSceneRequiredMessage,
       });
       updatePage("browse-3d", {
         label: tr("professional.pipeline.browse3d", "3D Scene Browse"),
@@ -333,6 +340,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
               ? "warning"
               : "pending",
         disabled: !hasCurrentScene,
+        unavailableMessage: currentSceneRequiredMessage,
       });
       if (
         route === "viewer"

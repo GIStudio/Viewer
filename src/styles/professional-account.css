@@ -68,6 +68,16 @@
 .professional-account-summary p { margin: 4px 0; }
 .professional-account-role,
 .professional-account-note { color: #48616b; font-size: 12px; line-height: 1.45; }
+.professional-account-identity-note {
+  margin-top: 8px;
+  border-top: 1px dashed #9aaab0;
+  padding-top: 8px;
+  color: #48616b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.professional-account-identity-note summary { color: var(--ink, #102d3a); font-weight: 750; cursor: pointer; }
+.professional-account-identity-note p { margin: 7px 0 0; }
 
 .professional-account-form { display: grid; gap: 9px; padding: 12px; }
 .professional-account-field { display: grid; gap: 4px; font-size: 12px; font-weight: 700; }

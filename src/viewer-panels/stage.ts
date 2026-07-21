@@ -2,6 +2,23 @@ import { renderDesignPanelHtml } from "./designPanel";
 import { renderHelpPanelHtml } from "./helpPanel";
 import { renderViewerSettingsPanelHtml } from "../viewer-settings-panel";
 
+function renderConsistencyDebugPanel(): string {
+  return `
+    <aside id="viewer-consistency-panel" class="viewer-slide-panel" data-open="false" aria-hidden="true">
+      <div class="viewer-slide-panel-header">
+        <div>
+          <div class="viewer-slide-panel-title" data-i18n-key="viewer.consistency.title">Layout Consistency</div>
+          <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.consistency.subtitle">Conversion and topology checks against the source graph.</div>
+        </div>
+        <button id="viewer-consistency-close" class="viewer-settings-close" type="button" aria-label="Close consistency" data-i18n-aria-label-key="viewer.consistency.close">x</button>
+      </div>
+      <div id="viewer-consistency-content" class="viewer-slide-panel-body">
+        <div class="viewer-consistency-empty" data-i18n-key="viewer.consistency.empty">Load a layout to see consistency metrics.</div>
+      </div>
+    </aside>
+  `;
+}
+
 export function createViewerStageHtml(): string {
   return `
     <div class="viewer-shell viewer-shell-embedded">
@@ -37,10 +54,11 @@ export function createViewerStageHtml(): string {
           <button class="stage-toolbar-button" type="button" id="viewer-top-assets">资产库</button>
           <button class="stage-toolbar-button" type="button" id="viewer-scenario-workbench-toggle" hidden>方案 A/B/C</button>
           <button class="stage-toolbar-button" type="button" id="viewer-open-camera-surface-diagnostic" title="相机局部几何诊断">QA 100m</button>
+          <button class="stage-toolbar-button" type="button" id="viewer-consistency-toggle" title="调试：查看转换与拓扑检查" data-i18n-key="viewer.stage.consistencyDebug">Consistency debug</button>
           <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-map" data-shell-action="file-export-png">PNG</button>
           <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-svg" data-shell-action="file-export-svg">SVG</button>
-          <span class="stage-pill" data-tone="ok" id="viewer-topology-pill">topology_ok</span>
-          <span class="stage-pill" id="viewer-geo-pill">geo_delta —</span>
+          <span class="stage-pill" data-tone="ok" id="viewer-topology-pill" hidden aria-hidden="true">topology_ok</span>
+          <span class="stage-pill" id="viewer-geo-pill" hidden aria-hidden="true">geo_delta —</span>
         </div>
       </div>
 
@@ -70,6 +88,7 @@ export function createViewerStageHtml(): string {
       </aside>
 
       <div id="viewer-design-workspace" class="viewer-design-workspace" hidden></div>
+      ${renderConsistencyDebugPanel()}
 
       <section id="viewer-center-controls" class="viewer-center-controls" data-open="false" aria-labelledby="viewer-center-controls-title">
         <header class="viewer-center-controls-header">
@@ -125,11 +144,19 @@ export function createViewerStageHtml(): string {
         <div class="viewer-generation-dialog-backdrop" data-close-generation></div>
         <div class="viewer-generation-dialog-panel">
           <div class="viewer-generation-dialog-head">
-            <div>
+            <div class="viewer-generation-dialog-heading">
               <h2 id="viewer-generation-dialog-title" data-i18n-key="viewer.generationDialog.title">Generation Control</h2>
               <p data-i18n-key="viewer.generationDialog.subtitle">Full generation flow in a dialog; confirm to return to the stage view.</p>
             </div>
-            <button class="viewer-settings-close" type="button" aria-label="Close generation control" data-i18n-aria-label-key="viewer.generationDialog.close" data-close-generation>x</button>
+            <div class="viewer-generation-head-workflow" aria-label="Generation step controls">
+              <div class="viewer-generation-head-position"><span id="viewer-generation-step-position">01 / 04</span><small>可以直接点击任意标签切换</small></div>
+              <div class="viewer-generation-head-actions">
+                <button id="viewer-generation-back" class="viewer-nav-button viewer-nav-button-secondary" type="button">上一步</button>
+                <button id="viewer-generation-next" class="viewer-nav-button viewer-nav-button-secondary" type="button">下一步</button>
+                <button id="viewer-design-generate" class="viewer-nav-button" type="button" hidden>生成参数化方案</button>
+              </div>
+              <button class="viewer-settings-close" type="button" aria-label="Close generation control" data-i18n-aria-label-key="viewer.generationDialog.close" data-close-generation>x</button>
+            </div>
           </div>
           <div class="viewer-generation-primary-tabs" role="tablist" aria-label="3D 场景生成步骤">
             <button id="viewer-generation-tab-source" type="button" role="tab" aria-selected="true" aria-controls="viewer-generation-page-source" tabindex="0" data-generation-primary-tab="source" data-status="pending"><span>01</span><strong>输入来源</strong><i aria-hidden="true"></i></button>
