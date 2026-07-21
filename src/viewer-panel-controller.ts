@@ -12,8 +12,6 @@ type ViewerPanelControllerDeps = {
   onSettingsClose: (restoreRoam: boolean) => void;
   onDesignOpen: () => void;
   onCompareOpen: () => void;
-  onHistoryOpen: () => void;
-  onHistoryClose: () => void;
   onConsistencyOpen: () => void;
   onCloseAllOverlays: () => void;
 };
@@ -38,7 +36,6 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     evaluate: false,
     compare: false,
     help: false,
-    history: false,
     consistency: false,
   };
 
@@ -56,7 +53,7 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
   }
 
   function activeNonSettingsPanel(): ViewerPanelKey | null {
-    for (const panel of ["design", "evaluate", "compare", "help", "history"] as ViewerPanelKey[]) {
+    for (const panel of ["design", "evaluate", "compare", "help"] as ViewerPanelKey[]) {
       if (state[panel]) return panel;
     }
     return null;
@@ -77,7 +74,6 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     if (panel === "settings") {
       deps.onSettingsClose(Boolean(options?.restoreRoam));
     }
-    if (panel === "history") deps.onHistoryClose();
     if (!Object.values(state).some(Boolean) && focusBeforePanelOpen?.isConnected) {
       focusBeforePanelOpen.focus({ preventScroll: true });
       focusBeforePanelOpen = null;
@@ -90,7 +86,6 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     closePanel("evaluate");
     closePanel("compare");
     closePanel("help");
-    closePanel("history");
     closePanel("consistency");
     deps.onCloseAllOverlays();
     deps.shell.activateRightTab(null);
@@ -121,9 +116,6 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     if (panel === "settings") {
       deps.onSettingsOpen();
     }
-    if (panel === "history") {
-      deps.onHistoryOpen();
-    }
     queueMicrotask(() => {
       const closeButton = deps.panels[panel].querySelector<HTMLElement>(
         ".viewer-settings-close, [data-close-generation], button",
@@ -153,7 +145,6 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     state[target] = true;
     setDataset(target, true);
     if (target === "settings") deps.onSettingsOpen();
-    if (target === "history") deps.onHistoryOpen();
     updateCanvasSlideOpenState();
   }
 

@@ -78,6 +78,9 @@ export function createSceneGraphLeftSections(): ShellSection[] {
               <button id="annotation-tool-hydrant" class="scene-tool-button" data-tool="hydrant" type="button" data-i18n-key="sceneGraph.tools.hydrant">Hydrant</button>
               <button id="annotation-tool-sign" class="scene-tool-button" data-tool="sign" type="button" data-i18n-key="sceneGraph.tools.sign">Sign</button>
             </div>
+            <p class="scene-tool-group-note scene-furniture-annotation-note">
+              标注作用：在道路横断面或功能区落点后，会保存为必需的 3D 街道家具实例；下一次生成将应用对应种类与位置，删除标注后才会移除。
+            </p>
           </div>
           <div id="annotation-image-meta" class="scene-image-meta" style="margin:0">
             <span data-i18n-key="sceneGraph.tools.referenceHint">Choose a reference plan or import PNG to start annotating.</span>
@@ -157,11 +160,12 @@ export function createSceneGraphRightTabs(options: SceneGraphShellOptions = {}):
               </div>
               <p data-i18n-key="sceneGraph.review.description">Edits are saved automatically. A valid revision is approved for generation without an extra confirmation step.</p>
             </div>
-            <div id="scene-source-provenance" class="scene-source-provenance"></div>
+            <div id="scene-source-provenance" class="scene-source-provenance" hidden aria-hidden="true"></div>
             <div id="scene-source-counts" class="scene-metric-grid scene-metric-grid-compact"></div>
             <div id="scene-source-warnings" class="scene-source-warnings"></div>
             <div class="scene-import-toolbar scene-import-toolbar-compact">
               <button id="scene-source-back" class="scene-toolbar-button scene-toolbar-button-secondary" type="button" data-i18n-key="sceneGraph.review.backToArea">Choose another study area</button>
+              <button id="scene-source-open-annotation-tools" class="scene-toolbar-button scene-toolbar-button-secondary" type="button" hidden data-i18n-key="sceneGraph.review.openAnnotationTools">Open annotation tools</button>
               <button id="scene-source-generate" class="scene-toolbar-button" type="button" data-i18n-key="sceneGraph.review.enter3d">Enter 3D scene</button>
               <button id="scene-source-open-existing" class="scene-toolbar-button scene-toolbar-button-secondary" type="button" hidden>Open existing 3D scene</button>
             </div>
@@ -301,6 +305,22 @@ export function createSceneGraphStageHtml(): string {
             </div>
           </div>
         </div>
+      </div>
+      <div id="scene-generation-confirm-dialog" class="scene-generation-confirm-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="scene-generation-confirm-title">
+        <div class="scene-generation-confirm-backdrop" data-close-scene-generation></div>
+        <section class="scene-generation-confirm-panel">
+          <header>
+            <span>03 / 3D 场景生成</span>
+            <h2 id="scene-generation-confirm-title">确认生成配置</h2>
+            <p>将使用当前已保存的 2D 标注与 OSM 上下文创建新的可追溯 3D 版本。</p>
+          </header>
+          <div id="scene-generation-confirm-summary" class="scene-generation-confirm-summary"></div>
+          <p class="scene-generation-confirm-note">道路、建筑足迹与人工街道家具会作为本次生成的固定输入；进入下一步可继续核对完整生成策略和参数。</p>
+          <footer>
+            <button id="scene-generation-confirm-cancel" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">返回标注</button>
+            <button id="scene-generation-confirm-open" class="scene-toolbar-button" type="button">确认并进入生成配置</button>
+          </footer>
+        </section>
       </div>
       <button id="scene-page-asset-editor" type="button" hidden>Asset Editor</button>
       <button id="scene-page-back" type="button" hidden>Back to Viewer</button>

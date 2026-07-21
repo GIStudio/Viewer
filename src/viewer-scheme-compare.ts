@@ -28,18 +28,20 @@ export type SchemeCompareController = {
   restoreStoredSelection: () => void;
   clearSelection: () => void;
   selectedLayoutPaths: () => string[];
+  refresh: () => void;
 };
 
 export type SchemeCompareControllerDeps = {
   hostEl: HTMLElement;
   loadManifest: (layoutPath: string) => Promise<ViewerManifest>;
   enterCompareSceneSet: (items: CompareSceneSetItem[], stepLabel?: string) => Promise<void>;
-  syncComparePair: (a: ComparisonItem, b: ComparisonItem, openDetails: boolean) => void;
+  syncComparePair: (a: ComparisonItem, b: ComparisonItem, openDetails: boolean, detailsHost?: HTMLElement) => void;
   escapeHtml: (text: string) => string;
   compactUiLabel: (label: string, maxLength?: number) => string;
   makeDirectLayoutLabel: (layoutPath: string) => string;
   flashStatus: (message: string) => void;
   setStatus: (message: string) => void;
+  text: (en: string, zh: string) => string;
 };
 
 function cleanString(value: unknown): string {
@@ -108,6 +110,10 @@ export function createSchemeCompareController(deps: SchemeCompareControllerDeps)
   let selectedStepKey = FINAL_STEP_KEY;
   let splitHasOpened = false;
   let hydrationVersion = 0;
+
+  function t(en: string, zh: string): string {
+    return deps.text(en, zh);
+  }
 
   function persist(): void {
     if (selectedPaths.length === 0) {
@@ -190,10 +196,10 @@ export function createSchemeCompareController(deps: SchemeCompareControllerDeps)
       <div class="viewer-scheme-compare-manual">
         <div class="viewer-scheme-compare-manual-header">
           <div>
-            <strong>Compare Results</strong>
-            <span>${selectedPaths.length ? `${selectedPaths.length}/${MAX_SELECTION} selected` : "Select 2-3 recent results"}</span>
+            <strong>${t("Scheme A/B/C comparison", "方案 A/B/C 对比")}</strong>
+            <span>${selectedPaths.length ? t(`${selectedPaths.length}/${MAX_SELECTION} selected`, `已选 ${selectedPaths.length}/${MAX_SELECTION} 个方案`) : t("Select 2-3 generated schemes", "选择 2–3 个已生成方案")}</span>
           </div>
-          ${selectedPaths.length ? '<button class="viewer-scheme-compare-clear" type="button">Clear</button>' : ""}
+          ${selectedPaths.length ? `<button class="viewer-scheme-compare-clear" type="button">${t("Clear", "清除")}</button>` : ""}
         </div>
         <div class="viewer-scheme-compare-results" role="list">
           ${candidates.map((layout) => renderCandidate(layout)).join("")}
@@ -212,10 +218,12 @@ export function createSchemeCompareController(deps: SchemeCompareControllerDeps)
           <div class="viewer-scheme-compare-list">
             ${selected.map((item) => renderItem(item)).join("")}
           </div>
+          ${renderVariantAnalysis(selected)}
           <div class="viewer-scheme-compare-actions">
-            <button class="viewer-nav-button viewer-scheme-compare-open" type="button" ${ready.length < 2 ? "disabled" : ""}>Open Split</button>
-            <button class="viewer-nav-button viewer-nav-button-secondary viewer-scheme-compare-details" type="button" ${ready.length < 2 ? "disabled" : ""}>Details A/B</button>
+            <button class="viewer-nav-button viewer-scheme-compare-open" type="button" ${ready.length < 2 ? "disabled" : ""}>${t("Open split view", "打开分屏视图")}</button>
+            <button class="viewer-nav-button viewer-nav-button-secondary viewer-scheme-compare-details" type="button" ${ready.length < 2 ? "disabled" : ""}>${t("Compare details", "查看方案差异")}</button>
           </div>
+          <section class="viewer-scheme-compare-details-output" aria-live="polite"></section>
         `}
       </div>
     `;
@@ -224,8 +232,8 @@ export function createSchemeCompareController(deps: SchemeCompareControllerDeps)
   function renderManualEmpty(): string {
     return `
       <div class="viewer-scheme-compare-empty">
-        <strong>Select 2-3 recent results to compare</strong>
-        <span>Use the checkboxes above. The current direct layout is included even when it is not in the recent list yet.</span>
+        <strong>${t("Select 2-3 generated schemes", "选择 2–3 个已生成方案")}</strong>
+        <span>${t("Choose schemes above. The current scene remains available even before it appears in recent results.", "在上方勾选方案；即使当前场景尚未进入最近结果，也可参与对比。")}</span>
       </div>
     `;
   }
@@ -313,6 +321,38 @@ export function createSchemeCompareController(deps: SchemeCompareControllerDeps)
     `;
   }
 
+  function renderVariantAnalysis(items: HydratedComparisonItem[]): string {
+    const rows: Array<{ label: string; value: (item: HydratedComparisonItem) => string }> = [
+      { label: t("Variant", "变体"), value: (item) => item.variant_name || item.scheme_id },
+      { label: t("Preset", "预设"), value: (item) => item.metadata?.preset_label || item.metadata?.preset_id || "—" },
+      { label: t("Road lanes", "车道数"), value: (item) => formatMetadataValue(item.metadata?.lane_count) },
+      { label: t("Road width", "道路宽度"), value: (item) => formatMetadataValue(item.metadata?.road_width_m, " m") },
+      { label: t("Density", "密度"), value: (item) => formatMetadataValue(item.metadata?.density) },
+      { label: t("Scene objects", "场景地物"), value: (item) => formatMetadataValue(item.metadata?.instance_count) },
+      { label: t("Balance", "均衡度"), value: (item) => formatMetadataValue(item.manifest?.summary?.balance_score) },
+      { label: t("Style consistency", "风格一致性"), value: (item) => formatMetadataValue(item.manifest?.summary?.style_consistency) },
+      { label: t("Spacing uniformity", "间距均匀性"), value: (item) => formatMetadataValue(item.manifest?.summary?.spacing_uniformity) },
+    ];
+    return `
+      <section class="viewer-scheme-variant-analysis" aria-label="${deps.escapeHtml(t("Scheme and variant analysis", "方案与变体分析"))}">
+        <header>
+          <strong>${t("Scheme and variant analysis", "方案与变体分析")}</strong>
+          <span>${t("Only the selected A/B/C schemes and their variants are compared.", "仅比较当前选择的 A/B/C 方案及其变体，不读取全量历史。")}</span>
+        </header>
+        <div class="viewer-scheme-variant-matrix" role="table">
+          ${rows.map((row) => {
+            const values = items.map(row.value);
+            const differs = new Set(values.filter((value) => value !== "—")).size > 1;
+            return `<div class="viewer-scheme-variant-row" data-diff="${differs ? "true" : "false"}" role="row">
+              <span role="rowheader">${deps.escapeHtml(row.label)}</span>
+              ${values.map((value) => `<b role="cell">${deps.escapeHtml(value)}</b>`).join("")}
+            </div>`;
+          }).join("")}
+        </div>
+      </section>
+    `;
+  }
+
   function hydrateSelected(): void {
     const version = ++hydrationVersion;
     for (const path of selectedPaths) {
@@ -372,7 +412,10 @@ export function createSchemeCompareController(deps: SchemeCompareControllerDeps)
     if (ready.length < 2) {
       return;
     }
-    deps.syncComparePair(ready[0]!, ready[1]!, openDetails);
+    const detailsHost = openDetails
+      ? deps.hostEl.querySelector<HTMLElement>(".viewer-scheme-compare-details-output") ?? undefined
+      : undefined;
+    deps.syncComparePair(ready[0]!, ready[1]!, openDetails, detailsHost);
   }
 
   function openSplitView(): void {
@@ -493,5 +536,6 @@ export function createSchemeCompareController(deps: SchemeCompareControllerDeps)
     restoreStoredSelection,
     clearSelection,
     selectedLayoutPaths: () => [...selectedPaths],
+    refresh: render,
   };
 }

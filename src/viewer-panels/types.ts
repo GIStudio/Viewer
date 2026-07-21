@@ -6,7 +6,6 @@ export type ViewerPanelKey =
   | "evaluate"
   | "compare"
   | "help"
-  | "history"
   | "consistency";
 
 export type ViewerPanelText = (en: string, zh: string) => string;
@@ -110,15 +109,10 @@ export type ViewerPanelElements = {
   evaluationConfigErrorEl: HTMLElement;
   evaluationConfigResetEl: HTMLButtonElement;
   comparePanelEl: HTMLElement;
-  compareCloseEl: HTMLButtonElement;
   compareSelectAEl: HTMLSelectElement;
   compareSelectBEl: HTMLSelectElement;
   compareResultsEl: HTMLElement;
   exitCompare3dEl: HTMLButtonElement;
-  historyAnalysisToggleEl: HTMLButtonElement;
-  historyAnalysisPanelEl: HTMLElement;
-  historyAnalysisCloseEl: HTMLButtonElement;
-  historyAnalysisContentEl: HTMLElement;
   consistencyPanelEl: HTMLElement;
   consistencyCloseEl: HTMLButtonElement;
   consistencyContentEl: HTMLElement;
@@ -139,7 +133,6 @@ export type ViewerPanelElements = {
   sceneCommandUndoEl: HTMLButtonElement;
   sceneCommandStatusEl: HTMLElement;
   floatingLanePanelHost: HTMLElement;
-  floatingLaneToggleEl: HTMLButtonElement;
   generationRunEl: HTMLButtonElement;
   syncCameraEl: HTMLButtonElement;
   mode3dEl: HTMLButtonElement;

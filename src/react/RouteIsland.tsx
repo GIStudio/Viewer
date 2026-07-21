@@ -4,6 +4,7 @@ import { mountViewer } from "../app";
 import { mountAssetEditor } from "../asset-editor";
 import { mountSceneGraphPage } from "../scene-graph";
 import { bindDesktopShell } from "../desktop-shell";
+import { SHELL_ACTION_EVENT } from "../shell-events";
 import { navigateTo } from "../ui";
 import type { AppRoute } from "../ui";
 import {
@@ -120,7 +121,9 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       }
       if (target === "browse") {
         host.querySelector<HTMLButtonElement>("#viewer-mode-3d")?.click();
-        host.querySelector<HTMLButtonElement>("[data-viewer-center-control=browser]")?.click();
+        host.dispatchEvent(new CustomEvent(SHELL_ACTION_EVENT, {
+          detail: { actionId: "tools-open-scenes" },
+        }));
         return;
       }
       if (target === "review") {

@@ -105,6 +105,49 @@
   flex: 0 0 auto;
 }
 
+.scene-generation-confirm-dialog {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.scene-generation-confirm-dialog[hidden] { display: none; }
+
+.scene-generation-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 27, 40, 0.46);
+}
+
+.scene-generation-confirm-panel {
+  position: relative;
+  z-index: 1;
+  width: min(33rem, calc(100vw - 2rem));
+  padding: 1.2rem;
+  border: 1px solid rgba(0, 83, 159, 0.36);
+  border-radius: 0.9rem;
+  background: #fffdf8;
+  box-shadow: 0 22px 70px rgba(15, 23, 42, 0.3);
+}
+
+.scene-generation-confirm-panel header > span {
+  color: var(--color-primary-dark);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.scene-generation-confirm-panel h2 { margin: 0.24rem 0; font-size: 1.15rem; }
+.scene-generation-confirm-panel p { margin: 0.3rem 0; color: rgba(15, 23, 42, 0.68); font-size: 0.8rem; line-height: 1.5; }
+.scene-generation-confirm-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; margin: 0.85rem 0; }
+.scene-generation-confirm-summary > div { padding: 0.54rem 0.62rem; border-radius: 0.55rem; background: rgba(232, 244, 255, 0.7); }
+.scene-generation-confirm-summary span { display: block; color: rgba(15, 23, 42, 0.55); font-size: 0.65rem; }
+.scene-generation-confirm-summary strong { display: block; margin-top: 0.12rem; color: #12384f; font-size: 0.84rem; }
+.scene-generation-confirm-panel footer { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.9rem; }
+
 .scene-tool-group {
   display: flex;
   flex-direction: column;
@@ -461,6 +504,13 @@
 .scene-canvas-viewport-shell[data-has-canvas="false"] .scene-canvas-viewport-controls,
 .scene-canvas-viewport-shell[data-has-canvas="false"] .scene-canvas-viewport-hint {
   visibility: hidden;
+}
+
+/* MapLibre owns zoom and pan while the OSM picker is visible. Its guidance
+   belongs in the picker toolbar, so the annotation hint cannot cover it. */
+.scene-canvas-viewport-shell:has(#scene-osm-aoi-picker:not([hidden])) .scene-canvas-viewport-controls,
+.scene-canvas-viewport-shell:has(#scene-osm-aoi-picker:not([hidden])) .scene-canvas-viewport-hint {
+  display: none;
 }
 
 .scene-layer-stage[data-pan-ready="true"] .scene-board,

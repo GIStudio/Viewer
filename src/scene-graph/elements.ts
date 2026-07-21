@@ -72,6 +72,7 @@ export type SceneGraphElements = {
   sourceCountsEl: HTMLElement;
   sourceWarningsEl: HTMLElement;
   sourceBackButton: HTMLButtonElement;
+  sourceOpenAnnotationToolsButton: HTMLButtonElement;
   sourceGenerateButton: HTMLButtonElement;
   sourceOpenExistingButton: HTMLButtonElement;
   sourceReviewStatusEl: HTMLElement;
@@ -150,6 +151,7 @@ export function collectSceneGraphElements(root: HTMLElement | Document): SceneGr
     sourceCountsEl: requireElement<HTMLElement>(root, "#scene-source-counts"),
     sourceWarningsEl: requireElement<HTMLElement>(root, "#scene-source-warnings"),
     sourceBackButton: requireElement<HTMLButtonElement>(root, "#scene-source-back"),
+    sourceOpenAnnotationToolsButton: requireElement<HTMLButtonElement>(root, "#scene-source-open-annotation-tools"),
     sourceGenerateButton: requireElement<HTMLButtonElement>(root, "#scene-source-generate"),
     sourceOpenExistingButton: requireElement<HTMLButtonElement>(root, "#scene-source-open-existing"),
     sourceReviewStatusEl: requireElement<HTMLElement>(root, "#scene-source-review-status"),

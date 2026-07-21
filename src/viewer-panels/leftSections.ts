@@ -10,10 +10,6 @@ export function createViewerLeftSections(t: ViewerPanelText): ViewerLeftSection[
         <nav class="viewer-control-menu" aria-label="${t("Control panels", "控制面板")}">
           <div class="viewer-control-menu-group">
             <span class="viewer-control-menu-label">${t("Scene", "场景")}</span>
-            <button class="viewer-control-menu-item" type="button" data-viewer-center-control="browser">
-              <span class="viewer-control-menu-code">SC</span>
-              <span><strong>${t("Scene Browser", "场景浏览")}</strong><small>${t("Layouts and generated scenes", "布局与已生成场景")}</small></span>
-            </button>
             <button class="viewer-control-menu-item" type="button" id="viewer-scene-graph-link">
               <span class="viewer-control-menu-code">AN</span>
               <span><strong>${t("Annotation", "标注")}</strong><small>${t("Reference geometry workspace", "参考几何工作区")}</small></span>
@@ -35,10 +31,6 @@ export function createViewerLeftSections(t: ViewerPanelText): ViewerLeftSection[
             <button class="viewer-control-menu-item" type="button" id="viewer-edit-toggle">
               <span class="viewer-control-menu-code">ED</span>
               <span><strong>${t("Edit", "编辑")}</strong><small>${t("Objects, transforms, and layers", "对象、变换与图层")}</small></span>
-            </button>
-            <button class="viewer-control-menu-item" type="button" id="viewer-floating-lane-toggle">
-              <span class="viewer-control-menu-code">OV</span>
-              <span><strong>${t("Live Overlay", "实时叠加")}</strong><small>${t("Open semantic overlay controls", "打开语义叠加控制")}</small></span>
             </button>
           </div>
           <div class="viewer-control-menu-group">

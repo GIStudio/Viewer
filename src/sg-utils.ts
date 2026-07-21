@@ -1535,6 +1535,21 @@ export function splitCenterlineAtSnap(
   const [leftId, rightId] = reserveNextFeatureIdsWithBlocked(annotation, "centerline", 2, blockedCenterlineIds);
   const left = cloneCenterlineForBranch(centerline, leftId, originalPoints.slice(0, splitIndex + 1));
   const right = cloneCenterlineForBranch(centerline, rightId, originalPoints.slice(splitIndex));
+  if (centerline.source_refs?.kind === "osm_road") {
+    // A manual topology split is still traceable to the source way, while
+    // each editable child keeps a geometry that can independently restore to
+    // its pre-edit OSM segment.
+    left.source_refs = {
+      ...centerline.source_refs,
+      edit_state: "modified",
+      original_points: left.points.map((point) => ({ ...point })),
+    };
+    right.source_refs = {
+      ...centerline.source_refs,
+      edit_state: "modified",
+      original_points: right.points.map((point) => ({ ...point })),
+    };
+  }
   left.start_junction_id = centerline.start_junction_id;
   left.end_junction_id = junctionId;
   right.start_junction_id = junctionId;

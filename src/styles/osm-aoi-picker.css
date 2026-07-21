@@ -35,10 +35,17 @@
   top: 1rem;
   left: 1rem;
   display: flex;
+  flex-wrap: wrap;
   align-items: end;
   gap: 0.65rem;
   max-width: calc(100% - 7.5rem);
   padding: 0.65rem;
+}
+
+.osm-aoi-picker-gesture-hint {
+  flex: 1 0 100%;
+  color: #607177;
+  font: 700 0.58rem/1.25 var(--rg-mono-font, ui-monospace, monospace);
 }
 
 .osm-aoi-picker-actions {

@@ -68,6 +68,7 @@ export function mountOsmRoadStudyPicker(
           <legend>${zh ? "路网邻域" : "NETWORK NEIGHBORHOOD"}</legend>
           <label><input type="radio" name="osm-hop-count" value="1" checked /> <span>1 ${zh ? "跳（默认）" : "hop (default)"}</span></label>
           <label><input type="radio" name="osm-hop-count" value="2" /> <span>2 ${zh ? "跳" : "hops"}</span></label>
+          <small class="osm-road-study-hop-hint">${zh ? "1 跳：种子道路及与它直接相连的道路；2 跳：再纳入这些道路直接相连的下一层道路，研究范围更大。" : "1 hop includes the seed road and roads directly connected to it. 2 hops adds the next directly connected layer, creating a larger study area."}</small>
         </fieldset>
         <label class="osm-road-study-buffer">
           <span>${zh ? "上下文 BUFFER" : "CONTEXT BUFFER"}</span>

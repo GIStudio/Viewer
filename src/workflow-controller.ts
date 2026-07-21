@@ -29,6 +29,7 @@ export type WorkflowSourceDescriptor = Readonly<Record<string, unknown> & {
 export type WorkflowSourceContext = Readonly<Record<string, unknown> & {
   aligned_buildings?: readonly Readonly<Record<string, unknown>>[];
   source_alignment?: Readonly<Record<string, unknown>> | null;
+  osm_annotation_context?: Readonly<Record<string, unknown>> | null;
 }>;
 
 export type WorkflowSceneRef =
@@ -554,7 +555,12 @@ export function createWorkflowController(): WorkflowController {
     },
     restoreProfessionalDraft(draft) {
       const revision = Math.max(0, Number(draft.sourceRevision) || 0);
-      const approvedRevision = draft.approvedSourceRevision === revision ? revision : null;
+      const restoredOsmBaseAnnotation = draft.sourceKind === "osm"
+        && Boolean(draft.normalized)
+        && draft.annotationDraft.status === "saved";
+      const approvedRevision = draft.approvedSourceRevision === revision || restoredOsmBaseAnnotation
+        ? revision
+        : null;
       const restoredLayoutPath = String(draft.sceneLayoutPath || "").trim() || null;
       const restoredSceneSourceRevision = typeof draft.sceneSourceRevision === "number"
         ? Math.max(0, Math.floor(draft.sceneSourceRevision))

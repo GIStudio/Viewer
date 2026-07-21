@@ -9,7 +9,6 @@ import * as THREE from "three";
 import type { FloatingLaneConfig, ViewerManifest } from "./viewer-types";
 import { PER_LANE_COLORS } from "./viewer-types";
 import { createTextSprite } from "./viewer-utils";
-import type { DesktopShell } from "./desktop-shell";
 import type { ViewerLanguage } from "./viewer-i18n";
 
 // ── Color Constants ────────────────────────────────────────────
@@ -59,8 +58,6 @@ export interface FloatingLaneDeps {
   axisHudEl: HTMLCanvasElement;
   layoutOverlayToggleEl: HTMLInputElement;
   panelHost: HTMLElement;
-  shell: DesktopShell;
-  shouldDeactivateTab: () => boolean;
   getLanguage: () => ViewerLanguage;
 }
 
@@ -127,8 +124,6 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
     axisHudEl,
     layoutOverlayToggleEl,
     panelHost,
-    shell,
-    shouldDeactivateTab,
     getLanguage,
   } = deps;
 
@@ -1005,7 +1000,10 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
   function updateControlPanelVisibility(): void {
     const panel = document.getElementById("floating-lane-panel");
     if (panel) {
-      panel.style.display = floatingLaneConfig.enabled ? "block" : "none";
+      // The controls live in Settings, so the enable switch must remain
+      // reachable while the overlay itself is off.
+      panel.style.display = "block";
+      panel.dataset.enabled = String(floatingLaneConfig.enabled);
     }
   }
 
@@ -1320,13 +1318,9 @@ export function createFloatingLaneSystem(deps: FloatingLaneDeps): FloatingLaneSy
     if (floatingLaneConfig.enabled) {
       buildFloatingLaneOverlay();
       mountControlPanel();
-      shell.activateRightTab("floating-lane");
     } else {
       clearFloatingLaneOverlay({ resetSelection: true });
       updateControlPanelVisibility();
-      if (shouldDeactivateTab()) {
-        shell.activateRightTab(null);
-      }
     }
   }
 

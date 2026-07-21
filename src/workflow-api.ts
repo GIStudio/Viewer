@@ -67,6 +67,7 @@ export type NormalizedSceneSourceResponse = ConvertedGraphPayload & {
   warnings: string[];
   aligned_buildings: AlignedBuilding[];
   source_alignment: SourceAlignment;
+  osm_annotation_context?: Record<string, unknown>;
   llm?: {
     provider?: string;
     protocol?: string;
@@ -139,6 +140,7 @@ export type OsmRoadStudyResponse = NormalizedSceneSourceResponse & {
     retrieval_bbox: [number, number, number, number];
     warnings: string[];
   };
+  osm_annotation_context: Record<string, unknown>;
 };
 
 export type OsmBuildingsResponse = {
@@ -204,6 +206,7 @@ export function toNormalizedSceneSource(payload: NormalizedSceneSourceResponse):
       source: payload.source,
       aligned_buildings: payload.aligned_buildings,
       source_alignment: payload.source_alignment,
+      osm_annotation_context: payload.osm_annotation_context ?? null,
     },
     featureCounts: countNormalizedFeatures(payload),
     normalizedAt: new Date().toISOString(),

@@ -52,7 +52,7 @@ export function createViewerStageHtml(): string {
         <div class="stage-toolbar-group stage-toolbar-output" data-od-id="toolbar-right">
           <button class="stage-toolbar-button stage-toolbar-button-primary" type="button" id="viewer-direct-edit" aria-pressed="false">编辑地物</button>
           <button class="stage-toolbar-button" type="button" id="viewer-top-assets">资产库</button>
-          <button class="stage-toolbar-button" type="button" id="viewer-scenario-workbench-toggle" hidden>方案 A/B/C</button>
+          <button class="stage-toolbar-button" type="button" id="viewer-scheme-compare-toggle" data-viewer-center-control="schemes" aria-expanded="false">方案 A/B/C</button>
           <button class="stage-toolbar-button" type="button" id="viewer-open-camera-surface-diagnostic" title="相机局部几何诊断">QA 100m</button>
           <button class="stage-toolbar-button" type="button" id="viewer-consistency-toggle" title="调试：查看转换与拓扑检查" data-i18n-key="viewer.stage.consistencyDebug">Consistency debug</button>
           <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-map" data-shell-action="file-export-png">PNG</button>
@@ -100,11 +100,11 @@ export function createViewerStageHtml(): string {
           <button id="viewer-center-controls-close" class="viewer-center-controls-close" type="button" aria-label="Close scene browser" data-i18n-aria-label-key="viewer.sceneBrowser.close">×</button>
         </header>
         <div class="viewer-center-controls-body">
-          <label class="desktop-shell-field">
+          <label class="desktop-shell-field viewer-scene-browser-only">
             <span data-i18n-key="viewer.sceneBrowser.myScenes">My scenes</span>
             <select id="layout-select" class="viewer-select viewer-select-inline" title="My scenes" data-i18n-title-key="viewer.sceneBrowser.myScenes"></select>
           </label>
-          <div class="viewer-scene-name-editor">
+          <div class="viewer-scene-name-editor viewer-scene-browser-only">
             <label class="desktop-shell-field" for="viewer-scene-name">
               <span data-i18n-key="viewer.sceneBrowser.name">Scene name</span>
               <input id="viewer-scene-name" class="viewer-input" type="text" maxlength="48" autocomplete="off" />
@@ -118,6 +118,14 @@ export function createViewerStageHtml(): string {
           <div id="viewer-scheme-compare" class="viewer-scheme-compare"></div>
         </div>
       </section>
+
+      <!-- The comparison engine has no separate UI. Its visible output is
+           mounted inside the Scheme A/B/C surface on demand. -->
+      <div id="viewer-compare-panel" hidden aria-hidden="true">
+        <select id="compare-layout-a" tabindex="-1" aria-hidden="true"></select>
+        <select id="compare-layout-b" tabindex="-1" aria-hidden="true"></select>
+        <div id="viewer-compare-results" class="viewer-compare-results"></div>
+      </div>
 
       <button id="viewer-exit-compare3d" class="viewer-exit-compare3d" type="button" hidden data-i18n-key="viewer.compare.exit">Exit Split View</button>
 

@@ -39,6 +39,11 @@
   gap: 0.28rem;
 }
 
+/* Keep every action in the same compact two-column rhythm. */
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-tools-actions-slot .scene-stage-action-row > * {
+  grid-column: auto;
+}
+
 .desktop-shell-section[data-section-id="annotation-tools"] .scene-tool-group {
   display: grid;
   gap: 0.22rem;
@@ -56,6 +61,17 @@
   font-weight: 850;
   letter-spacing: 0.075em;
   line-height: 1.1;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-furniture-annotation-note {
+  margin: 0.18rem 0 0;
+  padding: 0.36rem 0.42rem;
+  border-left: 2px solid rgba(0, 83, 159, 0.58);
+  border-radius: 0 0.42rem 0.42rem 0;
+  background: rgba(232, 244, 255, 0.78);
+  color: rgba(15, 51, 79, 0.78);
+  font-size: 0.62rem;
+  line-height: 1.38;
 }
 
 .desktop-shell-section[data-section-id="annotation-tools"] .scene-tool-row {
@@ -108,12 +124,6 @@
   padding: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
-}
-
-.desktop-shell-section[data-section-id="annotation-tools"] #annotation-delete-selected,
-.desktop-shell-section[data-section-id="annotation-tools"] #annotation-reset,
-.desktop-shell-section[data-section-id="annotation-tools"] .scene-layer-toggle {
-  grid-column: span 2;
 }
 
 .desktop-shell-section[data-section-id="annotation-tools"] .scene-layer-toggle {

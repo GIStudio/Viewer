@@ -360,7 +360,6 @@ export function bindDesktopShell(
       "public-space": "▦",
       compare: "↔",
       history: "◷",
-      "floating-lane": "≋",
       consistency: "≡",
       settings: "⚙",
       help: "?",
@@ -548,7 +547,7 @@ export function bindDesktopShell(
     Array.from(host.querySelectorAll<HTMLButtonElement>(".viewer-control-menu-item")).forEach((button) => {
       const implicitId = button.dataset.viewerCenterControl === "browser" ? "viewer-scene-browser-toggle" : button.id;
       const mapped = idMap[implicitId];
-      if (!mapped || button.id === "viewer-floating-lane-toggle") return;
+      if (!mapped) return;
       if (mode === "single_left_overlay" && ["scene", "annotation", "assets", "design", "edit"].includes(mapped.id)) return;
       if (mode === "course_single_left" && !["scene", "edit", "settings"].includes(mapped.id)) return;
       const label = button.querySelector("strong")?.textContent?.trim() || mapped.id;
@@ -620,9 +619,7 @@ export function bindDesktopShell(
     applyViewerTranslations(root, currentLanguage);
   }
 
-  const viewerTabButtonIds: Record<string, string> = {
-    history: "viewer-history-analysis-toggle",
-  };
+  const viewerTabButtonIds: Record<string, string> = {};
 
   const modalTabOpeners = new Map<string, () => void>();
 
@@ -699,7 +696,7 @@ export function bindDesktopShell(
       tabs.filter((tab) => tab.presentation === "modal").forEach(createModalTab);
       const nonModalTabs = tabs.filter((tab) => tab.presentation !== "modal");
       const visibleTabs = mode === "course_single_left" && route === "viewer"
-        ? nonModalTabs.filter((tab) => ["evaluate", "compare", "floating-lane"].includes(tab.id))
+        ? nonModalTabs.filter((tab) => ["evaluate", "compare"].includes(tab.id))
         : nonModalTabs;
       leftRail.querySelector("[data-course-hidden-tabs]")?.remove();
       if (visibleTabs.length !== nonModalTabs.length) {
@@ -721,7 +718,7 @@ export function bindDesktopShell(
       rightSidebarPages = visibleTabs.map((tab) => ({
         id: tab.id,
         label: tab.label,
-        icon: ({ evaluate: "EV", compare: "CP", history: "HI", "floating-lane": "OV", consistency: "QA" } as Record<string, string>)[tab.id],
+        icon: ({ evaluate: "EV", compare: "CP", history: "HI", consistency: "QA" } as Record<string, string>)[tab.id],
         group: "analysis",
         content: tab.content,
         ...(tab.presentation === "modal" ? { action: createModalTab(tab) } : {}),

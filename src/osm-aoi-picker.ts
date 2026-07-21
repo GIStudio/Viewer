@@ -159,6 +159,7 @@ export function mountOsmAoiPicker(host: HTMLElement, options: OsmAoiPickerOption
           <button type="button" data-aoi-action="draw" ${options.readonly ? "hidden" : ""}>${zh ? "精确框选" : "Draw precisely"}</button>
           <button type="button" data-aoi-action="fit" ${selection ? "" : "hidden"}>${zh ? "适应选区" : "Fit area"}</button>
         </div>
+        <small class="osm-aoi-picker-gesture-hint">${zh ? "滚轮缩放地图 · 拖动平移" : "Scroll to zoom · Drag to pan"}</small>
       </header>
       <aside class="osm-aoi-picker-panel">
         <div class="osm-aoi-selection-copy">

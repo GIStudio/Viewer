@@ -98,8 +98,11 @@ const METRIC_OVERLAYS: Array<{ key: ExpandedMapMetricKey; en: string; zh: string
 const COVERAGE_RADII_M: Record<string, number> = {
   tree: 1.8,
   lamp: 10,
-  bench: 20,
-  bus_stop: 60,
+  // Amenity coverage is a pedestrian-service catchment, not the physical
+  // footprint of the asset. Seats serve a nearby 100 m walk, while transit
+  // stops serve the broader 500 m access catchment.
+  bench: 100,
+  bus_stop: 500,
   trash: 25,
   mailbox: 30,
   hydrant: 30,
@@ -1595,7 +1598,7 @@ function drawCoverageMetric(
     ? text("Tree canopy radius: 1.8m", "树冠半径：1.8m")
     : metric === "lighting"
       ? text("Lamp effective radius: 10m", "路灯有效半径：10m")
-      : text("Bench 20m, bus stop 60m, trash 25m, mailbox/hydrant 30m", "座椅20m，公交60m，垃圾桶25m，邮箱/消防30m");
+      : text("Bench 100m, bus stop 500m; trash 25m, mailbox/hydrant 30m", "座椅100m，公交500m；垃圾桶25m，邮箱/消防30m");
   return {
     title,
     subtitle,

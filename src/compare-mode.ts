@@ -436,7 +436,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
       .join("");
 
     html += `<div class="viewer-compare-tab-panel" data-tab="metrics" data-active="true">
-      <div class="viewer-compare-table-header-info">${t("← Layout A (Left)", "← 布局 A（左侧）")} · ${t("Layout B (Right) →", "布局 B（右侧） →")}</div>
+      <div class="viewer-compare-table-header-info">${t("← Scheme A (Left)", "← 方案 A（左侧）")} · ${t("Scheme B (Right) →", "方案 B（右侧） →")}</div>
       <div class="viewer-compare-table-wrap"><table class="viewer-compare-table">
         <thead><tr><th>${t("Metric", "指标")}</th><th>${t("A", "A")}</th><th>${t("B", "B")}</th><th>${t("Diff", "差异")}</th></tr></thead><tbody>${metricsRows}</tbody>
       </table></div>
@@ -508,7 +508,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
       // 渲染新增的配置（按类型分组）
       if (configAdded.length) {
         const addedByCategory = categorizeEntries(configAdded);
-        configHtml += `<div class="viewer-config-section-title">${t("Added in Layout B", "B 新增的配置")}</div>`;
+        configHtml += `<div class="viewer-config-section-title">${t("Added in Scheme B", "方案 B 新增的配置")}</div>`;
         for (const cat of ["query", "setting", "result", "other"] as ConfigCategory[]) {
           configHtml += renderConfigCategory(cat, addedByCategory[cat], "added");
         }
@@ -517,7 +517,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
       // 渲染删除的配置（按类型分组）
       if (configRemoved.length) {
         const removedByCategory = categorizeEntries(configRemoved);
-        configHtml += `<div class="viewer-config-section-title">${t("Removed from Layout A", "A 删除的配置")}</div>`;
+        configHtml += `<div class="viewer-config-section-title">${t("Removed from Scheme A", "方案 A 删除的配置")}</div>`;
         for (const cat of ["query", "setting", "result", "other"] as ConfigCategory[]) {
           configHtml += renderConfigCategory(cat, removedByCategory[cat], "removed");
         }
@@ -588,17 +588,17 @@ export function createCompareMode(deps: CompareModeDependencies) {
 
     // Preview tab
     html += `<div class="viewer-compare-tab-panel" data-tab="preview">
-      <div class="viewer-compare-images-header">${t("← Layout A (Left)", "← 布局 A（左侧）")} · ${t("Layout B (Right) →", "布局 B（右侧） →")}</div>
+      <div class="viewer-compare-images-header">${t("← Scheme A (Left)", "← 方案 A（左侧）")} · ${t("Scheme B (Right) →", "方案 B（右侧） →")}</div>
       <div class="viewer-compare-images">
         <div class="viewer-compare-col">
-          <div class="viewer-compare-layout-badge viewer-compare-layout-a">${t("Layout A", "布局 A")}</div>
+          <div class="viewer-compare-layout-badge viewer-compare-layout-a">${t("Scheme A", "方案 A")}</div>
           <div class="viewer-compare-thumb-label">${deps.escapeHtml(deps.compactUiLabel(a.layout_path!))}</div>
-          ${imgA ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgA)}" alt="Layout A" />` : `<div class='viewer-compare-no-img'>${t("No preview", "无预览")}</div>`}
+          ${imgA ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgA)}" alt="Scheme A" />` : `<div class='viewer-compare-no-img'>${t("No preview", "无预览")}</div>`}
         </div>
         <div class="viewer-compare-col">
-          <div class="viewer-compare-layout-badge viewer-compare-layout-b">${t("Layout B", "布局 B")}</div>
+          <div class="viewer-compare-layout-badge viewer-compare-layout-b">${t("Scheme B", "方案 B")}</div>
           <div class="viewer-compare-thumb-label">${deps.escapeHtml(deps.compactUiLabel(b.layout_path!))}</div>
-          ${imgB ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgB)}" alt="Layout B" />` : `<div class='viewer-compare-no-img'>${t("No preview", "无预览")}</div>`}
+          ${imgB ? `<img class="viewer-compare-thumb" src="${deps.escapeHtml(imgB)}" alt="Scheme B" />` : `<div class='viewer-compare-no-img'>${t("No preview", "无预览")}</div>`}
         </div>
       </div>
     </div>`;
@@ -720,7 +720,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
     await enterCompareSceneSet([
       {
         id: "A",
-        label: t("Layout A", "布局 A"),
+        label: t("Scheme A", "方案 A"),
         layoutPath: a.layout_path || "",
         glbUrl: a.final_scene.glb_url,
         stepKey: "final_scene",
@@ -728,7 +728,7 @@ export function createCompareMode(deps: CompareModeDependencies) {
       },
       {
         id: "B",
-        label: t("Layout B", "布局 B"),
+        label: t("Scheme B", "方案 B"),
         layoutPath: b.layout_path || "",
         glbUrl: b.final_scene.glb_url,
         stepKey: "final_scene",

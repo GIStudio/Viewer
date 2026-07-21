@@ -1,4 +1,4 @@
-import { Button, Layout, Tabs, Tooltip } from "antd";
+import { Button, Layout, Tabs } from "antd";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
 
@@ -148,15 +148,6 @@ export function ViewerDesktopShell({
             )}
             actions={(
               <>
-                <Tooltip title={t("studio.courseEntryHint", "Open the six-step student course workflow") }>
-                  <Button
-                    className="studio-course-entry"
-                    type="default"
-                    onClick={() => navigateTo("course-studio")}
-                  >
-                    {t("studio.openCourse", "Course Studio")}
-                  </Button>
-                </Tooltip>
                 <StudioLanguageToggle language={language} />
                 <ShellMenus
                   language={language}

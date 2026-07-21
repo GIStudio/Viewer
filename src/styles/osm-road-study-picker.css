@@ -95,6 +95,12 @@
   font: 700 0.64rem/1.2 var(--rg-mono-font, ui-monospace, monospace);
 }
 
+.osm-road-study-hop-hint {
+  grid-column: 1 / -1;
+  color: #607177;
+  font: 0.57rem/1.4 var(--rg-mono-font, ui-monospace, monospace);
+}
+
 .osm-road-study-buffer {
   display: grid;
   gap: 0.35rem;

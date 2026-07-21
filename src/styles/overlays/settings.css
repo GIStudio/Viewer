@@ -151,6 +151,14 @@
   accent-color: var(--rg-blue);
 }
 
+.viewer-setting-control-hint {
+  display: block;
+  margin-top: 0.38rem;
+  color: var(--rg-muted);
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
 .viewer-settings-toggle-group {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -254,4 +262,17 @@
   border: 1px solid var(--rg-blue);
   border-top: 0;
   background: rgba(255, 253, 247, 0.94);
+}
+
+.viewer-settings-floating-lane-host {
+  min-width: 0;
+}
+
+.viewer-settings-floating-lane-host .floating-lane-panel {
+  margin: 0;
+  max-width: none;
+}
+
+.viewer-settings-floating-lane-host .floating-lane-panel[data-enabled="false"] {
+  opacity: 0.78;
 }

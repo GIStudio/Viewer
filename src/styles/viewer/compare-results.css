@@ -23,6 +23,73 @@
   gap: 0.45rem;
 }
 
+.viewer-scheme-compare-details-output {
+  min-width: 0;
+}
+
+.viewer-scheme-compare-details-output .viewer-compare-results {
+  max-height: min(34rem, 52vh);
+  overflow: auto;
+}
+
+.viewer-scheme-variant-analysis {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.65rem;
+  border: 1px solid rgba(14, 116, 144, 0.24);
+  border-radius: 0.55rem;
+  background: rgba(236, 254, 255, 0.42);
+}
+
+.viewer-scheme-variant-analysis header {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.viewer-scheme-variant-analysis header strong {
+  color: #164e63;
+  font-size: 0.82rem;
+}
+
+.viewer-scheme-variant-analysis header span {
+  color: #475569;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.viewer-scheme-variant-matrix {
+  display: grid;
+  gap: 0.22rem;
+  overflow-x: auto;
+}
+
+.viewer-scheme-variant-row {
+  display: grid;
+  grid-template-columns: minmax(5.2rem, 0.9fr) repeat(3, minmax(4.4rem, 1fr));
+  gap: 0.25rem;
+  min-width: 19rem;
+}
+
+.viewer-scheme-variant-row > span,
+.viewer-scheme-variant-row > b {
+  padding: 0.32rem 0.4rem;
+  border-radius: 0.32rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: #334155;
+  font-size: 0.69rem;
+  line-height: 1.25;
+}
+
+.viewer-scheme-variant-row > span {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.viewer-scheme-variant-row[data-diff="true"] > b {
+  background: rgba(254, 243, 199, 0.76);
+  color: #92400e;
+}
+
 .viewer-compare3d-labels {
   position: absolute;
   top: 0.85rem;

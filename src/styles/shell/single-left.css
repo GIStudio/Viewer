@@ -413,20 +413,23 @@
   margin-right: 0 !important;
 }
 
-.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-settings-panel,
+.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-shell > .viewer-settings-panel,
 .desktop-shell[data-shell-mode="single_left_overlay"] .viewer-shell > .viewer-slide-panel,
-.desktop-shell[data-shell-mode="course_single_left"] .viewer-settings-panel,
+.desktop-shell[data-shell-mode="course_single_left"] .viewer-shell > .viewer-settings-panel,
 .desktop-shell[data-shell-mode="course_single_left"] .viewer-shell > .viewer-slide-panel {
+  /* The shell reserves the left drawer before the stage. This panel remains
+   * mounted in the stage, so translate its anchor back by exactly that drawer
+   * width to occupy the reserved drawer coordinate instead of its centre. */
   right: auto;
-  left: 0;
+  left: calc(-1 * var(--workbench-drawer-width));
   width: var(--workbench-drawer-width);
   box-shadow: none;
   transform: translateX(-105%);
 }
 
-.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-settings-panel[data-open="true"],
+.desktop-shell[data-shell-mode="single_left_overlay"] .viewer-shell > .viewer-settings-panel[data-open="true"],
 .desktop-shell[data-shell-mode="single_left_overlay"] .viewer-shell > .viewer-slide-panel[data-open="true"],
-.desktop-shell[data-shell-mode="course_single_left"] .viewer-settings-panel[data-open="true"],
+.desktop-shell[data-shell-mode="course_single_left"] .viewer-shell > .viewer-settings-panel[data-open="true"],
 .desktop-shell[data-shell-mode="course_single_left"] .viewer-shell > .viewer-slide-panel[data-open="true"] {
   transform: translateX(0);
 }

@@ -102,9 +102,18 @@ try {
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);
     const bounds = await settings.boundingBox();
+    const viewerBounds = await page.locator(".viewer-shell-embedded").boundingBox();
+    const leftRailBounds = await page.locator(".desktop-shell-rail-right").boundingBox();
     assert.ok(bounds, `settings must be measurable at ${viewport.width}x${viewport.height}`);
+    assert.ok(viewerBounds, `viewer stage must be measurable at ${viewport.width}x${viewport.height}`);
+    assert.ok(leftRailBounds, `left workbench rail must be measurable at ${viewport.width}x${viewport.height}`);
     assert.ok(bounds.x >= -1, `settings escapes left edge at ${viewport.width}x${viewport.height}`);
     assert.ok(bounds.x + bounds.width <= viewport.width + 1, `settings escapes right edge at ${viewport.width}x${viewport.height}`);
+    assert.ok(
+      Math.abs((bounds.x + bounds.width) - viewerBounds.x) <= 1,
+      `settings must occupy the left drawer coordinate at ${viewport.width}x${viewport.height}`,
+    );
+    assert.ok(bounds.x >= leftRailBounds.x + leftRailBounds.width - 1, `settings must not cover the left rail at ${viewport.width}x${viewport.height}`);
     const overflow = await page.evaluate(() => {
       const body = document.querySelector("#viewer-settings-panel .viewer-settings-body");
       return {

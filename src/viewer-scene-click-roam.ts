@@ -16,8 +16,7 @@ const DRAG_THRESHOLD_PX = 6;
 
 /**
  * Converts an ordinary click on the rendered scene into a roam destination.
- * Shift-click deliberately passes through so PointerLockControls can still
- * capture the mouse for first-person look controls.
+ * A drag is deliberately ignored here because it belongs to direct mouse-look.
  */
 export function createSceneClickRoamController(options: SceneClickRoamOptions): SceneClickRoamController {
   const raycaster = new THREE.Raycaster();
@@ -26,7 +25,7 @@ export function createSceneClickRoamController(options: SceneClickRoamOptions): 
   let dragged = false;
 
   const onPointerDown = (event: PointerEvent): void => {
-    if (event.button !== 0 || event.shiftKey) return;
+    if (event.button !== 0) return;
     pointerStart = new THREE.Vector2(event.clientX, event.clientY);
     dragged = false;
   };
@@ -40,7 +39,7 @@ export function createSceneClickRoamController(options: SceneClickRoamOptions): 
 
   const onClick = (event: MouseEvent): void => {
     const root = options.getCurrentRoot();
-    if (!options.isEnabled() || !root || event.button !== 0 || event.shiftKey || dragged) return;
+    if (!options.isEnabled() || !root || event.button !== 0 || dragged) return;
     const rect = options.element.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
     pointer.set(

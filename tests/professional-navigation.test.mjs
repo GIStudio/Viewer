@@ -173,9 +173,21 @@ try {
   assert.equal(await page.locator('[data-shell-tab="model-input-audit"]').count(), 0, "retired model-input audit must not remain in product navigation");
   assert.equal(await page.locator('[data-shell-tab="presets"]').count(), 0, "retired scene presets must not remain in product navigation");
   assert.equal(await page.locator('[data-shell-tab="scene"]').count(), 0, "generic scene browser must not duplicate the production-flow browser");
+  await page.getByRole("button", { name: "工作台菜单", exact: true }).click();
+  const workbenchMenu = page.locator(".ant-dropdown:visible");
+  await workbenchMenu.getByText("我的场景", { exact: true }).click();
+  await page.locator('#viewer-center-controls[data-open="true"]').waitFor();
+  await page.locator("#viewer-center-controls-close").click();
+  await page.locator('#viewer-center-controls[data-open="false"]').waitFor();
   await page.locator("#viewer-direct-edit").waitFor();
   await page.locator("#viewer-top-assets").waitFor();
-  await page.locator("#viewer-scenario-workbench-toggle").waitFor();
+  const schemeCompareToggle = page.locator("#viewer-scheme-compare-toggle");
+  await schemeCompareToggle.waitFor();
+  assert.equal(await page.locator('[data-shell-tab="compare"]').count(), 0, "legacy layout comparison must not remain in the standard drawer");
+  await schemeCompareToggle.click();
+  await page.locator('#viewer-center-controls[data-open="true"][data-mode="schemes"]').waitFor();
+  assert.equal(await page.locator("#viewer-compare-panel").isHidden(), true, "legacy Layout A/B panel must remain an invisible comparison engine");
+  await page.locator("#viewer-center-controls-close").click();
   await page.locator("#viewer-consistency-toggle").click();
   await page.locator("#viewer-consistency-panel[data-open=\"true\"]").waitFor();
   await page.locator("#viewer-consistency-close").click();
@@ -191,6 +203,29 @@ try {
   for (const duplicate of ["annotation", "assets", "design"]) {
     assert.equal(await page.locator(`[data-shell-tab="${duplicate}"]`).count(), 0, `${duplicate} must not duplicate a production-flow entry`);
   }
+  const settingsRailButton = page.locator('[data-shell-tab="settings"]');
+  await settingsRailButton.click();
+  await page.locator('#viewer-settings-panel[data-open="true"]').waitFor();
+  assert.equal(
+    await page.locator("#viewer-settings-panel").evaluate((element) => element.closest(".workbench-sidebar-drawer") !== null),
+    true,
+    "display settings must mount inside the reserved left workbench drawer",
+  );
+  assert.equal(
+    await page.locator("#viewer-settings-panel .viewer-settings-header").isHidden(),
+    true,
+    "the standard drawer header must replace the duplicate display-settings header",
+  );
+  assert.equal(await page.locator('[data-shell-tab="floating-lane"]').count(), 0, "semantic overlay must not create a separate sidebar page");
+  assert.equal(
+    await page.locator("#viewer-floating-lane-panel-host").evaluate((element) => element.closest("#viewer-settings-panel") !== null),
+    true,
+    "floating-lane controls must live inside the standard Settings drawer",
+  );
+  await page.locator("#floating-lane-panel").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#flp-enabled").isChecked(), false, "overlay controls remain available while the overlay is disabled");
+  await page.locator("#viewer-settings-close").click();
+  await settingsRailButton.click();
 
   const openGeneration = page.locator("#viewer-generate-and-load");
   await page.waitForFunction(() => document.querySelector("#viewer-generate-and-load")?.textContent?.trim() === "3D 场景生成");
@@ -265,11 +300,7 @@ try {
 
   await page.locator("[data-close-generation]").last().click();
   assert.equal(await page.locator('#viewer-evaluate-modal-toggle').getAttribute("aria-disabled"), "true", "evaluation stays unavailable until a current 3D scene is accepted");
-  await page.locator('[data-shell-tab="history"]').click();
-  await page.locator("#viewer-history-analysis-panel").waitFor({ state: "visible" });
-  await page.locator("#viewer-history-load-state").waitFor({ state: "visible" });
-  await page.locator('[data-shell-tab="history"]').click();
-  await page.locator("#viewer-history-analysis-panel").waitFor({ state: "hidden" });
+  assert.equal(await page.locator('[data-shell-tab="history"]').count(), 0, "global history analysis must move into Scheme A/B/C comparison");
   for (const viewport of [
     { width: 1600, height: 1050 },
     { width: 1366, height: 768 },

@@ -68,7 +68,7 @@ export function renderViewerSettingsPanelHtml(): string {
               <span class="viewer-settings-group-index">02 / ENVIRONMENT</span>
               <h3 id="viewer-settings-environment-title" class="viewer-settings-group-title" data-i18n-key="viewer.settings.environment">Environment</h3>
             </div>
-            <small>天气、环境强度与太阳时间轴。</small>
+            <small>天气效果与模拟太阳时间。</small>
           </header>
           <div class="viewer-settings-grid">
             <div class="viewer-settings-section">
@@ -81,17 +81,19 @@ export function renderViewerSettingsPanelHtml(): string {
             </div>
             <div class="viewer-settings-section">
               <label class="viewer-range-label" for="environment-intensity">
-                <span data-i18n-key="viewer.settings.intensity">Intensity</span>
+                <span data-i18n-key="viewer.settings.weatherIntensity">Weather Effect Strength</span>
                 <span id="environment-intensity-value"></span>
               </label>
               <input id="environment-intensity" class="viewer-range" type="range" min="0" max="1" step="0.05" />
+              <small class="viewer-setting-control-hint" data-i18n-key="viewer.settings.weatherIntensityHint">Controls how pronounced overcast, rain, or fog appears. Clear weather stays at 0.</small>
             </div>
             <div class="viewer-settings-section">
               <label class="viewer-range-label" for="environment-time">
-                <span data-i18n-key="viewer.settings.timeOfDay">Time of Day</span>
+                <span data-i18n-key="viewer.settings.simulatedTime">Simulated Time</span>
                 <span id="environment-time-value"></span>
               </label>
               <input id="environment-time" class="viewer-range" type="range" min="0" max="24" step="0.25" />
+              <small class="viewer-setting-control-hint" data-i18n-key="viewer.settings.simulatedTimeHint">Controls the simulated sun position and shadow direction, from 0 to 24 hours.</small>
             </div>
             <div class="viewer-settings-section viewer-settings-section-wide">
               <button id="environment-sun-cycle-toggle-btn" class="viewer-toggle-button" type="button" data-toggle-input="environment-sun-cycle-enabled" aria-pressed="false" data-i18n-key="viewer.settings.animateSun">Animate Sun</button>
@@ -158,10 +160,21 @@ export function renderViewerSettingsPanelHtml(): string {
           </div>
         </section>
 
+        <section class="viewer-settings-group" aria-labelledby="viewer-settings-overlay-title">
+          <header class="viewer-settings-group-head">
+            <div>
+              <span class="viewer-settings-group-index">04 / SEMANTIC OVERLAY</span>
+              <h3 id="viewer-settings-overlay-title" class="viewer-settings-group-title">语义叠加 / Floating Lane</h3>
+            </div>
+            <small>在场景上叠加道路、建筑与街道要素的语义结构，仅用于浏览与检查。</small>
+          </header>
+          <div id="viewer-floating-lane-panel-host" class="viewer-settings-floating-lane-host"></div>
+        </section>
+
         <section class="viewer-settings-group" aria-labelledby="viewer-settings-advanced-title">
           <header class="viewer-settings-group-head">
             <div>
-              <span class="viewer-settings-group-index">04 / ADVANCED</span>
+              <span class="viewer-settings-group-index">05 / ADVANCED</span>
               <h3 id="viewer-settings-advanced-title" class="viewer-settings-group-title">高级 / Advanced</h3>
             </div>
             <small>服务器能力与持久化场景编辑命令。</small>

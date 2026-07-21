@@ -785,6 +785,9 @@ function normalizeCenterline(value: unknown, index: number): AnnotatedCenterline
     street_furniture_instances: streetFurnitureInstances,
     start_junction_id: asString(record.start_junction_id, ""),
     end_junction_id: asString(record.end_junction_id, ""),
+    source_refs: record.source_refs && typeof record.source_refs === "object"
+      ? structuredClone(record.source_refs as Record<string, unknown>)
+      : { kind: "manual", edit_state: "manual" },
   };
   syncCenterlineDerivedFields(centerline);
   return centerline;
@@ -1754,6 +1757,10 @@ function buildInspectorMarkup(
     const detailed = resolvedCrossSectionMode(centerline) === CROSS_SECTION_MODE_DETAILED;
     const nominalWidth = nominalSeedCrossSectionWidth(centerline);
     const canCalibratePixelsPerMeter = centerline.reference_width_px !== null && centerline.reference_width_px > 0;
+    const sourceRefs = centerline.source_refs ?? {};
+    const osmWayIds = Array.isArray(sourceRefs.osm_way_ids) ? sourceRefs.osm_way_ids.map(String).filter(Boolean) : [];
+    const isOsmRoad = sourceRefs.kind === "osm_road" && osmWayIds.length > 0;
+    const osmEditState = String(sourceRefs.edit_state ?? "base");
     return `
       ${buildCrossSectionPreviewMarkup(centerline, selectedStripId, junctionOverlays)}
       <div class="scene-inspector-grid annotation-road-properties-grid">
@@ -1827,6 +1834,12 @@ function buildInspectorMarkup(
           <span class="scene-fact-label">${escapeHtml(inspectorText("sceneGraph.inspector.roadGeometry", "Road geometry"))}</span>
           <strong>${escapeHtml(inspectorFormat("sceneGraph.inspector.vertexCountExplained", `${centerline.points.length} vertices — points defining the road centerline shape`, { count: centerline.points.length }))}${selection.vertexIndex !== undefined ? ` · ${escapeHtml(inspectorFormat("sceneGraph.inspector.selectedVertex", `selected vertex ${selection.vertexIndex + 1}`, { index: selection.vertexIndex + 1 }))}` : ""}</strong>
         </div>
+        ${isOsmRoad ? `
+          <div class="scene-fact-card scene-form-field-wide">
+            <span class="scene-fact-label">OSM 来源</span>
+            <strong>way ${escapeHtml(osmWayIds.join(", "))} · ${osmEditState === "base" ? "原始几何" : "已在标记层修改"}</strong>
+          </div>
+        ` : ""}
         <div class="annotation-detail-actions scene-form-field-wide">
           ${
             !detailed
@@ -1846,6 +1859,7 @@ function buildInspectorMarkup(
           <button type="button" class="scene-toolbar-button" data-action="split-centerline">
             ${detailed ? "Reseed Cross Section" : "Split to Cross Section"}
           </button>
+          ${isOsmRoad && osmEditState !== "base" ? '<button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="restore-osm-geometry">恢复 OSM 原始几何</button>' : ""}
           ${
             detailed
               ? `<button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="collapse-centerline" title="${escapeHtml(inspectorText("sceneGraph.inspector.backCoarseHint", "Replace the editable strip layout with a seed preview based on coarse parameters."))}">${escapeHtml(inspectorText("sceneGraph.inspector.backCoarse", "Return to coarse parameters"))}</button>`
@@ -2526,12 +2540,17 @@ export function mountSceneGraphPage(
     sourceCountsEl,
     sourceWarningsEl,
     sourceBackButton,
+    sourceOpenAnnotationToolsButton,
     sourceGenerateButton,
     sourceOpenExistingButton,
     sourceReviewStatusEl,
   } = collectSceneGraphElements(root);
 
   const toolButtons = Array.from(root.querySelectorAll<HTMLButtonElement>(".scene-tool-button"));
+  const generationConfirmDialog = root.querySelector<HTMLElement>("#scene-generation-confirm-dialog");
+  const generationConfirmSummary = root.querySelector<HTMLElement>("#scene-generation-confirm-summary");
+  const generationConfirmOpenButton = root.querySelector<HTMLButtonElement>("#scene-generation-confirm-open");
+  const generationConfirmCancelButton = root.querySelector<HTMLButtonElement>("#scene-generation-confirm-cancel");
   const osmMapHostEl = root.querySelector<HTMLElement>("#annotation-osm-map");
   const osmPickerHostEl = root.querySelector<HTMLElement>("#scene-osm-aoi-picker");
   let annotationOsmMap: MapLibreMap | null = null;
@@ -2609,7 +2628,10 @@ export function mountSceneGraphPage(
   };
 
   const retainedNormalizedSource = workflow.getSnapshot().normalized;
-  let pendingOsmNormalization: NormalizedSceneSourceResponse | null = retainedNormalizedSource?.sourceContext.aligned_buildings?.length
+  let pendingOsmNormalization: NormalizedSceneSourceResponse | null = (
+    retainedNormalizedSource?.sourceContext.aligned_buildings?.length
+    || retainedNormalizedSource?.sourceContext.osm_annotation_context
+  )
     ? {
         annotation: retainedNormalizedSource.referenceAnnotation,
         graph: retainedNormalizedSource.graph as ConvertedGraphPayload["graph"],
@@ -2617,8 +2639,9 @@ export function mountSceneGraphPage(
         source: retainedNormalizedSource.source as NormalizedSceneSourceResponse["source"],
         geojson: retainedNormalizedSource.geojson as Record<string, unknown> | null,
         warnings: [...retainedNormalizedSource.warnings],
-        aligned_buildings: [...retainedNormalizedSource.sourceContext.aligned_buildings] as NormalizedSceneSourceResponse["aligned_buildings"],
+        aligned_buildings: [...(retainedNormalizedSource.sourceContext.aligned_buildings ?? [])] as NormalizedSceneSourceResponse["aligned_buildings"],
         source_alignment: retainedNormalizedSource.sourceContext.source_alignment as NormalizedSceneSourceResponse["source_alignment"],
+        osm_annotation_context: retainedNormalizedSource.sourceContext.osm_annotation_context as Record<string, unknown>,
       }
     : null;
   let uploadedImageDataUrl = workflow.getSnapshot().sourceImageDataUrl ?? "";
@@ -2705,6 +2728,7 @@ export function mountSceneGraphPage(
       warnings: [...new Set([...payload.warnings, ...osmPayload.warnings])],
       aligned_buildings: osmPayload.aligned_buildings,
       source_alignment: osmPayload.source_alignment,
+      osm_annotation_context: osmPayload.osm_annotation_context,
     };
   }
 
@@ -2721,6 +2745,7 @@ export function mountSceneGraphPage(
     if (reviewPanel) reviewPanel.hidden = !reviewVisible;
 
     const normalized = snapshot.normalized;
+    const osmBaseAnnotation = snapshot.sourceKind === "osm" && Boolean(normalized);
     if (normalized) {
       const source = normalized.source;
       sourceProvenanceEl.innerHTML = `
@@ -2768,10 +2793,20 @@ export function mountSceneGraphPage(
           ?? `Saved and approved · revision ${snapshot.sourceRevision}`;
         const hasOlderScene = Boolean(snapshot.sceneLayoutPath)
           && snapshot.sceneSourceRevision !== snapshot.sourceRevision;
-        sourceReviewStatusEl.textContent = hasOlderScene
+        const reviewStatus = hasOlderScene
           ? `${saved} · ${formatViewerKey(language, "sceneGraph.review.olderScene", { revision: snapshot.sceneSourceRevision ?? "?" }) ?? "Existing 3D scene is based on an earlier annotation."}`
           : saved;
+        const osmGuidance = osmBaseAnnotation
+          ? ` · ${tr("sceneGraph.review.osmBaseAnnotation", "OSM map data is already a base annotation. Use Professional tools · Annotation to add or refine details.")}`
+          : "";
+        sourceReviewStatusEl.textContent = `${reviewStatus}${osmGuidance}`;
         sourceReviewStatusEl.dataset.tone = hasOlderScene ? "warning" : "success";
+      } else if (osmBaseAnnotation) {
+        sourceReviewStatusEl.textContent = tr(
+          "sceneGraph.review.osmBaseAnnotation",
+          "OSM map data is already a base annotation. Use Professional tools · Annotation to add or refine details.",
+        );
+        sourceReviewStatusEl.dataset.tone = "success";
       } else {
         sourceReviewStatusEl.textContent = tr("sceneGraph.review.waiting", "Waiting for a valid annotation.");
         sourceReviewStatusEl.dataset.tone = "neutral";
@@ -2793,6 +2828,11 @@ export function mountSceneGraphPage(
       && (snapshot.step === "source" || !snapshot.normalized);
     sourceNormalizeButton.hidden = browsingOsm;
     sourceNormalizeButton.setAttribute("aria-hidden", String(browsingOsm));
+    sourceOpenAnnotationToolsButton.hidden = !osmBaseAnnotation;
+    sourceOpenAnnotationToolsButton.title = tr(
+      "sceneGraph.review.openAnnotationToolsHint",
+      "Open Professional tools · Annotation to supplement or edit the imported OSM data.",
+    );
     const hasExistingScene = Boolean(snapshot.sceneLayoutPath);
     const sceneMatchesCurrentAnnotation = hasExistingScene
       && snapshot.sceneSourceRevision === snapshot.sourceRevision;
@@ -2962,7 +3002,7 @@ export function mountSceneGraphPage(
       if (!source) return text("sceneGraph.osmProgress.preparing", "Preparing OSM data…");
       if (language !== "zh") return source;
       const request = source.match(/^Requesting the complete OSM context \(attempt (\d+)\/(\d+)\)\.?$/i);
-      if (request) return text("sceneGraph.osmProgress.requesting", `正在请求完整的 OSM 上下文（第 ${request[1]}/${request[2]} 次）…`, { attempt: request[1], max: request[2] });
+      if (request) return text("sceneGraph.osmProgress.requesting", `正在请求地图数据（第 ${request[1]}/${request[2]} 次）…`, { attempt: request[1], max: request[2] });
       const retry = source.match(/^Overpass attempt (\d+) failed; retrying\.?$/i);
       if (retry) return text("sceneGraph.osmProgress.retrying", `第 ${retry[1]} 次 Overpass 请求失败，正在重试。`, { attempt: retry[1] });
       if (/^Preparing OSM data…?$/i.test(source)) return text("sceneGraph.osmProgress.preparing", "正在准备 OSM 数据…");
@@ -3083,6 +3123,14 @@ export function mountSceneGraphPage(
     }
   }
 
+  function osmImportFailureMessage(error: unknown): string {
+    const detail = error instanceof Error ? error.message : "地图数据获取失败。";
+    if (/RoadGen3D API is unavailable|failed to fetch|networkerror/i.test(detail)) {
+      return `地图数据服务暂时不可用。请检查 RoadGen3D 后端服务是否已启动（默认端口 8010）；若网络恢复后仍无法连接，请重启后端服务，再点击“获取完整 OSM 并选择道路”重试。技术原因：${detail}`;
+    }
+    return detail;
+  }
+
   async function importOsmContext(explicitSelection?: OsmAoiSelection): Promise<void> {
     const selected = explicitSelection ?? professionalOsmSelection;
     const bbox = selected?.bbox;
@@ -3106,7 +3154,7 @@ export function mountSceneGraphPage(
       workflow.endRequest(token);
     } catch (error) {
       if (workflow.endRequest(token, error)) {
-        setStatus(sourceStatusEl, error instanceof Error ? error.message : "OSM import failed.", "error");
+        setStatus(sourceStatusEl, osmImportFailureMessage(error), "error");
         renderSourceWorkflow();
       }
       mountProfessionalAoiPicker();
@@ -3151,6 +3199,45 @@ export function mountSceneGraphPage(
       setStatus(sourceReviewStatusEl, error instanceof Error ? error.message : "Unable to enter the 3D scene.", "error");
       renderSourceWorkflow();
     }
+  }
+
+  async function openGenerationConfiguration(): Promise<void> {
+    const snapshot = workflow.getSnapshot();
+    if (!snapshot.normalized || snapshot.approvedSourceRevision !== snapshot.sourceRevision) {
+      setStatus(sourceReviewStatusEl, "请先等待当前 2D 标注完成校验。", "error");
+      return;
+    }
+    const sceneMatchesCurrentAnnotation = Boolean(snapshot.sceneLayoutPath)
+      && snapshot.sceneSourceRevision === snapshot.sourceRevision;
+    if (sceneMatchesCurrentAnnotation) {
+      await openExistingProfessionalScene();
+      return;
+    }
+    if (!generationConfirmDialog || !generationConfirmSummary) {
+      await generateApprovedScene();
+      return;
+    }
+    const annotation = state.annotation;
+    const furnitureCount = annotation.centerlines.reduce(
+      (count, centerline) => count + centerline.street_furniture_instances.length,
+      annotation.functional_zones.reduce((count, zone) => count + zone.furniture_instances.length, 0),
+    );
+    const isOsm = snapshot.sourceKind === "osm" || snapshot.sourceKind === "osm_buildings";
+    generationConfirmSummary.innerHTML = [
+      ["输入来源", isOsm ? "OSM 地图数据 + 标记覆盖层" : "当前 2D 标注版本"],
+      ["标注版本", `revision ${snapshot.sourceRevision}`],
+      ["道路与路口", `${annotation.centerlines.length} 条道路 · ${annotation.junctions.length} 个路口`],
+      ["建筑足迹", `${annotation.regions.filter((item) => item.region_role === "building_region").length} 个`],
+      ["必需街道家具", `${furnitureCount} 个`],
+      ["输出方式", "创建新的可追溯 3D 版本"],
+    ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+    generationConfirmDialog.hidden = false;
+    window.requestAnimationFrame(() => generationConfirmOpenButton?.focus());
+  }
+
+  function closeGenerationConfiguration(): void {
+    if (generationConfirmDialog) generationConfirmDialog.hidden = true;
+    sourceGenerateButton.focus({ preventScroll: true });
   }
 
   async function openExistingProfessionalScene(): Promise<void> {
@@ -3237,6 +3324,12 @@ export function mountSceneGraphPage(
     workflow.setAnnotationDraftStatus(fingerprint, "saving");
     renderSourceWorkflow();
     return fingerprint;
+  }
+
+  function markCenterlineOverlayEdited(centerline: AnnotatedCenterline): void {
+    if (centerline.source_refs?.kind === "osm_road") {
+      centerline.source_refs.edit_state = "modified";
+    }
   }
 
   function scheduleAutoGraphConversion(delayMs = 900): void {
@@ -3442,14 +3535,21 @@ export function mountSceneGraphPage(
       return;
     }
     const role = state.drag.regionRole;
-    const id = nextFeatureId(state.annotation, role === "scene_region" ? "scene_region" : "region");
+    const id = nextFeatureId(
+      state.annotation,
+      role === "scene_region" ? "scene_region" : role === "building_region" ? "osm_building_footprint" : "region",
+    );
     state.annotation.regions.push({
       id,
-      label: role === "scene_region" ? "Scene Region" : id,
+      label: role === "scene_region" ? "Scene Region" : role === "building_region" ? "OSM Building Footprint" : id,
       region_role: role,
       points: points.map((p) => ({ ...p })),
       derived: false,
-      material: role === "scene_region" ? { preset: "scene_region_boundary" } : {},
+      material: role === "scene_region"
+        ? { preset: "scene_region_boundary" }
+        : role === "building_region"
+          ? { preset: "osm_building_footprint_overlay", source_kind: "manual_osm_overlay" }
+          : {},
     });
     state.selection = { kind: "region", id };
     state.selectedStripId = null;
@@ -3463,12 +3563,20 @@ export function mountSceneGraphPage(
   function markAnnotationChanged(statusMessage?: string): void {
     state.derivedRegionsStale = true;
     clearGraphResult("Annotation changed. Road graph will refresh automatically.");
-    workflow.setSourceDraft({
-      kind: "manual_annotation",
-      imageDataUrl: uploadedImageDataUrl || undefined,
-      fileName: state.annotation.image_path || undefined,
-      geojson: null,
-    });
+    const currentSource = workflow.getSnapshot();
+    if (currentSource.normalized) {
+      // Editing an OSM annotation changes only RoadGen3D's overlay. Keep the
+      // immutable OSM snapshot, its projection and context massing intact;
+      // setAnnotationDraft advances the revision and marks old 3D as stale.
+      workflow.setAnnotationDraft(cloneAnnotation(state.annotation), comparableAnnotationSnapshot(state.annotation));
+    } else {
+      workflow.setSourceDraft({
+        kind: currentSource.sourceKind === "osm" ? "osm" : "manual_annotation",
+        imageDataUrl: uploadedImageDataUrl || undefined,
+        fileName: state.annotation.image_path || undefined,
+        geojson: currentSource.sourceGeojson,
+      });
+    }
     renderSourceWorkflow();
     if (statusMessage) {
       setStatus(statusEl, statusMessage, "success");
@@ -3499,6 +3607,16 @@ export function mountSceneGraphPage(
     return normalizedOsmBboxFromWorkflow();
   }
 
+  function osmNativeFeatureCollection(): Record<string, unknown> | null {
+    const context = workflow.getSnapshot().normalized?.sourceContext.osm_annotation_context;
+    const candidate = context && typeof context === "object"
+      ? (context as Record<string, unknown>).raw_feature_collection
+      : null;
+    if (!candidate || typeof candidate !== "object") return null;
+    const record = candidate as Record<string, unknown>;
+    return record.type === "FeatureCollection" && Array.isArray(record.features) ? record : null;
+  }
+
   function mountAnnotationOsmBackground(): void {
     if (!osmMapHostEl || annotationOsmMap) return;
     const bbox = annotationOsmBbox();
@@ -3520,6 +3638,25 @@ export function mountSceneGraphPage(
         },
         layers: [{ id: "osm", type: "raster", source: "osm", paint: { "raster-opacity": 0.72 } }],
       },
+    });
+    map.on("load", () => {
+      const nativeFeatures = osmNativeFeatureCollection();
+      if (!nativeFeatures || map.getSource("roadgen-osm-native")) return;
+      map.addSource("roadgen-osm-native", { type: "geojson", data: nativeFeatures as never });
+      map.addLayer({
+        id: "roadgen-osm-native-casing",
+        type: "line",
+        source: "roadgen-osm-native",
+        filter: ["==", ["geometry-type"], "LineString"],
+        paint: { "line-color": "#f8f1df", "line-width": 5.5, "line-opacity": 0.92 },
+      });
+      map.addLayer({
+        id: "roadgen-osm-native-roads",
+        type: "line",
+        source: "roadgen-osm-native",
+        filter: ["==", ["geometry-type"], "LineString"],
+        paint: { "line-color": "#476d80", "line-width": 2.25, "line-opacity": 0.92 },
+      });
     });
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 0, duration: 0, maxZoom: 19 });
@@ -3687,10 +3824,15 @@ export function mountSceneGraphPage(
   }
 
   function renderToolButtons(): void {
+    const isDirectOsm = workflow.getSnapshot().sourceKind === "osm" || workflow.getSnapshot().sourceKind === "osm_buildings";
     for (const button of toolButtons) {
       button.dataset.active = button.dataset.tool === state.selectedTool ? "true" : "false";
+      if (["scene_region", "functional_zone", "surface_annotation"].includes(button.dataset.tool ?? "")) {
+        button.hidden = isDirectOsm;
+      }
     }
-    autoSplitRegionsButton.disabled = state.isDerivingRegions;
+    autoSplitRegionsButton.hidden = isDirectOsm;
+    autoSplitRegionsButton.disabled = isDirectOsm || state.isDerivingRegions;
     autoSplitRegionsButton.dataset.active = state.isDerivingRegions ? "true" : "false";
     autoSplitRegionsButton.title = state.derivedRegionsStale
       ? "Building regions are stale. Auto Split will recompute from scene region and roads."
@@ -4100,7 +4242,9 @@ export function mountSceneGraphPage(
         feature.highway_type = highwayTypeInput.value.trim() || feature.highway_type;
       }
       if (state.selection.kind === "centerline") {
-        syncCenterlineDerivedFields(feature as AnnotatedCenterline);
+        const centerline = feature as AnnotatedCenterline;
+        syncCenterlineDerivedFields(centerline);
+        markCenterlineOverlayEdited(centerline);
       }
       markAnnotationChanged();
       renderAll();
@@ -4312,7 +4456,22 @@ export function mountSceneGraphPage(
           }
           if (action === "reset-road-width-to-nominal") {
             centerline.road_width_m = nominalSeedCrossSectionWidth(centerline);
+            markCenterlineOverlayEdited(centerline);
             markAnnotationChanged(`Reset ${centerline.id} width to nominal cross-section.`);
+            renderAll();
+            return;
+          }
+          if (action === "restore-osm-geometry") {
+            const originalPoints = Array.isArray(centerline.source_refs?.original_points)
+              ? centerline.source_refs.original_points
+              : [];
+            if (originalPoints.length < 2) {
+              setStatus(statusEl, "此道路没有可恢复的 OSM 原始几何。", "error");
+              return;
+            }
+            centerline.points = originalPoints.map((value) => normalizePoint(value));
+            if (centerline.source_refs) centerline.source_refs.edit_state = "base";
+            markAnnotationChanged(`Restored ${centerline.id} to its OSM geometry.`);
             renderAll();
             return;
           }
@@ -4327,6 +4486,7 @@ export function mountSceneGraphPage(
           }
           if (action === "split-centerline") {
             ensureDetailedCrossSection(centerline);
+            markCenterlineOverlayEdited(centerline);
             state.selectedStripId = centerline.cross_section_strips[0]?.strip_id ?? null;
             clearFurniturePlacement();
             markAnnotationChanged(`Split ${centerline.id} into detailed cross-section strips.`);
@@ -4340,6 +4500,7 @@ export function mountSceneGraphPage(
             state.selectedStripId = null;
             clearFurniturePlacement();
             syncCenterlineDerivedFields(centerline);
+            markCenterlineOverlayEdited(centerline);
             markAnnotationChanged(`Collapsed ${centerline.id} back to coarse mode.`);
             renderAll();
             return;
@@ -4563,6 +4724,11 @@ export function mountSceneGraphPage(
         ? `${state.annotation.plan_id || "custom"} · ${state.annotation.image_width_px} × ${state.annotation.image_height_px}px · ${state.annotation.pixels_per_meter.toFixed(1)} px/m · ${state.annotation.centerlines.length} roads · ${state.annotation.centerlines.reduce((sum, item) => sum + item.cross_section_strips.length, 0)} strips · ${state.annotation.centerlines.reduce((sum, item) => sum + item.street_furniture_instances.length, 0)} furniture · ${state.annotation.regions.length} regions · ${(state.annotation.derived_regions ?? []).length} auto building regions · ${state.annotation.surface_annotations.length} design surfaces · ${state.annotation.station_strip_patches.length} strip patches`
         : "选择参考 plan 或导入 PNG 后，就可以在图上开始标注。";
     applyViewerTranslations(root, loadViewerLanguage());
+    const osmBuildingFootprintButton = root.querySelector<HTMLButtonElement>("#annotation-tool-building-region");
+    if (osmBuildingFootprintButton && isDirectOsm) {
+      osmBuildingFootprintButton.textContent = "OSM 建筑足迹";
+      osmBuildingFootprintButton.title = "逐点绘制新的 OSM 建筑足迹多边形；双击或按 Enter 完成";
+    }
     finishCenterlineButton.disabled = state.draftCenterline.length < 2;
     selectAllRoadsButton.disabled = state.annotation.centerlines.length === 0;
     selectAllRoadsButton.dataset.active = state.selection?.kind === "road_collection" ? "true" : "false";
@@ -4582,6 +4748,7 @@ export function mountSceneGraphPage(
   }
 
   function setTool(tool: Tool): void {
+    const isDirectOsm = workflow.getSnapshot().sourceKind === "osm" || workflow.getSnapshot().sourceKind === "osm_buildings";
     state.selectedTool = tool;
     state.drag = null;
     if (tool !== "branch") {
@@ -4599,6 +4766,8 @@ export function mountSceneGraphPage(
       setStatus(statusEl, `Cross Tool: hover an existing road to snap and extend a cross from it, or click empty space to place a standalone ${STANDALONE_CROSS_ARM_LENGTH_M.toFixed(0)}m cross intersection.`, "neutral");
     } else if (tool === "centerline") {
       setStatus(statusEl, "Centerline Tool: draw approach roads only. Use Branch Tool or Cross Tool to create intersections explicitly.", "neutral");
+    } else if (tool === "building_region" && isDirectOsm) {
+      setStatus(statusEl, "OSM 建筑足迹工具：逐点绘制新的建筑足迹多边形；双击或按 Enter 完成。该足迹仅保存到 RoadGen3D 覆盖层，并参与 3D 生成。", "neutral");
     } else if (tool === "building_region") {
       setStatus(statusEl, "Building Region Tool: advanced legacy rectangle. Prefer Scene Region + Auto Split for normal scene design.", "neutral");
     } else if (tool === "scene_region") {
@@ -5019,10 +5188,17 @@ export function mountSceneGraphPage(
       return;
     }
     const id = nextFeatureId(state.annotation, "centerline");
-    const centerline = createDefaultAnnotatedCenterline(id, snappedDraft.points, {
+    const profileSource = osmProfileForPoints(snappedDraft.points);
+    const centerline = profileSource
+      ? createArmFromProfile(profileSource, id, snappedDraft.points, {
+          startJunctionId: snappedDraft.startJunctionId,
+          endJunctionId: snappedDraft.endJunctionId,
+        })
+      : createDefaultAnnotatedCenterline(id, snappedDraft.points, {
       startJunctionId: snappedDraft.startJunctionId,
       endJunctionId: snappedDraft.endJunctionId,
     });
+    if (!profileSource) centerline.source_refs = { kind: "manual_overlay", edit_state: "manual" };
     state.annotation.centerlines.push(centerline);
     registerCenterlineWithExplicitJunction(state.annotation, centerline.start_junction_id, centerline.id);
     registerCenterlineWithExplicitJunction(state.annotation, centerline.end_junction_id, centerline.id);
@@ -5059,12 +5235,13 @@ export function mountSceneGraphPage(
 
     const junctionId = nextFeatureId(state.annotation, "junction");
     const [westArmId, eastArmId, northArmId, southArmId] = reserveNextFeatureIds(state.annotation, "centerline", 4);
-    const arms = [
-      createDefaultAnnotatedCenterline(westArmId, candidateArms[0], { endJunctionId: junctionId }),
-      createDefaultAnnotatedCenterline(eastArmId, candidateArms[1], { endJunctionId: junctionId }),
-      createDefaultAnnotatedCenterline(northArmId, candidateArms[2], { endJunctionId: junctionId }),
-      createDefaultAnnotatedCenterline(southArmId, candidateArms[3], { endJunctionId: junctionId }),
-    ];
+    const profileSource = osmProfileForPoints([anchorPoint]);
+    const arms = candidateArms.map((points, index) => profileSource
+      ? createArmFromProfile(profileSource, [westArmId, eastArmId, northArmId, southArmId][index], points, { endJunctionId: junctionId })
+      : createDefaultAnnotatedCenterline([westArmId, eastArmId, northArmId, southArmId][index], points, { endJunctionId: junctionId }));
+    for (const arm of arms) {
+      if (!profileSource) arm.source_refs = { kind: "manual_overlay", edit_state: "manual" };
+    }
     state.annotation.centerlines.push(...arms);
     createExplicitJunction(state.annotation, {
       junctionId,
@@ -5375,10 +5552,36 @@ export function mountSceneGraphPage(
     } = {},
   ): AnnotatedCenterline {
     const arm = cloneCenterlineForBranch(source, id, points);
+    const sourceWayIds = Array.isArray(source.source_refs?.osm_way_ids)
+      ? source.source_refs.osm_way_ids
+      : [];
+    arm.source_refs = {
+      kind: "manual_overlay",
+      edit_state: "manual",
+      parent_centerline_id: source.id,
+      ...(sourceWayIds.length > 0 ? { parent_osm_way_ids: sourceWayIds } : {}),
+    };
     arm.start_junction_id = options.startJunctionId ?? "";
     arm.end_junction_id = options.endJunctionId ?? "";
     syncCenterlineDerivedFields(arm);
     return arm;
+  }
+
+  function osmProfileForPoints(points: AnnotationPoint[]): AnnotatedCenterline | null {
+    const osmRoads = state.annotation.centerlines.filter((item) => item.source_refs?.kind === "osm_road");
+    if (osmRoads.length === 0) return null;
+    let closest: AnnotatedCenterline | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (const point of points) {
+      for (const road of osmRoads) {
+        const distance = projectPointOntoPolyline(road.points, point).distancePx;
+        if (distance < closestDistance) {
+          closest = road;
+          closestDistance = distance;
+        }
+      }
+    }
+    return closest;
   }
 
   function ensureExplicitJunctionAtSnap(
@@ -5426,6 +5629,12 @@ export function mountSceneGraphPage(
     );
     if (!splitResult) {
       return null;
+    }
+    // Splitting an imported OSM segment produces an editable RoadGen3D
+    // overlay; the immutable raw source remains in OsmAnnotationContext.
+    for (const connectedId of splitResult.connectedCenterlineIds) {
+      const edited = annotation.centerlines.find((item) => item.id === connectedId);
+      if (edited) markCenterlineOverlayEdited(edited);
     }
     let junction = annotation.junctions.find((item) => item.id === junctionId) ?? null;
     if (!junction) {
@@ -5567,6 +5776,7 @@ export function mountSceneGraphPage(
       return;
     }
     const anchorPoint = insertSharedVertexAtSnap(host, snap);
+    markCenterlineOverlayEdited(host);
     state.branchDraft = {
       anchor: { ...snap, point: { ...anchorPoint } },
       endpoint: { ...anchorPoint },
@@ -6129,8 +6339,38 @@ export function mountSceneGraphPage(
     },
     { signal },
   );
-  sourceGenerateButton.addEventListener("click", () => void generateApprovedScene(), { signal });
+  sourceOpenAnnotationToolsButton.addEventListener(
+    "click",
+    () => {
+      shell.setBottomOpen(true);
+      setTool("select");
+      const annotationTools = root.querySelector<HTMLElement>("#annotation-tools-actions-slot");
+      annotationTools?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      annotationTools?.querySelector<HTMLButtonElement>("#annotation-tool-select")?.focus({ preventScroll: true });
+      setStatus(statusEl, "OSM 地图数据已作为基础标注载入。请在专业工具 · 标记中继续补充或调整。", "success");
+    },
+    { signal },
+  );
+  sourceGenerateButton.addEventListener(
+    "click",
+    () => void (courseMode ? generateApprovedScene() : openGenerationConfiguration()),
+    { signal },
+  );
   sourceOpenExistingButton.addEventListener("click", () => void openExistingProfessionalScene(), { signal });
+  generationConfirmOpenButton?.addEventListener(
+    "click",
+    () => {
+      if (generationConfirmDialog) generationConfirmDialog.hidden = true;
+      void generateApprovedScene();
+    },
+    { signal },
+  );
+  generationConfirmCancelButton?.addEventListener("click", closeGenerationConfiguration, { signal });
+  generationConfirmDialog?.querySelector<HTMLElement>("[data-close-scene-generation]")?.addEventListener(
+    "click",
+    closeGenerationConfiguration,
+    { signal },
+  );
 
   imageInput.addEventListener(
     "change",
@@ -6654,6 +6894,28 @@ export function mountSceneGraphPage(
       }
 
       if (state.selectedTool === "building_region") {
+        const isDirectOsm = workflow.getSnapshot().sourceKind === "osm" || workflow.getSnapshot().sourceKind === "osm_buildings";
+        if (isDirectOsm) {
+          state.selection = null;
+          state.selectedStripId = null;
+          clearFurniturePlacement();
+          if (state.drag?.kind === "region_draw" && state.drag.regionRole === "building_region") {
+            state.drag = {
+              ...state.drag,
+              points: [...state.drag.points, point],
+            };
+          } else {
+            state.drag = {
+              kind: "region_draw",
+              pointerId: event.pointerId,
+              regionRole: "building_region",
+              points: [point],
+              currentPoint: point,
+            };
+          }
+          renderAll();
+          return;
+        }
         state.selection = null;
         state.selectedStripId = null;
         clearFurniturePlacement();
@@ -6750,8 +7012,7 @@ export function mountSceneGraphPage(
         state.annotation.control_points.push({ id, label: id, x: point.x, y: point.y, kind: "control_point" });
         state.selection = { kind: "control_point", id };
         state.selectedStripId = null;
-        clearGraphResult("Annotation changed. Road graph will refresh automatically.");
-        setStatus(statusEl, `Added control point ${id}.`, "success");
+        markAnnotationChanged(`Added control point ${id}.`);
         renderAll();
         return;
       }
@@ -6767,8 +7028,7 @@ export function mountSceneGraphPage(
         });
         state.selection = { kind: "roundabout", id };
         state.selectedStripId = null;
-        clearGraphResult("Annotation changed. Road graph will refresh automatically.");
-        setStatus(statusEl, `Added roundabout ${id}.`, "success");
+        markAnnotationChanged(`Added roundabout ${id}.`);
         renderAll();
       }
     },
@@ -6866,6 +7126,7 @@ export function mountSceneGraphPage(
           return;
         }
         centerline.points[drag.vertexIndex] = point;
+        markCenterlineOverlayEdited(centerline);
       } else if (drag.kind === "building_region_translate") {
         const region = state.annotation.building_regions.find((item) => item.id === drag.id);
         if (!region) {
@@ -6905,6 +7166,7 @@ export function mountSceneGraphPage(
           y: vertex.y + deltaY,
         }));
         drag.lastPoint = point;
+        markCenterlineOverlayEdited(centerline);
       } else {
         if (drag.markerKind === "junction") {
           const marker = state.annotation.junctions.find((item) => item.id === drag.id);
@@ -6977,7 +7239,7 @@ export function mountSceneGraphPage(
         return;
       }
       if (state.drag && state.drag.pointerId === event.pointerId) {
-        if (state.drag.kind === "functional_zone_draw") {
+        if (state.drag.kind === "functional_zone_draw" || state.drag.kind === "region_draw") {
           return;
         }
         if (state.drag.kind === "building_region_translate") {

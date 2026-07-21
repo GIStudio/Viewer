@@ -121,6 +121,17 @@
   box-shadow: none;
 }
 
+/* The workbench drawer already supplies the title and close affordance. Keep
+ * the settings body as its direct content instead of nesting a second drawer
+ * header ("Display Settings ×") inside it. */
+.workbench-sidebar-drawer .viewer-settings-panel .viewer-settings-header {
+  display: none;
+}
+
+.workbench-sidebar-drawer .viewer-settings-panel .viewer-settings-body {
+  padding: 0;
+}
+
 /* Viewer cards and inline panels inherit the same editorial construction. */
 :where(
   .viewer-slide-panel,

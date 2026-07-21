@@ -123,6 +123,7 @@ export type AnnotatedCenterline = {
   street_furniture_instances: AnnotatedStreetFurnitureInstance[];
   start_junction_id: string;
   end_junction_id: string;
+  source_refs?: Record<string, unknown>;
 };
 
 export type LaneProfile = {
