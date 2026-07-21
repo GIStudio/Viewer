@@ -84,7 +84,6 @@ export type ViewerPanelElements = {
   designGenerateEl: HTMLButtonElement;
   designStatusEl: HTMLElement;
   designResultEl: HTMLElement;
-  evaluateToggleEl: HTMLButtonElement;
   evaluatePanelEl: HTMLElement;
   evaluateCloseEl: HTMLButtonElement;
   evaluateRunEl: HTMLButtonElement;

@@ -160,6 +160,7 @@ export function createSceneGraphRightTabs(options: SceneGraphShellOptions = {}):
             <div class="scene-import-toolbar scene-import-toolbar-compact">
               <button id="scene-source-back" class="scene-toolbar-button scene-toolbar-button-secondary" type="button" data-i18n-key="sceneGraph.review.backToArea">Choose another study area</button>
               <button id="scene-source-generate" class="scene-toolbar-button" type="button" data-i18n-key="sceneGraph.review.enter3d">Enter 3D scene</button>
+              <button id="scene-source-open-existing" class="scene-toolbar-button scene-toolbar-button-secondary" type="button" hidden>Open existing 3D scene</button>
             </div>
             <div id="scene-source-review-status" class="scene-status" data-tone="neutral" data-i18n-key="sceneGraph.review.waiting">Waiting for a valid annotation.</div>
           </section>

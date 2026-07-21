@@ -192,7 +192,7 @@ import {
 } from "./viewer-evaluation";
 import { captureGalleryViews, type GalleryCaptureTarget } from "./viewer-evaluation-capture";
 import { createViewerEvaluationRunner } from "./viewer-evaluation-runner";
-import type { DesktopShell, ShellI18nText, WorkbenchSidebarPage } from "./desktop-shell";
+import type { DesktopShell, ShellI18nText, ShellTab, WorkbenchSidebarPage } from "./desktop-shell";
 import type { ProfessionalBaselineCoordinator } from "./professional-baseline-coordinator";
 import { WORKFLOW_UNDO_EVENT } from "./workflow-controller";
 import type { WorkflowController } from "./workflow-controller";
@@ -492,6 +492,7 @@ export type ViewerHostOptions = {
   runProjectEvaluation?: (weights: Record<string, number>) => Promise<EvaluationResult>;
   assetPaletteAdapter?: SceneAssetPaletteAdapter;
   sidebarPages?: WorkbenchSidebarPage[];
+  modalTabs?: ShellTab[];
   baselineCoordinator?: ProfessionalBaselineCoordinator;
   scenarioAdapter?: ProfessionalScenarioAdapter;
 };
@@ -517,7 +518,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         { key: "viewer.hints.tools" },
       ]);
   shell.setLeftSections(createViewerLeftSections(t));
-  shell.setRightTabs(createViewerRightTabs(t), null);
+  shell.setRightTabs([...createViewerRightTabs(t), ...(hostOptions.modalTabs ?? [])], null);
   const unregisterHostSidebarPages = hostOptions.sidebarPages?.length
     ? shell.sidebar.registerPages(hostOptions.sidebarPages)
     : () => undefined;
@@ -525,6 +526,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   shell.setStatusSummary({ key: "viewer.status.loading" });
   shell.statusActivityHost.innerHTML = `<div class="desktop-shell-log-entry" data-tone="neutral" data-i18n-key="viewer.status.initialized">${t("Viewer shell initialized.", "查看器框架已初始化。")}</div>`;
   shell.centerStage.innerHTML = createViewerStageHtml();
+  root.querySelectorAll<HTMLButtonElement>("[data-viewer-modal-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const modalId = button.dataset.viewerModalTab;
+      if (modalId) shell.openModalTab(modalId);
+    }, { signal });
+  });
   organizeViewerSettingsTools(root, signal);
 
   const {
@@ -798,6 +805,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     parameterDesignController?.refreshSource();
     const snapshot = workflow.getSnapshot();
     const hasWorkflowScene = Boolean(snapshot.sceneLayoutPath);
+    const hasCurrentWorkflowScene = hasWorkflowScene
+      && snapshot.sceneSourceRevision === snapshot.sourceRevision;
     const hasScene = hasWorkflowScene || activeSceneOrigin === "starter_demo";
     const baseline = snapshot.baselineRun;
     const baselineBusy = baseline.sourceRevision === snapshot.sourceRevision
@@ -906,6 +915,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         reviewStateEl.dataset.tone = "ready";
         if (strong) strong.textContent = currentLang === "zh" ? "正在查看内置完整十字路口" : "Viewing the complete built-in intersection";
         if (detail) detail.textContent = currentLang === "zh" ? "这是只读产品示例；下方说明如何生成你自己的 03 结果。" : "This is a read-only product example; follow the guide below to create your own 03 result.";
+      } else if (hasWorkflowScene && !hasCurrentWorkflowScene) {
+        reviewStateEl.dataset.tone = "warning";
+        if (strong) strong.textContent = currentLang === "zh" ? "当前 3D 场景来自较早的标注版本" : "The available 3D scene is based on an earlier annotation";
+        if (detail) detail.textContent = currentLang === "zh"
+          ? "可继续浏览该场景；请先生成当前标注版本的 3D 场景，再审核或评价。"
+          : "You can continue browsing it, but generate the current annotation revision before review or evaluation.";
       } else if (snapshot.sceneReviewStatus === "accepted") {
         reviewStateEl.dataset.tone = "ready";
         if (strong) strong.textContent = translateViewerKey(currentLang, "professional.review.accepted") ?? "Result accepted";
@@ -925,7 +940,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       }
     }
     [reviewAcceptEl, reviewChangesEl].forEach((button) => {
-      if (button) button.disabled = !hasWorkflowScene || starterPreview;
+      if (button) button.disabled = !hasCurrentWorkflowScene || starterPreview;
     });
     if (reviewAnnotationEl) reviewAnnotationEl.disabled = false;
     if (reviewAssetsEl) reviewAssetsEl.disabled = false;
@@ -945,10 +960,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
           gateDetail.textContent = currentLang === "zh" ? "复制示例后即可保存 revision、运行评价和导出。" : "Copy the demo to save revisions, evaluate, and export.";
           gateAction.textContent = currentLang === "zh" ? "使用此示例开始" : "Use this demo to start";
           gateAction.dataset.evaluateGateAction = "materialize";
-        } else if (!hasWorkflowScene) {
+        } else if (!hasCurrentWorkflowScene) {
           evaluateGateEl.dataset.state = "empty";
-          gateTitle.textContent = currentLang === "zh" ? "尚无可评价的 3D 场景" : "No 3D scene is available for evaluation";
-          gateDetail.textContent = currentLang === "zh" ? "先完成参数化生成；本页仍可查看评价说明。" : "Generate a parametric scene first; this page remains available for guidance.";
+          gateTitle.textContent = hasWorkflowScene
+            ? (currentLang === "zh" ? "现有 3D 场景不是当前标注版本" : "The available 3D scene is not from the current annotation")
+            : (currentLang === "zh" ? "尚无可评价的 3D 场景" : "No 3D scene is available for evaluation");
+          gateDetail.textContent = currentLang === "zh"
+            ? "先生成当前标注版本的 3D 场景；本页仍可查看评价说明。"
+            : "Generate the current annotation revision first; this page remains available for guidance.";
           gateAction.textContent = currentLang === "zh" ? "前往生成 3D 场景" : "Go to 3D generation";
           gateAction.dataset.evaluateGateAction = "generate";
         } else {
@@ -1978,7 +1997,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       activeLegacyStarterSceneId = null;
       workflow.setStarterPreview(starter.id);
       frameSceneFocus(starter.focus_xz, starter.focus_extent_m);
-      shell.sidebar.activate("review");
+      shell.openModalTab("review");
       setStatus(currentLang === "zh" ? "正在预览内置广州完整十字路口。" : "Viewing the built-in complete Guangzhou intersection.");
     } catch (error) {
       activeStarterScene = null;
@@ -2008,7 +2027,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     const action = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-evaluate-gate-action]")?.dataset.evaluateGateAction;
     if (action === "materialize") void materializeActiveStarterScene();
     if (action === "generate") generationRunEl.click();
-    if (action === "review") shell.sidebar.activate("review");
+    if (action === "review") shell.openModalTab("review");
   }, { signal });
 
   const workflowBridge = createViewerWorkflowBridge({
@@ -2251,7 +2270,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     onLoaded: () => {
       generationWizard?.close();
       panelController.setOpen("design", false);
-      shell.sidebar.activate("review");
+      shell.openModalTab("review");
       flashStatus("Generated scene loaded. Review the 3D result against the approved source.");
     },
     setStatus,

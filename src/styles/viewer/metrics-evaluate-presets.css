@@ -164,6 +164,24 @@
   gap: 0.85rem;
 }
 
+.desktop-shell-modal[data-shell-modal-tab="evaluate"] .viewer-evaluate-panel {
+  position: relative;
+  inset: auto;
+  width: min(52rem, 100%);
+  height: auto;
+  min-height: 100%;
+  margin: 0 auto;
+  transform: none;
+  overflow: visible;
+  box-shadow: none;
+}
+
+.desktop-shell-modal[data-shell-modal-tab="review"] .professional-result-review {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: clamp(1rem, 2vw, 1.75rem);
+}
+
 .viewer-evaluate-result {
   font-size: 0.9rem;
   line-height: 1.55;

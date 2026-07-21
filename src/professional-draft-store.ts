@@ -34,6 +34,7 @@ function draftFromSnapshot(snapshot: WorkflowSnapshot): ProfessionalWorkflowDraf
     approvedSourceRevision: snapshot.approvedSourceRevision,
     sceneRef: snapshot.sceneRef,
     sceneLayoutPath: snapshot.sceneLayoutPath,
+    sceneSourceRevision: snapshot.sceneSourceRevision,
     sceneRevision: snapshot.sceneRevision,
     sceneReviewStatus: snapshot.sceneReviewStatus,
     baselineRun: snapshot.baselineRun,
@@ -86,6 +87,7 @@ export function persistProfessionalWorkflowDraft(workflow: WorkflowController): 
       snapshot.annotationDraft?.status ?? "",
       snapshot.approvedSourceRevision ?? "",
       snapshot.sceneLayoutPath ?? "",
+      snapshot.sceneSourceRevision ?? "",
       snapshot.sceneRevision?.sha256 ?? "",
       snapshot.sceneReviewStatus,
     ].join(":");

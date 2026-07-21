@@ -324,6 +324,8 @@ export function bindDesktopShell(
 
   function sidebarIcon(page: WorkbenchSidebarPage): string {
     const label = sidebarLabel(page);
+    const dimensionalPrefix = label.match(/^(2D|3D)\b/i)?.[1];
+    if (dimensionalPrefix) return dimensionalPrefix.toUpperCase();
     if (currentLanguage === "zh") {
       const firstChineseCharacter = label.match(/[\u3400-\u9fff]/)?.[0];
       if (firstChineseCharacter) return firstChineseCharacter;
@@ -485,7 +487,7 @@ export function bindDesktopShell(
       const implicitId = button.dataset.viewerCenterControl === "browser" ? "viewer-scene-browser-toggle" : button.id;
       const mapped = idMap[implicitId];
       if (!mapped || button.id === "viewer-floating-lane-toggle") return;
-      if (mode === "single_left_overlay" && ["annotation", "assets", "design", "edit"].includes(mapped.id)) return;
+      if (mode === "single_left_overlay" && ["scene", "annotation", "assets", "design", "edit"].includes(mapped.id)) return;
       if (mode === "course_single_left" && !["scene", "edit", "settings"].includes(mapped.id)) return;
       const label = button.querySelector("strong")?.textContent?.trim() || mapped.id;
       const icon = button.querySelector(".viewer-control-menu-code")?.textContent?.trim();
@@ -557,13 +559,15 @@ export function bindDesktopShell(
   }
 
   const viewerTabButtonIds: Record<string, string> = {
-    evaluate: "viewer-evaluate-toggle",
     history: "viewer-history-analysis-toggle",
   };
+
+  const modalTabOpeners = new Map<string, () => void>();
 
   function clearModalTabs(): void {
     modalTabs.forEach((modal) => modal.remove());
     modalTabs.clear();
+    modalTabOpeners.clear();
   }
 
   function createModalTab(tab: ShellTab): () => void {
@@ -608,6 +612,9 @@ export function bindDesktopShell(
     };
     close.addEventListener("click", closeModal);
     backdrop.addEventListener("click", closeModal);
+    dialog.querySelectorAll<HTMLElement>("[data-shell-modal-close]").forEach((element) => {
+      element.addEventListener("click", closeModal);
+    });
     modal.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -615,25 +622,29 @@ export function bindDesktopShell(
       }
     });
 
-    return () => {
+    const openModal = () => {
       modal.hidden = false;
       applyViewerTranslations(modal, currentLanguage);
       window.requestAnimationFrame(() => close.focus());
     };
+    modalTabOpeners.set(tab.id, openModal);
+    return openModal;
   }
 
   function setRightTabs(tabs: ShellTab[], activeId: string | null = tabs[0]?.id ?? null): void {
     clearModalTabs();
     if (isSingleLeft) {
+      tabs.filter((tab) => tab.presentation === "modal").forEach(createModalTab);
+      const nonModalTabs = tabs.filter((tab) => tab.presentation !== "modal");
       const visibleTabs = mode === "course_single_left" && route === "viewer"
-        ? tabs.filter((tab) => ["evaluate", "compare", "floating-lane"].includes(tab.id))
-        : tabs;
+        ? nonModalTabs.filter((tab) => ["evaluate", "compare", "floating-lane"].includes(tab.id))
+        : nonModalTabs;
       leftRail.querySelector("[data-course-hidden-tabs]")?.remove();
-      if (visibleTabs.length !== tabs.length) {
+      if (visibleTabs.length !== nonModalTabs.length) {
         const compatibilityHost = document.createElement("div");
         compatibilityHost.hidden = true;
         compatibilityHost.dataset.courseHiddenTabs = "true";
-        tabs.filter((tab) => !visibleTabs.includes(tab)).forEach((tab) => {
+        nonModalTabs.filter((tab) => !visibleTabs.includes(tab)).forEach((tab) => {
           const button = document.createElement("button");
           button.type = "button";
           button.dataset.shellTab = tab.id;
@@ -670,7 +681,7 @@ export function bindDesktopShell(
       button.dataset.i18nSourceText = tab.label;
       button.dataset.open = "false";
       if (tab.presentation === "modal") {
-        const openModal = createModalTab(tab);
+        const openModal = modalTabOpeners.get(tab.id) ?? createModalTab(tab);
         button.addEventListener("click", openModal);
         button.setAttribute("aria-haspopup", "dialog");
       } else {
@@ -948,6 +959,12 @@ export function bindDesktopShell(
     statusHintsHost: hintsHost,
     setLeftSections,
     setRightTabs,
+    openModalTab: (id: string) => {
+      const openModal = modalTabOpeners.get(id);
+      if (!openModal) return false;
+      openModal();
+      return true;
+    },
     activateRightTab,
     setRightPinned,
     setBottomOpen,

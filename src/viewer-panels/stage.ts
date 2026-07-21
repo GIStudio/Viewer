@@ -22,6 +22,15 @@ export function createViewerStageHtml(): string {
           </div>
           <span class="stage-toolbar-divider" aria-hidden="true"></span>
           <button class="stage-toolbar-button" type="button" id="viewer-sync-camera" data-i18n-key="viewer.stage.resetView">Reset View</button>
+          <span class="stage-toolbar-divider" aria-hidden="true"></span>
+          <button class="stage-toolbar-button stage-toolbar-workflow-action" type="button" id="viewer-result-review-toggle" data-shell-tab="review" data-viewer-modal-tab="review" aria-haspopup="dialog">
+            <span data-stage-modal-label data-i18n-key="professional.pipeline.review">Result review</span>
+            <span class="stage-toolbar-workflow-badge" data-stage-modal-badge>—</span>
+          </button>
+          <button class="stage-toolbar-button stage-toolbar-workflow-action" type="button" id="viewer-evaluate-modal-toggle" data-shell-tab="evaluate" data-viewer-modal-tab="evaluate" aria-haspopup="dialog">
+            <span data-stage-modal-label data-i18n-key="professional.pipeline.deliver">Evaluation &amp; delivery</span>
+            <span class="stage-toolbar-workflow-badge" data-stage-modal-badge>—</span>
+          </button>
         </div>
         <div class="stage-toolbar-group stage-toolbar-output" data-od-id="toolbar-right">
           <button class="stage-toolbar-button stage-toolbar-button-primary" type="button" id="viewer-direct-edit" aria-pressed="false">编辑地物</button>

@@ -89,6 +89,8 @@ export type ProfessionalWorkflowDraft = Readonly<{
   approvedSourceRevision: number | null;
   sceneRef?: WorkflowSceneRef | null;
   sceneLayoutPath?: string | null;
+  /** Source annotation revision used to produce the stored 3D scene. */
+  sceneSourceRevision?: number | null;
   sceneRevision?: SceneRevision | null;
   sceneReviewStatus?: SceneReviewStatus;
   baselineRun?: WorkflowBaselineRun;
@@ -144,6 +146,8 @@ export type WorkflowSnapshot = Readonly<{
   approvedSourceRevision: number | null;
   sceneRef: WorkflowSceneRef | null;
   sceneLayoutPath: string | null;
+  /** Source annotation revision used to produce the stored 3D scene. */
+  sceneSourceRevision: number | null;
   sceneRevision: SceneRevision | null;
   contextMassing: Readonly<Record<string, unknown>> | null;
   editPending: boolean;
@@ -191,6 +195,8 @@ export type WorkflowController = {
   setGeneratedScene(input: {
     layoutPath: string;
     sceneRef?: WorkflowSceneRef | null;
+    /** Omit only for a scene generated from the active source revision. */
+    sourceRevision?: number | null;
     sceneRevision?: SceneRevision | null;
     contextMassing?: Record<string, unknown> | null;
   }): boolean;
@@ -311,6 +317,7 @@ function initialSnapshot(): WorkflowSnapshot {
     approvedSourceRevision: null,
     sceneRef: null,
     sceneLayoutPath: null,
+    sceneSourceRevision: null,
     sceneRevision: null,
     contextMassing: null,
     editPending: false,
@@ -344,6 +351,9 @@ function transitionGuard(snapshot: WorkflowSnapshot, step: WorkflowStep): string
   }
   if ((step === "edit" || step === "evaluate") && !snapshot.sceneLayoutPath) {
     return "Generate and load a scene before continuing.";
+  }
+  if (step === "evaluate" && snapshot.sceneSourceRevision !== snapshot.sourceRevision) {
+    return "Generate the current 3D scene before evaluation.";
   }
   if (step === "evaluate" && snapshot.editPending) {
     return "Wait for the persistent layout edit to finish before evaluation.";
@@ -402,6 +412,7 @@ export function createWorkflowController(): WorkflowController {
         approvedSourceRevision: null,
         sceneRef: null,
         sceneLayoutPath: null,
+        sceneSourceRevision: null,
         sceneRevision: null,
         contextMassing: null,
         editPending: false,
@@ -433,6 +444,7 @@ export function createWorkflowController(): WorkflowController {
         approvedSourceRevision: null,
         sceneRef: null,
         sceneLayoutPath: null,
+        sceneSourceRevision: null,
         sceneRevision: null,
         contextMassing: null,
         editPending: false,
@@ -465,11 +477,11 @@ export function createWorkflowController(): WorkflowController {
           validationErrors: [],
         }),
         approvedSourceRevision: null,
-        sceneRef: null,
-        sceneLayoutPath: null,
-        sceneRevision: null,
-        contextMassing: null,
+        // Keep the last generated scene available for comparison, but make it
+        // explicitly stale until a new scene is generated for this revision.
         evaluation: null,
+        editPending: false,
+        undoCommand: null,
         sceneReviewStatus: "not_available",
         baselineRun: Object.freeze({
           ...snapshot.baselineRun,
@@ -524,6 +536,7 @@ export function createWorkflowController(): WorkflowController {
         ...(revisionChanged ? {
           sceneRef: null,
           sceneLayoutPath: null,
+          sceneSourceRevision: null,
           sceneRevision: null,
           contextMassing: null,
           evaluation: null,
@@ -543,6 +556,11 @@ export function createWorkflowController(): WorkflowController {
       const revision = Math.max(0, Number(draft.sourceRevision) || 0);
       const approvedRevision = draft.approvedSourceRevision === revision ? revision : null;
       const restoredLayoutPath = String(draft.sceneLayoutPath || "").trim() || null;
+      const restoredSceneSourceRevision = typeof draft.sceneSourceRevision === "number"
+        ? Math.max(0, Math.floor(draft.sceneSourceRevision))
+        : null;
+      const restoredSceneIsCurrent = Boolean(restoredLayoutPath)
+        && restoredSceneSourceRevision === revision;
       publish({
         step: restoredLayoutPath ? "edit" : draft.normalized ? "review" : "source",
         sourceRevision: revision,
@@ -557,8 +575,9 @@ export function createWorkflowController(): WorkflowController {
           ? immutableCopy(draft.sceneRef ?? { kind: "local_layout" as const, layoutPath: restoredLayoutPath })
           : null,
         sceneLayoutPath: restoredLayoutPath,
+        sceneSourceRevision: restoredLayoutPath ? restoredSceneSourceRevision : null,
         sceneRevision: draft.sceneRevision ? immutableCopy(draft.sceneRevision) : null,
-        sceneReviewStatus: restoredLayoutPath ? draft.sceneReviewStatus ?? "pending" : "not_available",
+        sceneReviewStatus: restoredSceneIsCurrent ? draft.sceneReviewStatus ?? "pending" : "not_available",
         baselineRun: draft.baselineRun
           ? immutableCopy(draft.baselineRun)
           : Object.freeze({
@@ -605,7 +624,8 @@ export function createWorkflowController(): WorkflowController {
     setGenerationStarted() {
       const result = controller.transition("generate");
       if (!result.ok) return result;
-      publish({ sceneRef: null, sceneLayoutPath: null, sceneRevision: null, undoCommand: null, evaluation: null, sceneReviewStatus: "not_available", lastError: null });
+      // Keep the previous scene visible while the current revision is generated.
+      publish({ undoCommand: null, evaluation: null, sceneReviewStatus: "not_available", lastError: null });
       return result;
     },
     setGeneratedScene(input) {
@@ -619,6 +639,7 @@ export function createWorkflowController(): WorkflowController {
           ? immutableCopy(input.sceneRef)
           : Object.freeze({ kind: "local_layout" as const, layoutPath: input.layoutPath }),
         sceneLayoutPath: input.layoutPath,
+        sceneSourceRevision: input.sourceRevision === undefined ? snapshot.sourceRevision : input.sourceRevision,
         sceneRevision: input.sceneRevision ? immutableCopy(input.sceneRevision) : null,
         contextMassing: input.contextMassing ? immutableCopy(input.contextMassing) : null,
         editPending: false,
@@ -634,6 +655,7 @@ export function createWorkflowController(): WorkflowController {
       if (!cleanId || snapshot.sceneLayoutPath) return;
       publish({
         sceneRef: Object.freeze({ kind: "starter_demo" as const, demoId: cleanId }),
+        sceneSourceRevision: null,
         sceneReviewStatus: "not_available",
         lastError: null,
       });
@@ -671,6 +693,7 @@ export function createWorkflowController(): WorkflowController {
         approvedSourceRevision: nextRevision,
         sceneRef: Object.freeze({ kind: "local_layout" as const, layoutPath }),
         sceneLayoutPath: layoutPath,
+        sceneSourceRevision: nextRevision,
         sceneRevision: input.sceneRevision ? immutableCopy(input.sceneRevision) : null,
         contextMassing: null,
         editPending: false,
@@ -739,6 +762,11 @@ export function createWorkflowController(): WorkflowController {
     setSceneReviewStatus(status) {
       if (!snapshot.sceneLayoutPath) {
         const reason = "Generate and load a scene before reviewing the result.";
+        publish({ lastError: reason });
+        return Object.freeze({ ok: false, reason });
+      }
+      if (snapshot.sceneSourceRevision !== snapshot.sourceRevision) {
+        const reason = "Generate the current 3D scene before reviewing the result.";
         publish({ lastError: reason });
         return Object.freeze({ ok: false, reason });
       }

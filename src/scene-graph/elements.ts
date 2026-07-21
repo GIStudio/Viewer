@@ -73,6 +73,7 @@ export type SceneGraphElements = {
   sourceWarningsEl: HTMLElement;
   sourceBackButton: HTMLButtonElement;
   sourceGenerateButton: HTMLButtonElement;
+  sourceOpenExistingButton: HTMLButtonElement;
   sourceReviewStatusEl: HTMLElement;
 };
 
@@ -150,6 +151,7 @@ export function collectSceneGraphElements(root: HTMLElement | Document): SceneGr
     sourceWarningsEl: requireElement<HTMLElement>(root, "#scene-source-warnings"),
     sourceBackButton: requireElement<HTMLButtonElement>(root, "#scene-source-back"),
     sourceGenerateButton: requireElement<HTMLButtonElement>(root, "#scene-source-generate"),
+    sourceOpenExistingButton: requireElement<HTMLButtonElement>(root, "#scene-source-open-existing"),
     sourceReviewStatusEl: requireElement<HTMLElement>(root, "#scene-source-review-status"),
   };
 }

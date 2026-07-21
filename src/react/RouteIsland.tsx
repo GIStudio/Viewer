@@ -18,11 +18,10 @@ import type { ProfessionalBaselineCoordinator } from "../professional-baseline-c
 import {
   annotationPreparationStatus,
   consumeProfessionalViewerTarget,
-  professionalPipelineStage,
   renderProfessionalReviewPanelHtml,
   storeProfessionalViewerTarget,
 } from "../professional-pipeline";
-import type { WorkbenchShellMode } from "../shell-types";
+import type { ShellTab, WorkbenchShellMode } from "../shell-types";
 import { renderEvaluatePanelContent } from "../viewer-panels/rightTabs";
 import { ViewerDesktopShell } from "./ViewerDesktopShell";
 import { CourseStudio } from "./CourseStudio";
@@ -93,7 +92,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         );
       }
     };
-    const activateViewerTarget = (target: "generate" | "review" | "edit" | "deliver"): void => {
+    const activateViewerTarget = (target: "generate" | "browse" | "review" | "edit" | "deliver"): void => {
       if (target !== "review" && !workspaceReady()) {
         const message = language === "zh"
           ? "请先登录，再创建、生成、编辑或评价个人场景。"
@@ -105,17 +104,6 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       }
       const snapshot = workflow.getSnapshot();
       if (target !== "generate" && target !== "deliver" && !snapshot.sceneLayoutPath) {
-        if (target === "edit" && !snapshot.normalized) {
-          shell.setStatusSummary(tr("viewer.starter.materializing", "正在复制内置道路骨架…"));
-          void materializeDefaultStarterScene(workflow)
-            .then(() => activateViewerTarget("edit"))
-            .catch((error: unknown) => {
-              const message = error instanceof Error ? error.message : String(error);
-              shell.setStatusSummary(message);
-              shell.pushActivity(message, "error");
-            });
-          return;
-        }
         const message = tr("professional.pipeline.sceneRequired", "Generate and load a scene first.");
         shell.setStatusSummary(message);
         shell.pushActivity(message, "warning");
@@ -130,8 +118,13 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         host.querySelector<HTMLButtonElement>("#viewer-generate-and-load")?.click();
         return;
       }
+      if (target === "browse") {
+        host.querySelector<HTMLButtonElement>("#viewer-mode-3d")?.click();
+        host.querySelector<HTMLButtonElement>("[data-viewer-center-control=browser]")?.click();
+        return;
+      }
       if (target === "review") {
-        shell.sidebar.activate("review");
+        shell.openModalTab("review");
         return;
       }
       if (target === "edit") {
@@ -139,10 +132,26 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         host.querySelector<HTMLButtonElement>("#viewer-edit-toggle")?.click();
         return;
       }
-      shell.sidebar.activate("evaluate");
+      shell.openModalTab("evaluate");
     };
 
     const initialWorkflowSnapshot = workflow.getSnapshot();
+    const professionalModalTabs: ShellTab[] = route === "viewer"
+      ? [
+          {
+            id: "review",
+            label: tr("professional.pipeline.review", "Result review"),
+            content: renderProfessionalReviewPanelHtml(),
+            presentation: "modal",
+          },
+          {
+            id: "evaluate",
+            label: tr("professional.pipeline.deliver", "Evaluation & delivery"),
+            content: renderEvaluatePanelContent(),
+            presentation: "modal",
+          },
+        ]
+      : [];
     const professionalPages = [
       {
         id: "prepare-annotation",
@@ -171,44 +180,14 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         },
       },
       {
-        id: "generate",
-        label: tr("professional.pipeline.generate", "3D scene generation"),
-        icon: "02",
+        id: "browse-3d",
+        label: tr("professional.pipeline.browse3d", "3D Scene Browse"),
+        icon: "3D",
         group: "flow" as const,
         content: "",
-        flow: { stage: "02" as const, status: "pending" as const },
-        badge: "—",
-        action: () => activateViewerTarget("generate"),
-      },
-      {
-        id: "review",
-        label: tr("professional.pipeline.review", "Result review"),
-        icon: "03",
-        group: "flow" as const,
-        content: route === "viewer" ? renderProfessionalReviewPanelHtml() : "",
         flow: { stage: "03" as const, status: "pending" as const },
         badge: "—",
-        ...(route === "viewer" ? {} : { action: () => activateViewerTarget("review") }),
-      },
-      {
-        id: "edit",
-        label: tr("professional.pipeline.edit", "Scene editing"),
-        icon: "04",
-        group: "flow" as const,
-        content: "",
-        flow: { stage: "04" as const, status: "pending" as const },
-        badge: "—",
-        action: () => activateViewerTarget("edit"),
-      },
-      {
-        id: "evaluate",
-        label: tr("professional.pipeline.deliver", "Evaluation & delivery"),
-        icon: "05",
-        group: "flow" as const,
-        content: route === "viewer" ? renderEvaluatePanelContent() : "",
-        flow: { stage: "05" as const, status: "pending" as const },
-        badge: "—",
-        ...(route === "viewer" ? {} : { action: () => activateViewerTarget("deliver") }),
+        action: () => activateViewerTarget("browse"),
       },
     ];
 
@@ -293,69 +272,74 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       if (drawerTitle) drawerTitle.textContent = options.label;
     };
 
+    const updateToolbarAction = (
+      id: "review" | "evaluate",
+      options: { label: string; badge: string; status: string; disabled?: boolean },
+    ): void => {
+      const button = host.querySelector<HTMLButtonElement>(`[data-viewer-modal-tab="${id}"]`);
+      if (!button) return;
+      button.dataset.workflowStatus = options.status;
+      button.title = options.label;
+      button.setAttribute("aria-label", `${options.label} · ${options.badge}`);
+      button.disabled = Boolean(options.disabled);
+      const label = button.querySelector<HTMLElement>("[data-stage-modal-label]");
+      if (label) label.textContent = options.label;
+      const badge = button.querySelector<HTMLElement>("[data-stage-modal-badge]");
+      if (badge) badge.textContent = options.badge;
+    };
+
     let previousReviewStatus = workflow.getSnapshot().sceneReviewStatus;
     const syncProfessionalNavigation = () => {
       const snapshot = workflow.getSnapshot();
-      const pipelineStage = professionalPipelineStage(snapshot);
       const currentId = route === "scene-graph"
         ? "prepare-annotation"
-        : pipelineStage === "review"
-              ? "review"
-              : pipelineStage === "edit"
-                ? "edit"
-                : pipelineStage === "deliver"
-                  ? "evaluate"
-                  : "generate";
+        : "browse-3d";
       const annotationStatus = annotationPreparationStatus(snapshot);
-      const generationReady = annotationStatus === "ready";
+      const hasCurrentScene = Boolean(snapshot.sceneLayoutPath)
+        && snapshot.sceneSourceRevision === snapshot.sourceRevision;
+      const canOpenReview = hasCurrentScene || snapshot.sceneRef?.kind === "starter_demo";
       updatePage("prepare-annotation", {
         label: tr("professional.pipeline.annotation", "2D data & annotation"),
         badge: annotationStatus === "ready" ? "OK" : annotationStatus === "warning" ? "!" : "—",
         status: annotationStatus,
         current: currentId === "prepare-annotation",
       });
-      updatePage("generate", {
-        label: tr("professional.pipeline.generate", "3D scene generation"),
-        badge: snapshot.busy.generate ? "…" : generationReady ? "GO" : "—",
-        status: snapshot.busy.generate ? "active" : generationReady ? "ready" : "pending",
-        current: currentId === "generate",
-      });
-      updatePage("review", {
+      updateToolbarAction("review", {
         label: tr("professional.pipeline.review", "Result review"),
         badge: snapshot.sceneReviewStatus === "accepted" ? "OK" : snapshot.sceneReviewStatus === "pending" ? "!" : "—",
         status: snapshot.sceneReviewStatus === "accepted" ? "accepted" : snapshot.sceneReviewStatus === "pending" ? "warning" : "pending",
-        current: currentId === "review",
+        disabled: !canOpenReview,
       });
-      updatePage("edit", {
-        label: tr("professional.pipeline.edit", "Scene editing"),
-        badge: snapshot.editPending ? "…" : snapshot.sceneReviewStatus === "changes_requested" ? "!" : "—",
-        status: snapshot.editPending ? "active" : snapshot.sceneReviewStatus === "changes_requested" ? "warning" : "pending",
-        current: currentId === "edit",
+      updatePage("browse-3d", {
+        label: tr("professional.pipeline.browse3d", "3D Scene Browse"),
+        badge: hasCurrentScene ? "OK" : snapshot.sceneLayoutPath ? "OLD" : "—",
+        status: hasCurrentScene ? "ready" : snapshot.sceneLayoutPath ? "warning" : "pending",
+        current: currentId === "browse-3d",
       });
-      updatePage("evaluate", {
+      updateToolbarAction("evaluate", {
         label: tr("professional.pipeline.deliver", "Evaluation & delivery"),
         badge: snapshot.evaluation
           ? "OK"
           : snapshot.sceneReviewStatus === "accepted"
             ? "GO"
-            : snapshot.sceneLayoutPath || snapshot.sceneRef?.kind === "starter_demo"
+            : hasCurrentScene
               ? "03"
               : "N/A",
         status: snapshot.evaluation
           ? "ready"
           : snapshot.sceneReviewStatus === "accepted"
             ? "active"
-            : snapshot.sceneLayoutPath || snapshot.sceneRef?.kind === "starter_demo"
+            : hasCurrentScene
               ? "warning"
               : "pending",
-        current: currentId === "evaluate",
+        disabled: !hasCurrentScene,
       });
       if (
         route === "viewer"
         && snapshot.sceneReviewStatus === "pending"
         && previousReviewStatus !== "pending"
       ) {
-        shell.sidebar.activate("review");
+        shell.openModalTab("review");
       }
       previousReviewStatus = snapshot.sceneReviewStatus;
     };
@@ -374,8 +358,8 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         case "scene-graph":
           routeTeardown = mountSceneGraphPage(shell, workflow, {
             showAdvancedSourceTools: showAdvancedSourceTools(),
-            onEnterProfessionalScene: async () => {
-              await baselineCoordinator.start();
+            onNavigateProfessionalScene: async (target) => {
+              storeProfessionalViewerTarget(target);
               navigateTo("viewer");
             },
           });
@@ -396,6 +380,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
             runProjectEvaluation: (weights) => evaluateOwnedPublicProject(professionalSession, workflow, weights),
             assetPaletteAdapter: createProfessionalAssetPaletteAdapter(professionalSession),
             scenarioAdapter: createProfessionalScenarioAdapter(professionalSession, workflow),
+            modalTabs: professionalModalTabs,
           })
             .then((teardown) => {
               routeTeardown = teardown;

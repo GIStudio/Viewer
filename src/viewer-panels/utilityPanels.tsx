@@ -13,7 +13,7 @@ export function EvaluatePanelShell() {
             Engineering proxies, generation QA, and declared visual evidence
           </div>
         </div>
-        <button id="viewer-evaluate-close" className="viewer-settings-close" type="button" aria-label="Close evaluation">
+        <button id="viewer-evaluate-close" className="viewer-settings-close" type="button" aria-label="Close evaluation" data-shell-modal-close>
           x
         </button>
       </div>

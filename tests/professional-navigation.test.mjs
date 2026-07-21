@@ -159,10 +159,17 @@ try {
   assert.equal(await page.locator('[data-shell-tab^="workflow-"]').count(), 0, "legacy workflow steps must not remain in the professional rail");
   assert.equal(await page.locator('[data-shell-tab="prepare-annotation"]').getAttribute("data-flow-branch"), "annotation");
   assert.equal(await page.locator('[data-shell-tab="prepare-assets"]').count(), 0, "3D assets must move out of the left production rail");
-  assert.equal(await page.locator('[data-shell-tab="generate"]').getAttribute("data-flow-stage"), "02");
+  assert.equal(await page.locator('[data-shell-tab="generate"]').count(), 0, "3D generation must leave the left rail");
+  assert.equal(await page.locator('[data-shell-tab="browse-3d"]').getAttribute("data-flow-stage"), "03");
+  assert.equal(await page.locator('.desktop-shell-tab-button[data-shell-tab="review"]').count(), 0, "result review must leave the left rail");
+  assert.equal(await page.locator('.desktop-shell-tab-button[data-shell-tab="evaluate"]').count(), 0, "evaluation must leave the left rail");
+  assert.equal(await page.locator('#viewer-result-review-toggle').getAttribute("aria-haspopup"), "dialog");
+  assert.equal(await page.locator('#viewer-evaluate-modal-toggle').getAttribute("aria-haspopup"), "dialog");
+  assert.equal(await page.locator('[data-shell-tab="prepare-annotation"] .workbench-sidebar-icon').textContent(), "2D");
+  assert.equal(await page.locator('[data-shell-tab="browse-3d"] .workbench-sidebar-icon').textContent(), "3D");
   assert.equal(await page.locator('[data-shell-tab="model-input-audit"]').count(), 0, "retired model-input audit must not remain in product navigation");
   assert.equal(await page.locator('[data-shell-tab="presets"]').count(), 0, "retired scene presets must not remain in product navigation");
-  assert.equal(await page.locator('[data-shell-tab="scene"]').getAttribute("data-sidebar-group"), "workspace");
+  assert.equal(await page.locator('[data-shell-tab="scene"]').count(), 0, "generic scene browser must not duplicate the production-flow browser");
   await page.locator("#viewer-direct-edit").waitFor();
   await page.locator("#viewer-top-assets").waitFor();
   await page.locator("#viewer-scenario-workbench-toggle").waitFor();
@@ -202,9 +209,9 @@ try {
   }
 
   const openGeneration = page.locator("#viewer-generate-and-load");
-  await page.waitForFunction(() => document.querySelector("#viewer-generate-and-load")?.textContent?.trim() === "新建生成…");
+  await page.waitForFunction(() => document.querySelector("#viewer-generate-and-load")?.textContent?.trim() === "3D 场景生成");
   assert.deepEqual(pageErrors, [], `viewer initialization errors: ${pageErrors.join(" | ")}`);
-  assert.equal((await openGeneration.textContent())?.trim(), "新建生成…");
+  assert.equal((await openGeneration.textContent())?.trim(), "3D 场景生成");
   assert.equal(await openGeneration.getAttribute("aria-haspopup"), "dialog");
   await openGeneration.click({ noWaitAfter: true });
   const generationDialog = page.locator("#viewer-generation-dialog");
@@ -262,16 +269,7 @@ try {
   }
 
   await page.locator("[data-close-generation]").last().click();
-  await page.locator('[data-shell-tab="evaluate"]').click();
-  await page.locator("#viewer-evaluate-panel").waitFor({ state: "visible" });
-  const evaluationGate = page.locator("#viewer-evaluate-gate");
-  await evaluationGate.waitFor({ state: "attached" });
-  assert.ok(
-    await evaluationGate.isVisible() || await evaluationGate.getAttribute("data-state") === "ready",
-    "evaluation must either show its workflow gate or expose the ready state",
-  );
-  await page.locator('[data-shell-tab="evaluate"]').click();
-  await page.locator("#viewer-evaluate-panel").waitFor({ state: "hidden" });
+  assert.equal(await page.locator('#viewer-evaluate-modal-toggle').isDisabled(), true, "evaluation stays unavailable until a current 3D scene is accepted");
   await page.locator('[data-shell-tab="history"]').click();
   await page.locator("#viewer-history-analysis-panel").waitFor({ state: "visible" });
   await page.locator("#viewer-history-load-state").waitFor({ state: "visible" });
@@ -295,34 +293,16 @@ try {
     await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
     await page.waitForTimeout(240);
     const canvasBeforeReview = await rect("#viewer-canvas");
-    await page.locator('[data-shell-tab="review"]').click();
-    await page.locator('#viewer-result-review').waitFor({ state: "visible" });
-    await page.waitForFunction(() => {
-      const review = document.querySelector("#viewer-result-review");
-      const state = document.querySelector("#viewer-result-review-state");
-      const accept = document.querySelector("#viewer-result-review-accept");
-      if (!(review instanceof HTMLElement) || !(state instanceof HTMLElement) || !(accept instanceof HTMLButtonElement)) return false;
-      const shouldDisable = review.dataset.mode === "starter" || state.dataset.tone === "empty";
-      return accept.disabled === shouldDisable;
-    });
-    const reviewSnapshot = await page.locator('#viewer-result-review').evaluate((review) => ({
-      mode: review.getAttribute("data-mode"),
-      tone: review.querySelector("#viewer-result-review-state")?.getAttribute("data-tone") ?? null,
-      acceptDisabled: review.querySelector("#viewer-result-review-accept")?.hasAttribute("disabled") ?? false,
-    }));
-    assert.equal(
-      reviewSnapshot.acceptDisabled,
-      reviewSnapshot.mode === "starter" || reviewSnapshot.tone === "empty",
-      "result approval must be disabled only for an empty or read-only starter scene",
-    );
+    assert.equal(await page.locator('#viewer-result-review-toggle').isDisabled(), true, "review stays unavailable until a current 3D scene exists");
     const canvasDuringReview = await rect("#viewer-canvas");
     assert.ok(canvasBeforeReview && canvasDuringReview);
-    assert.ok(Math.abs(canvasBeforeReview.width - canvasDuringReview.width) <= 1, `review drawer must not resize the 3D canvas at ${viewport.width}x${viewport.height}`);
-    await page.keyboard.press("Escape");
+    assert.ok(Math.abs(canvasBeforeReview.width - canvasDuringReview.width) <= 1, `review availability must not resize the 3D canvas at ${viewport.width}x${viewport.height}`);
   }
   await page.locator('.studio-language-toggle [role="radio"]:has-text("中文")').click();
   await page.getByText("生产流程", { exact: true }).waitFor();
   await page.getByText("3D 场景工作台", { exact: true }).waitFor();
+  assert.equal(await page.locator('[data-shell-tab="prepare-annotation"] .workbench-sidebar-icon').textContent(), "2D");
+  assert.equal(await page.locator('[data-shell-tab="browse-3d"] .workbench-sidebar-icon').textContent(), "3D");
   await page.locator("#viewer-top-assets").click();
   await page.locator(".viewer-scene-assets-modal:not([hidden])").waitFor();
   await page.getByRole("heading", { name: "全部可用资产 · 点击放置或原位替换" }).waitFor();

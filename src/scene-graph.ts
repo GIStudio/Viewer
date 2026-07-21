@@ -2411,7 +2411,7 @@ export type SceneGraphHostOptions = {
   mode?: "expert" | "course";
   showAdvancedSourceTools?: boolean;
   onApproveAndGenerate?: (annotation: ReferenceAnnotation) => Promise<void>;
-  onEnterProfessionalScene?: () => Promise<void>;
+  onNavigateProfessionalScene?: (target: "generate" | "browse") => Promise<void>;
 };
 
 export function mountSceneGraphPage(
@@ -2521,6 +2521,7 @@ export function mountSceneGraphPage(
     sourceWarningsEl,
     sourceBackButton,
     sourceGenerateButton,
+    sourceOpenExistingButton,
     sourceReviewStatusEl,
   } = collectSceneGraphElements(root);
 
@@ -2757,9 +2758,14 @@ export function mountSceneGraphPage(
         sourceReviewStatusEl.textContent = tr(`sceneGraph.review.${status}`, status);
         sourceReviewStatusEl.dataset.tone = "neutral";
       } else if (snapshot.approvedSourceRevision === snapshot.sourceRevision) {
-        sourceReviewStatusEl.textContent = formatViewerKey(language, "sceneGraph.review.saved", { revision: snapshot.sourceRevision })
+        const saved = formatViewerKey(language, "sceneGraph.review.saved", { revision: snapshot.sourceRevision })
           ?? `Saved and approved · revision ${snapshot.sourceRevision}`;
-        sourceReviewStatusEl.dataset.tone = "success";
+        const hasOlderScene = Boolean(snapshot.sceneLayoutPath)
+          && snapshot.sceneSourceRevision !== snapshot.sourceRevision;
+        sourceReviewStatusEl.textContent = hasOlderScene
+          ? `${saved} · ${formatViewerKey(language, "sceneGraph.review.olderScene", { revision: snapshot.sceneSourceRevision ?? "?" }) ?? "Existing 3D scene is based on an earlier annotation."}`
+          : saved;
+        sourceReviewStatusEl.dataset.tone = hasOlderScene ? "warning" : "success";
       } else {
         sourceReviewStatusEl.textContent = tr("sceneGraph.review.waiting", "Waiting for a valid annotation.");
         sourceReviewStatusEl.dataset.tone = "neutral";
@@ -2781,18 +2787,31 @@ export function mountSceneGraphPage(
       && (snapshot.step === "source" || !snapshot.normalized);
     sourceNormalizeButton.hidden = browsingOsm;
     sourceNormalizeButton.setAttribute("aria-hidden", String(browsingOsm));
+    const hasExistingScene = Boolean(snapshot.sceneLayoutPath);
+    const sceneMatchesCurrentAnnotation = hasExistingScene
+      && snapshot.sceneSourceRevision === snapshot.sourceRevision;
+    const canGenerateCurrentScene = Boolean(normalized)
+      && snapshot.approvedSourceRevision === snapshot.sourceRevision
+      && snapshot.annotationDraft?.status === "saved"
+      && !snapshot.busy.generate;
     sourceGenerateButton.disabled = courseMode
       ? state.annotation.centerlines.length === 0 || Boolean(snapshot.busy.generate)
-      : !normalized
-        || snapshot.approvedSourceRevision !== snapshot.sourceRevision
-        || snapshot.annotationDraft?.status !== "saved"
-        || Boolean(snapshot.busy.generate);
+      : sceneMatchesCurrentAnnotation ? false : !canGenerateCurrentScene;
     if (!courseMode) {
-      sourceGenerateButton.textContent = tr("sceneGraph.review.enter3d", "Enter 3D scene");
-      sourceGenerateButton.title = tr("sceneGraph.review.enter3dHint", "Start or resume the road baseline for the current approved revision.");
+      sourceGenerateButton.textContent = sceneMatchesCurrentAnnotation
+        ? tr("sceneGraph.review.openCurrent3d", "Open current 3D scene")
+        : tr("sceneGraph.review.generateCurrent3d", "Generate current 3D scene");
+      sourceGenerateButton.title = sceneMatchesCurrentAnnotation
+        ? tr("sceneGraph.review.openCurrent3dHint", "Open the 3D scene generated from this annotation revision.")
+        : tr("sceneGraph.review.generateCurrent3dHint", "Open the 3D generation flow for this approved annotation revision.");
+      sourceOpenExistingButton.hidden = !hasExistingScene || sceneMatchesCurrentAnnotation;
+      sourceOpenExistingButton.disabled = !hasExistingScene;
+      sourceOpenExistingButton.textContent = tr("sceneGraph.review.openExisting3d", "Open existing 3D scene");
+      sourceOpenExistingButton.title = tr("sceneGraph.review.openExisting3dHint", "Browse the last generated 3D scene without treating it as current.");
     } else {
       sourceGenerateButton.textContent = tr("sceneGraph.review.courseGenerate", "Approve annotation and generate 3D baseline");
       sourceGenerateButton.title = tr("sceneGraph.review.courseGenerateHint", "Save this ReferenceAnnotation to the project and start the course baseline job.");
+      sourceOpenExistingButton.hidden = true;
     }
     if (snapshot.lastError && root.isConnected) {
       sourceStatusEl.textContent = snapshot.lastError;
@@ -3087,15 +3106,35 @@ export function mountSceneGraphPage(
       setStatus(sourceReviewStatusEl, "Approve the reviewed source before generation.", "error");
       return;
     }
+    const sceneMatchesCurrentAnnotation = Boolean(beforeApproval.sceneLayoutPath)
+      && beforeApproval.sceneSourceRevision === beforeApproval.sourceRevision;
     setStatus(
       sourceReviewStatusEl,
-      translateViewerKey(loadViewerLanguage(), "sceneGraph.review.startingBaseline") ?? "Opening the 3D scene and preparing the road baseline…",
+      sceneMatchesCurrentAnnotation
+        ? translateViewerKey(loadViewerLanguage(), "sceneGraph.review.openingCurrent3d") ?? "Opening the current 3D scene…"
+        : translateViewerKey(loadViewerLanguage(), "sceneGraph.review.openingGeneration") ?? "Opening the 3D generation flow for the current annotation…",
       "neutral",
     );
     try {
-      await hostOptions.onEnterProfessionalScene?.();
+      await hostOptions.onNavigateProfessionalScene?.(sceneMatchesCurrentAnnotation ? "browse" : "generate");
     } catch (error) {
       setStatus(sourceReviewStatusEl, error instanceof Error ? error.message : "Unable to enter the 3D scene.", "error");
+      renderSourceWorkflow();
+    }
+  }
+
+  async function openExistingProfessionalScene(): Promise<void> {
+    const snapshot = workflow.getSnapshot();
+    if (!snapshot.sceneLayoutPath) return;
+    setStatus(
+      sourceReviewStatusEl,
+      translateViewerKey(loadViewerLanguage(), "sceneGraph.review.openingExisting3d") ?? "Opening the existing 3D scene…",
+      "neutral",
+    );
+    try {
+      await hostOptions.onNavigateProfessionalScene?.("browse");
+    } catch (error) {
+      setStatus(sourceReviewStatusEl, error instanceof Error ? error.message : "Unable to open the existing 3D scene.", "error");
       renderSourceWorkflow();
     }
   }
@@ -6061,6 +6100,7 @@ export function mountSceneGraphPage(
     { signal },
   );
   sourceGenerateButton.addEventListener("click", () => void generateApprovedScene(), { signal });
+  sourceOpenExistingButton.addEventListener("click", () => void openExistingProfessionalScene(), { signal });
 
   imageInput.addEventListener(
     "change",

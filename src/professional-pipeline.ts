@@ -3,7 +3,7 @@ import type {
   WorkflowSnapshot,
 } from "./workflow-controller";
 
-export type ProfessionalViewerTarget = "generate" | "review" | "edit" | "deliver";
+export type ProfessionalViewerTarget = "generate" | "browse" | "review" | "edit" | "deliver";
 
 export const PROFESSIONAL_VIEWER_TARGET_KEY = "roadgen3d:professional-viewer-target";
 
@@ -45,7 +45,7 @@ export function consumeProfessionalViewerTarget(): ProfessionalViewerTarget | nu
   try {
     const value = sessionStorage.getItem(PROFESSIONAL_VIEWER_TARGET_KEY);
     sessionStorage.removeItem(PROFESSIONAL_VIEWER_TARGET_KEY);
-    if (value === "generate" || value === "review" || value === "edit" || value === "deliver") return value;
+    if (value === "generate" || value === "browse" || value === "review" || value === "edit" || value === "deliver") return value;
   } catch {
     // Ignore privacy-mode storage failures.
   }

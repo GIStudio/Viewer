@@ -162,6 +162,7 @@ export async function openProfessionalPublicProject(
   workflow.setGeneratedScene({
     layoutPath: materialized.manifestUrl,
     sceneRef: { kind: "project_revision", projectId: project.id, revisionId: revision.id },
+    sourceRevision: null,
     sceneRevision: materialized.manifest.layout_revision ?? null,
     contextMassing: materialized.manifest.context_massing ?? null,
   });
@@ -172,6 +173,7 @@ export async function openProfessionalOwnedRevision(
   workflow: WorkflowController,
   projectId: string,
   revision: SceneRevision,
+  options: { sourceRevision?: number | null } = {},
 ): Promise<void> {
   const isPublic = session.getSnapshot().workspace?.scope === "public";
   const materialized = await materializeProjectManifest(session, projectId, revision.id, isPublic);
@@ -179,6 +181,7 @@ export async function openProfessionalOwnedRevision(
   workflow.setGeneratedScene({
     layoutPath: materialized.manifestUrl,
     sceneRef: { kind: "project_revision", projectId, revisionId: revision.id },
+    sourceRevision: options.sourceRevision ?? null,
     sceneRevision: materialized.manifest.layout_revision ?? null,
     contextMassing: materialized.manifest.context_massing ?? null,
   });
@@ -195,6 +198,7 @@ async function openProfessionalReadOnlyRevision(
   workflow.setGeneratedScene({
     layoutPath: materialized.manifestUrl,
     sceneRef: { kind: "project_revision", projectId, revisionId: revision.id },
+    sourceRevision: null,
     sceneRevision: materialized.manifest.layout_revision ?? null,
     contextMassing: materialized.manifest.context_massing ?? null,
   });

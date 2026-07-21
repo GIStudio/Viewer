@@ -82,6 +82,8 @@ export interface DesktopShell {
   statusHintsHost: HTMLElement;
   setLeftSections: (sections: ShellSection[]) => void;
   setRightTabs: (tabs: ShellTab[], activeId?: string | null) => void;
+  /** Opens a registered modal tab without exposing it as a sidebar page. */
+  openModalTab: (id: string) => boolean;
   activateRightTab: (id: string | null) => void;
   setRightPinned: (pinned: boolean) => void;
   setBottomOpen: (open: boolean) => void;

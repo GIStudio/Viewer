@@ -72,7 +72,6 @@ export function collectViewerPanelElements(root: HTMLElement | Document): Viewer
     designGenerateEl: requireElement<HTMLButtonElement>(root, "#viewer-design-generate"),
     designStatusEl: requireElement<HTMLElement>(root, "#viewer-design-status"),
     designResultEl: requireElement<HTMLElement>(root, "#viewer-design-result"),
-    evaluateToggleEl: requireElement<HTMLButtonElement>(root, "#viewer-evaluate-toggle"),
     evaluatePanelEl: requireElement<HTMLElement>(root, "#viewer-evaluate-panel"),
     evaluateCloseEl: requireElement<HTMLButtonElement>(root, "#viewer-evaluate-close"),
     evaluateRunEl: requireElement<HTMLButtonElement>(root, "#viewer-evaluate-run"),

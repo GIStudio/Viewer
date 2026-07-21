@@ -206,6 +206,32 @@
   padding: 0.45rem 0.75rem;
 }
 
+.stage-toolbar-workflow-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.stage-toolbar-workflow-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.2rem;
+  min-height: 1.2rem;
+  padding-inline: 0.22rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font: 800 0.58rem/1 var(--rg-mono-font);
+}
+
+.stage-toolbar-workflow-action[data-workflow-status="warning"] .stage-toolbar-workflow-badge {
+  color: var(--rg-coral);
+}
+
+.stage-toolbar-workflow-action[data-workflow-status="ready"] .stage-toolbar-workflow-badge,
+.stage-toolbar-workflow-action[data-workflow-status="accepted"] .stage-toolbar-workflow-badge {
+  color: #3e7d67;
+}
+
 .stage-toolbar-button:hover:not(:disabled),
 .stage-segmented button:hover:not(:disabled) {
   border-color: rgba(0, 83, 159, 0.34);

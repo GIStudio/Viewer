@@ -95,7 +95,7 @@ export function createProfessionalBaselineCoordinator(
               `/api/v1/projects/${projectContext.projectId}/adopt-scene-job`,
               { job_id: payload.job_id, source_id: projectContext.sourceId },
             );
-            await openProfessionalOwnedRevision(session, workflow, projectContext.projectId, adopted);
+            await openProfessionalOwnedRevision(session, workflow, projectContext.projectId, adopted, { sourceRevision });
             await session.refreshPublicProjects().catch(() => []);
           } else {
             workflow.setGeneratedScene({

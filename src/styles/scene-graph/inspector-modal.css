@@ -1,4 +1,4 @@
-.desktop-shell-modal[data-shell-modal-tab="inspector"] {
+.desktop-shell-modal {
   position: fixed;
   z-index: var(--rg-overlay-z-modal, 10020);
   inset: 0;
@@ -7,7 +7,7 @@
   padding: clamp(0.75rem, 2.5vw, 2.25rem);
 }
 
-.desktop-shell-modal[data-shell-modal-tab="inspector"][hidden] {
+.desktop-shell-modal[hidden] {
   display: none;
 }
 
