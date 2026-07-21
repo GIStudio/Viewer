@@ -5,6 +5,7 @@ import type { AppRoute } from "../ui";
 import { createWorkflowController } from "../workflow-controller";
 import { createProfessionalBaselineCoordinator } from "../professional-baseline-coordinator";
 import { createProfessionalSessionController } from "../professional-session";
+import { disposeProfessionalPublicProjectUrls } from "../professional-public-project";
 import {
   VIEWER_LANGUAGE_EVENT,
   loadViewerLanguage,
@@ -23,8 +24,8 @@ export function AppRoot() {
   const [language, setLanguage] = useState<ViewerLanguage>(() => loadViewerLanguage());
   const [draftReady, setDraftReady] = useState(false);
   const [workflow] = useState(() => createWorkflowController());
-  const [baselineCoordinator] = useState(() => createProfessionalBaselineCoordinator(workflow));
   const [professionalSession] = useState(() => createProfessionalSessionController());
+  const [baselineCoordinator] = useState(() => createProfessionalBaselineCoordinator(workflow, professionalSession));
 
   useEffect(() => {
     const handleHashChange = () => setRoute(resolveRoute());
@@ -46,7 +47,7 @@ export function AppRoot() {
   }, [workflow]);
 
   useEffect(() => {
-    void professionalSession.initialize();
+    void professionalSession.initialize().catch(() => undefined);
   }, [professionalSession]);
 
   useEffect(() => {
@@ -65,6 +66,7 @@ export function AppRoot() {
 
   useEffect(() => () => {
     baselineCoordinator.dispose();
+    disposeProfessionalPublicProjectUrls();
     workflow.dispose();
   }, [baselineCoordinator, workflow]);
 

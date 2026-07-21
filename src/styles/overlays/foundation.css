@@ -1,0 +1,205 @@
+/*
+ * Shared overlay geometry and interaction affordances.
+ * These rules target existing DOM contracts so route controllers remain unchanged.
+ */
+
+:where(
+  .viewer-workbench-dialog,
+  .viewer-generation-dialog-panel,
+  .viewer-diff2d-modal-content,
+  .viewer-expanded-map-panel,
+  .junction-composer-container,
+  .course-design-external-drawer,
+  .osm-aoi-picker-panel,
+  .osm-road-study-picker-panel
+) {
+  color: var(--rg-ink);
+  border: var(--rg-overlay-border);
+  border-radius: var(--rg-overlay-radius);
+  background-color: var(--rg-overlay-surface);
+  background-image: var(--rg-grid-paper);
+  background-size: 24px 24px;
+  box-shadow: var(--rg-overlay-shadow);
+}
+
+:where(
+  .viewer-workbench-modal,
+  .viewer-generation-dialog,
+  .viewer-diff2d-modal,
+  .viewer-expanded-map-modal,
+  .junction-composer-overlay
+) {
+  isolation: isolate;
+}
+
+:where(.viewer-workbench-modal, .viewer-diff2d-modal) {
+  background: var(--rg-overlay-scrim);
+  backdrop-filter: blur(2px);
+}
+
+:where(
+  .viewer-workbench-dialog,
+  .viewer-generation-dialog-panel,
+  .viewer-settings-panel,
+  .viewer-slide-panel,
+  .course-design-external-drawer
+) :where(button, input, select, textarea, summary):focus-visible {
+  outline: var(--rg-overlay-focus);
+  outline-offset: 2px;
+}
+
+:where(
+  .viewer-workbench-dialog,
+  .viewer-generation-dialog-panel,
+  .viewer-settings-panel,
+  .viewer-slide-panel,
+  .course-design-external-drawer
+) :where(button, input, select, textarea) {
+  font-family: var(--rg-body-font);
+}
+
+:where(
+  .viewer-workbench-dialog > header,
+  .viewer-workbench-dialog > footer,
+  .viewer-generation-dialog-head,
+  .viewer-generation-dialog-footer,
+  .viewer-slide-panel-header,
+  .viewer-settings-header,
+  .workbench-sidebar-drawer-header,
+  .course-design-external-drawer > header
+) {
+  border-color: var(--rg-ink);
+  background: rgba(243, 240, 231, 0.97);
+}
+
+:where(
+  .viewer-workbench-dialog h2,
+  .viewer-generation-dialog-head h2,
+  .viewer-slide-panel-title,
+  .viewer-settings-title,
+  .workbench-sidebar-drawer-header strong
+) {
+  color: var(--rg-ink);
+  font-family: var(--rg-display-font);
+  letter-spacing: -0.015em;
+}
+
+:where(
+  .viewer-settings-close,
+  .viewer-workbench-dialog > header > button,
+  .viewer-diff2d-modal-close,
+  .viewer-expanded-map-close,
+  .workbench-sidebar-close
+) {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.35rem;
+  height: 2.35rem;
+  min-height: 2.35rem;
+  padding: 0;
+  border: 1px solid var(--rg-ink);
+  border-radius: 50%;
+  color: #fff;
+  background: var(--rg-blue);
+  box-shadow: 2px 2px 0 var(--rg-yellow);
+  font: 800 1.2rem/1 var(--rg-body-font);
+  cursor: pointer;
+  transition:
+    color var(--rg-overlay-duration) var(--rg-overlay-ease),
+    background var(--rg-overlay-duration) var(--rg-overlay-ease),
+    transform var(--rg-overlay-duration) var(--rg-overlay-ease),
+    box-shadow var(--rg-overlay-duration) var(--rg-overlay-ease);
+}
+
+:where(
+  .viewer-settings-close,
+  .viewer-workbench-dialog > header > button,
+  .viewer-diff2d-modal-close,
+  .viewer-expanded-map-close,
+  .workbench-sidebar-close
+):hover {
+  color: var(--rg-ink);
+  background: var(--rg-coral);
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--rg-yellow);
+}
+
+/* Keep close affordances identical even when legacy route CSS loads later. */
+.viewer-workbench-dialog > header > button,
+.viewer-workbench-dialog > header > button[data-action="close"],
+.viewer-generation-dialog-panel .viewer-settings-close,
+.viewer-settings-panel .viewer-settings-close,
+.viewer-slide-panel .viewer-settings-close,
+.viewer-diff2d-modal-content .viewer-diff2d-modal-close,
+.viewer-expanded-map-header .viewer-expanded-map-close,
+.course-design-external-drawer > header > button {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.35rem;
+  height: 2.35rem;
+  min-height: 2.35rem;
+  padding: 0;
+  border: 1px solid var(--rg-ink);
+  border-radius: 50%;
+  color: #fff;
+  background: var(--rg-blue);
+  box-shadow: 2px 2px 0 var(--rg-yellow);
+  font: 800 1.2rem/1 var(--rg-body-font);
+}
+
+.viewer-workbench-dialog > header > button:hover,
+.viewer-workbench-dialog > header > button[data-action="close"]:hover,
+.viewer-generation-dialog-panel .viewer-settings-close:hover,
+.viewer-settings-panel .viewer-settings-close:hover,
+.viewer-slide-panel .viewer-settings-close:hover,
+.viewer-diff2d-modal-content .viewer-diff2d-modal-close:hover,
+.viewer-expanded-map-header .viewer-expanded-map-close:hover,
+.course-design-external-drawer > header > button:hover {
+  color: var(--rg-ink);
+  border-color: var(--rg-ink);
+  background: var(--rg-coral);
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--rg-yellow);
+}
+
+:where(
+  .viewer-settings-panel,
+  .viewer-slide-panel,
+  .course-design-external-drawer
+) {
+  scrollbar-color: var(--rg-blue) var(--rg-paper-deep);
+  scrollbar-width: thin;
+}
+
+:where(
+  .viewer-settings-panel,
+  .viewer-slide-panel,
+  .viewer-workbench-dialog,
+  .course-design-external-drawer
+) ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+:where(
+  .viewer-settings-panel,
+  .viewer-slide-panel,
+  .viewer-workbench-dialog,
+  .course-design-external-drawer
+) ::-webkit-scrollbar-track {
+  background: var(--rg-paper-deep);
+  border-left: 1px solid rgba(16, 45, 58, 0.18);
+}
+
+:where(
+  .viewer-settings-panel,
+  .viewer-slide-panel,
+  .viewer-workbench-dialog,
+  .course-design-external-drawer
+) ::-webkit-scrollbar-thumb {
+  border: 2px solid var(--rg-paper-deep);
+  border-radius: 999px;
+  background: var(--rg-blue);
+}

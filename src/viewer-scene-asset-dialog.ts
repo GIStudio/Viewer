@@ -4,7 +4,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { resolveApiUrl } from "./api-origin";
 import { apiJson } from "./viewer-api";
 import type { SceneAssetRef } from "./viewer-api";
-import type { SceneAssetPalette, SceneAssetPaletteAdapter } from "./viewer-asset-palette";
+import type { SceneAssetPaletteAdapter } from "./viewer-asset-palette";
 
 type CatalogAsset = SceneAssetRef & {
   manifestLabel?: string;
@@ -24,14 +24,14 @@ type Options = {
   adapter: SceneAssetPaletteAdapter;
   language(): "en" | "zh";
   flashStatus(message: string): void;
+  selectedInstanceId?(): string | null;
+  selectedCategory?(): string | null;
+  replaceSelected?(asset: SceneAssetRef): boolean;
+  placeAsset?(asset: SceneAssetRef): boolean | Promise<boolean>;
 };
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function keyOf(asset: SceneAssetRef): string {
-  return `${asset.manifestName}:${asset.assetId}`;
 }
 
 export function createSceneAssetDialog(options: Options): SceneAssetDialogController {
@@ -40,27 +40,24 @@ export function createSceneAssetDialog(options: Options): SceneAssetDialogContro
   root.hidden = true;
   root.innerHTML = `
     <section class="viewer-workbench-dialog" role="dialog" aria-modal="true" aria-labelledby="viewer-scene-assets-title">
-      <header><div><span>SCENE ASSETS / 场景资产</span><h2 id="viewer-scene-assets-title">搜索并维护可拖入场景的资产</h2></div><button type="button" data-action="close" aria-label="关闭">×</button></header>
-      <nav class="viewer-dialog-tabs" role="tablist">
-        <button type="button" role="tab" data-tab="palette" aria-selected="true">我的资产列表 <em data-palette-count>0</em></button>
-        <button type="button" role="tab" data-tab="catalog" aria-selected="false">全部资产</button>
-      </nav>
+      <header><div><span>SCENE ASSETS / 场景资产</span><h2 id="viewer-scene-assets-title">全部可用资产 · 点击放置或原位替换</h2></div><button type="button" data-action="close" aria-label="关闭">×</button></header>
+      <div class="viewer-scene-assets-selection" data-selection-state="empty"><span>当前对象</span><strong data-selected-instance>未选择</strong><small data-selected-hint>先开启编辑并选择树木或街具，即可用同类资产原位替换。</small></div>
       <div class="viewer-scene-assets-toolbar"><input type="search" data-search placeholder="搜索名称、类别或资产 ID" /><select data-category><option value="">全部类别</option><option value="tree">树木</option><option value="bench">座椅</option><option value="lamp">路灯</option><option value="sign">标志</option><option value="bollard">护柱</option><option value="trash">垃圾桶</option></select><button type="button" data-action="search">搜索</button></div>
-      <main><section class="viewer-scene-assets-list" data-list></section><aside class="viewer-scene-assets-preview"><div data-preview-canvas></div><h3 data-preview-title>选择资产查看 GLB</h3><p data-preview-meta>只有经过 Asset Editor 检查并登记到受信任清单的资产可以加入。</p></aside></main>
-      <footer><p>候选列表不保证资产一定被自动生成采用；拖拽到场景会立即创建地物并由服务器校验承载面。</p><button type="button" data-action="close">完成</button></footer>
+      <main><section class="viewer-scene-assets-list" data-list></section><aside class="viewer-scene-assets-preview"><div data-preview-canvas></div><h3 data-preview-title>选择资产查看 GLB</h3><p data-preview-meta>所有用户使用同一受信任资产目录；服务器仍会校验文件指纹与承载面。</p></aside></main>
+      <footer><p>点击“添加到场景”进入放置画笔；普通点击落点，Shift + 点击进入漫游，Esc 退出画笔。原位替换会保留位置、旋转与缩放。</p><button type="button" data-action="close">完成</button></footer>
     </section>`;
   document.body.appendChild(root);
   const dialog = root.querySelector<HTMLElement>(".viewer-workbench-dialog")!;
   const list = root.querySelector<HTMLElement>("[data-list]")!;
   const searchInput = root.querySelector<HTMLInputElement>("[data-search]")!;
   const categorySelect = root.querySelector<HTMLSelectElement>("[data-category]")!;
-  const paletteCount = root.querySelector<HTMLElement>("[data-palette-count]")!;
+  const selectedInstanceEl = root.querySelector<HTMLElement>("[data-selected-instance]")!;
+  const selectedHintEl = root.querySelector<HTMLElement>("[data-selected-hint]")!;
+  const selectionStateEl = root.querySelector<HTMLElement>(".viewer-scene-assets-selection")!;
   const previewHost = root.querySelector<HTMLElement>("[data-preview-canvas]")!;
   const previewTitle = root.querySelector<HTMLElement>("[data-preview-title]")!;
   const previewMeta = root.querySelector<HTMLElement>("[data-preview-meta]")!;
-  let palette: SceneAssetPalette = { schemaVersion: "roadgen3d.asset-palette.v1", assets: [] };
   let catalog: CatalogAsset[] = [];
-  let activeTab: "palette" | "catalog" = "palette";
   let previousFocus: HTMLElement | null = null;
   let previewRenderer: THREE.WebGLRenderer | null = null;
   let previewScene: THREE.Scene | null = null;
@@ -69,33 +66,30 @@ export function createSceneAssetDialog(options: Options): SceneAssetDialogContro
   let previewObject: THREE.Object3D | null = null;
 
   function render(): void {
-    paletteCount.textContent = String(palette.assets.length);
-    root.querySelectorAll<HTMLElement>("[role=tab]").forEach((tab) => tab.setAttribute("aria-selected", String(tab.dataset.tab === activeTab)));
-    const rows = activeTab === "palette" ? palette.assets : catalog;
+    const rows = catalog;
+    const selectedId = options.selectedInstanceId?.() ?? null;
+    const selectedCategory = options.selectedCategory?.() ?? null;
+    selectedInstanceEl.textContent = selectedId ?? "未选择";
+    selectedHintEl.textContent = selectedId
+      ? `只显示 ${selectedCategory || "同类"} 资产；替换后保留当前变换。`
+      : "先开启编辑并选择树木或街具，即可用同类资产原位替换。";
+    selectionStateEl.dataset.selectionState = selectedId ? "selected" : "empty";
     if (!rows.length) {
-      list.innerHTML = `<div class="viewer-scene-assets-empty">${activeTab === "palette" ? "列表为空。先到“全部资产”搜索并加入。" : "没有匹配的可用资产。"}</div>`;
+      list.innerHTML = `<div class="viewer-scene-assets-empty">没有匹配的可用资产。</div>`;
       return;
     }
-    const inPalette = new Set(palette.assets.map(keyOf));
     list.innerHTML = rows.map((asset, index) => `
-      <article class="viewer-scene-asset-card" draggable="${activeTab === "palette"}" data-index="${index}">
+      <article class="viewer-scene-asset-card" data-index="${index}">
         <div><span>${escapeHtml(asset.category)}</span><strong>${escapeHtml(asset.label)}</strong><small>${escapeHtml(asset.manifestName)} · ${escapeHtml(asset.assetId)}</small></div>
         <div class="viewer-scene-asset-card-actions">
           <button type="button" data-action="preview" data-index="${index}">预览</button>
-          ${activeTab === "palette"
-            ? `<button type="button" data-action="remove" data-index="${index}">移出</button>`
-            : `<button type="button" data-action="add" data-index="${index}" ${inPalette.has(keyOf(asset)) ? "disabled" : ""}>${inPalette.has(keyOf(asset)) ? "已加入" : "加入列表"}</button>`}
+          <button type="button" data-action="place" data-index="${index}">添加到场景</button>
+          ${selectedId ? `<button type="button" data-action="replace" data-index="${index}">原位替换</button>` : ""}
         </div>
       </article>`).join("");
   }
 
-  async function savePalette(next: SceneAssetPalette): Promise<void> {
-    palette = await options.adapter.save(next);
-    render();
-  }
-
   async function search(): Promise<void> {
-    activeTab = "catalog";
     list.innerHTML = `<div class="viewer-scene-assets-empty">正在搜索受信任资产目录…</div>`;
     const query = new URLSearchParams({ q: searchInput.value.trim(), category: categorySelect.value, limit: "100" });
     const payload = await apiJson<{ assets: CatalogAsset[] }>(`/api/asset-catalog/search?${query.toString()}`);
@@ -146,27 +140,17 @@ export function createSceneAssetDialog(options: Options): SceneAssetDialogContro
     if (!target) return;
     if (target.dataset.action === "close") return controller.close();
     if (target.dataset.action === "search") return void search().catch((error) => options.flashStatus(String(error)));
-    if (target.dataset.tab) {
-      activeTab = target.dataset.tab as "palette" | "catalog";
-      render();
-      return;
-    }
     const index = Number(target.dataset.index);
-    const asset = (activeTab === "palette" ? palette.assets : catalog)[index];
+    const asset = catalog[index];
     if (!asset) return;
     if (target.dataset.action === "preview") void preview(asset).catch((error) => options.flashStatus(String(error)));
-    if (target.dataset.action === "add") void savePalette({ ...palette, assets: [...palette.assets, asset] }).catch((error) => options.flashStatus(String(error)));
-    if (target.dataset.action === "remove") void savePalette({ ...palette, assets: palette.assets.filter((_, itemIndex) => itemIndex !== index) }).catch((error) => options.flashStatus(String(error)));
+    if (target.dataset.action === "replace" && options.replaceSelected?.(asset)) controller.close();
+    if (target.dataset.action === "place") {
+      void Promise.resolve(options.placeAsset?.(asset) ?? false)
+        .then((started) => { if (started) controller.close(); })
+        .catch((error) => options.flashStatus(String(error)));
+    }
   });
-  list.addEventListener("dragstart", (event) => {
-    const card = (event.target as HTMLElement).closest<HTMLElement>("[data-index]");
-    const asset = card ? palette.assets[Number(card.dataset.index)] : undefined;
-    if (!asset || !event.dataTransfer) return;
-    event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData("application/x-roadgen3d-scene-asset", JSON.stringify(asset));
-    root.dataset.dragging = "true";
-  });
-  list.addEventListener("dragend", () => { delete root.dataset.dragging; });
   root.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -186,10 +170,11 @@ export function createSceneAssetDialog(options: Options): SceneAssetDialogContro
   const controller: SceneAssetDialogController = {
     async open(): Promise<void> {
       previousFocus = document.activeElement as HTMLElement | null;
-      palette = await options.adapter.load();
-      activeTab = "palette";
+      await options.adapter.load();
+      const selectedCategory = options.selectedCategory?.() ?? "";
+      categorySelect.value = [...categorySelect.options].some((option) => option.value === selectedCategory) ? selectedCategory : "";
       root.hidden = false;
-      render();
+      await search();
       searchInput.focus();
     },
     close(): void {

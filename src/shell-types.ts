@@ -18,12 +18,20 @@ export interface ShellTab {
   id: string;
   label: string;
   content: string | HTMLElement;
+  /** Opens content in a workbench dialog instead of a sidebar drawer. */
+  presentation?: "modal";
 }
 
 export type WorkbenchShellMode =
   | "single_left_overlay"
   | "course_single_left"
   | "legacy_dual";
+
+export type WorkbenchSidebarChangeDetail = {
+  pageId: string | null;
+  previousPageId: string | null;
+  mode: WorkbenchShellMode;
+};
 
 export type WorkbenchSidebarGroup = "flow" | "navigation" | "workspace" | "analysis" | "inspection" | "system";
 

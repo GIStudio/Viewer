@@ -43,7 +43,8 @@ assert.doesNotMatch(
 assert.match(app, /workflow\.setStarterPreview\(starter\.id\)/, "starter loading must publish the transient review state");
 assert.match(app, /frameSceneFocus\(starter\.focus_xz, starter\.focus_extent_m\)/, "starter loading must frame the cross junction rather than the full corridor");
 assert.match(app, /shell\.sidebar\.activate\("review"\)/, "first-open onboarding must activate the 03 review page");
-assert.match(pipeline, /id="viewer-starter-review-guide"/, "03 must explain how 01A, 01B and 02 produce a user scene");
+assert.match(pipeline, /id="viewer-starter-review-guide"/, "03 must explain how 01A and 02 produce a user scene");
+assert.doesNotMatch(pipeline, /<b>01B<\/b>/, "the hidden asset step must not return in the starter guide");
 assert.match(
   app,
   /shouldSyncGeneratedLayout:\s*\(\) => !parseQueryLayoutPath\(\)/,

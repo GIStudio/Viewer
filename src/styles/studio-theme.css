@@ -14,6 +14,23 @@
   --rg-mono-font: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --rg-grid-paper: linear-gradient(rgba(23, 75, 100, 0.055) 1px, transparent 1px),
     linear-gradient(90deg, rgba(23, 75, 100, 0.055) 1px, transparent 1px);
+  --rg-overlay-scrim: rgba(16, 45, 58, 0.56);
+  --rg-overlay-scrim-soft: rgba(16, 45, 58, 0.28);
+  --rg-overlay-surface: rgba(255, 254, 249, 0.985);
+  --rg-overlay-surface-muted: rgba(243, 240, 231, 0.94);
+  --rg-overlay-border: 1px solid var(--rg-ink);
+  --rg-overlay-shadow: 8px 8px 0 var(--rg-yellow);
+  --rg-overlay-shadow-soft: 4px 4px 0 rgba(16, 45, 58, 0.7);
+  --rg-overlay-focus: 3px solid rgba(223, 101, 79, 0.42);
+  --rg-overlay-modal-width: 64rem;
+  --rg-overlay-drawer-width: 34rem;
+  --rg-overlay-radius: 4px;
+  --rg-overlay-z-stage: 40;
+  --rg-overlay-z-drawer: 120;
+  --rg-overlay-z-modal: 14000;
+  --rg-overlay-z-toast: 15000;
+  --rg-overlay-duration: 180ms;
+  --rg-overlay-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   --course-ink: var(--rg-ink);
   --course-blue: var(--rg-blue);
@@ -52,7 +69,7 @@
 
 .studio-brand-header {
   display: grid;
-  grid-template-columns: 238px minmax(0, 1fr) auto;
+  grid-template-columns: var(--workbench-brand-column, 238px) minmax(0, 1fr) auto;
   align-items: center;
   min-width: 0;
   min-height: 76px;

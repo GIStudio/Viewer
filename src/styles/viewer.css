@@ -7,6 +7,7 @@
 @import "./viewer/settings-tool-disclosure.css";
 @import "./viewer/object-edit-status.css";
 @import "./viewer/history-scores.css";
+@import "./viewer/history-loading.css";
 @import "./viewer/metrics-evaluate-presets.css";
 @import "./viewer/compare-panel.css";
 @import "./viewer/compare-results.css";
@@ -25,3 +26,4 @@
 @import "./viewer/floating-lane.css";
 @import "./viewer/help-panel.css";
 @import "./viewer/scenario-panel.css";
+@import "./viewer/professional-scenarios.css";

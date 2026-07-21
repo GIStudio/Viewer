@@ -1,10 +1,54 @@
 .professional-account-panel,
-.professional-admin-panel {
+.professional-admin-panel,
+.professional-public-space {
   display: grid;
   gap: 12px;
   padding: 14px;
   color: var(--ink, #102d3a);
 }
+
+.professional-public-intro {
+  padding: 13px;
+  border: 1px solid var(--ink, #102d3a);
+  background: linear-gradient(135deg, rgba(244, 196, 48, .18), rgba(255, 253, 246, .96) 58%);
+  box-shadow: 4px 4px 0 var(--ink, #102d3a);
+}
+
+.professional-public-intro h3 { margin: 5px 0 7px; font-family: Georgia, "Songti SC", serif; }
+.professional-public-intro p { margin: 4px 0 10px; font-size: 12px; line-height: 1.5; }
+.professional-public-intro button,
+.professional-public-card-actions :is(button, a) {
+  display: inline-grid;
+  place-items: center;
+  min-height: 31px;
+  padding: 5px 8px;
+  border: 1px solid var(--ink, #102d3a);
+  border-radius: 2px;
+  color: #fff;
+  background: var(--roadgen-blue, #174b64);
+  font-size: 11px;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.professional-public-grid { display: grid; gap: 10px; }
+.professional-public-card {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid var(--ink, #102d3a);
+  border-left: 5px solid #9aabb1;
+  background: rgba(255, 253, 246, .96);
+}
+.professional-public-card[data-owned="true"] { border-left-color: var(--roadgen-yellow, #f4c430); }
+.professional-public-card header { display: flex; justify-content: space-between; gap: 8px; color: #58707a; font: 750 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.professional-public-card h4 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 15px; }
+.professional-public-card p,
+.professional-public-card small { margin: 0; color: #48616b; font-size: 11px; line-height: 1.4; }
+.professional-public-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.professional-public-card-actions :is(button, a):last-child { color: var(--ink, #102d3a); background: #fffdf6; }
+.professional-public-card-actions button:disabled { opacity: .45; cursor: not-allowed; }
 
 .professional-account-panel section,
 .professional-admin-panel section,

@@ -67,10 +67,9 @@ export function renderProfessionalReviewPanelHtml(): string {
       <section class="professional-starter-review-guide" id="viewer-starter-review-guide" hidden>
         <span>START HERE · 03</span>
         <h3>先看完整场景，再制作自己的研究区</h3>
-        <p>当前是只读的广州十字路口产品示例，不代表你已经完成 01A、01B 或 02。</p>
+        <p>当前是只读的广州十字路口产品示例，不代表你已经完成 01A 或 02。</p>
         <div class="professional-starter-flow" aria-label="从准备到结果审核的生成流程">
           <div><b>01A</b><strong>OSM 数据与标注</strong><small>选择道路、研究走廊与建筑上下文</small></div>
-          <div><b>01B</b><strong>3D 素材准备</strong><small>采用默认白模或维护候选资产仓库</small></div>
           <i aria-hidden="true">→</i>
           <div><b>02</b><strong>3D 场景生成</strong><small>确认结构、家具目标与输出配置</small></div>
           <i aria-hidden="true">→</i>
@@ -95,7 +94,7 @@ export function renderProfessionalReviewPanelHtml(): string {
         <button id="viewer-result-review-accept" class="viewer-nav-button" type="button" data-i18n-key="professional.review.accept">Accept and continue to evaluation</button>
         <button id="viewer-result-review-changes" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.changes">Needs scene changes</button>
         <button id="viewer-result-review-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.annotation">Return to 2D annotation</button>
-        <button id="viewer-result-review-assets" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.assetEditor">Return to asset preparation</button>
+        <button id="viewer-result-review-assets" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.assetEditor">Open all scene assets</button>
       </div>
       <p class="professional-review-note" data-i18n-key="professional.review.note">Road and topology changes belong in 2D annotation. Asset placement changes belong in scene editing.</p>
     </div>

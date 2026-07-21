@@ -91,6 +91,7 @@ function MountedWorkbench({
     if (route === "scene-graph") {
       teardown = mountSceneGraphPage(shell, workflow, {
         mode: "course",
+        showAdvancedSourceTools: false,
         onApproveAndGenerate: (annotation) => sceneGraphApprovalRef.current?.(annotation) ?? Promise.resolve(),
       });
     } else {
@@ -99,7 +100,7 @@ function MountedWorkbench({
         embedded: true,
         ...initialOptions,
         persistSceneCommands: initialOptions?.persistSceneCommands
-          ? (commands) => viewerOptionsRef.current!.persistSceneCommands!(commands)
+          ? (commands, context) => viewerOptionsRef.current!.persistSceneCommands!(commands, context)
           : undefined,
       }).then((next) => {
         if (disposed) next();

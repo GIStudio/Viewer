@@ -477,8 +477,8 @@ function DesignStage({ api, project, source, revisions, evaluations, profiles, c
       </div>
     </section>
 
-    {coursePanel ? <aside className="course-design-external-drawer" data-panel={coursePanel}>
-      <header><strong>{coursePanel === "goals" ? (zh ? "目标与优化" : "Goals & optimization") : (zh ? "版本账本" : "Revision ledger")}</strong><button type="button" aria-label={zh ? "关闭抽屉" : "Close drawer"} onClick={() => setCoursePanel(null)}>×</button></header>
+    {coursePanel ? <aside className="course-design-external-drawer" data-panel={coursePanel} role="dialog" aria-modal="false" aria-labelledby="course-design-drawer-title">
+      <header><strong id="course-design-drawer-title">{coursePanel === "goals" ? (zh ? "目标与优化" : "Goals & optimization") : (zh ? "版本账本" : "Revision ledger")}</strong><button type="button" aria-label={zh ? "关闭抽屉" : "Close drawer"} onClick={() => setCoursePanel(null)}>×</button></header>
       {coursePanel === "goals" ? <div className="course-design-console">
         <header><span className="course-eyebrow">PARAMETRIC DESIGN LOOP</span><h2>{zh ? "调整明确参数，生成下一版" : "Adjust explicit parameters for the next version"}</h2><p>{zh ? "道路骨架和每类家具均使用低、中、高控件；生成不调用 LLM 或 RAG。" : "Road skeleton and furniture use explicit low, medium, and high controls. LLM and RAG are not called."}</p></header>
         <div className="course-design-scores">{(["walkability", "safety", "beauty", "overall"] as const).map((key) => <div key={key}><span>{key}</span><strong>{score(latestEvaluation?.result?.[key])}</strong></div>)}</div>

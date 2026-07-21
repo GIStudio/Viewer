@@ -24,6 +24,9 @@ export function createViewerStageHtml(): string {
           <button class="stage-toolbar-button" type="button" id="viewer-sync-camera" data-i18n-key="viewer.stage.resetView">Reset View</button>
         </div>
         <div class="stage-toolbar-group stage-toolbar-output" data-od-id="toolbar-right">
+          <button class="stage-toolbar-button stage-toolbar-button-primary" type="button" id="viewer-direct-edit" aria-pressed="false">编辑地物</button>
+          <button class="stage-toolbar-button" type="button" id="viewer-top-assets">资产库</button>
+          <button class="stage-toolbar-button" type="button" id="viewer-scenario-workbench-toggle" hidden>方案 A/B/C</button>
           <button class="stage-toolbar-button" type="button" id="viewer-open-camera-surface-diagnostic" title="相机局部几何诊断">QA 100m</button>
           <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-map" data-shell-action="file-export-png">PNG</button>
           <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-svg" data-shell-action="file-export-svg">SVG</button>
@@ -88,11 +91,9 @@ export function createViewerStageHtml(): string {
 
       <div id="viewer-minimap" class="viewer-minimap">
         <div class="viewer-minimap-title">
-          <span data-i18n-key="viewer.minimap.title">Scene Map</span>
           <button id="viewer-minimap-expand" class="viewer-minimap-expand" type="button" aria-label="Expand Scene Map" title="Expand Scene Map" data-i18n-aria-label-key="viewer.minimap.expand" data-i18n-title-key="viewer.minimap.expand">&#x26F6;</button>
         </div>
-        <div id="viewer-minimap-canvas" class="viewer-minimap-canvas"></div>
-        <canvas id="viewer-minimap-overlay" class="viewer-minimap-overlay"></canvas>
+        <canvas id="viewer-minimap-plan" class="viewer-minimap-plan" aria-label="Scene Map plan preview" data-i18n-aria-label-key="viewer.minimap.openPlan"></canvas>
       </div>
 
       <canvas id="viewer-axis-hud" class="viewer-axis-hud"></canvas>
@@ -107,6 +108,8 @@ export function createViewerStageHtml(): string {
         </div>
         <button id="viewer-object-edit-exit" class="viewer-object-edit-exit" type="button">Exit editing</button>
       </aside>
+
+      <aside id="viewer-scenario-workbench" class="viewer-scenario-workbench" hidden aria-labelledby="viewer-scenario-workbench-title"></aside>
 
 
       <div id="viewer-generation-dialog" class="viewer-generation-dialog" data-open="false" role="dialog" aria-modal="true" aria-labelledby="viewer-generation-dialog-title" tabindex="-1">
@@ -131,17 +134,6 @@ export function createViewerStageHtml(): string {
       </div>
 
       ${renderViewerSettingsPanelHtml()}
-
-      <div id="viewer-presets-panel" class="viewer-slide-panel" data-open="false">
-        <div class="viewer-slide-panel-header">
-          <div>
-            <div class="viewer-slide-panel-title" data-i18n-key="viewer.presets.title">Scene Presets</div>
-            <div class="viewer-slide-panel-subtitle" data-i18n-key="viewer.presets.subtitle">Pre-configured scene styles.</div>
-          </div>
-          <button id="viewer-presets-close" class="viewer-settings-close" type="button" aria-label="Close presets" data-i18n-aria-label-key="viewer.presets.close">x</button>
-        </div>
-        <div id="viewer-presets-grid" class="viewer-presets-grid" />
-      </div>
 
       ${renderHelpPanelHtml()}
 

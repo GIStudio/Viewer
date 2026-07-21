@@ -506,14 +506,22 @@
 }
 
 .scene-image-empty[hidden],
+.scene-annotation-zoom-space[hidden],
 .scene-board[hidden] {
   display: none;
 }
 
-.scene-board {
+.scene-annotation-zoom-space {
   position: relative;
-  width: 100%;
-  margin: 0 auto;
+  flex: 0 0 auto;
+  min-width: 100%;
+  min-height: 1px;
+}
+
+.scene-board {
+  position: absolute;
+  top: 0;
+  margin: 0;
   overflow: hidden;
   border-radius: 0.65rem;
   box-shadow: none;

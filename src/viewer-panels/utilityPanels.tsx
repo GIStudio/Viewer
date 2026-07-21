@@ -17,6 +17,11 @@ export function EvaluatePanelShell() {
           x
         </button>
       </div>
+      <section id="viewer-evaluate-gate" className="viewer-evaluate-gate" role="status" data-state="ready" hidden>
+        <strong data-evaluate-gate-title />
+        <span data-evaluate-gate-detail />
+        <button type="button" data-evaluate-gate-action />
+      </section>
       <div className="viewer-evaluate-scope-note" role="note">
         <strong data-i18n-key="viewer.evaluate.scopeTitle">Diagnostic scope</strong>
         <span data-i18n-key="viewer.evaluate.scopeBody">
@@ -189,6 +194,10 @@ export function HistoryPanelShell() {
         </button>
       </div>
       <div id="viewer-history-analysis-content" className="viewer-slide-panel-body">
+        <div id="viewer-history-load-state" className="viewer-history-load-state" role="status" data-state="idle">
+          <strong data-history-state-title>尚未读取历史</strong>
+          <span data-history-state-detail>打开页面后读取最近 20 条结果。</span>
+        </div>
         <div className="viewer-history-tabs">
           <button className="viewer-history-tab" type="button" data-tab="scatter" data-active="true" data-i18n-key="viewer.history.scatter">Scatter</button>
           <button className="viewer-history-tab" type="button" data-tab="frequency" data-i18n-key="viewer.history.frequency">Frequency</button>
@@ -199,26 +208,8 @@ export function HistoryPanelShell() {
         <div id="viewer-history-frequency" className="viewer-history-tab-panel" data-tab="frequency" data-active="false" style={{ width: "100%" }} />
         <div id="viewer-history-trend" className="viewer-history-tab-panel" data-tab="trend" data-active="false" style={{ width: "100%" }} />
         <div id="viewer-history-scores" className="viewer-history-tab-panel" data-tab="scores" data-active="false" style={{ width: "100%" }} />
+        <button id="viewer-history-load-more" className="viewer-history-load-more" type="button" hidden>加载更多</button>
       </div>
-    </aside>
-  );
-}
-
-export function PresetsPanelShell() {
-  return (
-    <aside id="viewer-presets-panel" className="viewer-slide-panel" data-open="false">
-      <div className="viewer-slide-panel-header">
-        <div>
-          <div className="viewer-slide-panel-title" data-i18n-key="viewer.presets.title">Scene Presets</div>
-          <div className="viewer-slide-panel-subtitle" data-i18n-key="viewer.presets.subtitle">
-            Pre-configured scene styles. The highlighted card matches the currently loaded scene's generation preset.
-          </div>
-        </div>
-        <button id="viewer-presets-close" className="viewer-settings-close" type="button" aria-label="Close presets">
-          x
-        </button>
-      </div>
-      <div id="viewer-presets-grid" className="viewer-presets-grid" />
     </aside>
   );
 }

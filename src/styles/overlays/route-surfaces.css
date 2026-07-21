@@ -1,0 +1,236 @@
+/* Expanded map and image comparison use the same framed inspection surface. */
+.viewer-expanded-map-modal {
+  z-index: calc(var(--rg-overlay-z-modal) - 10);
+}
+
+.viewer-expanded-map-backdrop,
+.viewer-diff2d-modal-overlay,
+.viewer-design-diagnostic-backdrop {
+  background: var(--rg-overlay-scrim);
+  backdrop-filter: blur(2px);
+}
+
+.viewer-expanded-map-panel {
+  border: 1px solid var(--rg-ink);
+  border-radius: var(--rg-overlay-radius);
+  background-color: var(--rg-overlay-surface);
+  background-image: var(--rg-grid-paper);
+  background-size: 24px 24px;
+  box-shadow: var(--rg-overlay-shadow);
+}
+
+.viewer-expanded-map-header {
+  border-bottom: 1px solid var(--rg-ink);
+  background: rgba(243, 240, 231, 0.97);
+}
+
+.viewer-expanded-map-heading h2 {
+  color: var(--rg-ink);
+  font-family: var(--rg-display-font);
+}
+
+.viewer-expanded-map-status {
+  color: var(--rg-muted);
+  font-family: var(--rg-mono-font);
+}
+
+.viewer-expanded-map-mode {
+  border: 1px solid var(--rg-ink);
+  border-radius: 3px;
+  background: #fffdf7;
+}
+
+.viewer-expanded-map-mode button[aria-pressed="true"] {
+  color: #fff;
+  background: var(--rg-blue);
+  box-shadow: inset 0 -3px var(--rg-yellow);
+}
+
+.viewer-diff2d-modal-content {
+  padding: 0.85rem;
+  border: 1px solid var(--rg-ink);
+  border-radius: 3px;
+  background: var(--rg-paper);
+  box-shadow: var(--rg-overlay-shadow);
+}
+
+.viewer-diff2d-modal-content img {
+  border: 1px solid var(--rg-ink);
+  border-radius: 2px;
+  box-shadow: none;
+}
+
+.viewer-diff2d-modal-close {
+  top: 0.65rem;
+  right: 0.65rem;
+  z-index: 2;
+}
+
+.viewer-diff2d-modal-caption {
+  color: var(--rg-ink);
+  font-family: var(--rg-mono-font);
+}
+
+.viewer-design-diagnostic-modal {
+  z-index: calc(var(--rg-overlay-z-modal) - 20);
+}
+
+.viewer-design-diagnostic-dialog {
+  border: 1px solid var(--rg-ink);
+  border-radius: var(--rg-overlay-radius);
+  color: var(--rg-ink);
+  background-color: var(--rg-overlay-surface);
+  background-image: var(--rg-grid-paper);
+  background-size: 24px 24px;
+  box-shadow: var(--rg-overlay-shadow);
+}
+
+.viewer-design-diagnostic-header {
+  border-bottom: 1px solid var(--rg-ink);
+  background: rgba(243, 240, 231, 0.97);
+}
+
+.viewer-design-diagnostic-header span {
+  border-radius: 2px;
+  color: var(--rg-coral);
+  background: transparent;
+  font-family: var(--rg-mono-font);
+}
+
+.viewer-design-diagnostic-header h3 {
+  color: var(--rg-ink);
+  font-family: var(--rg-display-font);
+}
+
+.viewer-design-diagnostic-header p {
+  color: var(--rg-muted);
+}
+
+.viewer-design-diagnostic-section {
+  border: 1px solid var(--rg-blue);
+  border-radius: 3px;
+  background: rgba(255, 253, 247, 0.94);
+  box-shadow: 3px 3px 0 var(--rg-mint);
+}
+
+/* 2D junction composition remains full-screen, but no longer becomes a foreign dark app. */
+.junction-composer-overlay {
+  z-index: calc(var(--rg-overlay-z-modal) - 30);
+  color: var(--rg-ink);
+  background-color: var(--rg-paper);
+  background-image: var(--rg-grid-paper);
+  background-size: 24px 24px;
+  font-family: var(--rg-body-font);
+}
+
+.junction-composer-header {
+  border-bottom: 1px solid var(--rg-ink);
+  color: var(--rg-ink);
+  background: rgba(243, 240, 231, 0.97);
+  box-shadow: inset 0 -3px var(--rg-yellow);
+}
+
+.junction-composer-title {
+  font-family: var(--rg-display-font);
+}
+
+.junction-composer-subtitle {
+  color: var(--rg-muted);
+}
+
+.junction-composer-sidebar {
+  border-right: 1px solid var(--rg-ink);
+  background: rgba(255, 254, 249, 0.96);
+}
+
+.jc-panel {
+  border: 1px solid var(--rg-blue);
+  border-radius: 3px;
+  background: rgba(255, 253, 247, 0.94);
+  box-shadow: 3px 3px 0 var(--rg-mint);
+}
+
+.jc-panel-title {
+  color: var(--rg-coral);
+  font-family: var(--rg-mono-font);
+}
+
+.jc-quadrant-btn,
+.jc-strip-btn {
+  border: 1px solid var(--rg-line);
+  border-radius: 2px;
+  color: var(--rg-ink);
+  background: #fffdf7;
+}
+
+.jc-quadrant-btn:hover,
+.jc-strip-btn:hover {
+  background: rgba(185, 217, 204, 0.34);
+}
+
+.jc-quadrant-active,
+.jc-strip-active {
+  border-color: var(--rg-ink) !important;
+  color: #fff !important;
+  background: var(--rg-blue) !important;
+  box-shadow: inset 0 -3px var(--rg-yellow);
+}
+
+.jc-toggle {
+  color: var(--rg-muted);
+}
+
+.jc-toggle input {
+  accent-color: var(--rg-coral);
+}
+
+/* Asset-editor HUD and notifications share the overlay state language. */
+.ae-toast-container {
+  z-index: var(--rg-overlay-z-toast);
+}
+
+.ae-toast {
+  border: 1px solid var(--rg-ink);
+  border-radius: 3px;
+  color: var(--rg-ink);
+  background: var(--rg-surface);
+  box-shadow: 4px 4px 0 var(--rg-yellow);
+  font-family: var(--rg-body-font);
+}
+
+.ae-toast-success {
+  border-left: 5px solid var(--rg-mint);
+}
+
+.ae-toast-error {
+  border-left: 5px solid var(--rg-coral);
+  background: #fff3ef;
+}
+
+.ae-ruler-label,
+.ae-dimension-display,
+.ae-orientation-status {
+  border: 1px solid var(--rg-ink);
+  border-radius: 2px;
+  color: var(--rg-ink);
+  background: rgba(255, 254, 249, 0.94);
+  box-shadow: 2px 2px 0 var(--rg-yellow);
+  font-family: var(--rg-mono-font);
+}
+
+/* Course and map drawers were already close to the target; freeze them to tokens. */
+.course-design-external-drawer {
+  width: min(var(--rg-overlay-drawer-width), calc(100% - 4.25rem));
+}
+
+.course-design-external-drawer > header {
+  border-bottom: 1px solid var(--rg-ink);
+}
+
+:where(.osm-aoi-picker-toolbar, .osm-aoi-picker-panel, .osm-road-study-heading, .osm-road-study-panel) {
+  border-color: var(--rg-ink);
+  border-radius: 3px;
+  background-color: var(--rg-overlay-surface-muted);
+  background-image: var(--rg-grid-paper);
+  box-shadow: var(--rg-overlay-shadow-soft);
+}

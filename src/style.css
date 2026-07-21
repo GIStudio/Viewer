@@ -89,6 +89,12 @@
 .viewer-dialog-tabs button[aria-selected="true"] { color: #fff; background: #174b64; box-shadow: inset 0 -4px #df654f; }
 .viewer-dialog-tabs em { margin-left: 8px; padding: 2px 7px; color: #102d3a; background: #f4c430; border-radius: 999px; font-style: normal; }
 
+.viewer-scene-assets-selection { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 12px; align-items: center; padding: 10px 20px; border-bottom: 1px solid #102d3a; background: #f3f0e7; }
+.viewer-scene-assets-selection > span { grid-row: span 2; padding: 4px 7px; color: #fff; background: #174b64; font: 800 10px/1 ui-monospace, monospace; letter-spacing: 0.08em; }
+.viewer-scene-assets-selection strong { color: #102d3a; font-size: 13px; }
+.viewer-scene-assets-selection small { color: #58707a; font-size: 11px; }
+.viewer-scene-assets-selection[data-selection-state="selected"] { box-shadow: inset 5px 0 #f4c430; background: #e5f2ed; }
+
 .viewer-scene-assets-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: 10px; padding: 12px 20px; border-bottom: 1px solid #102d3a; }
 .viewer-scene-assets-toolbar input,
 .viewer-scene-assets-toolbar select { padding: 8px 10px; }
@@ -96,7 +102,7 @@
 .viewer-scene-assets-modal main { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr); }
 .viewer-scene-assets-list { min-height: 0; overflow: auto; padding: 14px 18px; border-right: 1px solid #102d3a; }
 .viewer-scene-asset-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-bottom: 9px; padding: 12px; background: rgba(255, 253, 247, 0.94); border: 1px solid #174b64; box-shadow: 3px 3px 0 #b9d9cc; }
-.viewer-scene-asset-card[draggable="true"] { cursor: grab; }
+[data-asset-placement-active="true"] canvas { cursor: crosshair; }
 .viewer-scene-asset-card div:first-child { display: grid; gap: 3px; min-width: 0; }
 .viewer-scene-asset-card span { width: fit-content; color: #df654f; font: 700 10px/1 ui-monospace, monospace; text-transform: uppercase; }
 .viewer-scene-asset-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #58707a; }

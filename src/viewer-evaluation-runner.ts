@@ -9,7 +9,7 @@ import {
   renderEvaluationViewsPreview,
   requestUnifiedEvaluation,
 } from "./viewer-evaluation";
-import type { EvaluationConfig, RenderedEvaluationView } from "./viewer-evaluation";
+import type { EvaluationConfig, EvaluationResult, RenderedEvaluationView } from "./viewer-evaluation";
 import { captureEvaluationViews } from "./viewer-evaluation-capture";
 
 export type ViewerEvaluationRunner = {
@@ -30,6 +30,13 @@ export type ViewerEvaluationRunnerDeps = {
   getCurrentManifest: () => ViewerManifest | null;
   getSelectedPresetId: () => string;
   getEvaluationConfig: () => EvaluationConfig | null;
+  requestEvaluation?: (input: {
+    layoutPath: string;
+    renderedViews: RenderedEvaluationView[];
+    presetId: string;
+    evaluationConfig: EvaluationConfig;
+    signal: AbortSignal;
+  }) => Promise<EvaluationResult>;
   workflow: WorkflowController;
   setStatus: (message: string) => void;
   flashStatus: (message: string) => void;
@@ -94,13 +101,22 @@ export function createViewerEvaluationRunner(deps: ViewerEvaluationRunnerDeps): 
 
       const requestStart = performance.now();
       const manifestSummary = (deps.getCurrentManifest()?.summary || {}) as Record<string, unknown>;
-      const result = await requestUnifiedEvaluation(currentLayoutPath, renderedViews, {
-        presetId: String(manifestSummary.preset_id || manifestSummary.benchmark_preset_id || deps.getSelectedPresetId() || "custom"),
-        persistToBenchmark: true,
-        evaluationProfile: "auto",
-        evaluationConfig,
-        signal: requestToken.signal,
-      });
+      const presetId = String(manifestSummary.preset_id || manifestSummary.benchmark_preset_id || deps.getSelectedPresetId() || "custom");
+      const result = deps.requestEvaluation
+        ? await deps.requestEvaluation({
+          layoutPath: currentLayoutPath,
+          renderedViews,
+          presetId,
+          evaluationConfig,
+          signal: requestToken.signal,
+        })
+        : await requestUnifiedEvaluation(currentLayoutPath, renderedViews, {
+          presetId,
+          persistToBenchmark: true,
+          evaluationProfile: "auto",
+          evaluationConfig,
+          signal: requestToken.signal,
+        });
       if (!requestToken.isCurrent()) return;
       console.info(`[viewer-timing] evaluation.request: ${(performance.now() - requestStart).toFixed(1)} ms`);
       const evalResult = enforceVisualEvaluationAvailability(result);

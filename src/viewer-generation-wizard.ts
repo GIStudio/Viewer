@@ -1,5 +1,5 @@
 export type GenerationPrimaryPage = "source" | "strategy" | "output";
-export type GenerationStrategyPage = "assets" | "skeleton" | "furniture";
+export type GenerationStrategyPage = "skeleton" | "furniture";
 export type GenerationStepStatus = "pending" | "complete" | "warning" | "error" | "running";
 
 type WizardStep =
@@ -28,7 +28,7 @@ type ViewerGenerationWizardDeps = {
 };
 
 const PRIMARY_ORDER: GenerationPrimaryPage[] = ["source", "strategy", "output"];
-const STRATEGY_ORDER: GenerationStrategyPage[] = ["assets", "skeleton", "furniture"];
+const STRATEGY_ORDER: GenerationStrategyPage[] = ["skeleton", "furniture"];
 const WALK_ORDER: WizardStep[] = [
   { primary: "source" },
   ...STRATEGY_ORDER.map((strategy) => ({ primary: "strategy" as const, strategy })),
@@ -49,7 +49,7 @@ export function createViewerGenerationWizardController(
   const confirmEl = requireSelector<HTMLButtonElement>(deps.dialogEl, "#viewer-design-generate");
   const positionEl = requireSelector<HTMLElement>(deps.dialogEl, "#viewer-generation-step-position");
   let primary: GenerationPrimaryPage = "source";
-  let strategy: GenerationStrategyPage = "assets";
+  let strategy: GenerationStrategyPage = "skeleton";
   let busy = false;
 
   for (const [page, tab] of primaryTabs) {

@@ -66,6 +66,47 @@
   width: 100%;
 }
 
+.annotation-cross-preview-strip-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.28rem;
+}
+
+.annotation-cross-preview-strip-actions .scene-icon-button {
+  width: 1.55rem;
+  height: 1.55rem;
+  font-size: 0.78rem;
+}
+
+.annotation-cross-preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding-top: 0.05rem;
+}
+
+.annotation-cross-preview-toolbar > span {
+  color: #4e5d4a;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.annotation-cross-preview-toolbar > div {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.annotation-cross-preview-toolbar .scene-toolbar-button {
+  min-height: 1.8rem;
+  padding: 0.28rem 0.52rem;
+  font-size: 0.72rem;
+}
+
 .annotation-cross-preview-divider {
   flex: 0 0 0.9rem;
   display: grid;
@@ -243,4 +284,8 @@
   justify-content: space-between;
   gap: 0.65rem;
   flex-wrap: wrap;
+}
+.scene-graph-overlay[data-show-osm-labels="false"] .annotation-osm-label,
+.scene-graph-overlay[data-show-annotation-labels="false"] .annotation-overlay-label {
+  display: none;
 }

@@ -577,9 +577,9 @@
 }
 
 .viewer-generation-primary-tabs > button {
-  flex: 1 0 12rem;
-  min-height: 3.75rem;
-  padding: 0.65rem 0.8rem;
+  flex: 1 0 8rem;
+  min-height: 2.55rem;
+  padding: 0.42rem 0.65rem;
 }
 
 .viewer-generation-primary-tabs > button > span,
@@ -592,7 +592,7 @@
 
 .viewer-generation-primary-tabs > button > strong,
 .viewer-generation-subtab > strong {
-  font-size: 0.78rem;
+  font-size: 0.7rem;
   line-height: 1.2;
 }
 
@@ -625,7 +625,7 @@
 
 .viewer-generation-primary-panel {
   min-height: 0;
-  padding: 1rem;
+  padding: 0.7rem;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -646,7 +646,7 @@
   gap: 0.25rem;
 }
 
-.viewer-generation-page-intro { margin-bottom: 1rem; }
+.viewer-generation-page-intro { margin-bottom: 0.6rem; }
 .viewer-generation-page-intro > span,
 .viewer-generation-strategy-head span {
   color: #df654f;
@@ -695,10 +695,21 @@
 .viewer-generation-strategy-head > div { display: grid; gap: 0.2rem; }
 .viewer-generation-strategy-head strong { font-size: 0.88rem; }
 .viewer-generation-subtabs { gap: 0; padding: 0 1rem; border-bottom: 1px solid var(--color-border); background: #f3f0e7; }
-.viewer-generation-subtab { flex: 1 0 8rem; min-height: 3rem; padding: 0.55rem 0.65rem; border-right: 1px solid var(--color-border); background: transparent; }
+.viewer-generation-subtab { flex: 1 0 7rem; min-height: 2.35rem; padding: 0.38rem 0.55rem; border-right: 1px solid var(--color-border); background: transparent; }
 .viewer-generation-subtab:first-child { border-left: 1px solid var(--color-border); }
-.viewer-generation-strategy-workspace { min-height: 0; overflow: hidden; }
-.viewer-generation-strategy-panel { height: 100%; min-height: 0; padding: 1rem; overflow-y: auto; scrollbar-gutter: stable; }
+.viewer-generation-strategy-workspace {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: 0.7rem;
+  scrollbar-gutter: stable;
+}
+.viewer-generation-strategy-panel {
+  height: auto;
+  min-height: 0;
+  padding: 0.7rem;
+  overflow: visible;
+}
 .viewer-generation-strategy-panel.viewer-design-flow-section { align-content: start; border: 0; border-radius: 0; background: transparent; }
 
 .viewer-generation-return-note,

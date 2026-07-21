@@ -1,0 +1,57 @@
+@media (max-width: 720px) {
+  .viewer-settings-panel {
+    width: calc(100vw - var(--workbench-menu-track, 0px));
+    max-width: none;
+    height: 100%;
+    max-height: 100%;
+    border-block: 0;
+    border-right: 0;
+    box-shadow: none;
+  }
+
+  .viewer-settings-grid,
+  .viewer-settings-toggle-group,
+  .viewer-settings-editing {
+    grid-template-columns: 1fr;
+  }
+
+  .viewer-settings-group-head {
+    align-items: start;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .viewer-settings-group-head small {
+    text-align: left;
+  }
+
+  .viewer-workbench-modal {
+    padding: 0.5rem;
+  }
+
+  .viewer-workbench-dialog,
+  .viewer-generation-dialog-panel {
+    width: calc(100vw - 1rem);
+    height: calc(100dvh - 1rem);
+    border-radius: 2px;
+    box-shadow: 4px 4px 0 var(--rg-yellow);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(
+    .viewer-settings-panel,
+    .viewer-slide-panel,
+    .viewer-workbench-modal,
+    .viewer-workbench-dialog,
+    .viewer-generation-dialog,
+    .viewer-generation-dialog-panel,
+    .course-design-external-drawer,
+    .ui-toast
+  ) {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

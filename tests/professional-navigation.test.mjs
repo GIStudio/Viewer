@@ -18,11 +18,37 @@ try {
 
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1576, height: 980 } });
+  await page.addInitScript(() => {
+    window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(performance.now()), 50);
+    window.cancelAnimationFrame = (handle) => window.clearTimeout(handle);
+  });
+  page.setDefaultTimeout(60_000);
+  page.setDefaultNavigationTimeout(30_000);
+  const rect = (selector) => page.locator(selector).evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return { x: box.x, y: box.y, width: box.width, height: box.height };
+  });
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   let generationRequestCount = 0;
   await page.route("**/api/**", async (route) => {
     const url = route.request().url();
+    if (url.endsWith("/api/v1/auth/guest")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          access_token: "fixture-guest-token",
+          user: { id: "guest-a", email: "guest-a@public.invalid", display_name: "访客 TEST", system_role: "guest", is_active: true },
+          workspace: { id: "workspace-public", name: "公共空间", scope: "public", role: "owner" },
+        }),
+      });
+      return;
+    }
+    if (url.endsWith("/api/v1/public/projects")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+      return;
+    }
     if (/scene\/jobs|design-assistant|generate/.test(url) && route.request().method() !== "GET") {
       generationRequestCount += 1;
     }
@@ -93,12 +119,34 @@ try {
       });
       return;
     }
+    if (url.includes("/api/asset-catalog/search?")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          assets: [{
+            manifestName: "real_assets_manifest.jsonl",
+            assetId: "fixture-tree",
+            fingerprint: "fixture-fingerprint",
+            category: "tree",
+            label: "Fixture tree",
+            ready: true,
+          }],
+          total: 1,
+          offset: 0,
+          limit: 100,
+          hasMore: false,
+        }),
+      });
+      return;
+    }
     await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "test fixture" }) });
   });
 
   await page.goto(`${origin}/#viewer`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await page.locator(".studio-brand-header").waitFor();
+  await page.locator('[data-shell-tab="account"] .workbench-sidebar-badge').filter({ hasText: "PUB" }).waitFor({ timeout: 30_000 });
   assert.deepEqual(pageErrors, [], `viewer initialization errors: ${pageErrors.join(" | ")}`);
 
   assert.equal((await page.locator(".studio-header-context > span").textContent())?.trim(), "当前上下文");
@@ -108,13 +156,47 @@ try {
 
   const groupLabels = (await page.locator(".workbench-sidebar-group-label").allTextContents()).map((value) => value.trim());
   assert.ok(groupLabels.includes("生产流程"), "left rail must expose the Y-shaped production flow");
-  assert.ok(groupLabels.includes("检查工具"), "model input audit must be a cross-cutting inspection tool");
   assert.equal(await page.locator('[data-shell-tab^="workflow-"]').count(), 0, "legacy workflow steps must not remain in the professional rail");
   assert.equal(await page.locator('[data-shell-tab="prepare-annotation"]').getAttribute("data-flow-branch"), "annotation");
-  assert.equal(await page.locator('[data-shell-tab="prepare-assets"]').getAttribute("data-flow-branch"), "assets");
+  assert.equal(await page.locator('[data-shell-tab="prepare-assets"]').count(), 0, "3D assets must move out of the left production rail");
   assert.equal(await page.locator('[data-shell-tab="generate"]').getAttribute("data-flow-stage"), "02");
-  assert.equal(await page.locator('[data-shell-tab="model-input-audit"]').getAttribute("data-sidebar-group"), "inspection");
+  assert.equal(await page.locator('[data-shell-tab="model-input-audit"]').count(), 0, "retired model-input audit must not remain in product navigation");
+  assert.equal(await page.locator('[data-shell-tab="presets"]').count(), 0, "retired scene presets must not remain in product navigation");
   assert.equal(await page.locator('[data-shell-tab="scene"]').getAttribute("data-sidebar-group"), "workspace");
+  await page.locator("#viewer-direct-edit").waitFor();
+  await page.locator("#viewer-top-assets").waitFor();
+  await page.locator("#viewer-scenario-workbench-toggle").waitFor();
+  const canvasBeforeRailExpand = await rect("#viewer-canvas");
+  await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
+  await page.waitForTimeout(240);
+  assert.equal(await page.locator(".desktop-shell").getAttribute("data-sidebar-rail-expanded"), "true");
+  await page.getByText("2D 数据与标注", { exact: true }).waitFor();
+  const canvasAfterRailExpand = await rect("#viewer-canvas");
+  const expandedRail = await rect(".desktop-shell-rail-right");
+  const expandedTabList = await rect(".desktop-shell-tab-list");
+  const brandColumn = await rect(".studio-wordmark");
+  assert.ok(canvasBeforeRailExpand && canvasAfterRailExpand);
+  assert.ok(expandedRail && brandColumn);
+  assert.ok(Math.abs(expandedRail.width - brandColumn.width) <= 1, "expanded rail must align with the banner brand column");
+  assert.ok(Math.abs(expandedTabList.width - expandedRail.width) <= 1, "expanded navigation list and its yellow edge must align with the rail boundary");
+  assert.ok(canvasBeforeRailExpand.width - canvasAfterRailExpand.width >= 160, "expanded rail must dynamically compress the canvas");
+  assert.ok(canvasAfterRailExpand.x - canvasBeforeRailExpand.x >= 160, "expanded rail must move the canvas with the layout grid");
+  await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
+  await page.waitForTimeout(240);
+  const canvasAfterRailCollapse = await rect("#viewer-canvas");
+  assert.ok(canvasAfterRailCollapse);
+  assert.ok(Math.abs(canvasBeforeRailExpand.width - canvasAfterRailCollapse.width) <= 1, "collapsing the rail must restore canvas width");
+
+  await page.setViewportSize({ width: 700, height: 820 });
+  const mobileCanvasBefore = await rect("#viewer-canvas");
+  await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
+  await page.waitForTimeout(240);
+  const mobileCanvasAfter = await rect("#viewer-canvas");
+  assert.ok(mobileCanvasBefore && mobileCanvasAfter);
+  assert.ok(Math.abs(mobileCanvasBefore.width - mobileCanvasAfter.width) <= 1, "mobile rail expansion must remain an overlay");
+  await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
+  await page.waitForTimeout(240);
+  await page.setViewportSize({ width: 1576, height: 980 });
   for (const duplicate of ["annotation", "assets", "design"]) {
     assert.equal(await page.locator(`[data-shell-tab="${duplicate}"]`).count(), 0, `${duplicate} must not duplicate a production-flow entry`);
   }
@@ -124,7 +206,7 @@ try {
   assert.deepEqual(pageErrors, [], `viewer initialization errors: ${pageErrors.join(" | ")}`);
   assert.equal((await openGeneration.textContent())?.trim(), "新建生成…");
   assert.equal(await openGeneration.getAttribute("aria-haspopup"), "dialog");
-  await openGeneration.click();
+  await openGeneration.click({ noWaitAfter: true });
   const generationDialog = page.locator("#viewer-generation-dialog");
   await generationDialog.waitFor({ state: "visible" });
   assert.equal(await generationDialog.getAttribute("data-open"), "true");
@@ -132,13 +214,13 @@ try {
   assert.equal(await generationDialog.getByRole("tab", { name: /生成策略/ }).count(), 1);
   assert.equal(await generationDialog.getByRole("tab", { name: /输出结果/ }).count(), 1);
   await generationDialog.getByRole("tab", { name: /生成策略/ }).click();
-  for (const name of [/3D 素材/, /道路骨架/, /家具参数/]) {
+  for (const name of [/道路骨架/, /家具参数/]) {
     assert.equal(await generationDialog.getByRole("tab", { name }).count(), 1);
   }
+  assert.equal(await generationDialog.getByRole("tab", { name: /3D 素材/ }).count(), 0, "asset policy must not consume generation-panel space");
   for (const name of [/场景结构/, /家具目标/, /补充要求/, /方案矩阵/, /AI 参数/]) {
     assert.equal(await generationDialog.getByRole("tab", { name }).count(), 0);
   }
-  await generationDialog.getByText("3D 素材准备", { exact: true }).waitFor();
   assert.equal(await generationDialog.locator('[data-generation-primary-panel]:visible').count(), 1, "only one primary page may be visible");
   assert.equal(await generationDialog.locator('[data-generation-strategy-panel]:visible').count(), 1, "only one strategy subpage may be visible");
   const dialogDimensions = await generationDialog.locator('.viewer-generation-dialog-panel').evaluate((element) => ({
@@ -146,15 +228,32 @@ try {
     scrollHeight: element.scrollHeight,
   }));
   assert.ok(dialogDimensions.scrollHeight - dialogDimensions.clientHeight <= 1, "the full dialog must not become a long vertical scroller");
-  assert.equal(await page.locator('#viewer-design-generate').isDisabled(), true, "generation must wait for approved 2D input and an asset strategy");
-  await page.getByText("使用默认素材与透明建筑白模", { exact: true }).click();
-  assert.equal(await page.locator('[data-shell-tab="prepare-assets"] .workbench-sidebar-badge').textContent(), "DEF");
-  assert.equal(await page.locator('#viewer-design-generate').isDisabled(), true, "asset defaults alone must not bypass 2D approval");
+  assert.equal(await page.locator('#viewer-design-generate').isDisabled(), true, "generation must wait for approved 2D input");
   await generationDialog.getByRole("tab", { name: /输出结果/ }).click();
   assert.equal(await page.locator('#viewer-design-generate').isVisible(), true, "final generation action belongs only to the output page");
   await generationDialog.getByRole("tab", { name: /生成策略/ }).click();
   await generationDialog.getByRole("tab", { name: /道路骨架/ }).click();
   assert.equal(await generationDialog.locator('[data-generation-strategy-panel]:visible').getAttribute('data-generation-strategy-panel'), "skeleton");
+  await page.setViewportSize({ width: 815, height: 863 });
+  await generationDialog.locator("#viewer-parameter-skeleton-controls").waitFor();
+  const strategyLayout = await generationDialog.evaluate((dialog) => {
+    const workspace = dialog.querySelector(".viewer-generation-strategy-workspace");
+    const controls = dialog.querySelector("#viewer-parameter-skeleton-controls");
+    const summary = dialog.querySelector(".viewer-parameter-summary-board");
+    if (!(workspace instanceof HTMLElement) || !(controls instanceof HTMLElement) || !(summary instanceof HTMLElement)) return null;
+    const controlsBox = controls.getBoundingClientRect();
+    const summaryBox = summary.getBoundingClientRect();
+    return {
+      summaryInsideWorkspace: summary.parentElement === workspace,
+      overlapPx: Math.max(0, Math.min(controlsBox.bottom, summaryBox.bottom) - Math.max(controlsBox.top, summaryBox.top)),
+      overflowY: getComputedStyle(workspace).overflowY,
+    };
+  });
+  assert.deepEqual(strategyLayout, { summaryInsideWorkspace: true, overlapPx: 0, overflowY: "auto" }, "the parameter summary must follow the controls in the same scroll flow without covering them at 815x863");
+  const parameterSummary = generationDialog.locator(".viewer-parameter-summary-board");
+  await parameterSummary.scrollIntoViewIfNeeded();
+  assert.equal(await parameterSummary.isVisible(), true, "the parameter summary must remain reachable after the controls");
+  await page.setViewportSize({ width: 1576, height: 980 });
   assert.equal(generationRequestCount, 0, "opening generation setup must not submit a generation job");
   assert.equal(await page.locator(".viewer-generation-dialog-panel .viewer-settings-close:visible").count(), 1, "generation dialog must expose one unambiguous close action");
 
@@ -163,34 +262,86 @@ try {
   }
 
   await page.locator("[data-close-generation]").last().click();
+  await page.locator('[data-shell-tab="evaluate"]').click();
+  await page.locator("#viewer-evaluate-panel").waitFor({ state: "visible" });
+  const evaluationGate = page.locator("#viewer-evaluate-gate");
+  await evaluationGate.waitFor({ state: "attached" });
+  assert.ok(
+    await evaluationGate.isVisible() || await evaluationGate.getAttribute("data-state") === "ready",
+    "evaluation must either show its workflow gate or expose the ready state",
+  );
+  await page.locator('[data-shell-tab="evaluate"]').click();
+  await page.locator("#viewer-evaluate-panel").waitFor({ state: "hidden" });
+  await page.locator('[data-shell-tab="history"]').click();
+  await page.locator("#viewer-history-analysis-panel").waitFor({ state: "visible" });
+  await page.locator("#viewer-history-load-state").waitFor({ state: "visible" });
+  await page.locator('[data-shell-tab="history"]').click();
+  await page.locator("#viewer-history-analysis-panel").waitFor({ state: "hidden" });
   for (const viewport of [
     { width: 1600, height: 1050 },
     { width: 1366, height: 768 },
     { width: 1024, height: 768 },
   ]) {
     await page.setViewportSize(viewport);
-    const canvasBeforeReview = await page.locator("#viewer-canvas").boundingBox();
+    const canvasBeforeResponsiveExpand = await rect("#viewer-canvas");
+    await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
+    await page.waitForTimeout(240);
+    const canvasAfterResponsiveExpand = await rect("#viewer-canvas");
+    const responsiveRail = await rect(".desktop-shell-rail-right");
+    const responsiveBrand = await rect(".studio-wordmark");
+    assert.ok(Math.abs(responsiveRail.width - responsiveBrand.width) <= 1, `rail and banner must align at ${viewport.width}x${viewport.height}`);
+    assert.ok(canvasBeforeResponsiveExpand.width - canvasAfterResponsiveExpand.width >= 160, `expanded rail must compress the 3D canvas at ${viewport.width}x${viewport.height}`);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `expanded layout must not overflow horizontally at ${viewport.width}x${viewport.height}`);
+    await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
+    await page.waitForTimeout(240);
+    const canvasBeforeReview = await rect("#viewer-canvas");
     await page.locator('[data-shell-tab="review"]').click();
     await page.locator('#viewer-result-review').waitFor({ state: "visible" });
-    assert.equal(await page.locator('#viewer-result-review-accept').isDisabled(), true, "result approval must wait for a generated scene");
-    const canvasDuringReview = await page.locator("#viewer-canvas").boundingBox();
+    await page.waitForFunction(() => {
+      const review = document.querySelector("#viewer-result-review");
+      const state = document.querySelector("#viewer-result-review-state");
+      const accept = document.querySelector("#viewer-result-review-accept");
+      if (!(review instanceof HTMLElement) || !(state instanceof HTMLElement) || !(accept instanceof HTMLButtonElement)) return false;
+      const shouldDisable = review.dataset.mode === "starter" || state.dataset.tone === "empty";
+      return accept.disabled === shouldDisable;
+    });
+    const reviewSnapshot = await page.locator('#viewer-result-review').evaluate((review) => ({
+      mode: review.getAttribute("data-mode"),
+      tone: review.querySelector("#viewer-result-review-state")?.getAttribute("data-tone") ?? null,
+      acceptDisabled: review.querySelector("#viewer-result-review-accept")?.hasAttribute("disabled") ?? false,
+    }));
+    assert.equal(
+      reviewSnapshot.acceptDisabled,
+      reviewSnapshot.mode === "starter" || reviewSnapshot.tone === "empty",
+      "result approval must be disabled only for an empty or read-only starter scene",
+    );
+    const canvasDuringReview = await rect("#viewer-canvas");
     assert.ok(canvasBeforeReview && canvasDuringReview);
     assert.ok(Math.abs(canvasBeforeReview.width - canvasDuringReview.width) <= 1, `review drawer must not resize the 3D canvas at ${viewport.width}x${viewport.height}`);
     await page.keyboard.press("Escape");
   }
   await page.locator('.studio-language-toggle [role="radio"]:has-text("中文")').click();
   await page.getByText("生产流程", { exact: true }).waitFor();
-  await page.getByText("检查工具", { exact: true }).waitFor();
   await page.getByText("3D 场景工作台", { exact: true }).waitFor();
-  await page.locator('[data-shell-tab="prepare-assets"]').click();
-  await page.waitForURL(/#asset-editor$/);
-  await page.locator('#ae-use-manifest-for-generation').waitFor();
-  assert.equal(await page.locator('#ae-manifest-select').inputValue(), "real_assets_manifest.jsonl", "01B must automatically restore the default manifest");
-  assert.equal(await page.locator('#ae-use-manifest-for-generation').isDisabled(), false, "a restored manifest can be added to the candidate repository");
-  await page.locator('#ae-use-manifest-for-generation').click();
-  assert.equal(await page.locator('[data-shell-tab="prepare-assets"] .workbench-sidebar-badge').textContent(), "1");
+  await page.locator("#viewer-top-assets").click();
+  await page.locator(".viewer-scene-assets-modal:not([hidden])").waitFor();
+  await page.getByRole("heading", { name: "全部可用资产 · 点击放置或原位替换" }).waitFor();
+  assert.ok(await page.getByRole("button", { name: "添加到场景", exact: true }).count() > 0, "asset cards must expose click-to-place brush actions");
+  assert.equal(await page.locator('.viewer-scene-asset-card[draggable="true"]').count(), 0, "asset placement must not depend on drag and drop");
+  await page.locator('.viewer-scene-assets-modal [data-action="close"]').last().click();
+  await page.locator('[data-shell-tab="prepare-annotation"]').click();
+  await page.waitForURL(/#scene-graph$/);
+  await page.locator("#scene-source-workflow").waitFor();
+  assert.equal(await page.getByText("其他数据来源", { exact: true }).isVisible(), false, "guest users must not see advanced source imports");
+  assert.equal(await page.locator("#scene-source-normalize").isVisible(), false, "manual normalization must remain admin-only");
+  await page.getByText("浏览 OSM 并截取研究区；车道级细节可继续在画布中编辑。", { exact: true }).waitFor();
   await page.getByRole("button", { name: "课程教学", exact: true }).click();
   await page.waitForURL(/#course-studio$/);
+  await page.locator(".course-auth-shell").waitFor();
+  assert.deepEqual(await page.evaluate(() => ({
+    guest: localStorage.getItem("roadgen3d-public-session-token"),
+    account: localStorage.getItem("roadgen3d-session-token"),
+  })), { guest: "fixture-guest-token", account: null }, "Course Studio must not consume or overwrite the guest token");
 
   console.log("professional navigation: tool switching, workflow grouping, course entry, and generation confirmation verified");
 } finally {

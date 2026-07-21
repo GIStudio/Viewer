@@ -162,8 +162,9 @@
 }
 
 .viewer-parameter-summary-board {
+  margin: 0 12px 12px;
   padding: 8px 12px;
-  border-width: 1px 0 0;
+  border-width: 1px;
   background: rgba(243, 240, 231, .95);
 }
 

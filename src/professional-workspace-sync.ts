@@ -1,6 +1,7 @@
 import type { CourseProject, SceneSource } from "./course-api";
 import type { ProfessionalSessionController } from "./professional-session";
 import type { WorkflowController } from "./workflow-controller";
+import type { SceneAssetPalette, SceneAssetPaletteAdapter } from "./viewer-asset-palette";
 
 export type WorkspaceSaveResult = { project: CourseProject; source: SceneSource };
 
@@ -31,4 +32,30 @@ export async function saveProfessionalSourceToWorkspace(
     : imported;
   await session.api.patch<CourseProject>(`/api/v1/projects/${project.id}/workflow`, { workflow_step: "annotation" });
   return { project, source };
+}
+
+export function createProfessionalAssetPaletteAdapter(
+  session: ProfessionalSessionController,
+): SceneAssetPaletteAdapter {
+  const currentProject = async (create: boolean): Promise<CourseProject | null> => {
+    const snapshot = await session.ensureReady();
+    const selected = snapshot.projects.find((project) => project.id === snapshot.currentProjectId) ?? snapshot.projects[0] ?? null;
+    if (selected || !create) return selected;
+    return session.createProject("未命名街道设计");
+  };
+  return {
+    async load(): Promise<SceneAssetPalette> {
+      const project = await currentProject(false);
+      if (!project) return { schemaVersion: "roadgen3d.asset-palette.v1", assets: [] };
+      return session.api.request<SceneAssetPalette>(`/api/v1/projects/${project.id}/asset-palette`);
+    },
+    async save(palette: SceneAssetPalette): Promise<SceneAssetPalette> {
+      const project = await currentProject(true);
+      if (!project) throw new Error("Unable to create a public project for this asset palette.");
+      return session.api.request<SceneAssetPalette>(`/api/v1/projects/${project.id}/asset-palette`, {
+        method: "PUT",
+        body: JSON.stringify(palette),
+      });
+    },
+  };
 }

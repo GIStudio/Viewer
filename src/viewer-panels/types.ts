@@ -5,7 +5,6 @@ export type ViewerPanelKey =
   | "design"
   | "evaluate"
   | "compare"
-  | "presets"
   | "help"
   | "history"
   | "consistency";
@@ -33,8 +32,7 @@ export type ViewerPanelElements = {
   crosshairEl: HTMLElement;
   minimapEl: HTMLElement;
   minimapExpandEl: HTMLButtonElement;
-  minimapHost: HTMLElement;
-  minimapOverlayEl: HTMLCanvasElement;
+  minimapPlanCanvas: HTMLCanvasElement;
   axisHudEl: HTMLCanvasElement;
   lightingPresetEl: HTMLSelectElement;
   exposureInput: HTMLInputElement;
@@ -91,6 +89,7 @@ export type ViewerPanelElements = {
   evaluateCloseEl: HTMLButtonElement;
   evaluateRunEl: HTMLButtonElement;
   evaluateContentEl: HTMLElement;
+  evaluateGateEl: HTMLElement;
   evaluationConfigInputs: {
     walkabilityWeight: HTMLInputElement;
     safetyWeight: HTMLInputElement;
@@ -126,10 +125,6 @@ export type ViewerPanelElements = {
   consistencyContentEl: HTMLElement;
   exportTopdownMapEl: HTMLButtonElement;
   exportTopdownSvgEl: HTMLButtonElement;
-  presetsToggleEl: HTMLButtonElement;
-  presetsPanelEl: HTMLElement;
-  presetsCloseEl: HTMLButtonElement;
-  presetsGridEl: HTMLElement;
   helpToggleEl: HTMLButtonElement;
   helpPanelEl: HTMLElement;
   helpCloseEl: HTMLButtonElement;

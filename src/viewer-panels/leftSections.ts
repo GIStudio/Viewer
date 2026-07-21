@@ -29,10 +29,6 @@ export function createViewerLeftSections(t: ViewerPanelText): ViewerLeftSection[
               <span class="viewer-control-menu-code">GN</span>
               <span><strong>${t("Generation", "场景生成")}</strong><small>${t("Configure and run generation", "配置并运行场景生成")}</small></span>
             </button>
-            <button class="viewer-control-menu-item" type="button" id="viewer-presets-toggle">
-              <span class="viewer-control-menu-code">PR</span>
-              <span><strong>${t("Presets", "预设")}</strong><small>${t("Reusable scene configurations", "可复用场景配置")}</small></span>
-            </button>
           </div>
           <div class="viewer-control-menu-group">
             <span class="viewer-control-menu-label">${t("Adjust", "调整")}</span>

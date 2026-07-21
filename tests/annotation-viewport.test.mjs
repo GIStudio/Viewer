@@ -62,6 +62,10 @@ try {
   const baselineRect = await board.boundingBox();
   const stageRect = await stage.boundingBox();
   assert.ok(baselineRect && stageRect, "annotation stage and board must have measurable bounds");
+  assert.ok(
+    Math.abs((baselineRect.x - stageRect.x) - (stageRect.width - baselineRect.width) / 2) < 3,
+    "a board narrower than the viewport must be horizontally centered instead of pinned to the upper-left",
+  );
   await page.mouse.move(stageRect.x + stageRect.width * 0.55, stageRect.y + stageRect.height * 0.55);
   await page.mouse.wheel(0, -420);
   await page.waitForTimeout(80);

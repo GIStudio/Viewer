@@ -98,7 +98,6 @@ export const menuGroups: ShellMenuGroup[] = [
       { id: "tools-open-evaluate", labelKey: "menu.tools.evaluate", fallback: "Evaluate" },
       { id: "tools-open-compare", labelKey: "menu.tools.compare", fallback: "Compare" },
       { id: "tools-open-history", labelKey: "menu.tools.history", fallback: "History" },
-      { id: "tools-open-presets", labelKey: "menu.tools.presets", fallback: "Presets" },
       { id: "tools-open-floating-lane", labelKey: "menu.tools.floatingLane", fallback: "Floating Lane" },
       { link: "/new-ui/index.html", labelKey: "menu.tools.newUi", fallback: "New UI Prototype", icon: <RocketOutlined /> },
     ],
@@ -118,7 +117,11 @@ export function resolveRoute(): AppRoute {
   if (hash === "#viewer") return "viewer";
   if (hash === "#scene-graph") return "scene-graph";
   if (hash === "#asset-editor") return "asset-editor";
-  if (hash === "#model-input-browser") return "model-input-browser";
+  if (hash === "#model-input-browser") {
+    try { sessionStorage.setItem("roadgen:retired-model-input-notice", "true"); } catch { /* ignore */ }
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#viewer`);
+    return "viewer";
+  }
   const defaultRoute = import.meta.env.VITE_ROADGEN_DEFAULT_ROUTE;
   if (!hash && defaultRoute === "course-studio") return "course-studio";
   return "viewer";

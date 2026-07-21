@@ -5,11 +5,23 @@ export const SESSION_TOKEN_KEY = "roadgen3d-session-token";
 export const COURSE_TOKEN_KEY = SESSION_TOKEN_KEY;
 const LEGACY_COURSE_TOKEN_KEY = "roadgen3d-course-token";
 
-export type CourseUser = { id: string; email: string; display_name: string; system_role: "student" | "teacher" | "admin"; is_active?: boolean };
+export type CourseUser = { id: string; email: string; display_name: string; system_role: "guest" | "student" | "teacher" | "admin"; is_active?: boolean };
 export type Course = { id: string; name: string; code: string; role: string; invite_code?: string };
 export type CourseProject = { id: string; course_id: string; name: string; city: string; design_goal: string; aoi_bbox: number[] | null; workflow_step: string; role: string };
+export type PublicProject = {
+  id: string;
+  name: string;
+  city: string;
+  design_goal: string;
+  workflow_step: string;
+  author: string;
+  updated_at: string;
+  latest_revision: SceneRevision | null;
+  latest_evaluation: EvaluationRun | null;
+  latest_bundle: { id: string; download_url: string; media_type: string; byte_size: number } | null;
+};
 export type SceneSource = { id: string; kind: string; quality_report: Record<string, any>; provenance: Record<string, any>; role_counts?: Record<string, number>; warnings?: string[]; normalized_artifact_id: string; annotation_artifact_id?: string };
-export type SceneRevision = { id: string; revision_number: number; branch_kind: string; label: string; parent_id?: string; layout_artifact_id?: string; glb_artifact_id?: string; evaluation_status: string; provenance?: Record<string, any>; auto_evaluation?: EvaluationRun | null };
+export type SceneRevision = { id: string; revision_number: number; branch_kind: string; label: string; parent_id?: string; layout_artifact_id?: string; glb_artifact_id?: string; evaluation_status: string; commands?: Array<Record<string, any>>; provenance?: Record<string, any>; auto_evaluation?: EvaluationRun | null; created_at?: string };
 export type EvaluationRun = { id: string; revision_id: string; status: string; weights: Record<string, number>; result: Record<string, unknown>; error: string };
 export type EvaluationProfile = { id: string; name: string; weights: Record<string, number>; is_default: boolean };
 export type JobOperation = { timestamp: string; stage: string; progress: number; message: string; detail: Record<string, unknown> };

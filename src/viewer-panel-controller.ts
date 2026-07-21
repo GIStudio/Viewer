@@ -12,8 +12,8 @@ type ViewerPanelControllerDeps = {
   onSettingsClose: (restoreRoam: boolean) => void;
   onDesignOpen: () => void;
   onCompareOpen: () => void;
-  onPresetsOpen: () => void;
   onHistoryOpen: () => void;
+  onHistoryClose: () => void;
   onConsistencyOpen: () => void;
   onCloseAllOverlays: () => void;
 };
@@ -25,17 +25,18 @@ export type ViewerPanelController = {
   isOpen: (panel: ViewerPanelKey) => boolean;
   isAnyOpen: () => boolean;
   snapshot: () => PanelState;
+  syncFromSidebar: (pageId: string | null) => void;
 };
 
-const SLIDE_PANELS = new Set<ViewerPanelKey>(["design", "evaluate", "compare", "presets"]);
+const SLIDE_PANELS = new Set<ViewerPanelKey>(["design", "evaluate", "compare"]);
 
 export function createViewerPanelController(deps: ViewerPanelControllerDeps): ViewerPanelController {
+  let focusBeforePanelOpen: HTMLElement | null = null;
   const state: PanelState = {
     settings: false,
     design: false,
     evaluate: false,
     compare: false,
-    presets: false,
     help: false,
     history: false,
     consistency: false,
@@ -48,13 +49,14 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
 
   function setDataset(panel: ViewerPanelKey, open: boolean): void {
     deps.panels[panel].dataset.open = open ? "true" : "false";
+    deps.panels[panel].setAttribute("aria-hidden", open ? "false" : "true");
     if (panel === "settings") {
       deps.settingsToggleEl.setAttribute("aria-expanded", open ? "true" : "false");
     }
   }
 
   function activeNonSettingsPanel(): ViewerPanelKey | null {
-    for (const panel of ["design", "evaluate", "compare", "presets", "help", "history", "consistency"] as ViewerPanelKey[]) {
+    for (const panel of ["design", "evaluate", "compare", "help", "history", "consistency"] as ViewerPanelKey[]) {
       if (state[panel]) return panel;
     }
     return null;
@@ -75,6 +77,11 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     if (panel === "settings") {
       deps.onSettingsClose(Boolean(options?.restoreRoam));
     }
+    if (panel === "history") deps.onHistoryClose();
+    if (!Object.values(state).some(Boolean) && focusBeforePanelOpen?.isConnected) {
+      focusBeforePanelOpen.focus({ preventScroll: true });
+      focusBeforePanelOpen = null;
+    }
   }
 
   function closeAll(): void {
@@ -82,7 +89,6 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     closePanel("design");
     closePanel("evaluate");
     closePanel("compare");
-    closePanel("presets");
     closePanel("help");
     closePanel("history");
     closePanel("consistency");
@@ -93,10 +99,11 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
 
   function setOpen(panel: ViewerPanelKey, nextOpen: boolean, options?: { restoreRoam?: boolean }): void {
     if (nextOpen) {
+      const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       closeAll();
+      focusBeforePanelOpen = opener;
       if (panel === "design") deps.onDesignOpen();
       if (panel === "compare") deps.onCompareOpen();
-      if (panel === "presets") deps.onPresetsOpen();
       if (panel === "consistency") deps.onConsistencyOpen();
     }
 
@@ -117,11 +124,37 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     if (panel === "history") {
       deps.onHistoryOpen();
     }
+    queueMicrotask(() => {
+      const closeButton = deps.panels[panel].querySelector<HTMLElement>(
+        ".viewer-settings-close, [data-close-generation], button",
+      );
+      closeButton?.focus({ preventScroll: true });
+    });
     updateCanvasSlideOpenState();
   }
 
   function toggle(panel: ViewerPanelKey, options?: { restoreRoam?: boolean }): void {
     setOpen(panel, !state[panel], options);
+  }
+
+  function syncFromSidebar(pageId: string | null): void {
+    const target = pageId && pageId in state ? pageId as ViewerPanelKey : null;
+    (Object.keys(state) as ViewerPanelKey[]).forEach((panel) => {
+      if (panel !== target) closePanel(panel);
+    });
+    if (!target || state[target]) {
+      updateCanvasSlideOpenState();
+      return;
+    }
+    focusBeforePanelOpen = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (target === "design") deps.onDesignOpen();
+    if (target === "compare") deps.onCompareOpen();
+    if (target === "consistency") deps.onConsistencyOpen();
+    state[target] = true;
+    setDataset(target, true);
+    if (target === "settings") deps.onSettingsOpen();
+    if (target === "history") deps.onHistoryOpen();
+    updateCanvasSlideOpenState();
   }
 
   return {
@@ -131,5 +164,6 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     isOpen: (panel) => state[panel],
     isAnyOpen: () => Object.values(state).some(Boolean),
     snapshot: () => ({ ...state }),
+    syncFromSidebar,
   };
 }

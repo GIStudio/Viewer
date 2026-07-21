@@ -3,7 +3,6 @@ import { useEffect, useRef } from "react";
 import { mountViewer } from "../app";
 import { mountAssetEditor } from "../asset-editor";
 import { mountSceneGraphPage } from "../scene-graph";
-import { mountModelInputBrowser } from "../model-input-browser";
 import { bindDesktopShell } from "../desktop-shell";
 import { navigateTo } from "../ui";
 import type { AppRoute } from "../ui";
@@ -18,7 +17,6 @@ import type { WorkflowController } from "../workflow-controller";
 import type { ProfessionalBaselineCoordinator } from "../professional-baseline-coordinator";
 import {
   annotationPreparationStatus,
-  assetPreparationStatus,
   consumeProfessionalViewerTarget,
   professionalPipelineStage,
   renderProfessionalReviewPanelHtml,
@@ -30,8 +28,15 @@ import { ViewerDesktopShell } from "./ViewerDesktopShell";
 import { CourseStudio } from "./CourseStudio";
 import { materializeDefaultStarterScene } from "../starter-scene";
 import type { ProfessionalSessionController } from "../professional-session";
-import { createProfessionalAccountPanel, createProfessionalAdminPanel } from "../professional-account-panels";
-import { saveProfessionalSourceToWorkspace } from "../professional-workspace-sync";
+import { createProfessionalAccountPanel, createProfessionalAdminPanel, createProfessionalPublicSpacePanel } from "../professional-account-panels";
+import { createProfessionalAssetPaletteAdapter, saveProfessionalSourceToWorkspace } from "../professional-workspace-sync";
+import {
+  exportOwnedPublicProject,
+  evaluateOwnedPublicProject,
+  createProfessionalScenarioAdapter,
+  openProfessionalPublicProject,
+  persistProfessionalPublicCommands,
+} from "../professional-public-project";
 
 type Teardown = () => void;
 
@@ -58,11 +63,38 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
     let unregisterProfessionalNavigation: (() => void) | undefined;
     const shellMode: WorkbenchShellMode = "single_left_overlay";
     const shell = bindDesktopShell(host, route, shellMode);
+    try {
+      if (sessionStorage.getItem("roadgen:retired-model-input-notice") === "true") {
+        sessionStorage.removeItem("roadgen:retired-model-input-notice");
+        const message = language === "zh"
+          ? "模型输入审计属于已停用的实验入口，已返回 3D 场景工作台。"
+          : "The model-input audit was a retired experimental entry. You have been returned to the 3D Scene Workbench.";
+        shell.setStatusSummary(message);
+        shell.pushActivity(message, "warning");
+      }
+    } catch {
+      // Session storage can be unavailable in embedded or privacy-restricted contexts.
+    }
 
     const tr = (key: string, fallback: string): string => translateViewerKey(loadViewerLanguage(), key) ?? fallback;
+    const workspaceReady = (): boolean => ["guest", "authenticated"].includes(professionalSession.getSnapshot().status);
+    const showAdvancedSourceTools = (): boolean => professionalSession.getSnapshot().user?.system_role === "admin";
+    const syncAdvancedSourceTools = (): void => {
+      const visible = showAdvancedSourceTools();
+      shell.root.querySelectorAll<HTMLElement>("[data-admin-source-tools]").forEach((element) => {
+        element.hidden = !visible;
+      });
+      const sourceStatus = shell.root.querySelector<HTMLElement>("#scene-source-status");
+      if (sourceStatus && !visible && sourceStatus.dataset.tone === "neutral") {
+        sourceStatus.dataset.i18nKey = "sceneGraph.source.osmInitialStatus";
+        sourceStatus.textContent = tr(
+          "sceneGraph.source.osmInitialStatus",
+          "Browse OSM and capture a study area. Lane-level details remain editable on the stage.",
+        );
+      }
+    };
     const activateViewerTarget = (target: "generate" | "review" | "edit" | "deliver"): void => {
-      const snapshot = workflow.getSnapshot();
-      if (target !== "review" && professionalSession.getSnapshot().status !== "authenticated") {
+      if (target !== "review" && !workspaceReady()) {
         const message = language === "zh"
           ? "请先登录，再创建、生成、编辑或评价个人场景。"
           : "Sign in before creating, generating, editing, or evaluating a personal scene.";
@@ -71,7 +103,8 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         shell.sidebar.activate("account");
         return;
       }
-      if (target !== "generate" && !snapshot.sceneLayoutPath) {
+      const snapshot = workflow.getSnapshot();
+      if (target !== "generate" && target !== "deliver" && !snapshot.sceneLayoutPath) {
         if (target === "edit" && !snapshot.normalized) {
           shell.setStatusSummary(tr("viewer.starter.materializing", "正在复制内置道路骨架…"));
           void materializeDefaultStarterScene(workflow)
@@ -106,16 +139,10 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         host.querySelector<HTMLButtonElement>("#viewer-edit-toggle")?.click();
         return;
       }
-      if (snapshot.sceneReviewStatus !== "accepted") {
-        const message = tr("professional.pipeline.reviewRequired", "Accept the generated result before evaluation.");
-        shell.setStatusSummary(message);
-        shell.pushActivity(message, "warning");
-        shell.sidebar.activate("review");
-        return;
-      }
-      host.querySelector<HTMLButtonElement>('[data-shell-tab="evaluate"]')?.click();
+      shell.sidebar.activate("evaluate");
     };
 
+    const initialWorkflowSnapshot = workflow.getSnapshot();
     const professionalPages = [
       {
         id: "prepare-annotation",
@@ -124,9 +151,9 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         group: "flow" as const,
         content: "",
         flow: { stage: "01" as const, branch: "annotation" as const, status: annotationPreparationStatus(workflow.getSnapshot()) },
-        badge: "—",
+        badge: annotationPreparationStatus(initialWorkflowSnapshot) === "ready" ? "OK" : "—",
         action: () => {
-          if (professionalSession.getSnapshot().status !== "authenticated") {
+          if (!workspaceReady()) {
             shell.sidebar.activate("account");
             return;
           }
@@ -141,22 +168,6 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
               shell.pushActivity(message, "warning");
             })
             .finally(() => navigateTo("scene-graph"));
-        },
-      },
-      {
-        id: "prepare-assets",
-        label: tr("professional.pipeline.assets", "3D asset preparation"),
-        icon: "01B",
-        group: "flow" as const,
-        content: "",
-        flow: { stage: "01" as const, branch: "assets" as const, status: assetPreparationStatus(workflow.getSnapshot()) },
-        badge: "—",
-        action: () => {
-          if (professionalSession.getSnapshot().status !== "authenticated") {
-            shell.sidebar.activate("account");
-            return;
-          }
-          navigateTo("asset-editor");
         },
       },
       {
@@ -199,19 +210,18 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         badge: "—",
         ...(route === "viewer" ? {} : { action: () => activateViewerTarget("deliver") }),
       },
-      {
-        id: "model-input-audit",
-        label: tr("professional.pipeline.audit", "Model input audit"),
-        icon: "QA",
-        group: "inspection" as const,
-        content: "",
-        current: route === "model-input-browser",
-        action: () => navigateTo("model-input-browser"),
-      },
     ];
 
     const accountPanel = createProfessionalAccountPanel(professionalSession, language, {
       onSaveCurrent: async () => { await saveProfessionalSourceToWorkspace(professionalSession, workflow); },
+    });
+    const publicSpacePanel = createProfessionalPublicSpacePanel(professionalSession, language, {
+      onOpen: async (project) => {
+        await openProfessionalPublicProject(professionalSession, workflow, project);
+        if (route !== "viewer") navigateTo("viewer");
+        shell.setStatusSummary(language === "zh" ? "已载入公共项目的最新3D版本。" : "Loaded the latest public 3D revision.");
+      },
+      onExportOwned: (project) => exportOwnedPublicProject(professionalSession, project),
     });
     const adminPanel = createProfessionalAdminPanel(professionalSession, language);
     const registerProfessionalNavigation = (): void => {
@@ -223,18 +233,45 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         icon: "AC",
         group: "system" as const,
         content: accountPanel.element,
-        badge: session.status === "authenticated" ? "ON" : "—",
+        badge: session.status === "authenticated" ? "ON" : session.status === "guest" ? "PUB" : "—",
       };
-      const adminPages = session.user?.system_role === "admin" ? [{
+      const publicSpacePage = {
+        id: "public-space",
+        label: language === "zh" ? "公共空间" : "Public space",
+        icon: "PS",
+        group: "workspace" as const,
+        content: publicSpacePanel.element,
+        badge: String(session.publicProjects.length),
+      };
+      const adminPage = {
         id: "admin",
         label: language === "zh" ? "系统管理" : "System admin",
         icon: "AD",
         group: "system" as const,
         content: adminPanel.element,
-      }] : [];
-      unregisterProfessionalNavigation = shell.sidebar.registerPages([...professionalPages, accountPage, ...adminPages]);
+      };
+      unregisterProfessionalNavigation = shell.sidebar.registerPages([...professionalPages, publicSpacePage, accountPage, adminPage]);
     };
     registerProfessionalNavigation();
+
+    const syncProfessionalSessionNavigation = (): void => {
+      const session = professionalSession.getSnapshot();
+      const setBadge = (id: string, value: string): void => {
+        const button = host.querySelector<HTMLButtonElement>(`[data-shell-tab="${id}"]`);
+        const badge = button?.querySelector<HTMLElement>(".workbench-sidebar-badge");
+        if (badge) badge.textContent = value;
+      };
+      setBadge("account", session.status === "authenticated" ? "ON" : session.status === "guest" ? "PUB" : "—");
+      setBadge("public-space", String(session.publicProjects.length));
+      const adminButton = host.querySelector<HTMLButtonElement>('[data-shell-tab="admin"]');
+      if (adminButton) {
+        const visible = session.user?.system_role === "admin";
+        adminButton.hidden = !visible;
+        adminButton.setAttribute("aria-hidden", String(!visible));
+        if (!visible && adminButton.getAttribute("aria-pressed") === "true") shell.sidebar.activate("account");
+      }
+    };
+    syncProfessionalSessionNavigation();
 
     const updatePage = (
       id: string,
@@ -262,11 +299,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       const pipelineStage = professionalPipelineStage(snapshot);
       const currentId = route === "scene-graph"
         ? "prepare-annotation"
-        : route === "asset-editor"
-          ? "prepare-assets"
-          : route === "model-input-browser"
-            ? "model-input-audit"
-            : pipelineStage === "review"
+        : pipelineStage === "review"
               ? "review"
               : pipelineStage === "edit"
                 ? "edit"
@@ -274,21 +307,12 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
                   ? "evaluate"
                   : "generate";
       const annotationStatus = annotationPreparationStatus(snapshot);
-      const assetsStatus = assetPreparationStatus(snapshot);
-      const generationReady = annotationStatus === "ready" && assetsStatus === "ready";
+      const generationReady = annotationStatus === "ready";
       updatePage("prepare-annotation", {
         label: tr("professional.pipeline.annotation", "2D data & annotation"),
         badge: annotationStatus === "ready" ? "OK" : annotationStatus === "warning" ? "!" : "—",
         status: annotationStatus,
         current: currentId === "prepare-annotation",
-      });
-      updatePage("prepare-assets", {
-        label: tr("professional.pipeline.assets", "3D asset preparation"),
-        badge: snapshot.assetPreparation?.mode === "candidate_manifests"
-          ? String(snapshot.assetPreparation.manifests.length)
-          : snapshot.assetPreparation?.mode === "default_transparent_massing" ? "DEF" : "—",
-        status: assetsStatus,
-        current: currentId === "prepare-assets",
       });
       updatePage("generate", {
         label: tr("professional.pipeline.generate", "3D scene generation"),
@@ -310,18 +334,22 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       });
       updatePage("evaluate", {
         label: tr("professional.pipeline.deliver", "Evaluation & delivery"),
-        badge: snapshot.evaluation ? "OK" : snapshot.sceneReviewStatus === "accepted" ? "GO" : "—",
-        status: snapshot.evaluation ? "ready" : snapshot.sceneReviewStatus === "accepted" ? "active" : "pending",
+        badge: snapshot.evaluation
+          ? "OK"
+          : snapshot.sceneReviewStatus === "accepted"
+            ? "GO"
+            : snapshot.sceneLayoutPath || snapshot.sceneRef?.kind === "starter_demo"
+              ? "03"
+              : "N/A",
+        status: snapshot.evaluation
+          ? "ready"
+          : snapshot.sceneReviewStatus === "accepted"
+            ? "active"
+            : snapshot.sceneLayoutPath || snapshot.sceneRef?.kind === "starter_demo"
+              ? "warning"
+              : "pending",
         current: currentId === "evaluate",
       });
-      const auditButton = host.querySelector<HTMLButtonElement>('[data-shell-tab="model-input-audit"]');
-      if (auditButton) {
-        const auditLabel = tr("professional.pipeline.audit", "Model input audit");
-        auditButton.title = auditLabel;
-        auditButton.setAttribute("aria-label", auditLabel);
-        auditButton.dataset.current = route === "model-input-browser" ? "true" : "false";
-        auditButton.querySelector<HTMLElement>(".workbench-sidebar-label")!.textContent = auditLabel;
-      }
       if (
         route === "viewer"
         && snapshot.sceneReviewStatus === "pending"
@@ -334,30 +362,41 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
 
     syncProfessionalNavigation();
     const unsubscribeWorkflow = workflow.subscribe(syncProfessionalNavigation);
-    window.addEventListener(VIEWER_LANGUAGE_EVENT, syncProfessionalNavigation);
     const unsubscribeProfessionalSession = professionalSession.subscribe(() => {
-      registerProfessionalNavigation();
+      syncProfessionalSessionNavigation();
       syncProfessionalNavigation();
+      syncAdvancedSourceTools();
     });
+    window.addEventListener(VIEWER_LANGUAGE_EVENT, syncProfessionalNavigation);
 
     function mountRoute() {
       switch (route) {
         case "scene-graph":
           routeTeardown = mountSceneGraphPage(shell, workflow, {
+            showAdvancedSourceTools: showAdvancedSourceTools(),
             onEnterProfessionalScene: async () => {
               await baselineCoordinator.start();
               navigateTo("viewer");
             },
           });
+          syncAdvancedSourceTools();
           break;
         case "asset-editor":
           routeTeardown = mountAssetEditor(shell, workflow);
           break;
-        case "model-input-browser":
-          routeTeardown = mountModelInputBrowser(shell);
-          break;
         default:
-          void mountViewer(shell, workflow, { baselineCoordinator })
+          void mountViewer(shell, workflow, {
+            baselineCoordinator,
+            persistSceneCommands: (commands, context) => persistProfessionalPublicCommands(
+              professionalSession,
+              workflow,
+              commands,
+              context.layoutPath,
+            ),
+            runProjectEvaluation: (weights) => evaluateOwnedPublicProject(professionalSession, workflow, weights),
+            assetPaletteAdapter: createProfessionalAssetPaletteAdapter(professionalSession),
+            scenarioAdapter: createProfessionalScenarioAdapter(professionalSession, workflow),
+          })
             .then((teardown) => {
               routeTeardown = teardown;
               if (cancelled) routeTeardown();
@@ -396,9 +435,10 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       cancelled = true;
       window.removeEventListener(VIEWER_LANGUAGE_EVENT, syncProfessionalNavigation);
       unsubscribeWorkflow();
-      unregisterProfessionalNavigation?.();
       unsubscribeProfessionalSession();
+      unregisterProfessionalNavigation?.();
       accountPanel.destroy();
+      publicSpacePanel.destroy();
       adminPanel.destroy();
       routeTeardown?.();
       shell.destroy();

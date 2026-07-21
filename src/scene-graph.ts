@@ -120,15 +120,12 @@ import {
   FURNITURE_COMPATIBLE_STRIP_KINDS,
   FURNITURE_KINDS,
   FURNITURE_KIND_LABELS,
-  METAAURBAN_ASSET_GUIDE_LINES,
   METAAURBAN_STRIP_ASSET_BADGES,
-  METAAURBAN_STRIP_GUIDANCE,
   METAAURBAN_STRIP_ZONE_LABELS,
   NOMINAL_STRIP_WIDTHS,
   SIDE_STRIP_KINDS,
   STANDALONE_CROSS_ARM_LENGTH_M,
   STRIP_DIRECTION_OPTIONS,
-  STRIP_KIND_LABELS,
   SURFACE_ANNOTATION_KINDS,
   SURFACE_ANNOTATION_KIND_LABELS,
   SURFACE_ROLE_LABELS,
@@ -535,21 +532,101 @@ function metaurbanStripZoneLabel(kind: StripKind): string {
   return METAAURBAN_STRIP_ZONE_LABELS[kind] || kind;
 }
 
+const STRIP_KIND_I18N_KEYS: Record<StripKind, string> = {
+  drive_lane: "sceneGraph.strip.driveLane",
+  bus_lane: "sceneGraph.strip.busLane",
+  bike_lane: "sceneGraph.strip.bikeLane",
+  parking_lane: "sceneGraph.strip.parkingLane",
+  median: "sceneGraph.strip.median",
+  nearroad_buffer: "sceneGraph.strip.nearRoadBuffer",
+  nearroad_furnishing: "sceneGraph.strip.nearRoadFurnishing",
+  clear_sidewalk: "sceneGraph.strip.clearSidewalk",
+  farfromroad_buffer: "sceneGraph.strip.farFromRoadBuffer",
+  frontage_reserve: "sceneGraph.strip.frontageReserve",
+  grass_belt: "sceneGraph.strip.centralGreenBelt",
+  shared_street_surface: "sceneGraph.strip.sharedStreetSurface",
+  colored_pavement: "sceneGraph.strip.coloredPavement",
+};
+
+const METAAURBAN_ZONE_I18N_KEYS: Record<StripKind, string> = {
+  drive_lane: "sceneGraph.metaurbanZone.carriageway",
+  bus_lane: "sceneGraph.metaurbanZone.carriageway",
+  bike_lane: "sceneGraph.metaurbanZone.carriagewayEdge",
+  parking_lane: "sceneGraph.metaurbanZone.carriagewayEdge",
+  median: "sceneGraph.metaurbanZone.median",
+  nearroad_buffer: "sceneGraph.metaurbanZone.nearRoadBuffer",
+  nearroad_furnishing: "sceneGraph.metaurbanZone.nearRoadFurnishing",
+  clear_sidewalk: "sceneGraph.metaurbanZone.mainSidewalk",
+  farfromroad_buffer: "sceneGraph.metaurbanZone.farFromRoadBuffer",
+  frontage_reserve: "sceneGraph.metaurbanZone.validRegion",
+  grass_belt: "sceneGraph.metaurbanZone.median",
+  shared_street_surface: "sceneGraph.metaurbanZone.mixedUse",
+  colored_pavement: "sceneGraph.metaurbanZone.decorativeSurface",
+};
+
+const STRIP_USAGE_I18N_KEYS: Record<StripKind, string> = {
+  drive_lane: "sceneGraph.guidance.driveLane",
+  bus_lane: "sceneGraph.guidance.busLane",
+  bike_lane: "sceneGraph.guidance.bikeLane",
+  parking_lane: "sceneGraph.guidance.parkingLane",
+  median: "sceneGraph.guidance.median",
+  nearroad_buffer: "sceneGraph.guidance.nearroadBuffer",
+  nearroad_furnishing: "sceneGraph.guidance.nearroadFurnishing",
+  clear_sidewalk: "sceneGraph.guidance.clearSidewalk",
+  farfromroad_buffer: "sceneGraph.guidance.farBuffer",
+  frontage_reserve: "sceneGraph.guidance.frontageReserve",
+  grass_belt: "sceneGraph.guidance.grassBelt",
+  shared_street_surface: "sceneGraph.guidance.sharedSurface",
+  colored_pavement: "sceneGraph.guidance.coloredPavement",
+};
+
+function inspectorText(key: string, fallback: string): string {
+  return translateViewerKey(loadViewerLanguage(), key) ?? fallback;
+}
+
+function inspectorFormat(key: string, fallback: string, params: Record<string, string | number>): string {
+  return formatViewerKey(loadViewerLanguage(), key, params) ?? fallback;
+}
+
+function localizedStripLabel(kind: StripKind): string {
+  return inspectorText(STRIP_KIND_I18N_KEYS[kind], metaurbanStripLabel(kind));
+}
+
+function localizedMetaurbanStripZoneLabel(kind: StripKind): string {
+  return inspectorText(METAAURBAN_ZONE_I18N_KEYS[kind], metaurbanStripZoneLabel(kind));
+}
+
+function localizedStripUsage(kind: StripKind): string {
+  return inspectorText(STRIP_USAGE_I18N_KEYS[kind], localizedStripLabel(kind));
+}
+
+function localizedStripSideLabel(zone: StripZone): string {
+  if (zone === "left") return inspectorText("sceneGraph.inspector.leftSide", "Left side");
+  if (zone === "right") return inspectorText("sceneGraph.inspector.rightSide", "Right side");
+  return inspectorText("sceneGraph.inspector.center", "Center");
+}
+
+function localizedStripKindLabels(): Record<StripKind, string> {
+  return Object.fromEntries(
+    (Object.keys(STRIP_KIND_I18N_KEYS) as StripKind[]).map((kind) => [kind, localizedStripLabel(kind)]),
+  ) as Record<StripKind, string>;
+}
+
 function metaurbanAssetBadges(kind: StripKind): MetaurbanAssetBadge[] {
   return METAAURBAN_STRIP_ASSET_BADGES[kind] || [];
 }
 
 function stripDirectionChip(strip: AnnotatedCrossSectionStrip): string {
   if (strip.direction === "forward") {
-    return "FWD";
+    return inspectorText("sceneGraph.inspector.forward", "Forward");
   }
   if (strip.direction === "reverse") {
-    return "REV";
+    return inspectorText("sceneGraph.inspector.reverse", "Reverse");
   }
   if (strip.direction === "bidirectional") {
-    return "BI";
+    return inspectorText("sceneGraph.inspector.bidirectional", "Bidirectional");
   }
-  return "STATIC";
+  return inspectorText("sceneGraph.inspector.static", "Static");
 }
 
 function stripPreviewFillColor(kind: StripKind): string {
@@ -602,11 +679,16 @@ function buildMetaurbanAssetBadgeMarkup(
     <div class="annotation-metaurban-badge-row">
       ${badges
         .map(
-          (badge) => `
-            <span class="annotation-metaurban-badge" data-asset-key="${escapeHtml(badge.key)}" title="${escapeHtml(badge.label)}">
-              ${escapeHtml(badge.shortLabel)}
+          (badge) => {
+            const key = `sceneGraph.asset.${badge.key}`;
+            const label = inspectorText(key, badge.label);
+            const shortLabel = loadViewerLanguage() === "zh" ? label : badge.shortLabel;
+            return `
+            <span class="annotation-metaurban-badge" data-asset-key="${escapeHtml(badge.key)}" title="${escapeHtml(label)}">
+              ${escapeHtml(shortLabel)}
             </span>
-          `,
+          `;
+          },
         )
         .join("")}
     </div>
@@ -1382,16 +1464,21 @@ function buildCrossSectionPreviewMarkup(
             data-strip-id="${escapeHtml(strip.strip_id)}"
             data-preview-source="${escapeHtml(preview.sourceMode)}"
           >
-            <span class="annotation-cross-preview-strip-label">${escapeHtml(metaurbanStripLabel(strip.kind))}</span>
+            <span class="annotation-cross-preview-strip-label">${escapeHtml(localizedStripLabel(strip.kind))}</span>
             <span class="annotation-cross-preview-strip-meta">${escapeHtml(strip.width_m.toFixed(2))}m · ${escapeHtml(stripDirectionChip(strip))}</span>
-            <span class="annotation-cross-preview-strip-zone">${escapeHtml(metaurbanStripZoneLabel(strip.kind))}</span>
+            <span class="annotation-cross-preview-strip-zone">${escapeHtml(localizedMetaurbanStripZoneLabel(strip.kind))}</span>
             ${buildMetaurbanAssetBadgeMarkup(strip.kind)}
           </button>
           ${
             isDetailedPreview
               ? `
+                <div class="annotation-cross-preview-strip-actions" aria-label="${escapeHtml(inspectorText("sceneGraph.inspector.stripActions", "Strip actions"))}">
+                  <button type="button" class="scene-icon-button" data-action="move-strip-up" data-strip-id="${escapeHtml(strip.strip_id)}" title="${escapeHtml(inspectorText("sceneGraph.inspector.moveStripUp", "Move strip earlier"))}" aria-label="${escapeHtml(inspectorText("sceneGraph.inspector.moveStripUp", "Move strip earlier"))}">↑</button>
+                  <button type="button" class="scene-icon-button" data-action="move-strip-down" data-strip-id="${escapeHtml(strip.strip_id)}" title="${escapeHtml(inspectorText("sceneGraph.inspector.moveStripDown", "Move strip later"))}" aria-label="${escapeHtml(inspectorText("sceneGraph.inspector.moveStripDown", "Move strip later"))}">↓</button>
+                  <button type="button" class="scene-icon-button" data-action="delete-strip" data-strip-id="${escapeHtml(strip.strip_id)}" title="${escapeHtml(inspectorText("sceneGraph.inspector.removeStrip", "Remove strip"))}" aria-label="${escapeHtml(inspectorText("sceneGraph.inspector.removeStrip", "Remove strip"))}">×</button>
+                </div>
                 <label class="annotation-cross-preview-control">
-                  <span>Width</span>
+                  <span>${escapeHtml(inspectorText("sceneGraph.inspector.widthM", "Width (m)"))}</span>
                   <input
                     type="range"
                     min="0.1"
@@ -1415,7 +1502,7 @@ function buildCrossSectionPreviewMarkup(
             data-action="start-preview-resize"
             data-left-strip-id="${escapeHtml(strip.strip_id)}"
             data-right-strip-id="${escapeHtml(nextStrip.strip_id)}"
-            aria-label="Resize boundary between ${escapeHtml(metaurbanStripLabel(strip.kind))} and ${escapeHtml(metaurbanStripLabel(nextStrip.kind))}"
+            aria-label="${escapeHtml(inspectorFormat("sceneGraph.inspector.resizeBoundary", `Resize boundary between ${localizedStripLabel(strip.kind)} and ${localizedStripLabel(nextStrip.kind)}`, { left: localizedStripLabel(strip.kind), right: localizedStripLabel(nextStrip.kind) }))}"
           >
             <span class="annotation-cross-preview-divider-line" aria-hidden="true"></span>
           </button>
@@ -1426,24 +1513,38 @@ function buildCrossSectionPreviewMarkup(
     <section class="annotation-cross-preview-section">
       <div class="annotation-cross-preview-header">
         <div>
-          <h3>Cross Section Preview</h3>
+          <h3>${escapeHtml(inspectorText("sceneGraph.inspector.crossSectionPreview", "Cross Section Preview"))}</h3>
           <div class="scene-micro-note">
-            ${escapeHtml(preview.sourceMode === "seed" ? "Seed preview from coarse parameters" : "Detailed cross section")}
+            ${escapeHtml(preview.sourceMode === "seed" ? inspectorText("sceneGraph.inspector.seedPreview", "Seed preview from coarse parameters") : inspectorText("sceneGraph.inspector.detailedCrossSection", "Detailed cross section"))}
           </div>
         </div>
         <div class="annotation-cross-preview-stats">
-          <span class="annotation-cross-preview-stat">${escapeHtml(totalWidth.toFixed(2))}m total</span>
-          <span class="annotation-cross-preview-stat">${escapeHtml(getCenterlineCarriagewayWidth(centerline).toFixed(2))}m carriageway</span>
+          <span class="annotation-cross-preview-stat">${escapeHtml(inspectorFormat("sceneGraph.inspector.totalWidthValue", `${totalWidth.toFixed(2)}m total`, { value: totalWidth.toFixed(2) }))}</span>
+          <span class="annotation-cross-preview-stat">${escapeHtml(inspectorFormat("sceneGraph.inspector.carriagewayValue", `${getCenterlineCarriagewayWidth(centerline).toFixed(2)}m carriageway`, { value: getCenterlineCarriagewayWidth(centerline).toFixed(2) }))}</span>
         </div>
       </div>
       <div class="annotation-cross-preview-row">
         ${bands.join("")}
       </div>
+      ${
+        isDetailedPreview
+          ? `
+            <div class="annotation-cross-preview-toolbar">
+              <span>${escapeHtml(inspectorText("sceneGraph.inspector.laneComposition", "Lane composition"))}</span>
+              <div>
+                <button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="add-strip" data-zone="left">${escapeHtml(inspectorText("sceneGraph.inspector.addLeftStrip", "Add left strip"))}</button>
+                <button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="add-strip" data-zone="center">${escapeHtml(inspectorText("sceneGraph.inspector.addCenterStrip", "Add center lane"))}</button>
+                <button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="add-strip" data-zone="right">${escapeHtml(inspectorText("sceneGraph.inspector.addRightStrip", "Add right strip"))}</button>
+              </div>
+            </div>
+          `
+          : ""
+      }
       <div class="scene-micro-note">
         ${escapeHtml(
           preview.sourceMode === "seed"
-            ? "Click a seed band to split this road into editable detailed strips."
-            : "Click a band to select it, then adjust width and direction below.",
+            ? inspectorText("sceneGraph.inspector.seedClickHint", "Click a seed band to split this road into editable detailed strips.")
+            : inspectorText("sceneGraph.inspector.detailClickHint", "Click a band to select it, then adjust width and direction below."),
         )}
       </div>
       ${buildStripCornerConnectionsMarkup(centerline, selectedStripId, junctionOverlays)}
@@ -1474,17 +1575,17 @@ function buildSelectedStripEditorMarkup(
     <section class="annotation-selected-strip-section">
       <div class="annotation-strip-section-header">
         <h3>Selected Strip</h3>
-        <span class="scene-micro-note">${escapeHtml(strip.strip_id)} · ${escapeHtml(metaurbanStripZoneLabel(strip.kind))}</span>
+        <span class="scene-micro-note">${escapeHtml(strip.strip_id)} · ${escapeHtml(localizedMetaurbanStripZoneLabel(strip.kind))}</span>
       </div>
       ${buildMetaurbanAssetBadgeMarkup(strip.kind, { emptyMode: "note" })}
-      <div class="scene-inspector-grid">
+      <div class="scene-inspector-grid annotation-road-properties-grid">
         <label class="scene-form-field">
           <span>Strip ID</span>
           <input type="text" value="${escapeHtml(strip.strip_id)}" readonly />
         </label>
         <label class="scene-form-field">
           <span>Zone</span>
-          <input type="text" value="${escapeHtml(strip.zone)}" readonly />
+          <input type="text" value="${escapeHtml(localizedStripSideLabel(strip.zone))}" readonly />
         </label>
         <label class="scene-form-field">
           <span>Kind</span>
@@ -1494,7 +1595,7 @@ function buildSelectedStripEditorMarkup(
                 ? (["drive_lane", "bus_lane", "bike_lane", "parking_lane", "median", "grass_belt", "shared_street_surface", "colored_pavement"] as StripKind[])
                 : (["nearroad_buffer", "nearroad_furnishing", "clear_sidewalk", "farfromroad_buffer", "frontage_reserve", "colored_pavement"] as StripKind[]),
               strip.kind,
-              STRIP_KIND_LABELS,
+              localizedStripKindLabels(),
             )}
           </select>
         </label>
@@ -1509,78 +1610,18 @@ function buildSelectedStripEditorMarkup(
           </select>
         </label>
         <div class="scene-fact-card">
-          <span class="scene-fact-label">MetaUrban Zone</span>
-          <strong>${escapeHtml(metaurbanStripZoneLabel(strip.kind))}</strong>
+          <span class="scene-fact-label">Functional Zone</span>
+          <strong>${escapeHtml(localizedMetaurbanStripZoneLabel(strip.kind))}</strong>
         </div>
         <div class="scene-fact-card">
           <span class="scene-fact-label">Corner-linked Roads</span>
           <strong>${cornerLinkedRoadCount}</strong>
         </div>
         <div class="scene-fact-card scene-form-field-wide">
-          <span class="scene-fact-label">Guidance</span>
-          <strong>${escapeHtml(METAAURBAN_STRIP_GUIDANCE[strip.kind])}</strong>
+          <span class="scene-fact-label">Function</span>
+          <strong>${escapeHtml(localizedStripUsage(strip.kind))}</strong>
         </div>
       </div>
-    </section>
-  `;
-}
-
-function buildMetaurbanAssetGuideMarkup(): string {
-  return `
-    <section class="annotation-metaurban-guide">
-      <div class="annotation-strip-section-header">
-        <h3>MetaUrban Asset Hook</h3>
-        <span class="scene-micro-note">Placeholder badges now, real assets later.</span>
-      </div>
-      <div class="annotation-metaurban-guide-lines">
-        ${METAAURBAN_ASSET_GUIDE_LINES.map((line) => `<div class="scene-micro-note">${escapeHtml(line)}</div>`).join("")}
-      </div>
-    </section>
-  `;
-}
-
-function buildStripSectionMarkup(
-  centerline: AnnotatedCenterline,
-  zone: StripZone,
-  selectedStripId: string | null,
-): string {
-  const strips = sortedCrossSectionStrips(centerline.cross_section_strips).filter((strip) => strip.zone === zone);
-  const rows = strips.length > 0
-    ? strips
-        .map(
-          (strip) => `
-            <div class="annotation-strip-row${selectedStripId === strip.strip_id ? " annotation-strip-row-selected" : ""}">
-              <div class="annotation-strip-row-header">
-                <button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="select-strip" data-strip-id="${escapeHtml(strip.strip_id)}">
-                  ${escapeHtml(strip.strip_id)}
-                </button>
-                <div class="annotation-strip-row-actions">
-                  <button type="button" class="scene-icon-button" data-action="move-strip-up" data-strip-id="${escapeHtml(strip.strip_id)}">↑</button>
-                  <button type="button" class="scene-icon-button" data-action="move-strip-down" data-strip-id="${escapeHtml(strip.strip_id)}">↓</button>
-                  <button type="button" class="scene-icon-button" data-action="delete-strip" data-strip-id="${escapeHtml(strip.strip_id)}">×</button>
-                </div>
-              </div>
-              <div class="annotation-strip-row-summary">
-                <strong>${escapeHtml(metaurbanStripLabel(strip.kind))}</strong>
-                <span>${escapeHtml(strip.width_m.toFixed(2))}m</span>
-                <span>${escapeHtml(stripDirectionChip(strip))}</span>
-                <span>${escapeHtml(metaurbanStripZoneLabel(strip.kind))}</span>
-              </div>
-              ${buildMetaurbanAssetBadgeMarkup(strip.kind)}
-            </div>
-          `,
-        )
-        .join("")
-    : `<div class="scene-empty-note">No ${zone} strips yet.</div>`;
-  return `
-    <section class="annotation-strip-section">
-      <div class="annotation-strip-section-header">
-        <h3>${escapeHtml(zone.charAt(0).toUpperCase() + zone.slice(1))}</h3>
-        <button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="add-strip" data-zone="${escapeHtml(zone)}">
-          Add Strip
-        </button>
-      </div>
-      ${rows}
     </section>
   `;
 }
@@ -1708,12 +1749,12 @@ function buildInspectorMarkup(
     const canCalibratePixelsPerMeter = centerline.reference_width_px !== null && centerline.reference_width_px > 0;
     return `
       ${buildCrossSectionPreviewMarkup(centerline, selectedStripId, junctionOverlays)}
-      <div class="scene-inspector-grid">
+      <div class="scene-inspector-grid annotation-road-properties-grid">
         <label class="scene-form-field">
           <span>ID</span>
           <input id="annotation-inspector-id" type="text" value="${escapeHtml(centerline.id)}" />
         </label>
-        <label class="scene-form-field scene-form-field-wide">
+        <label class="scene-form-field scene-form-field-compact-wide">
           <span>Label</span>
           <input id="annotation-inspector-label" type="text" value="${escapeHtml(centerline.label)}" />
         </label>
@@ -1745,10 +1786,12 @@ function buildInspectorMarkup(
           <span>Parking Lanes</span>
           <input id="annotation-inspector-parking-lanes" type="number" min="0" step="1" value="${centerline.parking_lane_count}" ${detailed ? "disabled" : ""} />
         </label>
-        <label class="scene-form-field scene-form-field-wide">
+        <label class="scene-form-field scene-form-field-compact-wide">
           <span>Highway Type</span>
           <input id="annotation-inspector-highway-type" type="text" value="${escapeHtml(centerline.highway_type)}" />
         </label>
+      </div>
+      <div class="scene-inspector-grid annotation-road-summary-grid">
         <div class="scene-fact-card">
           <span class="scene-fact-label">Mode</span>
           <strong>${detailed ? "Detailed" : "Coarse"}</strong>
@@ -1774,14 +1817,14 @@ function buildInspectorMarkup(
           <strong>${annotation.pixels_per_meter.toFixed(2)} px/m</strong>
         </div>
         <div class="scene-fact-card scene-form-field-wide">
-          <span class="scene-fact-label">Geometry</span>
-          <strong>${centerline.points.length} vertices${selection.vertexIndex !== undefined ? ` · selected vertex ${selection.vertexIndex + 1}` : ""}</strong>
+          <span class="scene-fact-label">${escapeHtml(inspectorText("sceneGraph.inspector.roadGeometry", "Road geometry"))}</span>
+          <strong>${escapeHtml(inspectorFormat("sceneGraph.inspector.vertexCountExplained", `${centerline.points.length} vertices — points defining the road centerline shape`, { count: centerline.points.length }))}${selection.vertexIndex !== undefined ? ` · ${escapeHtml(inspectorFormat("sceneGraph.inspector.selectedVertex", `selected vertex ${selection.vertexIndex + 1}`, { index: selection.vertexIndex + 1 }))}` : ""}</strong>
         </div>
         <div class="annotation-detail-actions scene-form-field-wide">
           ${
             !detailed
               ? `<button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="reset-road-width-to-nominal">
-                  Reset Width to Nominal ${escapeHtml(nominalWidth.toFixed(2))}m
+                  ${escapeHtml(inspectorFormat("sceneGraph.inspector.resetWidth", `Reset Width to Nominal ${nominalWidth.toFixed(2)}m`, { value: nominalWidth.toFixed(2) }))}
                 </button>`
               : ""
           }
@@ -1796,24 +1839,21 @@ function buildInspectorMarkup(
           <button type="button" class="scene-toolbar-button" data-action="split-centerline">
             ${detailed ? "Reseed Cross Section" : "Split to Cross Section"}
           </button>
-          ${detailed ? `<button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="collapse-centerline">Back to Coarse</button>` : ""}
+          ${
+            detailed
+              ? `<button type="button" class="scene-toolbar-button scene-toolbar-button-secondary" data-action="collapse-centerline" title="${escapeHtml(inspectorText("sceneGraph.inspector.backCoarseHint", "Replace the editable strip layout with a seed preview based on coarse parameters."))}">${escapeHtml(inspectorText("sceneGraph.inspector.backCoarse", "Return to coarse parameters"))}</button>`
+              : ""
+          }
         </div>
       </div>
       ${
         detailed
           ? `
             ${buildSelectedStripEditorMarkup(centerline, selectedStripId, linkedRoadIds.size)}
-            <div class="annotation-detailed-layout">
-              ${buildStripSectionMarkup(centerline, "left", selectedStripId)}
-              ${buildStripSectionMarkup(centerline, "center", selectedStripId)}
-              ${buildStripSectionMarkup(centerline, "right", selectedStripId)}
-              ${buildFurnitureMarkup(centerline, selectedStripId, pendingFurnitureKind, isFurniturePlacementArmed)}
-            </div>
-            ${buildMetaurbanAssetGuideMarkup()}
+            ${buildFurnitureMarkup(centerline, selectedStripId, pendingFurnitureKind, isFurniturePlacementArmed)}
           `
           : `
             <div class="scene-empty-note">先把总宽度和参考图调准；你现在也可以直接点击上方 seed 横截面中的任一部分，自动进入 detailed 编辑。</div>
-            ${buildMetaurbanAssetGuideMarkup()}
           `
       }
     `;
@@ -2369,6 +2409,7 @@ async function readImageFileDataUrl(file: File): Promise<string> {
 
 export type SceneGraphHostOptions = {
   mode?: "expert" | "course";
+  showAdvancedSourceTools?: boolean;
   onApproveAndGenerate?: (annotation: ReferenceAnnotation) => Promise<void>;
   onEnterProfessionalScene?: () => Promise<void>;
 };
@@ -2389,7 +2430,9 @@ export function mountSceneGraphPage(
     { key: "sceneGraph.hints.statusFeedback" },
   ]);
   shell.setLeftSections(createSceneGraphLeftSections());
-  shell.setRightTabs(createSceneGraphRightTabs(), "source");
+  shell.setRightTabs(createSceneGraphRightTabs({
+    showAdvancedSourceTools: hostOptions.showAdvancedSourceTools === true,
+  }), "source");
   shell.setMenuActions({
     "file-export-json": () => root.querySelector<HTMLButtonElement>("#annotation-download-json")?.click(),
     "tools-open-settings": () => shell.activateRightTab("view"),
@@ -2408,12 +2451,14 @@ export function mountSceneGraphPage(
   const {
     backButton,
     planSelect,
-    scenarioSelect,
-    scenarioSelectData,
+    referencePlanControl,
+    osmReferenceNote,
     imageInput,
     imageResetButton,
     showOriginalInput,
     showOverlayInput,
+    showOsmLabelsInput,
+    showAnnotationLabelsInput,
     showJunctionCoreInput,
     showJunctionConnectorsInput,
     showJunctionOutlinesInput,
@@ -2421,6 +2466,7 @@ export function mountSceneGraphPage(
     showJunctionBoundariesInput,
     showJunctionLabelsInput,
     showJunctionDebugInput,
+    originalOpacityLabel,
     originalOpacityInput,
     overlayOpacityInput,
     pixelsPerMeterInput,
@@ -2439,6 +2485,7 @@ export function mountSceneGraphPage(
     zoomFitButton,
     zoomLevelEl,
     stageEmptyEl,
+    zoomSpaceEl,
     boardEl,
     originalImageEl,
     overlayHostEl,
@@ -2507,6 +2554,8 @@ export function mountSceneGraphPage(
     graphResult: null as ConvertedGraphPayload | null,
     showOriginal: true,
     showOverlay: true,
+    showOsmLabels: false,
+    showAnnotationLabels: true,
     showJunctionCore: true,
     showJunctionConnectors: true,
     showJunctionOutlines: false,
@@ -3431,9 +3480,32 @@ export function mountSceneGraphPage(
     });
   }
 
+  function syncViewportLayout(): void {
+    if (!hasAnnotationCanvas()) return;
+    const stageStyle = window.getComputedStyle(stageEl);
+    const horizontalPadding = Number.parseFloat(stageStyle.paddingLeft || "0")
+      + Number.parseFloat(stageStyle.paddingRight || "0");
+    const viewportWidth = Math.max(1, stageEl.clientWidth - horizontalPadding);
+    const imageWidth = Math.max(1, state.annotation.image_width_px);
+    const imageHeight = Math.max(1, state.annotation.image_height_px);
+    const baseWidth = viewportWidth;
+    const baseHeight = baseWidth * imageHeight / imageWidth;
+    const scaledWidth = baseWidth * state.viewportScale;
+    const scaledHeight = baseHeight * state.viewportScale;
+    const spaceWidth = Math.max(viewportWidth, scaledWidth);
+
+    zoomSpaceEl.style.width = `${spaceWidth}px`;
+    zoomSpaceEl.style.height = `${scaledHeight}px`;
+    boardEl.style.width = `${baseWidth}px`;
+    boardEl.style.height = `${baseHeight}px`;
+    boardEl.style.left = `${Math.max(0, (spaceWidth - scaledWidth) / 2)}px`;
+    boardEl.style.transform = `scale(${state.viewportScale})`;
+    window.requestAnimationFrame(() => annotationOsmMap?.resize());
+  }
+
   function renderViewportControls(): void {
     const hasCanvas = hasAnnotationCanvas();
-    boardEl.style.transform = `scale(${state.viewportScale})`;
+    syncViewportLayout();
     zoomLevelEl.value = `${Math.round(state.viewportScale * 100)}%`;
     zoomOutButton.disabled = !hasCanvas || state.viewportScale <= ANNOTATION_MIN_ZOOM;
     zoomInButton.disabled = !hasCanvas || state.viewportScale >= ANNOTATION_MAX_ZOOM;
@@ -3461,8 +3533,9 @@ export function mountSceneGraphPage(
 
     state.viewportScale = nextScale;
     renderViewportControls();
-    stageEl.scrollLeft += boardPointX * (nextScale - oldScale);
-    stageEl.scrollTop += boardPointY * (nextScale - oldScale);
+    const nextBoardRect = boardEl.getBoundingClientRect();
+    stageEl.scrollLeft += nextBoardRect.left + boardPointX * nextScale - anchorX;
+    stageEl.scrollTop += nextBoardRect.top + boardPointY * nextScale - anchorY;
   }
 
   function resetViewport(): void {
@@ -3503,11 +3576,13 @@ export function mountSceneGraphPage(
     if (viewportShellEl) viewportShellEl.dataset.hasCanvas = hasCanvas ? "true" : "false";
     stageEl.dataset.loading = state.isReferenceImageLoading ? "true" : "false";
     stageEl.dataset.emptyState = hasCanvas ? "ready" : state.isReferenceImageLoading ? "loading" : "empty";
+    zoomSpaceEl.hidden = !hasCanvas;
     boardEl.hidden = !hasCanvas;
     boardEl.style.aspectRatio = hasCanvas
       ? `${state.annotation.image_width_px} / ${state.annotation.image_height_px}`
       : "";
     stageEmptyEl.hidden = hasCanvas;
+    if (hasCanvas) window.requestAnimationFrame(syncViewportLayout);
     if (!hasCanvas) {
       const loadingDefaultPlan = state.referenceImageLoadingMessage === DEFAULT_REFERENCE_IMAGE_LOADING_MESSAGE;
       const i18nKey = state.isReferenceImageLoading && loadingDefaultPlan
@@ -3578,7 +3653,7 @@ export function mountSceneGraphPage(
   }
 
   function scenarioDesignSelects(): HTMLSelectElement[] {
-    return [scenarioSelect, scenarioSelectData];
+    return [];
   }
 
   function renderScenarioDesignOptions(preferredScenarioId?: string): void {
@@ -4373,6 +4448,13 @@ export function mountSceneGraphPage(
       state.drag?.kind === "functional_zone_draw" ? state.drag : null,
       state.drag?.kind === "region_draw" || state.drag?.kind === "region_box_draw" ? state.drag : null,
     );
+    overlayHostEl.dataset.showOsmLabels = String(state.showOsmLabels);
+    overlayHostEl.dataset.showAnnotationLabels = String(state.showAnnotationLabels);
+    overlayHostEl.querySelectorAll<SVGTextElement>("text").forEach((label) => {
+      const isOsmLabel = label.textContent?.trim().startsWith("osm-") ?? false;
+      label.classList.toggle("annotation-osm-label", isOsmLabel);
+      label.classList.toggle("annotation-overlay-label", !isOsmLabel);
+    });
     updateStageVisibility();
   }
 
@@ -4384,6 +4466,14 @@ export function mountSceneGraphPage(
     graphTextarea.value = state.graphResult ? JSON.stringify(state.graphResult, null, 2) : "";
     showOriginalInput.checked = state.showOriginal;
     showOverlayInput.checked = state.showOverlay;
+    showOsmLabelsInput.checked = state.showOsmLabels;
+    showAnnotationLabelsInput.checked = state.showAnnotationLabels;
+    const isDirectOsm = workflow.getSnapshot().sourceKind === "osm" || workflow.getSnapshot().sourceKind === "osm_buildings";
+    referencePlanControl.hidden = isDirectOsm;
+    osmReferenceNote.hidden = !isDirectOsm;
+    originalOpacityLabel.dataset.i18nKey = isDirectOsm
+      ? "sceneGraph.right.baseMapOpacity"
+      : "sceneGraph.right.originalOpacity";
     showJunctionCoreInput.checked = state.showJunctionCore;
     showJunctionConnectorsInput.checked = state.showJunctionConnectors;
     showJunctionOutlinesInput.checked = state.showJunctionOutlines;
@@ -6053,6 +6143,22 @@ export function mountSceneGraphPage(
     },
     { signal },
   );
+  showOsmLabelsInput.addEventListener(
+    "change",
+    () => {
+      state.showOsmLabels = showOsmLabelsInput.checked;
+      renderOverlay();
+    },
+    { signal },
+  );
+  showAnnotationLabelsInput.addEventListener(
+    "change",
+    () => {
+      state.showAnnotationLabels = showAnnotationLabelsInput.checked;
+      renderOverlay();
+    },
+    { signal },
+  );
   showJunctionCoreInput.addEventListener(
     "change",
     () => {
@@ -6230,6 +6336,9 @@ export function mountSceneGraphPage(
     { signal },
   );
   zoomFitButton.addEventListener("click", resetViewport, { signal });
+  const annotationResizeObserver = new ResizeObserver(() => syncViewportLayout());
+  annotationResizeObserver.observe(stageEl);
+  signal.addEventListener("abort", () => annotationResizeObserver.disconnect(), { once: true });
   stageEl.addEventListener(
     "wheel",
     (event) => {
@@ -7025,7 +7134,6 @@ export function mountSceneGraphPage(
           : "Optional AI capability check unavailable.";
         sourceAiStatusEl.dataset.tone = "neutral";
       });
-    void loadScenarioDesigns({ silent: true });
     void loadReferencePlans({ silent: true }).catch((error) => {
       const reason = error instanceof Error ? error.message : "Reference template library unavailable.";
       shell.pushActivity(`Reference template library unavailable: ${reason}`, "warning");

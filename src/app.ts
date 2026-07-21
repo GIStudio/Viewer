@@ -89,22 +89,20 @@ import {
   prepareEnvironmentSkyDomes,
   sceneContentBounds,
 } from "./viewer-scene-bounds";
-import { createSceneObjectEditorController } from "./viewer-scene-object-editor";
+import {
+  createSceneObjectEditorController,
+  type SceneObjectEditMode,
+} from "./viewer-scene-object-editor";
 import { createSceneEditAutosaveCoordinator } from "./viewer-scene-edit-autosave";
 import { createSceneObjectEditStatusController } from "./viewer-object-edit-status";
 import { createLocalAssetPaletteAdapter, type SceneAssetPaletteAdapter } from "./viewer-asset-palette";
 import { createSceneAssetDialog } from "./viewer-scene-asset-dialog";
 import { createViewerCommandRegistry } from "./viewer-command-registry";
+import { createScenarioWorkbench, type ProfessionalScenarioAdapter } from "./viewer-scenario-workbench";
 import { createViewerPanelController, type ViewerPanelController } from "./viewer-panel-controller";
 import { organizeViewerSettingsTools } from "./viewer-settings-tool-disclosure";
 import {
-  buildMinimapSurfacePlan,
-  drawMinimapSurfacePlan,
-  resizeMinimapCanvas,
   sceneBoundsFromManifest,
-  minimapToWorld,
-  renderMinimap,
-  type MinimapSurfacePlan,
   type SceneBounds,
 } from "./viewer-minimap";
 import {
@@ -116,7 +114,7 @@ import {
   renderCameraSurfaceDiagnosticControls,
   type SurfaceDiagnosticColorMode,
 } from "./viewer-camera-surface-diagnostic";
-import { createExpandedMapController } from "./viewer-expanded-map";
+import { createExpandedMapController, renderPlanMapCanvas } from "./viewer-expanded-map";
 import { createSchemeCompareController } from "./viewer-scheme-compare";
 import {
   buildDesignStageNodes,
@@ -190,9 +188,9 @@ import {
   validateEvaluationConfig,
   type EvaluationConfig,
   type EvaluationConfigField,
+  type EvaluationResult,
 } from "./viewer-evaluation";
 import { captureGalleryViews, type GalleryCaptureTarget } from "./viewer-evaluation-capture";
-import { createViewerPresetsController } from "./viewer-presets-controller";
 import { createViewerEvaluationRunner } from "./viewer-evaluation-runner";
 import type { DesktopShell, ShellI18nText, WorkbenchSidebarPage } from "./desktop-shell";
 import type { ProfessionalBaselineCoordinator } from "./professional-baseline-coordinator";
@@ -487,10 +485,15 @@ function createAvatarFigure(): THREE.Group {
 
 export type ViewerHostOptions = {
   embedded?: boolean;
-  persistSceneCommands?: (commands: SceneEditCommand[]) => Promise<SceneLayoutEditResponse>;
+  persistSceneCommands?: (
+    commands: SceneEditCommand[],
+    context: { layoutPath: string },
+  ) => Promise<SceneLayoutEditResponse>;
+  runProjectEvaluation?: (weights: Record<string, number>) => Promise<EvaluationResult>;
   assetPaletteAdapter?: SceneAssetPaletteAdapter;
   sidebarPages?: WorkbenchSidebarPage[];
   baselineCoordinator?: ProfessionalBaselineCoordinator;
+  scenarioAdapter?: ProfessionalScenarioAdapter;
 };
 
 function mountViewer(shell: DesktopShell, workflow: WorkflowController, hostOptions: ViewerHostOptions = {}): Promise<() => void> {
@@ -542,8 +545,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     crosshairEl,
     minimapEl,
     minimapExpandEl,
-    minimapHost,
-    minimapOverlayEl,
+    minimapPlanCanvas,
     axisHudEl,
     lightingPresetEl,
     exposureInput,
@@ -595,11 +597,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     designGenerateEl,
     designStatusEl,
     designResultEl,
-    evaluateToggleEl,
     evaluatePanelEl,
     evaluateCloseEl,
     evaluateRunEl,
     evaluateContentEl,
+    evaluateGateEl,
     evaluationConfigInputs,
     evaluationConfigErrorEl,
     evaluationConfigResetEl,
@@ -609,7 +611,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     compareSelectBEl,
     compareResultsEl,
     exitCompare3dEl,
-    historyAnalysisToggleEl,
     historyAnalysisPanelEl,
     historyAnalysisCloseEl,
     historyAnalysisContentEl,
@@ -618,10 +619,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     consistencyContentEl,
     exportTopdownMapEl,
     exportTopdownSvgEl,
-    presetsToggleEl,
-    presetsPanelEl,
-    presetsCloseEl,
-    presetsGridEl,
     helpToggleEl,
     helpPanelEl,
     helpCloseEl,
@@ -769,19 +766,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     assetPolicyInputs.forEach((input) => {
       input.checked = input.value === snapshot.assetPreparationChoice;
     });
-    const assetReady = snapshot.assetPreparation?.mode === "default_transparent_massing"
-      || (snapshot.assetPreparation?.mode === "candidate_manifests"
-        && snapshot.assetPreparation.manifests.some((manifest) => manifest.readyCount > 0));
     const built = currentGenerationSpecBuild();
     const spec = built.spec;
     const issues = [...built.issues, ...(parameterDesignController?.validationIssues() ?? [])];
     const sourceReady = hasApprovedSource || (spec.sourceMode === "graph_template" && Boolean(spec.graphTemplateId));
-    const preparationReady = assetReady || hostOptions.embedded;
-    const generationReady = sourceReady && preparationReady && issues.length === 0;
+    const generationReady = sourceReady && issues.length === 0;
     designGenerateEl.disabled = !generationReady || Boolean(snapshot.busy.generate);
     const missing = [
       ...(!sourceReady ? [spec.sourceMode === "reference_annotation" ? translateViewerKey(currentLang, "viewer.generationDialog.approvalRequired") : "请选择明确的 Graph Template ID"] : []),
-      ...(!preparationReady ? [translateViewerKey(currentLang, "professional.assets.policyRequired")] : []),
       ...issues,
     ].filter(Boolean).join(" · ");
     designGenerateEl.title = generationReady ? "" : missing;
@@ -794,9 +786,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     renderCandidateRepository();
     renderGenerationOutputSummary(spec, issues);
     generationWizard?.setPrimaryStatus("source", sourceReady ? "complete" : "warning");
-    generationWizard?.setPrimaryStatus("strategy", issues.length ? "error" : preparationReady ? "complete" : "warning");
+    generationWizard?.setPrimaryStatus("strategy", issues.length ? "error" : "complete");
     generationWizard?.setPrimaryStatus("output", generationReady ? "complete" : "pending");
-    generationWizard?.setStrategyStatus("assets", preparationReady ? "complete" : "warning");
     generationWizard?.setStrategyStatus("skeleton", issues.length ? "error" : "complete");
     generationWizard?.setStrategyStatus("furniture", "complete");
   };
@@ -933,14 +924,41 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         if (detail) detail.textContent = translateViewerKey(currentLang, "professional.review.noSceneHint") ?? "Complete scene generation first.";
       }
     }
-    [reviewAcceptEl, reviewChangesEl, reviewAnnotationEl, reviewAssetsEl].forEach((button) => {
-      if (button) button.disabled = !hasWorkflowScene;
+    [reviewAcceptEl, reviewChangesEl].forEach((button) => {
+      if (button) button.disabled = !hasWorkflowScene || starterPreview;
     });
+    if (reviewAnnotationEl) reviewAnnotationEl.disabled = false;
+    if (reviewAssetsEl) reviewAssetsEl.disabled = false;
     if (!hostOptions.embedded) {
       evaluateRunEl.disabled = snapshot.sceneReviewStatus !== "accepted" || Boolean(snapshot.busy.evaluate);
       evaluateRunEl.title = snapshot.sceneReviewStatus === "accepted"
         ? ""
         : (translateViewerKey(currentLang, "professional.pipeline.reviewRequired") ?? "Accept the generated result before evaluation.");
+      const gateTitle = evaluateGateEl.querySelector<HTMLElement>("[data-evaluate-gate-title]");
+      const gateDetail = evaluateGateEl.querySelector<HTMLElement>("[data-evaluate-gate-detail]");
+      const gateAction = evaluateGateEl.querySelector<HTMLButtonElement>("[data-evaluate-gate-action]");
+      evaluateGateEl.hidden = snapshot.sceneReviewStatus === "accepted";
+      if (!evaluateGateEl.hidden && gateTitle && gateDetail && gateAction) {
+        if (starterPreview) {
+          evaluateGateEl.dataset.state = "starter";
+          gateTitle.textContent = currentLang === "zh" ? "内置示例为只读评价摘要" : "The built-in demo has a read-only evaluation summary";
+          gateDetail.textContent = currentLang === "zh" ? "复制示例后即可保存 revision、运行评价和导出。" : "Copy the demo to save revisions, evaluate, and export.";
+          gateAction.textContent = currentLang === "zh" ? "使用此示例开始" : "Use this demo to start";
+          gateAction.dataset.evaluateGateAction = "materialize";
+        } else if (!hasWorkflowScene) {
+          evaluateGateEl.dataset.state = "empty";
+          gateTitle.textContent = currentLang === "zh" ? "尚无可评价的 3D 场景" : "No 3D scene is available for evaluation";
+          gateDetail.textContent = currentLang === "zh" ? "先完成参数化生成；本页仍可查看评价说明。" : "Generate a parametric scene first; this page remains available for guidance.";
+          gateAction.textContent = currentLang === "zh" ? "前往生成 3D 场景" : "Go to 3D generation";
+          gateAction.dataset.evaluateGateAction = "generate";
+        } else {
+          evaluateGateEl.dataset.state = "review";
+          gateTitle.textContent = currentLang === "zh" ? "当前结果尚未通过审核" : "The current result has not been accepted";
+          gateDetail.textContent = currentLang === "zh" ? "评价结果与导出会绑定已接受的 revision。" : "Evaluation and export are bound to an accepted revision.";
+          gateAction.textContent = currentLang === "zh" ? "前往 03 接受结果" : "Open 03 result review";
+          gateAction.dataset.evaluateGateAction = "review";
+        }
+      }
     }
   };
   emptyStateEl?.addEventListener("click", (event) => {
@@ -966,8 +984,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     root.querySelector<HTMLButtonElement>("#viewer-edit-toggle")?.click();
   }, { signal });
   reviewAnnotationEl?.addEventListener("click", () => { window.location.hash = "scene-graph"; }, { signal });
-  reviewAssetsEl?.addEventListener("click", () => { window.location.hash = "asset-editor"; }, { signal });
-  generationEditCandidatesEl?.addEventListener("click", () => { window.location.hash = "asset-editor"; }, { signal });
+  reviewAssetsEl?.addEventListener("click", () => root.querySelector<HTMLButtonElement>("#viewer-top-assets")?.click(), { signal });
+  generationEditCandidatesEl?.addEventListener("click", () => root.querySelector<HTMLButtonElement>("#viewer-top-assets")?.click(), { signal });
   generationEditSourceEl?.addEventListener("click", () => { window.location.hash = "scene-graph"; }, { signal });
   root.querySelectorAll<HTMLButtonElement>("[data-generation-return-source]").forEach((button) => {
     button.addEventListener("click", () => { window.location.hash = "scene-graph"; }, { signal });
@@ -1170,12 +1188,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   function renderGenerationOutputSummary(spec: GenerationRequestSpec, issues: readonly string[]): void {
     if (!generationOutputSummaryEl) return;
     const snapshot = workflow.getSnapshot();
-    const preparation = snapshot.assetPreparation;
-    const assetLabel = preparation?.mode === "candidate_manifests"
-      ? `${preparation.manifests.length} 个候选清单 · ${preparation.manifests.reduce((sum, item) => sum + item.readyCount, 0)} ready`
-      : preparation?.mode === "default_transparent_massing"
-        ? "默认参数化素材 + 透明建筑白模"
-        : "尚未选择素材策略";
+    const assetLabel = "全量受信任资产目录 · 所有用户同一权限";
     const parameterSpec = parameterDesignController?.currentSpec();
     const skeleton = parameterSpec?.skeleton;
     const enabledFurniture = parameterSpec
@@ -1572,15 +1585,10 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     resizeRenderer();
   });
   canvasResizeObserver.observe(canvasHost);
-
-  const minimapPlanCanvas = document.createElement("canvas");
-  minimapPlanCanvas.className = "viewer-minimap-plan";
-  minimapPlanCanvas.setAttribute("aria-hidden", "true");
-  minimapHost.appendChild(minimapPlanCanvas);
   const minimapResizeObserver = new ResizeObserver(() => {
-    resizeMinimap();
+    renderMinimapPlanPreview();
   });
-  minimapResizeObserver.observe(minimapHost);
+  minimapResizeObserver.observe(minimapEl);
 
   const lightingRig = createViewerLightingRig(scene);
 
@@ -1686,14 +1694,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   let currentAvatarPosition = new THREE.Vector3(0, Math.max(0, 1.65 - AVATAR_EYE_HEIGHT_M), 0);
   let currentCameraMode: CameraMode = "first_person";
   let currentSceneBounds: SceneBounds | null = null;
-  let currentMinimapPlan: MinimapSurfacePlan | null = null;
   let currentLaserHitPoint: THREE.Vector3 | null = null;
   let currentLaserCopyText = "";
   let lastLaserTargetKey = "";
   let flyAnimation: { startAvatarPos: THREE.Vector3; targetAvatarPos: THREE.Vector3; startTime: number; duration: number } | null = null;
   let resumeRoamAfterSettingsClose = false;
   let statusResetHandle: number | null = null;
-  let minimapClickHandle: number | null = null;
   let lastBranchRunSnapshot: BranchRunStatusPayload | null = null;
   let selectedBranchNodeId: string | null = null;
   let lastDesignRunSnapshot: DesignRunSnapshot | null = null;
@@ -1744,7 +1750,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       design: generationDialogEl,
       evaluate: evaluatePanelEl,
       compare: comparePanelEl,
-      presets: presetsPanelEl,
       help: helpPanelEl,
       history: historyAnalysisPanelEl,
       consistency: consistencyPanelEl,
@@ -1770,8 +1775,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       generationWizard?.open();
     },
     onCompareOpen: populateCompareSelectors,
-    onPresetsOpen: () => presetsController.populatePresetsGrid(),
-    onHistoryOpen: () => void historyPanelController.loadAndRenderHistory(),
+    onHistoryOpen: () => {
+      historyPanelController.setActive(true);
+      void historyPanelController.loadAndRenderHistory();
+    },
+    onHistoryClose: () => historyPanelController.setActive(false),
     onConsistencyOpen: () => renderConsistencyPanel(),
     onCloseAllOverlays: () => {
       if (graphOverlayActive) {
@@ -1853,7 +1861,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     settingsToggleEl,
     sceneGraphLinkEl,
     assetEditorLinkEl,
-    presetsToggleEl,
     floatingLaneToggleEl,
     helpToggleEl,
   ].forEach((button) => {
@@ -1997,6 +2004,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       void loadStarterScenePreview();
     }
   }, { signal });
+  evaluateGateEl.addEventListener("click", (event) => {
+    const action = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-evaluate-gate-action]")?.dataset.evaluateGateAction;
+    if (action === "materialize") void materializeActiveStarterScene();
+    if (action === "generate") generationRunEl.click();
+    if (action === "review") shell.sidebar.activate("review");
+  }, { signal });
 
   const workflowBridge = createViewerWorkflowBridge({
     workflow,
@@ -2122,6 +2135,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       }
       return config;
     },
+    requestEvaluation: hostOptions.runProjectEvaluation
+      ? ({ evaluationConfig }) => hostOptions.runProjectEvaluation!(evaluationConfig.aggregation.dimension_weights)
+      : undefined,
     workflow,
     setStatus,
     flashStatus,
@@ -2239,18 +2255,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       flashStatus("Generated scene loaded. Review the 3D result against the approved source.");
     },
     setStatus,
-  });
-
-  const presetsController = createViewerPresetsController({
-    presetsGridEl,
-    errorEl,
-    getCurrentManifest: () => currentManifest,
-    closePresetsPanel: () => panelController.setOpen("presets", false),
-    setStatus,
-    setError,
-    flashStatus,
-    loadLayoutSelection: sceneSelectionController.loadLayoutSelection,
-    populateRecentLayoutOptions,
   });
 
   schemeCompareController.restoreStoredSelection();
@@ -2468,20 +2472,35 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     renderer.setSize(width, height);
     renderPipeline.setSize(width, height);
 
-    resizeMinimap();
     expandedMapController.resize();
   }
 
-  function resizeMinimap(): void {
-    const minimapWidth = minimapHost.clientWidth;
-    const minimapHeight = minimapHost.clientHeight;
-    if (minimapWidth <= 0 || minimapHeight <= 0) return;
+  /** The lower-right preview uses the canonical Plan compositor without its presentation labels. */
+  function renderMinimapPlanPreview(): void {
+    const cssWidth = minimapPlanCanvas.clientWidth;
+    const cssHeight = minimapPlanCanvas.clientHeight;
+    const context = minimapPlanCanvas.getContext("2d");
+    if (!context || cssWidth <= 0 || cssHeight <= 0) return;
     const dpr = Math.min(window.devicePixelRatio, 2);
-    const planChanged = resizeMinimapCanvas(minimapPlanCanvas, minimapWidth, minimapHeight, dpr);
-    resizeMinimapCanvas(minimapOverlayEl, minimapWidth, minimapHeight, dpr);
-    if (planChanged || currentMinimapPlan) {
-      drawMinimapSurfacePlan(minimapPlanCanvas, currentSceneBounds, currentMinimapPlan);
+    const width = Math.max(1, Math.round(cssWidth * dpr));
+    const height = Math.max(1, Math.round(cssHeight * dpr));
+    if (minimapPlanCanvas.width !== width || minimapPlanCanvas.height !== height) {
+      minimapPlanCanvas.width = width;
+      minimapPlanCanvas.height = height;
     }
+    context.clearRect(0, 0, width, height);
+    if (!currentManifest || !currentSceneBounds) return;
+    const planCanvas = renderPlanMapCanvas({
+      manifest: currentManifest,
+      bounds: currentSceneBounds,
+      avatarPosition: currentAvatarPosition,
+      forward: cameraForwardHorizontal(),
+      text: t,
+      width,
+      height,
+      showDecorations: false,
+    });
+    context.drawImage(planCanvas, 0, 0, width, height);
   }
 
   function cameraForwardHorizontal(): THREE.Vector3 {
@@ -2590,6 +2609,42 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   let lastSceneEditUndo: SceneLayoutEditResponse["undo"] & { layoutPath: string } | null = null;
   let structuredEvaluationController: AbortController | null = null;
 
+  type SceneViewSnapshot = {
+    cameraPosition: THREE.Vector3;
+    cameraQuaternion: THREE.Quaternion;
+    avatarPosition: THREE.Vector3;
+    cameraMode: CameraMode;
+    editingEnabled: boolean;
+    editMode: SceneObjectEditMode;
+  };
+
+  function captureSceneViewSnapshot(): SceneViewSnapshot {
+    return {
+      cameraPosition: camera.position.clone(),
+      cameraQuaternion: camera.quaternion.clone(),
+      avatarPosition: currentAvatarPosition.clone(),
+      cameraMode: currentCameraMode,
+      editingEnabled: sceneObjectEditor?.isEnabled?.() ?? false,
+      editMode: sceneObjectEditor?.getMode?.() ?? "translate",
+    };
+  }
+
+  function restoreSceneViewSnapshot(snapshot: SceneViewSnapshot): void {
+    currentCameraMode = snapshot.cameraMode;
+    currentAvatarPosition.copy(snapshot.avatarPosition);
+    camera.position.copy(snapshot.cameraPosition);
+    camera.quaternion.copy(snapshot.cameraQuaternion);
+    camera.updateMatrixWorld(true);
+    thirdPersonToggleEl.checked = snapshot.cameraMode === "third_person";
+    updateAvatarTransform();
+    renderMinimapPlanPreview();
+    if (snapshot.editingEnabled) {
+      setObjectEditingEnabled(true, { announce: false });
+      sceneObjectEditor.setMode(snapshot.editMode);
+    }
+    updateOverlay();
+  }
+
   function syncSceneCommandEditor(): void {
     const layoutPath = currentLayoutPath || currentManifest?.layout_path || "";
     sceneCommandJsonEl.value = sceneCommandEnvelopeTemplate(currentManifest, layoutPath);
@@ -2600,12 +2655,16 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       : "Load a durable generated layout to edit.";
   }
 
-  async function loadSceneEditRevision(result: SceneLayoutEditResponse): Promise<void> {
+  async function loadSceneEditRevision(
+    result: SceneLayoutEditResponse,
+    viewSnapshot: SceneViewSnapshot,
+  ): Promise<void> {
     clearManifestCache();
     clearRecentLayoutsCache();
     await sceneSelectionController.loadLayoutSelection(result.revision.layout_path, {
       sceneGlbPath: result.revision.scene_glb_path,
     });
+    restoreSceneViewSnapshot(viewSnapshot);
     if (!hostOptions.embedded) {
       const recent = await loadRecentLayouts(20, false).catch(() => []);
       recentLayoutSelector.populate(recent, result.revision.layout_path);
@@ -2623,16 +2682,17 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     base: { revision: number; sha256: string },
     commands: SceneEditCommand[],
   ): Promise<void> {
+    const viewSnapshot = captureSceneViewSnapshot();
     workflow.setEditPending(true);
     syncSceneCommandEditor();
     try {
       const result = hostOptions.persistSceneCommands
-        ? await hostOptions.persistSceneCommands(commands)
+        ? await hostOptions.persistSceneCommands(commands, { layoutPath })
         : await saveSceneLayoutEdits(layoutPath, base, commands);
       lastSceneEditUndo = { ...result.undo, layoutPath: result.revision.layout_path };
-      await loadSceneEditRevision(result);
+      await loadSceneEditRevision(result, viewSnapshot);
       sceneCommandStatusEl.textContent = `Saved immutable revision ${result.revision.revision}.`;
-      if (!hostOptions.embedded) {
+      if (!hostOptions.embedded && !hostOptions.persistSceneCommands) {
         const savedRevision = result.revision.revision;
         structuredEvaluationController?.abort();
         structuredEvaluationController = new AbortController();
@@ -2719,12 +2779,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     storageKey: hostOptions.embedded ? "course-current" : "expert-current",
     submit: persistCurrentSceneCommands,
     async replayConflict(commands, error): Promise<void> {
+      const viewSnapshot = captureSceneViewSnapshot();
       const current = (error as { detail?: { current?: Record<string, unknown> } })?.detail?.current;
       const layoutPath = String(current?.layout_path ?? "");
       if (!layoutPath) throw error;
       await sceneSelectionController.loadLayoutSelection(layoutPath, {
         sceneGlbPath: String(current?.scene_glb_path ?? "") || undefined,
       });
+      restoreSceneViewSnapshot(viewSnapshot);
       await persistCurrentSceneCommands(commands.filter((command) => {
         if (command.op === "add_instance") return true;
         const record = currentManifest?.instances?.[command.instance_id];
@@ -2759,6 +2821,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   });
 
   let assetBboxEnabledBeforeEditing: boolean | null = null;
+  const directEditEl = root.querySelector<HTMLButtonElement>("#viewer-direct-edit");
 
   function setObjectEditingEnabled(enabled: boolean, options: { announce?: boolean } = {}): void {
     const announce = options.announce ?? true;
@@ -2767,6 +2830,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         assetBboxEnabledBeforeEditing = assetBboxToggleEl.checked;
       }
       sceneObjectEditor.setEnabled(true);
+      directEditEl?.setAttribute("aria-pressed", "true");
+      if (directEditEl) directEditEl.textContent = currentLang === "zh" ? "退出编辑" : "Exit edit";
       setToggleInput(assetMoveToggleEl, true);
       setToggleInput(assetBboxToggleEl, true);
       createAssetBboxHelpers(scene, currentRoot, currentManifest);
@@ -2786,6 +2851,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
 
     const wasEnabled = sceneObjectEditor.isEnabled();
     sceneObjectEditor.exit();
+    directEditEl?.setAttribute("aria-pressed", "false");
+    if (directEditEl) directEditEl.textContent = currentLang === "zh" ? "编辑地物" : "Edit objects";
     setToggleInput(assetMoveToggleEl, false);
     if (assetBboxEnabledBeforeEditing !== null) {
       setToggleInput(assetBboxToggleEl, assetBboxEnabledBeforeEditing);
@@ -2818,18 +2885,42 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     adapter: workflowPaletteAdapter,
     language: () => currentLang,
     flashStatus,
+    selectedInstanceId: () => sceneObjectEditor.selectedInstanceId(),
+    selectedCategory: () => sceneObjectEditor.selectedCategory(),
+    replaceSelected: (asset) => sceneObjectEditor.replaceSelected(asset),
+    placeAsset: async (asset) => {
+      if (!(await materializeActiveStarterScene())) return false;
+      startAssetPlacement(asset);
+      return true;
+    },
   });
-  const openSceneAssetsEl = root.querySelector<HTMLButtonElement>("#viewer-open-scene-assets");
+  const openSceneAssetsEl = root.querySelector<HTMLButtonElement>("#viewer-top-assets");
   const openSceneAssets = (): void => { void sceneAssetDialog.open().catch((error) => flashStatus(String(error))); };
   openSceneAssetsEl?.addEventListener("click", openSceneAssets);
-  const assetDropGhost = new THREE.Mesh(
+  directEditEl?.addEventListener("click", async () => {
+    if (!(await materializeActiveStarterScene())) return;
+    setObjectEditingEnabled(!sceneObjectEditor.isEnabled());
+  }, { signal });
+  const scenarioToggleEl = root.querySelector<HTMLButtonElement>("#viewer-scenario-workbench-toggle");
+  const scenarioWorkbenchEl = root.querySelector<HTMLElement>("#viewer-scenario-workbench");
+  const scenarioWorkbench = hostOptions.scenarioAdapter && scenarioToggleEl && scenarioWorkbenchEl
+    ? createScenarioWorkbench({
+        root: scenarioWorkbenchEl,
+        toggle: scenarioToggleEl,
+        adapter: hostOptions.scenarioAdapter,
+        language: () => currentLang,
+        flashStatus,
+      })
+    : null;
+  if (scenarioToggleEl) scenarioToggleEl.hidden = !scenarioWorkbench;
+  const assetPlacementGhost = new THREE.Mesh(
     new THREE.CylinderGeometry(0.48, 0.48, 0.04, 28),
     new THREE.MeshBasicMaterial({ color: 0xb9d9cc, transparent: true, opacity: 0.78, depthWrite: false }),
   );
-  assetDropGhost.name = "roadgen3d-asset-drop-ghost";
-  assetDropGhost.visible = false;
-  assetDropGhost.userData.viewerHelper = true;
-  scene.add(assetDropGhost);
+  assetPlacementGhost.name = "roadgen3d-asset-placement-ghost";
+  assetPlacementGhost.visible = false;
+  assetPlacementGhost.userData.viewerHelper = true;
+  scene.add(assetPlacementGhost);
 
   function surfaceRoleForObject(object: THREE.Object3D): string {
     const roles = currentManifest?.surface_diagnostic?.node_roles ?? {};
@@ -2842,13 +2933,19 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     return "";
   }
 
-  function assetDropPoint(event: DragEvent, asset: SceneAssetRef | null): { point: THREE.Vector3; valid: boolean; role: string } | null {
+  function assetPlacementPoint(
+    asset: SceneAssetRef | null,
+    pointer: THREE.Vector2 | null,
+  ): { point: THREE.Vector3; valid: boolean; role: string } | null {
     if (!currentRoot) return null;
-    const rect = renderer.domElement.getBoundingClientRect();
-    raycaster.setFromCamera(new THREE.Vector2(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1,
-    ), camera);
+    if (pointer) {
+      raycaster.setFromCamera(pointer, camera);
+    } else {
+      const direction = new THREE.Vector3();
+      camera.getWorldDirection(direction);
+      raycaster.set(camera.position, direction.normalize());
+    }
+    raycaster.far = 220;
     const hit = raycaster.intersectObject(currentRoot, true).find((candidate) => !candidate.object.userData?.viewerHelper);
     if (!hit) return null;
     const role = surfaceRoleForObject(hit.object);
@@ -2858,40 +2955,52 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     return { point: hit.point.clone(), valid: allowed.has(role), role };
   }
 
-  let draggedAsset: SceneAssetRef | null = null;
-  renderer.domElement.addEventListener("dragenter", (event) => {
-    const raw = event.dataTransfer?.getData("application/x-roadgen3d-scene-asset");
-    if (raw) {
-      try { draggedAsset = JSON.parse(raw) as SceneAssetRef; } catch { draggedAsset = null; }
+  let assetPlacementAsset: SceneAssetRef | null = null;
+  const assetPlacementPointer = new THREE.Vector2(0, 0);
+
+  function cancelAssetPlacement(announce = true): void {
+    const wasActive = Boolean(assetPlacementAsset);
+    assetPlacementAsset = null;
+    assetPlacementGhost.visible = false;
+    delete root.dataset.assetPlacementActive;
+    crosshairEl.hidden = !laserToggleEl.checked;
+    if (announce && wasActive) flashStatus("已退出资产放置画笔。");
+  }
+
+  function startAssetPlacement(asset: SceneAssetRef): void {
+    setObjectEditingEnabled(false, { announce: false });
+    assetPlacementAsset = asset;
+    root.dataset.assetPlacementActive = "true";
+    crosshairEl.hidden = false;
+    updateAssetPlacementPreview();
+    renderer.domElement.focus();
+    flashStatus(`放置 ${asset.label}：点击承载面落点；Shift + 点击进入漫游；Esc 退出。`);
+  }
+
+  function updateAssetPlacementPreview(): void {
+    if (!assetPlacementAsset) {
+      assetPlacementGhost.visible = false;
+      return;
     }
-  });
-  renderer.domElement.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    if (!draggedAsset) {
-      const raw = event.dataTransfer?.getData("application/x-roadgen3d-scene-asset");
-      if (raw) try { draggedAsset = JSON.parse(raw) as SceneAssetRef; } catch { draggedAsset = null; }
-    }
-    const placement = assetDropPoint(event, draggedAsset);
-    assetDropGhost.visible = Boolean(placement);
+    const placement = assetPlacementPoint(
+      assetPlacementAsset,
+      isPointerLookActive() ? null : assetPlacementPointer,
+    );
+    assetPlacementGhost.visible = Boolean(placement);
     if (!placement) return;
-    assetDropGhost.position.copy(placement.point);
-    (assetDropGhost.material as THREE.MeshBasicMaterial).color.set(placement.valid ? 0x41a86d : 0xdf654f);
-    if (event.dataTransfer) event.dataTransfer.dropEffect = placement.valid ? "copy" : "none";
-  });
-  renderer.domElement.addEventListener("dragleave", () => { assetDropGhost.visible = false; });
-  renderer.domElement.addEventListener("drop", (event) => {
-    event.preventDefault();
-    const raw = event.dataTransfer?.getData("application/x-roadgen3d-scene-asset");
-    let asset: SceneAssetRef | null = draggedAsset;
-    if (raw) try { asset = JSON.parse(raw) as SceneAssetRef; } catch { asset = null; }
-    const placement = assetDropPoint(event, asset);
-    assetDropGhost.visible = false;
-    draggedAsset = null;
+    assetPlacementGhost.position.copy(placement.point);
+    (assetPlacementGhost.material as THREE.MeshBasicMaterial).color.set(placement.valid ? 0x41a86d : 0xdf654f);
+  }
+
+  function placeAssetAtCurrentTarget(): void {
+    const asset = assetPlacementAsset;
+    const placement = assetPlacementPoint(asset, isPointerLookActive() ? null : assetPlacementPointer);
     if (!asset || !placement?.valid) {
       flashStatus(`该地物不能放在 ${placement?.role || "未知承载面"}；请选择人行道、设施带、种植带或临街区。`);
       return;
     }
-    const instanceId = `${asset.category}-${asset.assetId}-${Date.now().toString(36)}`;
+    const unique = globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36);
+    const instanceId = `${asset.category}-${asset.assetId}-${unique}`;
     editAutosave.enqueue({
       command_id: globalThis.crypto?.randomUUID?.() ?? `add-${Date.now()}`,
       op: "add_instance",
@@ -2903,10 +3012,37 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       yaw_deg: 0,
       scale: 1,
       height_offset_m: 0,
-    });
-    sceneAssetDialog.close();
-    flashStatus(`正在添加 ${asset.label}；保存成功后转为正式对象。`);
-  });
+    }, { debounceMs: 0 });
+    flashStatus(`已放置 ${asset.label}，正在保存；可继续点击放置，Esc 退出。`);
+  }
+
+  renderer.domElement.addEventListener("pointermove", (event) => {
+    if (!assetPlacementAsset || isPointerLookActive()) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    assetPlacementPointer.set(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    updateAssetPlacementPreview();
+  }, { signal });
+  renderer.domElement.addEventListener("pointerdown", (event) => {
+    if (!assetPlacementAsset || event.button !== 0 || event.shiftKey) return;
+    if (!isPointerLookActive()) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      assetPlacementPointer.set(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    placeAssetAtCurrentTarget();
+  }, { capture: true, signal });
+  renderer.domElement.addEventListener("click", (event) => {
+    if (!assetPlacementAsset || event.shiftKey) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, { capture: true, signal });
 
   const commandRegistry = createViewerCommandRegistry({
     "edit.move": () => sceneObjectEditor.setMode("translate"),
@@ -2947,6 +3083,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (active && event.code === "Escape" && sceneAssetDialog.isOpen()) {
       event.preventDefault();
       sceneAssetDialog.close();
+      return;
+    }
+    if (active && event.code === "Escape" && assetPlacementAsset) {
+      event.preventDefault();
+      cancelAssetPlacement();
       return;
     }
     if (active && event.code === "Escape" && panelController.isAnyOpen()) {
@@ -3278,8 +3419,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       currentRoot = null;
     }
     currentSceneBounds = null;
-    currentMinimapPlan = null;
-    drawMinimapSurfacePlan(minimapPlanCanvas, null, null);
+    renderMinimapPlanPreview();
     removeAnalysisOverlayHelpers(scene);
     removeFrameAndAssetHelpers(scene);
 
@@ -3333,8 +3473,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       disposeObject(currentRoot);
       currentRoot = null;
       currentSceneBounds = null;
-      currentMinimapPlan = null;
-      drawMinimapSurfacePlan(minimapPlanCanvas, null, null);
+      renderMinimapPlanPreview();
       throw new Error("The scene contains no usable road geometry or has invalid bounds.");
     }
     const spawnCenter = new THREE.Vector3();
@@ -3348,11 +3487,10 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     currentSpawn = spawn.position;
     currentForward = spawn.forward;
     currentSceneBounds = sceneBoundsFromManifest(bbox, currentManifest);
-    currentMinimapPlan = buildMinimapSurfacePlan(currentRoot, currentManifest, currentSceneBounds);
+    renderMinimapPlanPreview();
     const boundsMs = (performance.now() - boundsStart).toFixed(1);
     console.info(`[viewer-timing] loadScene.bounds (${option.label}): ${boundsMs} ms`);
     fitViewerLightingRigToBounds(lightingRig, bbox);
-    resizeMinimap();
     expandedMapController.render();
     resetView();
     const params = currentManifest?.lighting_params as Partial<LightingState> | undefined;
@@ -3797,11 +3935,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   root.querySelector<HTMLButtonElement>("#viewer-edit-toggle")?.addEventListener("click", async () => {
     if (!(await materializeActiveStarterScene())) return;
     panelController.closeAll();
-    panelController.setOpen("settings", true);
-    window.requestAnimationFrame(() => {
-      sceneCommandJsonEl.scrollIntoView({ block: "center", behavior: "smooth" });
-      sceneCommandJsonEl.focus({ preventScroll: true });
-    });
+    setObjectEditingEnabled(true);
   }, { signal });
   settingsCloseEl.addEventListener("click", () => panelController.setOpen("settings", false), { signal });
   sceneCommandSubmitEl.addEventListener("click", () => void submitSceneCommandEditor(), { signal });
@@ -3825,7 +3959,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       ["evaluate", "professional.pipeline.deliver"],
       ["compare", "viewer.tab.compare"],
       ["history", "viewer.tab.history"],
-      ["presets", "viewer.tab.presets"],
       ["floating-lane", "viewer.tab.floatingLane"],
       ["help", "viewer.tab.help"],
     ];
@@ -3888,7 +4021,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     "tools-open-evaluate": () => panelController.setOpen("evaluate", !panelController.isOpen("evaluate")),
     "tools-open-compare": () => panelController.setOpen("compare", !panelController.isOpen("compare")),
     "tools-open-history": () => panelController.setOpen("history", !panelController.isOpen("history")),
-    "tools-open-presets": () => panelController.setOpen("presets", !panelController.isOpen("presets")),
     "tools-open-floating-lane": () => {
       shell.activateRightTab("floating-lane");
       if (!floatingLaneSystem.config.enabled) {
@@ -3902,17 +4034,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     },
   });
 
-  root.querySelector<HTMLButtonElement>('[data-shell-tab="evaluate"]')?.addEventListener("click", () => {
-    panelController.setOpen("evaluate", shell.sidebar.activePage() === "evaluate");
-  }, { signal });
-  root.querySelector<HTMLButtonElement>('[data-shell-tab="compare"]')?.addEventListener("click", () => {
-    panelController.setOpen("compare", shell.sidebar.activePage() === "compare");
-  }, { signal });
-  root.querySelector<HTMLButtonElement>('[data-shell-tab="history"]')?.addEventListener("click", () => {
-    panelController.setOpen("history", shell.sidebar.activePage() === "history");
-  }, { signal });
-  root.querySelector<HTMLButtonElement>('[data-shell-tab="consistency"]')?.addEventListener("click", () => {
-    panelController.setOpen("consistency", shell.sidebar.activePage() === "consistency");
+  root.addEventListener("roadgen:workbench-sidebar-change", (event) => {
+    const detail = (event as CustomEvent<{ pageId?: string | null }>).detail;
+    panelController.syncFromSidebar(detail?.pageId ?? null);
   }, { signal });
 
   designToggleEl.addEventListener("click", () => panelController.setOpen("design", !panelController.isOpen("design")), { signal });
@@ -3982,14 +4106,10 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     const sourceApproved = spec.sourceMode === "graph_template"
       ? Boolean(spec.graphTemplateId)
       : Boolean(snapshot.normalized && snapshot.approvedSourceRevision === snapshot.sourceRevision);
-    const assetReady = hostOptions.embedded
-      || snapshot.assetPreparation?.mode === "default_transparent_massing"
-      || (snapshot.assetPreparation?.mode === "candidate_manifests" && snapshot.assetPreparation.manifests.some((manifest) => manifest.readyCount > 0));
     const validationIssues = [
       ...issues,
       ...(parameterDesignController?.validationIssues() ?? []),
       ...(!sourceApproved ? ["请先批准当前 ReferenceAnnotation 或选择明确的 Graph Template。"] : []),
-      ...(!assetReady ? ["请先选择 3D 素材策略。"] : []),
     ];
     if (validationIssues.length) {
       designStatusEl.textContent = validationIssues.join(" · ");
@@ -4063,7 +4183,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     })();
   }, { signal });
 
-  evaluateToggleEl.addEventListener("click", () => panelController.setOpen("evaluate", !panelController.isOpen("evaluate")), { signal });
   evaluateCloseEl.addEventListener("click", () => panelController.setOpen("evaluate", false), { signal });
   evaluateRunEl.addEventListener("click", () => void evaluationRunner.run(), { signal });
 
@@ -4071,7 +4190,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   compareSelectAEl.addEventListener("change", () => void compareMode.runComparison(), { signal });
   compareSelectBEl.addEventListener("change", () => void compareMode.runComparison(), { signal });
 
-  historyAnalysisToggleEl.addEventListener("click", () => panelController.setOpen("history", !panelController.isOpen("history")), { signal });
   historyAnalysisCloseEl.addEventListener("click", () => panelController.setOpen("history", false), { signal });
 
   consistencyCloseEl.addEventListener("click", () => panelController.setOpen("consistency", false), { signal });
@@ -4082,10 +4200,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       consistencyContentEl.querySelector<HTMLElement>(".viewer-surface-diagnostic-card")?.scrollIntoView({ block: "start" });
     });
   }, { signal });
-
-  presetsToggleEl.addEventListener("click", () => panelController.setOpen("presets", !panelController.isOpen("presets")), { signal });
-  presetsCloseEl.addEventListener("click", () => panelController.setOpen("presets", false), { signal });
-  presetsGridEl.addEventListener("click", presetsController.handleGridClick, { signal });
 
   // Help panel toggle and close
   helpToggleEl.addEventListener("click", () => panelController.setOpen("help", !panelController.isOpen("help")), { signal });
@@ -4184,54 +4298,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     event.stopPropagation();
     expandedMapController.open();
   }, { signal });
-
-  minimapOverlayEl.addEventListener(
-    "click",
-    (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (minimapClickHandle !== null) {
-        window.clearTimeout(minimapClickHandle);
-        minimapClickHandle = null;
-      }
-      if (event.detail > 1) {
-        return;
-      }
-      if (!currentSceneBounds) {
-        return;
-      }
-      const rect = minimapOverlayEl.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) {
-        return;
-      }
-      const world = minimapToWorld(
-        event.clientX - rect.left,
-        event.clientY - rect.top,
-        currentSceneBounds,
-        minimapOverlayEl,
-      );
-      if (world) {
-        minimapClickHandle = window.setTimeout(() => {
-          flyCameraTo(world.x, currentAvatarPosition.y, world.z);
-          minimapClickHandle = null;
-        }, 180);
-      }
-    },
-    { signal },
-  );
-  minimapOverlayEl.addEventListener(
-    "dblclick",
-    (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (minimapClickHandle !== null) {
-        window.clearTimeout(minimapClickHandle);
-        minimapClickHandle = null;
-      }
-      expandedMapController.open();
-    },
-    { signal },
-  );
 
   lightingPresetEl.addEventListener(
     "change",
@@ -4505,6 +4571,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     }
 
     updateAssetBboxHelpers(scene);
+    updateAssetPlacementPreview();
     updateLaserPointer();
     floatingLaneSystem.updateAnimation(delta);
     environmentController.update(
@@ -4518,13 +4585,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       renderPipeline.render(delta);
     }
 
-    renderMinimap(
-      currentSceneBounds,
-      minimapOverlayEl,
-      currentAvatarPosition,
-      cameraForwardHorizontal,
-      currentLaserHitPoint,
-    );
     expandedMapController.render();
     animationFrameId = requestAnimationFrame(animate);
   }
@@ -4624,10 +4684,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (animationFrameId) {
       cancelAnimationFrame(animationFrameId);
     }
-    if (minimapClickHandle !== null) {
-      window.clearTimeout(minimapClickHandle);
-      minimapClickHandle = null;
-    }
     eventController.abort();
     minimapResizeObserver.disconnect();
     unregisterHostSidebarPages();
@@ -4648,10 +4704,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     editAutosave.dispose();
     sceneObjectEditor.dispose();
     sceneAssetDialog.dispose();
+    cancelAssetPlacement(false);
+    scenarioWorkbench?.dispose();
     openSceneAssetsEl?.removeEventListener("click", openSceneAssets);
-    scene.remove(assetDropGhost);
-    assetDropGhost.geometry.dispose();
-    (assetDropGhost.material as THREE.Material).dispose();
+    scene.remove(assetPlacementGhost);
+    assetPlacementGhost.geometry.dispose();
+    (assetPlacementGhost.material as THREE.Material).dispose();
     environmentController.dispose();
     expandedMapController.dispose();
     renderPipeline.dispose();

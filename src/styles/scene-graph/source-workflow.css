@@ -103,6 +103,10 @@
   background: var(--rg-paper, #f3f0e7);
 }
 
+[data-admin-source-tools][hidden] {
+  display: none !important;
+}
+
 .scene-source-provenance {
   display: grid;
   gap: 0.36rem;
@@ -145,4 +149,64 @@
 
 .scene-source-workflow[data-step="review"] [data-workflow-panel="review"] {
   display: grid;
+}
+
+.scene-source-review-step {
+  gap: 0.46rem;
+  padding: 0.56rem;
+}
+
+.scene-source-review-step .scene-source-heading {
+  gap: 0.2rem;
+  padding-bottom: 0.38rem;
+}
+
+.scene-source-review-step .scene-source-heading > div {
+  gap: 0.35rem;
+}
+
+.scene-source-review-step .scene-source-heading p {
+  font-size: 0.68rem;
+  line-height: 1.32;
+}
+
+.scene-source-review-step .scene-source-provenance {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.22rem 0.45rem;
+  padding: 0.42rem 0.5rem;
+  border-left-width: 2px;
+  font-size: 0.64rem;
+  line-height: 1.28;
+}
+
+.scene-source-review-step .scene-source-provenance strong {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-source-review-step .scene-metric-grid-compact {
+  grid-template-columns: repeat(auto-fit, minmax(4.7rem, max-content));
+  justify-content: start;
+  gap: 0.32rem;
+  padding: 0;
+}
+
+.scene-source-review-step .scene-metric-grid-compact div {
+  padding: 0.34rem 0.42rem;
+  border-radius: 0.5rem;
+}
+
+.scene-source-review-step .scene-metric-grid-compact strong {
+  margin-top: 0.08rem;
+  font-size: 0.88rem;
+  line-height: 1.05;
+}
+
+.scene-source-review-step .scene-source-warning,
+.scene-source-review-step .scene-status {
+  padding: 0.38rem 0.46rem;
+  font-size: 0.66rem;
+  line-height: 1.28;
 }

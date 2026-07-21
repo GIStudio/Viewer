@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 
-import type { SceneEditCommand } from "./viewer-api";
+import type { SceneAssetRef, SceneEditCommand } from "./viewer-api";
 import { resolveInstanceIdFromName } from "./viewer-hit-info";
 import type { ViewerManifest } from "./viewer-types";
 
@@ -25,6 +25,8 @@ export type SceneObjectEditorController = {
   setMode(mode: SceneObjectEditMode): void;
   getMode(): SceneObjectEditMode;
   selectedInstanceId(): string | null;
+  selectedCategory(): string | null;
+  replaceSelected(asset: SceneAssetRef): boolean;
   duplicateSelected(): void;
   deleteSelected(): void;
   getInteractionState(): SceneObjectEditorInteractionState;
@@ -57,6 +59,11 @@ type TransformSnapshot = {
   manifestPosition: [number, number, number];
   yawDeg: number;
   scale: number;
+};
+
+type SelectionProxy = {
+  group: THREE.Group;
+  members: Array<{ object: THREE.Object3D; parent: THREE.Object3D }>;
 };
 
 const EDITABLE_CATEGORIES = new Set(["bench", "bollard", "bus_stop", "hydrant", "lamp", "mailbox", "sign", "trash", "tree"]);
@@ -106,6 +113,16 @@ function topInstanceObject(object: THREE.Object3D, root: THREE.Object3D, instanc
   return cursor;
 }
 
+function instanceSelectionRoots(root: THREE.Object3D, instanceId: string, manifest: ViewerManifest): THREE.Object3D[] {
+  const members: THREE.Object3D[] = [];
+  root.traverse((object) => {
+    if (object === root || instanceIdForObject(object, root, manifest) !== instanceId) return;
+    const parentId = object.parent ? instanceIdForObject(object.parent, root, manifest) : "";
+    if (parentId !== instanceId) members.push(object);
+  });
+  return members;
+}
+
 function positionFrom(record: Record<string, unknown>): [number, number, number] {
   const raw = Array.isArray(record.position_xyz) ? record.position_xyz.map(Number) : [];
   return raw.length >= 3 && raw.slice(0, 3).every(Number.isFinite) ? [raw[0]!, raw[1]!, raw[2]!] : [0, 0, 0];
@@ -123,6 +140,7 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
   let mode: SceneObjectEditMode = "translate";
   let selectedId: string | null = null;
   let selectedObject: THREE.Object3D | null = null;
+  let selectionProxy: SelectionProxy | null = null;
   let selectionBox: THREE.BoxHelper | null = null;
   let snapshot: TransformSnapshot | null = null;
   let normalizingScale = false;
@@ -162,8 +180,22 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
     controls.setScaleSnap(active ? 0.05 : null);
   };
 
+  const releaseSelectionProxy = (): void => {
+    if (!selectionProxy) return;
+    const { group, members } = selectionProxy;
+    group.updateMatrixWorld(true);
+    for (const member of members) {
+      if (member.parent.parent || member.parent === options.getCurrentRoot()) {
+        member.parent.attach(member.object);
+      }
+    }
+    group.removeFromParent();
+    selectionProxy = null;
+  };
+
   const clearSelection = (): void => {
     controls.detach();
+    releaseSelectionProxy();
     selectedId = null;
     selectedObject = null;
     snapshot = null;
@@ -176,12 +208,37 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
     notifyInteractionState();
   };
 
-  const select = (instanceId: string, object: THREE.Object3D): void => {
+  const selectionObject = (
+    instanceId: string,
+    fallback: THREE.Object3D,
+    root: THREE.Object3D,
+    manifest: ViewerManifest,
+  ): THREE.Object3D => {
+    const members = instanceSelectionRoots(root, instanceId, manifest);
+    if (members.length <= 1) return members[0] ?? fallback;
+    const bounds = new THREE.Box3();
+    for (const member of members) bounds.expandByObject(member);
+    const centerWorld = bounds.getCenter(new THREE.Vector3());
+    const group = new THREE.Group();
+    group.name = `roadgen3d-instance-selection:${instanceId}`;
+    group.userData.viewerHelper = true;
+    root.add(group);
+    group.position.copy(root.worldToLocal(centerWorld.clone()));
+    group.updateMatrixWorld(true);
+    const links = members.flatMap((member) => member.parent
+      ? [{ object: member, parent: member.parent }]
+      : []);
+    for (const member of members) group.attach(member);
+    selectionProxy = { group, members: links };
+    return group;
+  };
+
+  const select = (instanceId: string, object: THREE.Object3D, root: THREE.Object3D, manifest: ViewerManifest): void => {
     clearSelection();
     selectedId = instanceId;
-    selectedObject = object;
-    controls.attach(object);
-    selectionBox = new THREE.BoxHelper(object, 0xdf654f);
+    selectedObject = selectionObject(instanceId, object, root, manifest);
+    controls.attach(selectedObject);
+    selectionBox = new THREE.BoxHelper(selectedObject, 0xdf654f);
     selectionBox.name = "roadgen3d-edit-selection";
     selectionBox.userData.viewerHelper = true;
     scene.add(selectionBox);
@@ -268,7 +325,7 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
     if (!instanceId) return;
     event.preventDefault();
     event.stopPropagation();
-    select(instanceId, topInstanceObject(hit.object, root, instanceId, manifest));
+    select(instanceId, topInstanceObject(hit.object, root, instanceId, manifest), root, manifest);
   };
 
   const onKey = (event: KeyboardEvent): void => {
@@ -332,6 +389,36 @@ export function createSceneObjectEditorController(options: EditorOptions): Scene
     },
     getMode: () => mode,
     selectedInstanceId: () => selectedId,
+    selectedCategory(): string | null {
+      if (!selectedId) return null;
+      return String(recordFor(options.getManifest(), selectedId)?.category ?? "").trim().toLowerCase() || null;
+    },
+    replaceSelected(asset): boolean {
+      if (!selectedId) {
+        options.flashStatus("请先在场景中选择要替换的树木或街具。");
+        return false;
+      }
+      const record = recordFor(options.getManifest(), selectedId);
+      if (!record || !editable(record)) return false;
+      const currentCategory = String(record.category ?? "").trim().toLowerCase();
+      const nextCategory = String(asset.category ?? "").trim().toLowerCase();
+      if (currentCategory && nextCategory && currentCategory !== nextCategory) {
+        options.flashStatus(`请选择同类资产：当前对象为 ${currentCategory}，所选资产为 ${nextCategory}。`);
+        return false;
+      }
+      record.asset_id = asset.assetId;
+      record.asset_ref = { ...asset };
+      options.enqueue({
+        command_id: commandId("replace"),
+        op: "replace_asset",
+        instance_id: selectedId,
+        asset_id: asset.assetId,
+        category: asset.category,
+        asset_ref: asset,
+      }, { debounceMs: 0 });
+      options.flashStatus(`正在原位替换 ${selectedId} 为 ${asset.label}；位置、旋转和缩放保持不变。`);
+      return true;
+    },
     duplicateSelected(): void {
       if (!selectedId) return;
       const record = recordFor(options.getManifest(), selectedId);

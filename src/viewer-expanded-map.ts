@@ -1,8 +1,8 @@
 /**
  * Expanded Scene Map modal for the RoadGen3D Viewer.
  *
- * The small minimap stays a navigation affordance; this controller owns a
- * separate renderer and overlay canvas for presentation-scale plan reading.
+ * The lower-right Scene Map launcher opens this controller directly, making
+ * this the single canonical renderer for presentation-scale plan reading.
  */
 import * as THREE from "three";
 import type { RecentLayout, ViewerManifest } from "./viewer-types";
@@ -1886,6 +1886,7 @@ function drawPlanViewport(
   avatarPosition: THREE.Vector3,
   forward: THREE.Vector3,
   text: (en: string, zh: string) => string,
+  showDecorations = true,
 ): void {
   const { x, y, width, height, manifest, bounds, label } = viewport;
   ctx.save();
@@ -1916,12 +1917,14 @@ function drawPlanViewport(
     drawFurniture(ctx, manifest, bounds, width, height);
   }
   const metricLegend = drawMetricOverlay(ctx, metricOverlay, manifest, bounds, width, height, text);
-  if (layerState.viewpoint) {
+  if (showDecorations && layerState.viewpoint) {
     drawViewpoint(ctx, bounds, width, height, avatarPosition, forward);
   }
-  drawScaleBar(ctx, bounds, width, height);
-  drawMetricLegend(ctx, width, height, metricLegend);
-  drawViewportTags(ctx, label, manifest, width, text);
+  if (showDecorations) {
+    drawScaleBar(ctx, bounds, width, height);
+    drawMetricLegend(ctx, width, height, metricLegend);
+    drawViewportTags(ctx, label, manifest, width, text);
+  }
   ctx.restore();
 
   ctx.save();
@@ -1939,6 +1942,7 @@ export type PlanMapCanvasOptions = {
   text: (en: string, zh: string) => string;
   width?: number;
   height?: number;
+  showDecorations?: boolean;
 };
 
 /**
@@ -1956,6 +1960,7 @@ export function renderPlanMapCanvas({
   text,
   width = 2400,
   height = 1500,
+  showDecorations = true,
 }: PlanMapCanvasOptions): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(width));
@@ -1982,7 +1987,7 @@ export function renderPlanMapCanvas({
   ctx.fillStyle = "#f7f6f3";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   for (const viewport of viewports) {
-    drawPlanViewport(ctx, viewport, layerState, "none", avatarPosition, forward, text);
+    drawPlanViewport(ctx, viewport, layerState, "none", avatarPosition, forward, text, showDecorations);
   }
   return canvas;
 }

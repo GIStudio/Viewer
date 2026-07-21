@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = (name) => readFile(new URL(`../src/${name}`, import.meta.url), "utf8");
-const [api, editor, autosave, assets, commands, course, shortcut, styles, app, stage, editStatus, editStatusStyles] = await Promise.all([
+const [api, editor, autosave, assets, commands, course, shortcut, styles, app, stage, editStatus, editStatusStyles, publicProject, routeIsland] = await Promise.all([
   read("viewer-api.ts"),
   read("viewer-scene-object-editor.ts"),
   read("viewer-scene-edit-autosave.ts"),
@@ -15,6 +15,8 @@ const [api, editor, autosave, assets, commands, course, shortcut, styles, app, s
   read("viewer-panels/stage.ts"),
   read("viewer-object-edit-status.ts"),
   read("styles/viewer/object-edit-status.css"),
+  read("professional-public-project.ts"),
+  read("react/RouteIsland.tsx"),
 ]);
 
 for (const op of ["move_instance", "rotate_instance", "scale_instance", "add_instance", "delete_instance", "duplicate_instance", "replace_asset"]) {
@@ -31,14 +33,26 @@ assert.match(editor, /getInteractionState: interactionState/);
 assert.match(editor, /cancelStep/);
 assert.match(editor, /const exit = \(\): void =>/);
 assert.match(editor, /options\.onInteractionStateChange/);
+assert.match(editor, /replaceSelected\(asset/);
+assert.match(editor, /op: "replace_asset"/);
+assert.match(editor, /位置、旋转和缩放保持不变/);
+assert.match(editor, /function instanceSelectionRoots/);
+assert.match(editor, /roadgen3d-instance-selection/);
+assert.match(editor, /for \(const member of members\) group\.attach\(member\)/);
 assert.match(autosave, /scene-edit-queues/);
 assert.match(autosave, /statusCode === 409/);
 assert.match(autosave, /mergeCommand/);
 assert.match(course, /auto_evaluate_mode: "structured"/);
 assert.match(course, /asset-palette/);
-assert.match(assets, /application\/x-roadgen3d-scene-asset/);
+assert.doesNotMatch(assets, /application\/x-roadgen3d-scene-asset/);
+assert.doesNotMatch(assets, /draggable="true"/);
+assert.doesNotMatch(assets, /dragstart/);
 assert.match(assets, /asset-catalog\/search/);
 assert.match(assets, /asset-catalog\/model/);
+assert.match(assets, /data-action="place"/);
+assert.match(assets, /添加到场景/);
+assert.match(assets, /data-action="replace"/);
+assert.match(assets, /全部可用资产/);
 for (const shortcutKey of ["edit.move", "edit.rotate", "edit.scale", "edit.duplicate", "edit.delete", "edit.assets", "edit.undo", "edit.redo", "edit.cancel", "edit.exit"]) {
   assert.match(commands, new RegExp(`id: "${shortcutKey.replace(".", "\\.")}"`));
 }
@@ -47,6 +61,8 @@ assert.match(styles, /viewer-workbench-dialog/);
 assert.match(styles, /background-size: 24px 24px/);
 assert.match(stage, /id="viewer-object-edit-status"/);
 assert.match(stage, /id="viewer-object-edit-exit"/);
+assert.match(stage, /id="viewer-direct-edit"/);
+assert.match(stage, /id="viewer-top-assets"/);
 assert.match(editStatus, /setInteractionState/);
 assert.match(editStatus, /Esc exits editing/);
 assert.match(editStatus, /退出编辑/);
@@ -58,5 +74,16 @@ assert.match(app, /assetBboxEnabledBeforeEditing/);
 assert.match(app, /const result = sceneObjectEditor\.cancelStep\(\)/);
 assert.match(app, /result === "nothing_to_cancel"/);
 assert.match(app, /setObjectEditingEnabled\(false, \{ announce: false \}\)/);
+assert.match(app, /roadgen3d-asset-placement-ghost/);
+assert.match(app, /function startAssetPlacement/);
+assert.match(app, /function placeAssetAtCurrentTarget/);
+assert.match(app, /Shift \+ 点击进入漫游/);
+assert.match(app, /captureSceneViewSnapshot/);
+assert.match(app, /restoreSceneViewSnapshot\(viewSnapshot\)/);
+assert.match(styles, /data-asset-placement-active="true"/);
+assert.match(app, /persistSceneCommands\(commands, \{ layoutPath \}\)/, "scene persistence must receive the active local layout path");
+assert.match(publicProject, /revisions\/import-layout/, "the first 3D edit must lazily materialize an explicit layout into the project");
+assert.match(publicProject, /await openProfessionalOwnedRevision[\s\S]*sceneRef = workflow\.getSnapshot\(\)\.sceneRef/, "editing must switch to the imported project revision before applying commands");
+assert.match(routeIsland, /context\.layoutPath/, "the professional host must forward the active layout path");
 
 console.log("scene edit loop contract ok");

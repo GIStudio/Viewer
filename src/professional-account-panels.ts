@@ -1,5 +1,6 @@
 import type { ViewerLanguage } from "./viewer-i18n";
 import type { ProfessionalSessionController } from "./professional-session";
+import type { PublicProject } from "./course-api";
 
 type Panel = { element: HTMLElement; destroy: () => void };
 const text = (language: ViewerLanguage, zh: string, en: string): string => language === "zh" ? zh : en;
@@ -22,29 +23,31 @@ export function createProfessionalAccountPanel(
   let bootstrapAvailable = false;
   let busy = false;
   let message = "";
+  let showAuth = false;
   const render = () => {
     const snapshot = session.getSnapshot();
     const zh = language === "zh";
-    if (snapshot.status === "authenticated" && snapshot.user) {
+    const guest = snapshot.status === "guest";
+    if ((snapshot.status === "authenticated" || guest) && snapshot.user && !(guest && showAuth)) {
       const projects = snapshot.projects.map((project) => `<option value="${escapeHtml(project.id)}" ${project.id === snapshot.currentProjectId ? "selected" : ""}>${escapeHtml(project.name)}</option>`).join("");
       element.innerHTML = `
         <section class="professional-account-summary">
-          <p class="workbench-panel-kicker">${zh ? "个人账户" : "PERSONAL ACCOUNT"}</p>
+          <p class="workbench-panel-kicker">${guest ? (zh ? "访客公共身份" : "GUEST PUBLIC IDENTITY") : (zh ? "个人账户" : "PERSONAL ACCOUNT")}</p>
           <h3>${escapeHtml(snapshot.user.display_name)}</h3>
-          <p>${escapeHtml(snapshot.user.email)}</p>
-          <p class="professional-account-role">${snapshot.user.system_role === "admin" ? (zh ? "系统管理员" : "System administrator") : (zh ? "个人专业工作区" : "Personal professional workspace")}</p>
+          ${guest ? `<p>${zh ? "无需登录；此浏览器持有项目编辑权。" : "No sign-in required; this browser owns the edit capability."}</p>` : `<p>${escapeHtml(snapshot.user.email)}</p>`}
+          <p class="professional-account-role">${guest ? (zh ? "公共空间 · 永久公开" : "Public space · permanently visible") : snapshot.user.system_role === "admin" ? (zh ? "系统管理员" : "System administrator") : (zh ? "个人专业工作区" : "Personal professional workspace")}</p>
         </section>
         <section class="professional-account-projects">
-          <h4>${zh ? "我的项目" : "My projects"}</h4>
+          <h4>${guest ? (zh ? "本浏览器创建的公共项目" : "Public projects from this browser") : (zh ? "我的项目" : "My projects")}</h4>
           <select data-account-project ${projects ? "" : "disabled"}><option value="">${projects ? "" : (zh ? "尚无项目" : "No projects yet")}</option>${projects}</select>
           <form data-account-create class="professional-account-inline-form">
             <input name="name" required maxlength="180" placeholder="${zh ? "新项目名称" : "New project name"}" />
             <button type="submit" ${busy ? "disabled" : ""}>${zh ? "新建项目" : "New project"}</button>
           </form>
-          <p class="professional-account-note">${zh ? "项目、场景版本、资产列表和评价结果仅对你的账户可见。" : "Projects, scene revisions, palettes, and evaluation results are private to your account."}</p>
+          <p class="professional-account-note">${guest ? (zh ? "项目与产物公开可见；只有持有本浏览器访客身份的人可以继续编辑。" : "Projects and artifacts are public; only this browser guest identity can edit them.") : (zh ? "项目、场景版本、资产列表和评价结果仅对你的账户可见。" : "Projects, scene revisions, palettes, and evaluation results are private to your account.")}</p>
         </section>
-        ${options.onSaveCurrent ? `<button type="button" data-account-save class="professional-account-secondary" ${busy ? "disabled" : ""}>${zh ? "保存当前2D标注到我的项目" : "Save current 2D annotation to my project"}</button>` : ""}
-        <button type="button" data-account-logout class="professional-account-secondary">${zh ? "退出登录" : "Sign out"}</button>
+        ${options.onSaveCurrent ? `<button type="button" data-account-save class="professional-account-secondary" ${busy ? "disabled" : ""}>${guest ? (zh ? "保存当前2D标注到公共项目" : "Save current 2D annotation to a public project") : (zh ? "保存当前2D标注到我的项目" : "Save current 2D annotation to my project")}</button>` : ""}
+        ${guest ? `<button type="button" data-account-auth-open class="professional-account-secondary">${zh ? "登录私人空间" : "Sign in to a private workspace"}</button>` : `<button type="button" data-account-logout class="professional-account-secondary">${zh ? "退出登录" : "Sign out"}</button>`}
         ${message ? `<p role="status" class="professional-account-message">${message}</p>` : ""}`;
       element.querySelector<HTMLSelectElement>("[data-account-project]")?.addEventListener("change", (event) => {
         session.selectProject((event.currentTarget as HTMLSelectElement).value || null);
@@ -61,10 +64,13 @@ export function createProfessionalAccountPanel(
         });
       });
       element.querySelector<HTMLButtonElement>("[data-account-logout]")?.addEventListener("click", () => void session.logout());
+      element.querySelector<HTMLButtonElement>("[data-account-auth-open]")?.addEventListener("click", () => { showAuth = true; mode = "login"; message = ""; render(); });
       element.querySelector<HTMLButtonElement>("[data-account-save]")?.addEventListener("click", () => {
         busy = true; message = ""; render();
         void options.onSaveCurrent?.().then(() => {
-          message = zh ? "当前2D标注已保存到所选个人项目。" : "The current 2D annotation has been saved to the selected personal project.";
+          message = guest
+            ? (zh ? "当前2D标注已保存到所选公共项目。" : "The current 2D annotation has been saved to the selected public project.")
+            : (zh ? "当前2D标注已保存到所选个人项目。" : "The current 2D annotation has been saved to the selected personal project.");
         }).catch((error) => {
           message = error instanceof Error ? error.message : String(error);
         }).finally(() => { busy = false; render(); });
@@ -80,7 +86,9 @@ export function createProfessionalAccountPanel(
       <section class="professional-account-summary">
         <p class="workbench-panel-kicker">${zh ? "账户与项目" : "ACCOUNT & PROJECTS"}</p>
         <h3>${title}</h3>
-        <p>${zh ? "匿名状态只能浏览内置示例。登录后，所有工作将保存到仅自己可见的项目。" : "Guests can browse the starter scene only. Sign in to save work in projects visible only to you."}</p>
+        <p>${guest
+          ? (zh ? "你可以继续使用完整专业流程；登录只用于切换到私有个人项目。" : "The full professional workflow remains available; sign in only to switch to private personal projects.")
+          : (zh ? "登录后，所有工作将保存到仅自己可见的项目。" : "Sign in to save work in projects visible only to you.")}</p>
       </section>
       <form data-account-auth class="professional-account-form">
         ${(registerMode || bootstrapMode) ? formField(zh ? "姓名" : "Name", "display_name") : ""}
@@ -91,9 +99,11 @@ export function createProfessionalAccountPanel(
         <button type="submit" ${busy ? "disabled" : ""}>${bootstrapMode ? (zh ? "创建管理员" : "Create administrator") : registerMode ? (zh ? "创建账户" : "Create account") : (zh ? "登录" : "Sign in")}</button>
       </form>
       <button type="button" data-account-mode class="professional-account-secondary">${registerMode || bootstrapMode ? (zh ? "已有账户？去登录" : "Already have an account? Sign in") : (zh ? "使用邀请码注册" : "Register with an invite")}</button>
+      ${guest ? `<button type="button" data-account-auth-back class="professional-account-secondary">${zh ? "返回公共空间" : "Back to public space"}</button>` : ""}
       ${bootstrapAvailable && !bootstrapMode ? `<button type="button" data-account-bootstrap class="professional-account-secondary">${zh ? "首次部署：初始化管理员" : "First deployment: initialize administrator"}</button>` : ""}
       ${message || snapshot.error ? `<p role="alert" class="professional-account-message" data-tone="error">${message || snapshot.error}</p>` : ""}`;
     element.querySelector<HTMLButtonElement>("[data-account-mode]")?.addEventListener("click", () => { mode = mode === "login" ? "register" : "login"; message = ""; render(); });
+    element.querySelector<HTMLButtonElement>("[data-account-auth-back]")?.addEventListener("click", () => { showAuth = false; message = ""; render(); });
     element.querySelector<HTMLButtonElement>("[data-account-bootstrap]")?.addEventListener("click", () => { mode = "bootstrap"; message = ""; render(); });
     element.querySelector<HTMLFormElement>("[data-account-auth]")?.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -112,6 +122,64 @@ export function createProfessionalAccountPanel(
     bootstrapAvailable = !status.initialized;
     render();
   }).catch(() => undefined);
+  const unsubscribe = session.subscribe(render);
+  return { element, destroy: unsubscribe };
+}
+
+export function createProfessionalPublicSpacePanel(
+  session: ProfessionalSessionController,
+  language: ViewerLanguage,
+  options: {
+    onOpen: (project: PublicProject) => Promise<void>;
+    onExportOwned: (project: PublicProject) => Promise<void>;
+  },
+): Panel {
+  const element = document.createElement("div");
+  element.className = "professional-public-space";
+  let busyId = "";
+  let message = "";
+  const render = () => {
+    const snapshot = session.getSnapshot();
+    const zh = language === "zh";
+    const ownedIds = new Set(snapshot.projects.map((project) => project.id));
+    const cards = snapshot.publicProjects.map((project) => {
+      const owned = ownedIds.has(project.id);
+      const revision = project.latest_revision;
+      const bundle = project.latest_bundle;
+      return `<article class="professional-public-card" data-owned="${String(owned)}">
+        <header><span>${owned ? (zh ? "可编辑" : "EDITABLE") : (zh ? "只读" : "READ ONLY")}</span><time>${escapeHtml(new Date(project.updated_at).toLocaleDateString())}</time></header>
+        <h4>${escapeHtml(project.name)}</h4>
+        <p>${escapeHtml(project.city)} · ${escapeHtml(project.author)}</p>
+        <small>${escapeHtml(project.design_goal)}</small>
+        <div class="professional-public-card-actions">
+          <button type="button" data-public-open="${escapeHtml(project.id)}" ${revision ? "" : "disabled"}>${zh ? "打开最新3D场景" : "Open latest 3D scene"}</button>
+          ${bundle ? `<a href="${escapeHtml(bundle.download_url)}" download>${zh ? "下载项目包" : "Download bundle"}</a>` : owned ? `<button type="button" data-public-export="${escapeHtml(project.id)}">${zh ? "生成项目包" : "Build bundle"}</button>` : ""}
+        </div>
+      </article>`;
+    }).join("");
+    element.innerHTML = `<section class="professional-public-intro">
+      <p class="workbench-panel-kicker">${zh ? "公共空间" : "PUBLIC SPACE"}</p>
+      <h3>${zh ? "公开的街道设计与可复查版本" : "Public street designs and traceable revisions"}</h3>
+      <p>${zh ? "所有人都可以查看和下载；标记为“可编辑”的项目只属于当前浏览器访客身份。" : "Everyone can inspect and download. Editable projects belong only to this browser guest identity."}</p>
+      <button type="button" data-public-refresh>${zh ? "刷新公共空间" : "Refresh public space"}</button>
+    </section>${message ? `<p class="professional-account-message">${escapeHtml(message)}</p>` : ""}<div class="professional-public-grid">${cards || `<p>${zh ? "还没有公共项目。" : "No public projects yet."}</p>`}</div>`;
+    element.querySelector<HTMLButtonElement>("[data-public-refresh]")?.addEventListener("click", () => {
+      void session.refreshPublicProjects().catch((error) => { message = error instanceof Error ? error.message : String(error); render(); });
+    });
+    element.querySelectorAll<HTMLButtonElement>("[data-public-open]").forEach((button) => button.addEventListener("click", () => {
+      const project = snapshot.publicProjects.find((item) => item.id === button.dataset.publicOpen);
+      if (!project || busyId) return;
+      busyId = project.id; message = zh ? "正在载入公共场景…" : "Loading public scene…"; render();
+      void options.onOpen(project).catch((error) => { message = error instanceof Error ? error.message : String(error); }).finally(() => { busyId = ""; render(); });
+    }));
+    element.querySelectorAll<HTMLButtonElement>("[data-public-export]").forEach((button) => button.addEventListener("click", () => {
+      const project = snapshot.publicProjects.find((item) => item.id === button.dataset.publicExport);
+      if (!project || busyId) return;
+      busyId = project.id; message = zh ? "正在生成公开项目包…" : "Building public project bundle…"; render();
+      void options.onExportOwned(project).then(() => session.refreshPublicProjects()).then(() => { message = zh ? "项目包已进入公共空间。" : "The bundle is now public."; }).catch((error) => { message = error instanceof Error ? error.message : String(error); }).finally(() => { busyId = ""; render(); });
+    }));
+  };
+  render();
   const unsubscribe = session.subscribe(render);
   return { element, destroy: unsubscribe };
 }

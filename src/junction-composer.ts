@@ -285,10 +285,10 @@ export function mountJunctionComposer(deps: JunctionComposerDeps): () => void {
   const overlayHeight = deps.annotation.image_height_px;
 
   deps.root.innerHTML += `
-    <div class="junction-composer-overlay" id="jc-overlay">
+    <div class="junction-composer-overlay" id="jc-overlay" role="dialog" aria-modal="true" aria-labelledby="jc-title" tabindex="-1">
       <div class="junction-composer-header">
         <div>
-          <h2 class="junction-composer-title">Junction Composer</h2>
+          <h2 id="jc-title" class="junction-composer-title">Junction Composer</h2>
           <p class="junction-composer-subtitle">${escapeHtml(deps.junction.label)} — Edit bezier curves for corner patches and skeleton lines.</p>
         </div>
         <div class="junction-composer-actions">
@@ -352,6 +352,28 @@ export function mountJunctionComposer(deps: JunctionComposerDeps): () => void {
   const layerSkeletons = requireElement<SVGGElement>(deps.root, "#jc-layer-skeletons");
   const layerCurves = requireElement<SVGGElement>(deps.root, "#jc-layer-curves");
   const layerHandles = requireElement<SVGGElement>(deps.root, "#jc-layer-handles");
+  const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+  queueMicrotask(() => overlayEl.focus({ preventScroll: true }));
+
+  overlayEl.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      btnCancel.click();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [...overlayEl.querySelectorAll<HTMLElement>(
+      "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])",
+    )];
+    if (!focusable.length) return;
+    const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+    const nextIndex = event.shiftKey
+      ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+      : (currentIndex + 1) % focusable.length;
+    event.preventDefault();
+    focusable[nextIndex]?.focus();
+  }, { signal });
 
   function svgPointFromEvent(event: PointerEvent): AnnotationPoint | null {
     const rect = svgEl.getBoundingClientRect();
@@ -606,11 +628,13 @@ export function mountJunctionComposer(deps: JunctionComposerDeps): () => void {
   btnSave.addEventListener("click", () => {
     deps.onSave(composition);
     overlayEl.remove();
+    previouslyFocused?.focus({ preventScroll: true });
   }, { signal });
 
   btnCancel.addEventListener("click", () => {
     deps.onCancel();
     overlayEl.remove();
+    previouslyFocused?.focus({ preventScroll: true });
   }, { signal });
 
   // Drag logic

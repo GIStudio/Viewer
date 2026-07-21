@@ -14,6 +14,7 @@ import "./styles/professional-account.css";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./react-app";
+import "./styles/overlay-system.css";
 
 const appRoot = document.querySelector<HTMLElement>("#app");
 

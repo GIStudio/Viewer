@@ -1,6 +1,10 @@
 import type { SceneJobOperation, SceneJobStatusPayload } from "./viewer-types";
 import type { WorkflowController, WorkflowRequestToken } from "./workflow-controller";
 import { cancelSceneJob, loadSceneJob, submitWorkflowSceneJob } from "./workflow-api";
+import type { ProfessionalSessionController } from "./professional-session";
+import { saveProfessionalSourceToWorkspace } from "./professional-workspace-sync";
+import { openProfessionalOwnedRevision } from "./professional-public-project";
+import type { SceneRevision } from "./course-api";
 
 const BASELINE_POLL_MS = 650;
 const BASELINE_MAX_POLLS = 720;
@@ -30,7 +34,10 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export function createProfessionalBaselineCoordinator(workflow: WorkflowController): ProfessionalBaselineCoordinator {
+export function createProfessionalBaselineCoordinator(
+  workflow: WorkflowController,
+  session?: ProfessionalSessionController,
+): ProfessionalBaselineCoordinator {
   let disposed = false;
   let activeSourceRevision: number | null = null;
   let activeJobId: string | null = null;
@@ -58,7 +65,12 @@ export function createProfessionalBaselineCoordinator(workflow: WorkflowControll
     void cancelRemote(staleJobId);
   });
 
-  async function poll(sourceRevision: number, token: WorkflowRequestToken, initial: SceneJobStatusPayload): Promise<void> {
+  async function poll(
+    sourceRevision: number,
+    token: WorkflowRequestToken,
+    initial: SceneJobStatusPayload,
+    projectContext: { projectId: string; sourceId: string } | null,
+  ): Promise<void> {
     let payload = initial;
     try {
       for (let attempt = 0; attempt < BASELINE_MAX_POLLS; attempt += 1) {
@@ -78,14 +90,23 @@ export function createProfessionalBaselineCoordinator(workflow: WorkflowControll
           const layoutPath = payload.result?.scene_layout_path ?? payload.result?.layout_path ?? "";
           if (!layoutPath) throw new Error("Road baseline completed without a scene layout path.");
           if (workflow.getSnapshot().sourceRevision !== sourceRevision) return;
-          workflow.setGeneratedScene({
-            layoutPath,
-            contextMassing: {
-              baseline_kind: "approved_road_skeleton",
-              building_representation: "transparent_massing",
-              source_revision: sourceRevision,
-            },
-          });
+          if (session && projectContext) {
+            const adopted = await session.api.post<SceneRevision>(
+              `/api/v1/projects/${projectContext.projectId}/adopt-scene-job`,
+              { job_id: payload.job_id, source_id: projectContext.sourceId },
+            );
+            await openProfessionalOwnedRevision(session, workflow, projectContext.projectId, adopted);
+            await session.refreshPublicProjects().catch(() => []);
+          } else {
+            workflow.setGeneratedScene({
+              layoutPath,
+              contextMassing: {
+                baseline_kind: "approved_road_skeleton",
+                building_representation: "transparent_massing",
+                source_revision: sourceRevision,
+              },
+            });
+          }
           workflow.updateBaselineRun(sourceRevision, {
             status: "succeeded",
             stage: payload.stage ?? "completed",
@@ -151,6 +172,12 @@ export function createProfessionalBaselineCoordinator(workflow: WorkflowControll
       operations: [],
     });
     try {
+      let projectContext: { projectId: string; sourceId: string } | null = null;
+      if (session) {
+        await session.ensureReady();
+        const saved = await saveProfessionalSourceToWorkspace(session, workflow);
+        projectContext = { projectId: saved.project.id, sourceId: saved.source.id };
+      }
       const created = await submitWorkflowSceneJob({
         normalized: snapshot.normalized,
         prompt: "Generate the approved road geometry as an editable baseline with transparent building massing and no street furniture.",
@@ -181,7 +208,12 @@ export function createProfessionalBaselineCoordinator(workflow: WorkflowControll
         stage: "queued",
         message: "Road baseline job created.",
       });
-      void poll(sourceRevision, token, { job_id: created.job_id, status: created.status === "running" ? "running" : "queued" });
+      void poll(
+        sourceRevision,
+        token,
+        { job_id: created.job_id, status: created.status === "running" ? "running" : "queued" },
+        projectContext,
+      );
     } catch (error) {
       if (token.signal.aborted) return;
       const message = error instanceof Error ? error.message : String(error);

@@ -240,3 +240,26 @@
   line-height: 1.4;
   color: #6b7280;
 }
+.viewer-evaluate-gate {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.7rem;
+  padding: 0.75rem;
+  border: 1px solid var(--rg-ink, #102d3a);
+  border-left: 5px solid var(--rg-coral, #df654f);
+  background: rgba(244, 196, 48, 0.12);
+}
+
+.viewer-evaluate-gate[hidden] { display: none; }
+.viewer-evaluate-gate span { color: #607177; font-size: 0.72rem; line-height: 1.45; }
+.viewer-evaluate-gate button {
+  justify-self: start;
+  min-height: 2.2rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--rg-ink, #102d3a);
+  background: var(--rg-blue, #174b64);
+  color: #fff;
+  box-shadow: 3px 3px 0 var(--rg-yellow, #f4c430);
+  font-weight: 800;
+  cursor: pointer;
+}

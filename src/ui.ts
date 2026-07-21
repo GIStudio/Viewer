@@ -96,7 +96,11 @@ function getCurrentRoute(): AppRoute {
   if (hash === "#course-studio") return "course-studio";
   if (hash === "#scene-graph") return "scene-graph";
   if (hash === "#asset-editor") return "asset-editor";
-  if (hash === "#model-input-browser") return "model-input-browser";
+  if (hash === "#model-input-browser") {
+    try { sessionStorage.setItem("roadgen:retired-model-input-notice", "true"); } catch { /* ignore */ }
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#viewer`);
+    return "viewer";
+  }
   return "viewer";
 }
 

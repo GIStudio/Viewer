@@ -3,12 +3,14 @@ import { requireElement } from "../viewer-utils";
 export type SceneGraphElements = {
   backButton: HTMLButtonElement;
   planSelect: HTMLSelectElement;
-  scenarioSelect: HTMLSelectElement;
-  scenarioSelectData: HTMLSelectElement;
+  referencePlanControl: HTMLElement;
+  osmReferenceNote: HTMLElement;
   imageInput: HTMLInputElement;
   imageResetButton: HTMLButtonElement;
   showOriginalInput: HTMLInputElement;
   showOverlayInput: HTMLInputElement;
+  showOsmLabelsInput: HTMLInputElement;
+  showAnnotationLabelsInput: HTMLInputElement;
   showJunctionCoreInput: HTMLInputElement;
   showJunctionConnectorsInput: HTMLInputElement;
   showJunctionOutlinesInput: HTMLInputElement;
@@ -16,6 +18,7 @@ export type SceneGraphElements = {
   showJunctionBoundariesInput: HTMLInputElement;
   showJunctionLabelsInput: HTMLInputElement;
   showJunctionDebugInput: HTMLInputElement;
+  originalOpacityLabel: HTMLElement;
   originalOpacityInput: HTMLInputElement;
   overlayOpacityInput: HTMLInputElement;
   pixelsPerMeterInput: HTMLInputElement;
@@ -34,6 +37,7 @@ export type SceneGraphElements = {
   zoomFitButton: HTMLButtonElement;
   zoomLevelEl: HTMLOutputElement;
   stageEmptyEl: HTMLElement;
+  zoomSpaceEl: HTMLElement;
   boardEl: HTMLElement;
   originalImageEl: HTMLImageElement;
   overlayHostEl: HTMLElement;
@@ -76,12 +80,14 @@ export function collectSceneGraphElements(root: HTMLElement | Document): SceneGr
   return {
     backButton: requireElement<HTMLButtonElement>(root, "#scene-page-back"),
     planSelect: requireElement<HTMLSelectElement>(root, "#annotation-plan-select"),
-    scenarioSelect: requireElement<HTMLSelectElement>(root, "#annotation-scenario-select"),
-    scenarioSelectData: requireElement<HTMLSelectElement>(root, "#annotation-scenario-select-data"),
+    referencePlanControl: requireElement<HTMLElement>(root, "#annotation-reference-plan-control"),
+    osmReferenceNote: requireElement<HTMLElement>(root, "#annotation-osm-reference-note"),
     imageInput: requireElement<HTMLInputElement>(root, "#annotation-image-input"),
     imageResetButton: requireElement<HTMLButtonElement>(root, "#annotation-image-reset"),
     showOriginalInput: requireElement<HTMLInputElement>(root, "#annotation-show-original"),
     showOverlayInput: requireElement<HTMLInputElement>(root, "#annotation-show-overlay"),
+    showOsmLabelsInput: requireElement<HTMLInputElement>(root, "#annotation-show-osm-labels"),
+    showAnnotationLabelsInput: requireElement<HTMLInputElement>(root, "#annotation-show-annotation-labels"),
     showJunctionCoreInput: requireElement<HTMLInputElement>(root, "#annotation-show-junction-core"),
     showJunctionConnectorsInput: requireElement<HTMLInputElement>(root, "#annotation-show-junction-connectors"),
     showJunctionOutlinesInput: requireElement<HTMLInputElement>(root, "#annotation-show-junction-outlines"),
@@ -89,6 +95,7 @@ export function collectSceneGraphElements(root: HTMLElement | Document): SceneGr
     showJunctionBoundariesInput: requireElement<HTMLInputElement>(root, "#annotation-show-junction-boundaries"),
     showJunctionLabelsInput: requireElement<HTMLInputElement>(root, "#annotation-show-junction-labels"),
     showJunctionDebugInput: requireElement<HTMLInputElement>(root, "#annotation-show-junction-debug"),
+    originalOpacityLabel: requireElement<HTMLElement>(root, "#annotation-original-opacity-label"),
     originalOpacityInput: requireElement<HTMLInputElement>(root, "#annotation-original-opacity"),
     overlayOpacityInput: requireElement<HTMLInputElement>(root, "#annotation-overlay-opacity"),
     pixelsPerMeterInput: requireElement<HTMLInputElement>(root, "#annotation-pixels-per-meter"),
@@ -107,6 +114,7 @@ export function collectSceneGraphElements(root: HTMLElement | Document): SceneGr
     zoomFitButton: requireElement<HTMLButtonElement>(root, "#annotation-zoom-fit"),
     zoomLevelEl: requireElement<HTMLOutputElement>(root, "#annotation-zoom-level"),
     stageEmptyEl: requireElement<HTMLElement>(root, "#annotation-stage-empty"),
+    zoomSpaceEl: requireElement<HTMLElement>(root, "#annotation-zoom-space"),
     boardEl: requireElement<HTMLElement>(root, "#annotation-board"),
     originalImageEl: requireElement<HTMLImageElement>(root, "#annotation-original-image"),
     overlayHostEl: requireElement<HTMLElement>(root, "#annotation-overlay-host"),

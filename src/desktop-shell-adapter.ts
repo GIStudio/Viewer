@@ -15,6 +15,7 @@ import type {
   ShellTab,
   WorkbenchShellMode,
   WorkbenchSidebarController,
+  WorkbenchSidebarChangeDetail,
   WorkbenchSidebarPage,
 } from "./shell-types";
 import {
@@ -47,6 +48,7 @@ export type {
   WorkbenchShellMode,
   WorkbenchSidebarPage,
   WorkbenchSidebarController,
+  WorkbenchSidebarChangeDetail,
 } from "./shell-types";
 
 function renderSectionContent(contentHost: HTMLElement, content: string | HTMLElement): void {
@@ -118,6 +120,7 @@ export function bindDesktopShell(
   let leftSidebarPages: WorkbenchSidebarPage[] = [];
   let rightSidebarPages: WorkbenchSidebarPage[] = [];
   const registeredSidebarPages = new Map<symbol, WorkbenchSidebarPage[]>();
+  const modalTabs = new Map<string, HTMLElement>();
   let rememberedSidebarPage: string | null = null;
   let sidebarRailExpanded = false;
   if (isSingleLeft) {
@@ -183,6 +186,7 @@ export function bindDesktopShell(
     shellRoot.dataset.viewerLanguage = language;
     document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
     applyViewerTranslations(root, language);
+    syncSidebarLanguage();
     syncLanguageButtons(language);
     renderHints();
     updatePinButtonText(root.querySelector<HTMLButtonElement>("[data-shell-left-pin]"), shellRoot.classList.contains("desktop-shell-left-pinned"), "left");
@@ -240,8 +244,8 @@ export function bindDesktopShell(
     updatePinButtonText(rightPinButton, pinned, "right");
   }
 
-  function announceSidebarChange(pageId: string | null): void {
-    const detail = { pageId, mode };
+  function announceSidebarChange(pageId: string | null, previousPageId: string | null): void {
+    const detail: WorkbenchSidebarChangeDetail = { pageId, previousPageId, mode };
     root.dispatchEvent(new CustomEvent("roadgen:workbench-sidebar-change", {
       bubbles: true,
       detail,
@@ -250,6 +254,7 @@ export function bindDesktopShell(
   }
 
   function setActiveSidebarPage(id: string | null): void {
+    const previousPageId = activeRightTab;
     activeRightTab = id;
     shellRoot.dataset.sidebarOpen = id ? "true" : "false";
     rightTabButtons.querySelectorAll<HTMLButtonElement>("[data-shell-tab]").forEach((button) => {
@@ -275,7 +280,7 @@ export function bindDesktopShell(
         // Session storage can be unavailable in embedded or privacy-restricted contexts.
       }
     }
-    announceSidebarChange(id);
+    announceSidebarChange(id, previousPageId);
   }
 
   function activateRightTab(id: string | null): void {
@@ -313,11 +318,35 @@ export function bindDesktopShell(
     return Array.from(deduped.values()).sort((a, b) => groupOrder[a.group] - groupOrder[b.group]);
   }
 
+  function sidebarLabel(page: WorkbenchSidebarPage): string {
+    return translateViewerLiteral(currentLanguage, page.label) ?? page.label;
+  }
+
   function sidebarIcon(page: WorkbenchSidebarPage): string {
+    const label = sidebarLabel(page);
+    if (currentLanguage === "zh") {
+      const firstChineseCharacter = label.match(/[\u3400-\u9fff]/)?.[0];
+      if (firstChineseCharacter) return firstChineseCharacter;
+    }
     if (page.icon) return page.icon;
-    const words = page.label.trim().split(/\s+/).filter(Boolean);
+    const words = label.trim().split(/\s+/).filter(Boolean);
     if (!words.length) return "·";
     return words.length === 1 ? words[0].slice(0, 2).toUpperCase() : words.map((word) => word[0]).join("").slice(0, 2).toUpperCase();
+  }
+
+  function syncSidebarLanguage(): void {
+    if (!isSingleLeft) return;
+    rightTabButtons.querySelectorAll<HTMLButtonElement>("[data-shell-tab]").forEach((button) => {
+      const page = allSidebarPages().find((candidate) => candidate.id === button.dataset.shellTab);
+      if (!page) return;
+      const label = sidebarLabel(page);
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      const icon = button.querySelector<HTMLElement>(".workbench-sidebar-icon");
+      if (icon) icon.textContent = sidebarIcon(page);
+      const labelElement = button.querySelector<HTMLElement>(".workbench-sidebar-label");
+      if (labelElement) labelElement.textContent = label;
+    });
   }
 
   function renderSingleLeftPages(preferredActive: string | null = activeRightTab): void {
@@ -335,7 +364,10 @@ export function bindDesktopShell(
     railToggle.addEventListener("click", () => {
       sidebarRailExpanded = !sidebarRailExpanded;
       try { sessionStorage.setItem(`roadgen:sidebar-expanded:${route}`, String(sidebarRailExpanded)); } catch { /* ignore */ }
-      renderSingleLeftPages(activeRightTab);
+      shellRoot.dataset.sidebarRailExpanded = String(sidebarRailExpanded);
+      railToggle.setAttribute("aria-expanded", String(sidebarRailExpanded));
+      railToggle.setAttribute("aria-label", viewerText(currentLanguage, sidebarRailExpanded ? "Collapse sidebar labels" : "Expand sidebar labels", sidebarRailExpanded ? "收起侧边栏文字" : "展开侧边栏文字"));
+      railToggle.innerHTML = `<span aria-hidden="true">${sidebarRailExpanded ? "‹" : "›"}</span><strong>${viewerText(currentLanguage, sidebarRailExpanded ? "Collapse" : "Expand", sidebarRailExpanded ? "收起" : "展开")}</strong>`;
     });
     rightTabButtons.appendChild(railToggle);
     let previousGroup: WorkbenchSidebarPage["group"] | null = null;
@@ -372,14 +404,15 @@ export function bindDesktopShell(
         if (page.flow.branch) button.dataset.flowBranch = page.flow.branch;
       }
       button.dataset.open = "false";
-      button.title = page.label;
-      button.setAttribute("aria-label", page.label);
+      const label = sidebarLabel(page);
+      button.title = label;
+      button.setAttribute("aria-label", label);
       button.setAttribute("aria-controls", panelId);
       button.setAttribute("aria-expanded", "false");
       if (page.current) button.setAttribute("aria-current", "step");
       button.innerHTML = `<span class="workbench-sidebar-icon" aria-hidden="true"></span><span class="workbench-sidebar-label"></span>`;
       button.querySelector<HTMLElement>(".workbench-sidebar-icon")!.textContent = sidebarIcon(page);
-      button.querySelector<HTMLElement>(".workbench-sidebar-label")!.textContent = page.label;
+      button.querySelector<HTMLElement>(".workbench-sidebar-label")!.textContent = label;
       if (page.badge) {
         const badge = document.createElement("span");
         badge.className = "workbench-sidebar-badge";
@@ -390,7 +423,7 @@ export function bindDesktopShell(
         if (page.action) {
           closeSidebar();
           page.action();
-          announceSidebarChange(page.id);
+          announceSidebarChange(page.id, activeRightTab);
           return;
         }
         if (activeRightTab === page.id) closeSidebar();
@@ -443,7 +476,6 @@ export function bindDesktopShell(
       "viewer-scene-graph-link": { id: "annotation", group: "workspace" },
       "viewer-asset-editor-link": { id: "assets", group: "workspace" },
       "viewer-design-toggle": { id: "design", group: "workspace" },
-      "viewer-presets-toggle": { id: "presets", group: "workspace" },
       "viewer-edit-toggle": { id: "edit", group: "workspace" },
       "viewer-settings-toggle": { id: "settings", group: "system" },
       "viewer-help-toggle": { id: "help", group: "system" },
@@ -529,7 +561,69 @@ export function bindDesktopShell(
     history: "viewer-history-analysis-toggle",
   };
 
+  function clearModalTabs(): void {
+    modalTabs.forEach((modal) => modal.remove());
+    modalTabs.clear();
+  }
+
+  function createModalTab(tab: ShellTab): () => void {
+    const modal = document.createElement("div");
+    const titleId = `desktop-shell-modal-title-${tab.id}`;
+    modal.className = "desktop-shell-modal";
+    modal.dataset.shellModalTab = tab.id;
+    modal.hidden = true;
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-labelledby", titleId);
+    modal.tabIndex = -1;
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "desktop-shell-modal-backdrop";
+    const dialog = document.createElement("section");
+    dialog.className = "desktop-shell-modal-dialog";
+    const header = document.createElement("header");
+    const heading = document.createElement("h2");
+    heading.id = titleId;
+    heading.dataset.i18nSourceText = tab.label;
+    heading.textContent = translateViewerLiteral(currentLanguage, tab.label) ?? tab.label;
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "desktop-shell-modal-close";
+    close.textContent = "×";
+    close.setAttribute("aria-label", viewerText(currentLanguage, `Close ${tab.label}`, `关闭${heading.textContent}`));
+    const body = document.createElement("div");
+    body.className = "desktop-shell-modal-body";
+    body.dataset.i18nScope = "literal";
+    renderSectionContent(body, tab.content);
+    header.append(heading, close);
+    dialog.append(header, body);
+    modal.append(backdrop, dialog);
+    root.appendChild(modal);
+    modalTabs.set(tab.id, modal);
+
+    const closeModal = () => {
+      if (modal.hidden) return;
+      modal.hidden = true;
+      root.querySelector<HTMLButtonElement>(`[data-shell-tab="${tab.id}"]`)?.focus();
+    };
+    close.addEventListener("click", closeModal);
+    backdrop.addEventListener("click", closeModal);
+    modal.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeModal();
+      }
+    });
+
+    return () => {
+      modal.hidden = false;
+      applyViewerTranslations(modal, currentLanguage);
+      window.requestAnimationFrame(() => close.focus());
+    };
+  }
+
   function setRightTabs(tabs: ShellTab[], activeId: string | null = tabs[0]?.id ?? null): void {
+    clearModalTabs();
     if (isSingleLeft) {
       const visibleTabs = mode === "course_single_left" && route === "viewer"
         ? tabs.filter((tab) => ["evaluate", "compare", "floating-lane"].includes(tab.id))
@@ -557,6 +651,7 @@ export function bindDesktopShell(
         icon: ({ evaluate: "EV", compare: "CP", history: "HI", "floating-lane": "OV", consistency: "QA" } as Record<string, string>)[tab.id],
         group: "analysis",
         content: tab.content,
+        ...(tab.presentation === "modal" ? { action: createModalTab(tab) } : {}),
       }));
       renderSingleLeftPages(activeId);
       return;
@@ -574,11 +669,21 @@ export function bindDesktopShell(
       button.dataset.shellTab = tab.id;
       button.dataset.i18nSourceText = tab.label;
       button.dataset.open = "false";
-      button.setAttribute("aria-controls", panelId);
-      button.setAttribute("aria-expanded", "false");
+      if (tab.presentation === "modal") {
+        const openModal = createModalTab(tab);
+        button.addEventListener("click", openModal);
+        button.setAttribute("aria-haspopup", "dialog");
+      } else {
+        button.setAttribute("aria-controls", panelId);
+        button.setAttribute("aria-expanded", "false");
+        button.addEventListener("click", () => activateRightTab(tab.id));
+      }
       button.textContent = tab.label;
-      button.addEventListener("click", () => activateRightTab(tab.id));
       rightTabButtons.appendChild(button);
+
+      if (tab.presentation === "modal") {
+        return;
+      }
 
       const panel = document.createElement("section");
       panel.id = panelId;
@@ -809,7 +914,7 @@ export function bindDesktopShell(
       if (page.action) {
         closeSidebar();
         page.action();
-        announceSidebarChange(page.id);
+        announceSidebarChange(page.id, activeRightTab);
       } else {
         setActiveSidebarPage(pageId);
       }
@@ -855,6 +960,7 @@ export function bindDesktopShell(
     setMenuActions,
     destroy: () => {
       destroyed = true;
+      clearModalTabs();
       document.removeEventListener("click", handleDocumentClick);
       window.removeEventListener(VIEWER_LANGUAGE_EVENT, handleViewerLanguageChange);
       root.removeEventListener("keydown", handleSidebarEscape);

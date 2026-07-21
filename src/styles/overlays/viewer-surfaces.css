@@ -1,0 +1,180 @@
+.viewer-workbench-modal {
+  z-index: var(--rg-overlay-z-modal);
+}
+
+.viewer-workbench-dialog {
+  box-shadow: var(--rg-overlay-shadow);
+}
+
+.viewer-workbench-dialog > header,
+.viewer-workbench-dialog > footer {
+  border-color: var(--rg-ink);
+}
+
+.roadgen-shortcut-modal section,
+.viewer-scene-asset-card {
+  border-color: var(--rg-blue);
+  border-radius: 2px;
+  background: rgba(255, 253, 247, 0.94);
+  box-shadow: 3px 3px 0 var(--rg-mint);
+}
+
+.viewer-slide-panel {
+  color: var(--rg-ink);
+  border-color: var(--rg-ink);
+  background-color: var(--rg-overlay-surface);
+  background-image: var(--rg-grid-paper);
+  background-size: 24px 24px;
+  box-shadow: var(--rg-overlay-shadow);
+}
+
+.viewer-slide-panel-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  border-bottom: 1px solid var(--rg-ink);
+}
+
+.viewer-slide-panel-subtitle {
+  color: var(--rg-muted);
+}
+
+.ui-toast {
+  z-index: var(--rg-overlay-z-toast);
+  border: 1px solid var(--rg-ink);
+  border-radius: 3px;
+  color: var(--rg-ink);
+  background: var(--rg-surface);
+  box-shadow: 4px 4px 0 var(--rg-yellow);
+  font-family: var(--rg-body-font);
+}
+
+.ui-toast-success {
+  border-left: 5px solid var(--rg-mint);
+  background: #f2f8f4;
+}
+
+.ui-toast-error {
+  border-left: 5px solid var(--rg-coral);
+  background: #fff3ef;
+}
+
+.ui-toast-info {
+  border-left: 5px solid var(--rg-blue);
+  background: #f3f7f8;
+}
+
+.course-busy {
+  z-index: var(--rg-overlay-z-toast);
+  border: 1px solid var(--rg-yellow);
+  border-radius: 2px;
+  background: var(--rg-ink);
+  box-shadow: 4px 4px 0 var(--rg-yellow);
+}
+
+.course-design-external-drawer {
+  z-index: var(--rg-overlay-z-drawer);
+  border-right: 1px solid var(--rg-ink);
+  box-shadow: 8px 8px 0 var(--rg-yellow);
+}
+
+.junction-composer-overlay {
+  background: var(--rg-overlay-scrim);
+}
+
+.junction-composer-container {
+  overflow: hidden;
+}
+
+.viewer-legacy-starter-warning {
+  z-index: var(--rg-overlay-z-stage);
+}
+
+.desktop-shell:has(.viewer-settings-panel[data-open="true"]) .viewer-legacy-starter-warning {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The active single-left shell owns the drawer frame; inner panels own content. */
+.desktop-shell[data-shell-mode="single_left_overlay"]:has(.viewer-settings-panel[data-open="true"]),
+.desktop-shell[data-shell-mode="course_single_left"]:has(.viewer-settings-panel[data-open="true"]) {
+  --workbench-drawer-width: min(var(--rg-overlay-drawer-width), calc(100vw - var(--workbench-menu-track) - 1rem));
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-drawer,
+.desktop-shell[data-shell-mode="course_single_left"] .workbench-sidebar-drawer {
+  border-right: 1px solid var(--rg-ink);
+  background-color: var(--rg-overlay-surface);
+  background-image: var(--rg-grid-paper);
+  background-size: 24px 24px;
+  box-shadow: 7px 7px 0 var(--rg-yellow);
+  backdrop-filter: none;
+}
+
+.desktop-shell[data-shell-mode="single_left_overlay"] .workbench-sidebar-drawer .viewer-settings-panel,
+.desktop-shell[data-shell-mode="course_single_left"] .workbench-sidebar-drawer .viewer-settings-panel {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Viewer cards and inline panels inherit the same editorial construction. */
+:where(
+  .viewer-slide-panel,
+  .viewer-settings-panel
+) :where(
+  .viewer-preset-card,
+  .viewer-help-step,
+  .viewer-help-faq-item,
+  .viewer-scenario-card,
+  .viewer-scenario-run-card,
+  .viewer-scenario-report-card,
+  .viewer-scheme-compare-card,
+  .viewer-evaluate-result,
+  .viewer-metrics-panel,
+  .viewer-three-system-score-card
+) {
+  border: 1px solid var(--rg-line);
+  border-radius: 3px;
+  color: var(--rg-ink);
+  background: rgba(255, 253, 247, 0.94);
+  box-shadow: 3px 3px 0 rgba(16, 45, 58, 0.24);
+}
+
+:where(.viewer-slide-panel, .viewer-settings-panel) :where(
+  .viewer-help-step-number,
+  .viewer-scenario-status-pill,
+  .viewer-preset-card[data-active="true"]
+) {
+  border-color: var(--rg-blue);
+  color: var(--rg-ink);
+  background: var(--rg-yellow);
+}
+
+.floating-lane-panel {
+  color: var(--rg-ink);
+}
+
+.floating-lane-panel :where(.flp-section, .viewer-help-section) {
+  padding: 0.7rem;
+  border: 1px solid var(--rg-line);
+  border-radius: 3px;
+  background: rgba(255, 253, 247, 0.9);
+}
+
+.floating-lane-panel input[type="range"] {
+  accent-color: var(--rg-blue);
+}
+
+.viewer-error {
+  z-index: var(--rg-overlay-z-toast);
+  border: 1px solid var(--rg-ink);
+  border-left: 5px solid var(--rg-coral);
+  border-radius: 3px;
+  color: var(--rg-ink);
+  background: #fff3ef;
+  box-shadow: 4px 4px 0 var(--rg-yellow);
+}

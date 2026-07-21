@@ -5,9 +5,9 @@ function strategyTab(id: string, index: string, label: string, controls: string)
       class="viewer-generation-subtab"
       type="button"
       role="tab"
-      aria-selected="${id === "assets" ? "true" : "false"}"
+      aria-selected="${id === "skeleton" ? "true" : "false"}"
       aria-controls="${controls}"
-      tabindex="${id === "assets" ? "0" : "-1"}"
+      tabindex="${id === "skeleton" ? "0" : "-1"}"
       data-generation-strategy-tab="${id}"
       data-status="pending"
     ><span>${index}</span><strong>${label}</strong><i aria-hidden="true"></i></button>
@@ -68,43 +68,11 @@ export function renderDesignPanelHtml(): string {
         <p id="viewer-generation-strategy-mode">直接调整可解释参数；生成不调用 LLM 或 RAG。</p>
       </header>
       <div class="viewer-generation-subtabs" role="tablist" aria-label="生成策略子页面">
-        ${strategyTab("assets", "01", "3D 素材", "viewer-generation-strategy-assets")}
-        ${strategyTab("skeleton", "02", "道路骨架", "viewer-generation-strategy-skeleton")}
-        ${strategyTab("furniture", "03", "家具参数", "viewer-generation-strategy-furniture")}
+        ${strategyTab("skeleton", "01", "道路骨架", "viewer-generation-strategy-skeleton")}
+        ${strategyTab("furniture", "02", "家具参数", "viewer-generation-strategy-furniture")}
       </div>
 
       <aside id="viewer-design-panel" class="viewer-generation-strategy-workspace">
-        <section
-          id="viewer-generation-strategy-assets"
-          class="viewer-generation-strategy-panel"
-          role="tabpanel"
-          aria-labelledby="viewer-generation-strategy-tab-assets"
-          data-generation-strategy-panel="assets"
-        >
-          <fieldset class="viewer-generation-asset-policy" id="viewer-generation-asset-policy">
-            <legend>3D 素材准备</legend>
-            <p>确认与已批准 2D 标注汇合的素材来源。候选仓库仅参与检索，不保证最终采用。</p>
-            <label>
-              <input type="radio" name="viewer-generation-asset-policy" value="current_manifest" />
-              <span><strong>使用当前候选资产仓库</strong><small>在已启用清单中检索可参与生成的树木与街道设施。</small></span>
-            </label>
-            <label>
-              <input type="radio" name="viewer-generation-asset-policy" value="default_transparent_massing" />
-              <span><strong>使用默认素材与透明建筑白模</strong><small>跳过自定义素材准备；建筑继续作为透明上下文。</small></span>
-            </label>
-            <section class="viewer-generation-candidate-repository" aria-labelledby="viewer-generation-candidate-title">
-              <header>
-                <strong id="viewer-generation-candidate-title">本次候选资产仓库</strong>
-                <button id="viewer-generation-edit-candidates" type="button">返回 01B 调整</button>
-              </header>
-              <div id="viewer-generation-candidate-summary"></div>
-              <div id="viewer-generation-candidate-list"></div>
-              <p>候选资产只进入检索池，不保证出现在最终场景中。</p>
-            </section>
-            <div id="viewer-generation-readiness" class="viewer-generation-readiness" data-tone="warning" role="status"></div>
-          </fieldset>
-        </section>
-
         <section
           id="viewer-generation-strategy-skeleton"
           class="viewer-generation-strategy-panel viewer-design-flow-section"
@@ -130,8 +98,8 @@ export function renderDesignPanelHtml(): string {
           <div class="viewer-design-flow-heading"><span>03</span><div><strong>家具参数</strong><small>逐类开启并调整数量、间距、退界和风格。</small></div></div>
           <div id="viewer-parameter-furniture-controls" class="viewer-parameter-control-host" aria-live="polite"></div>
         </section>
+        <section class="viewer-parameter-summary-board"><div id="viewer-parameter-summary" class="viewer-parameter-summary" aria-live="polite"></div></section>
       </aside>
-      <section class="viewer-parameter-summary-board"><div id="viewer-parameter-summary" class="viewer-parameter-summary" aria-live="polite"></div></section>
     </section>
 
     <section
@@ -185,7 +153,7 @@ export function renderDesignPanelHtml(): string {
     </section>
 
     <footer class="viewer-generation-dialog-footer">
-      <div class="viewer-generation-footer-position"><span id="viewer-generation-step-position">01 / 05</span><small>可以直接点击任意标签切换</small></div>
+      <div class="viewer-generation-footer-position"><span id="viewer-generation-step-position">01 / 04</span><small>可以直接点击任意标签切换</small></div>
       <div class="viewer-generation-footer-actions">
         <button id="viewer-generation-back" class="viewer-nav-button viewer-nav-button-secondary" type="button">上一步</button>
         <button id="viewer-generation-next" class="viewer-nav-button viewer-nav-button-secondary" type="button">下一步</button>
@@ -194,6 +162,12 @@ export function renderDesignPanelHtml(): string {
     </footer>
 
     <div hidden aria-hidden="true">
+      <fieldset id="viewer-generation-asset-policy">
+        <input type="radio" name="viewer-generation-asset-policy" value="current_manifest" />
+        <input type="radio" name="viewer-generation-asset-policy" value="default_transparent_massing" />
+        <button id="viewer-generation-edit-candidates" type="button"></button>
+        <div id="viewer-generation-candidate-summary"></div><div id="viewer-generation-candidate-list"></div><div id="viewer-generation-readiness"></div>
+      </fieldset>
       <select id="viewer-design-count"><option value="1">1</option></select>
       <select id="viewer-design-preset"><option value="__custom__">custom</option></select><textarea id="viewer-design-prompt"></textarea>
       <select id="viewer-design-scenario"><option value=""></option></select><div id="viewer-design-scenario-meta"></div><div id="viewer-design-skeleton-summary"></div>
