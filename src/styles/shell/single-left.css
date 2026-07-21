@@ -5,16 +5,18 @@
   --workbench-brand-column: 238px;
   --workbench-brand-header-height: 76px;
   --workbench-menu-expanded: var(--workbench-brand-column);
-  --workbench-layout-track: var(--workbench-menu-track);
-  --workbench-drawer-width: min(21.25rem, calc(100vw - var(--workbench-menu-track) - 1rem));
+  --workbench-rail-width: var(--workbench-menu-track);
+  --workbench-layout-track: var(--workbench-rail-width);
+  --workbench-drawer-width: min(21.25rem, calc(100vw - var(--workbench-rail-width) - 1rem));
 }
 
 .desktop-shell[data-sidebar-rail-expanded="true"] {
-  --workbench-layout-track: var(--workbench-menu-expanded);
+  --workbench-rail-width: var(--workbench-menu-expanded);
+  --workbench-layout-track: var(--workbench-rail-width);
 }
 
 .desktop-shell[data-sidebar-rail-expanded="true"] .desktop-shell-rail-right {
-  inline-size: var(--workbench-menu-expanded);
+  inline-size: var(--workbench-rail-width);
   box-shadow: none;
 }
 
@@ -28,10 +30,6 @@
   border-right: 1px solid rgba(16, 45, 58, 0.18);
   background: #102d3a;
   box-shadow: 7px 0 0 rgba(244, 196, 48, 0.88);
-}
-
-.desktop-shell[data-sidebar-rail-expanded="true"] .desktop-shell-right-panels {
-  inset-inline-start: var(--workbench-menu-expanded);
 }
 
 .workbench-sidebar-rail-toggle {
@@ -127,6 +125,15 @@
   padding-inline: 0.65rem 0.8rem;
 }
 
+.desktop-shell[data-sidebar-rail-expanded="true"] .workbench-sidebar-button[data-sidebar-icon="false"] {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-inline-start: 0.8rem;
+}
+
+.desktop-shell[data-sidebar-rail-expanded="true"] .workbench-sidebar-button[data-sidebar-icon="false"] .workbench-sidebar-icon {
+  display: none;
+}
+
 .desktop-shell[data-sidebar-rail-expanded="true"] .workbench-sidebar-label,
 .desktop-shell[data-sidebar-rail-expanded="true"] .workbench-sidebar-button[data-sidebar-group="flow"] .workbench-sidebar-label,
 .desktop-shell[data-sidebar-rail-expanded="true"] .workbench-sidebar-button[data-sidebar-group="navigation"] .workbench-sidebar-label {
@@ -158,6 +165,14 @@
   transition: grid-template-columns 180ms ease;
 }
 
+/* A shell drawer is part of the workbench layout, not an overlay on the map.
+   The centre stage therefore receives a smaller, real viewport whenever a
+   production, analysis or system drawer opens. */
+.desktop-shell[data-shell-mode="single_left_overlay"][data-sidebar-open="true"],
+.desktop-shell[data-shell-mode="course_single_left"][data-sidebar-open="true"] {
+  --workbench-layout-track: calc(var(--workbench-rail-width) + var(--workbench-drawer-width));
+}
+
 .desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-rail-left,
 .desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-rail-left {
   display: none;
@@ -177,7 +192,7 @@
   z-index: 48;
   inset: 0 auto 0 0;
   display: block;
-  inline-size: var(--workbench-layout-track);
+  inline-size: var(--workbench-rail-width);
   overflow: visible;
   transition: inline-size 180ms ease;
   border: 0;
@@ -329,7 +344,7 @@
 .desktop-shell[data-shell-mode="course_single_left"] .desktop-shell-right-panels {
   position: absolute;
   z-index: 50;
-  inset: 0 auto 0 var(--workbench-menu-track);
+  inset: 0 auto 0 var(--workbench-rail-width);
   width: var(--workbench-drawer-width);
   min-height: 0;
   padding: 0;
@@ -421,8 +436,16 @@
   .desktop-shell[data-shell-mode="course_single_left"] {
     --workbench-menu-track: 3.75rem;
     --workbench-menu-expanded: min(15rem, calc(100vw - 1rem));
-    --workbench-layout-track: var(--workbench-menu-track);
-    --workbench-drawer-width: min(20.5rem, calc(100vw - var(--workbench-menu-track)));
+    --workbench-rail-width: var(--workbench-menu-track);
+    --workbench-layout-track: var(--workbench-rail-width);
+    --workbench-drawer-width: min(20.5rem, calc(100vw - var(--workbench-rail-width)));
+  }
+
+  /* At phone widths the rail plus drawer would consume the entire viewport.
+     Retain the readable map and use the drawer as the only safe overlay case. */
+  .desktop-shell[data-shell-mode="single_left_overlay"][data-sidebar-open="true"],
+  .desktop-shell[data-shell-mode="course_single_left"][data-sidebar-open="true"] {
+    --workbench-layout-track: var(--workbench-rail-width);
   }
 
   .desktop-shell[data-shell-mode="single_left_overlay"] .desktop-shell-center,

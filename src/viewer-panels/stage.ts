@@ -101,12 +101,19 @@ export function createViewerStageHtml(): string {
         </header>
         <div class="viewer-center-controls-body">
           <label class="desktop-shell-field">
-            <span data-i18n-key="viewer.left.recentResult">Recent Result</span>
-            <select id="layout-select" class="viewer-select viewer-select-inline" title="Recent Result" data-i18n-title-key="viewer.left.recentResult"></select>
+            <span data-i18n-key="viewer.sceneBrowser.myScenes">My scenes</span>
+            <select id="layout-select" class="viewer-select viewer-select-inline" title="My scenes" data-i18n-title-key="viewer.sceneBrowser.myScenes"></select>
           </label>
-          <label class="desktop-shell-field">
-            <span data-i18n-key="viewer.left.scene">Scene</span>
-            <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene" data-i18n-title-key="viewer.left.scene"></select>
+          <div class="viewer-scene-name-editor">
+            <label class="desktop-shell-field" for="viewer-scene-name">
+              <span data-i18n-key="viewer.sceneBrowser.name">Scene name</span>
+              <input id="viewer-scene-name" class="viewer-input" type="text" maxlength="48" autocomplete="off" />
+            </label>
+            <button id="viewer-scene-name-save" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="viewer.sceneBrowser.saveName">Save name</button>
+          </div>
+          <label class="desktop-shell-field" hidden>
+            <span data-i18n-key="viewer.left.scene">Scene view</span>
+            <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene view" data-i18n-title-key="viewer.left.scene"></select>
           </label>
           <div id="viewer-scheme-compare" class="viewer-scheme-compare"></div>
         </div>
@@ -121,12 +128,12 @@ export function createViewerStageHtml(): string {
         <div class="viewer-minimap-title">
           <button id="viewer-minimap-expand" class="viewer-minimap-expand" type="button" aria-label="Expand Scene Map" title="Expand Scene Map" data-i18n-aria-label-key="viewer.minimap.expand" data-i18n-title-key="viewer.minimap.expand">&#x26F6;</button>
         </div>
-        <canvas id="viewer-minimap-plan" class="viewer-minimap-plan" aria-label="Scene Map plan preview" data-i18n-aria-label-key="viewer.minimap.openPlan"></canvas>
+        <canvas id="viewer-minimap-plan" class="viewer-minimap-plan" aria-label="Click a location on the Scene Map to roam there" data-i18n-aria-label-key="viewer.minimap.openPlan"></canvas>
       </div>
 
       <canvas id="viewer-axis-hud" class="viewer-axis-hud"></canvas>
 
-      <div id="viewer-overlay" class="viewer-overlay" data-i18n-key="viewer.overlay.capture">Click scene to capture mouse</div>
+      <div id="viewer-overlay" class="viewer-overlay" data-i18n-key="viewer.overlay.capture">Overview: click to roam · Level view: Shift-click to capture mouse</div>
 
       <aside id="viewer-object-edit-status" class="viewer-object-edit-status" aria-live="polite" aria-label="Scene object editing status" hidden>
         <div class="viewer-object-edit-copy">

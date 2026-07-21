@@ -274,6 +274,7 @@ export function ViewerDesktopShell({
             <span id="desktop-shell-status-summary-text">
               {t("shell.status.ready", "Ready.")}
             </span>
+            <span id="desktop-shell-status-unread-badge" className="desktop-shell-status-unread-badge" hidden aria-label={t("shell.unreadUpdates", "Unread updates")} />
           </Button>
           <div className="desktop-shell-status-body roadgen-ant-status-body">
             <div className="desktop-shell-status-tab-bridge" aria-hidden="true">
@@ -287,7 +288,7 @@ export function ViewerDesktopShell({
                 {t("shell.artifacts", "Artifacts")}
               </button>
               <button className="desktop-shell-status-tab" type="button" data-shell-status-tab="hints">
-                {t("shell.hints", "Hints")}
+                {t("shell.hints", "Usage")}
               </button>
             </div>
             <Tabs
@@ -314,7 +315,7 @@ export function ViewerDesktopShell({
                 },
                 {
                   key: "hints",
-                  label: t("shell.hints", "Hints"),
+                  label: t("shell.hints", "Usage"),
                   forceRender: true,
                   children: <div id="desktop-shell-hints-host" className="desktop-shell-status-stack" />,
                 },

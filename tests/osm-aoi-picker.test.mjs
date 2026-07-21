@@ -135,6 +135,8 @@ try {
 
   const mapBox = await page.locator("[data-aoi-map]").boundingBox();
   assert.ok(mapBox && mapBox.width > 800 && mapBox.height > 300, `OSM map must fill the stage, received ${JSON.stringify(mapBox)}`);
+  const sourcePanelBox = await page.locator("#desktop-shell-tab-panel-source").boundingBox();
+  assert.ok(sourcePanelBox && mapBox.x >= sourcePanelBox.x + sourcePanelBox.width - 1, `the source drawer must reserve layout space instead of covering the OSM map: ${JSON.stringify({ sourcePanelBox, mapBox })}`);
   await page.locator("[data-aoi-city]").selectOption("guangzhou");
   assert.equal(osmRequestCount, 0, "city navigation only changes the map view");
 

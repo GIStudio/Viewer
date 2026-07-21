@@ -92,11 +92,10 @@ export function renderProfessionalReviewPanelHtml(): string {
       </section>
       <div class="professional-review-actions">
         <button id="viewer-result-review-accept" class="viewer-nav-button" type="button" data-i18n-key="professional.review.accept">Accept and continue to evaluation</button>
-        <button id="viewer-result-review-changes" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.changes">Needs scene changes</button>
-        <button id="viewer-result-review-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.annotation">Return to 2D annotation</button>
-        <button id="viewer-result-review-assets" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.assetEditor">Open all scene assets</button>
+        <button id="viewer-result-review-changes" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.edit3d">Edit 3D scene</button>
+        <button id="viewer-result-review-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.edit2d">Edit 2D annotation</button>
       </div>
-      <p class="professional-review-note" data-i18n-key="professional.review.note">Road and topology changes belong in 2D annotation. Asset placement changes belong in scene editing.</p>
+      <p class="professional-review-note" data-i18n-key="professional.review.note">Road and topology changes belong in 2D annotation. Objects, facilities and materials belong in 3D scene editing.</p>
     </div>
   `;
 }

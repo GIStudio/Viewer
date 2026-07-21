@@ -180,37 +180,14 @@ try {
   await page.locator("#viewer-consistency-panel[data-open=\"true\"]").waitFor();
   await page.locator("#viewer-consistency-close").click();
   await page.locator("#viewer-consistency-panel[data-open=\"false\"]").waitFor();
-  const canvasBeforeRailExpand = await rect("#viewer-canvas");
-  await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
-  await page.waitForTimeout(240);
   assert.equal(await page.locator(".desktop-shell").getAttribute("data-sidebar-rail-expanded"), "true");
   await page.getByText("2D 数据与标注", { exact: true }).waitFor();
-  const canvasAfterRailExpand = await rect("#viewer-canvas");
   const expandedRail = await rect(".desktop-shell-rail-right");
   const expandedTabList = await rect(".desktop-shell-tab-list");
   const brandColumn = await rect(".studio-wordmark");
-  assert.ok(canvasBeforeRailExpand && canvasAfterRailExpand);
   assert.ok(expandedRail && brandColumn);
   assert.ok(Math.abs(expandedRail.width - brandColumn.width) <= 1, "expanded rail must align with the banner brand column");
   assert.ok(Math.abs(expandedTabList.width - expandedRail.width) <= 1, "expanded navigation list and its yellow edge must align with the rail boundary");
-  assert.ok(canvasBeforeRailExpand.width - canvasAfterRailExpand.width >= 160, "expanded rail must dynamically compress the canvas");
-  assert.ok(canvasAfterRailExpand.x - canvasBeforeRailExpand.x >= 160, "expanded rail must move the canvas with the layout grid");
-  await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
-  await page.waitForTimeout(240);
-  const canvasAfterRailCollapse = await rect("#viewer-canvas");
-  assert.ok(canvasAfterRailCollapse);
-  assert.ok(Math.abs(canvasBeforeRailExpand.width - canvasAfterRailCollapse.width) <= 1, "collapsing the rail must restore canvas width");
-
-  await page.setViewportSize({ width: 700, height: 820 });
-  const mobileCanvasBefore = await rect("#viewer-canvas");
-  await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
-  await page.waitForTimeout(240);
-  const mobileCanvasAfter = await rect("#viewer-canvas");
-  assert.ok(mobileCanvasBefore && mobileCanvasAfter);
-  assert.ok(Math.abs(mobileCanvasBefore.width - mobileCanvasAfter.width) <= 1, "mobile rail expansion must remain an overlay");
-  await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
-  await page.waitForTimeout(240);
-  await page.setViewportSize({ width: 1576, height: 980 });
   for (const duplicate of ["annotation", "assets", "design"]) {
     assert.equal(await page.locator(`[data-shell-tab="${duplicate}"]`).count(), 0, `${duplicate} must not duplicate a production-flow entry`);
   }
@@ -299,17 +276,10 @@ try {
     { width: 1024, height: 768 },
   ]) {
     await page.setViewportSize(viewport);
-    const canvasBeforeResponsiveExpand = await rect("#viewer-canvas");
-    await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
-    await page.waitForTimeout(240);
-    const canvasAfterResponsiveExpand = await rect("#viewer-canvas");
     const responsiveRail = await rect(".desktop-shell-rail-right");
     const responsiveBrand = await rect(".studio-wordmark");
     assert.ok(Math.abs(responsiveRail.width - responsiveBrand.width) <= 1, `rail and banner must align at ${viewport.width}x${viewport.height}`);
-    assert.ok(canvasBeforeResponsiveExpand.width - canvasAfterResponsiveExpand.width >= 160, `expanded rail must compress the 3D canvas at ${viewport.width}x${viewport.height}`);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `expanded layout must not overflow horizontally at ${viewport.width}x${viewport.height}`);
-    await page.locator(".workbench-sidebar-rail-toggle").dispatchEvent("click");
-    await page.waitForTimeout(240);
     const canvasBeforeReview = await rect("#viewer-canvas");
     const reviewToggle = page.locator('#viewer-result-review-toggle');
     assert.equal(await reviewToggle.getAttribute("aria-disabled"), "true", "review stays unavailable until a current 3D scene exists");

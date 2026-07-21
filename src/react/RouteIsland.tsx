@@ -281,6 +281,11 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       button.dataset.workflowStatus = options.status;
       button.title = options.label;
       button.setAttribute("aria-label", `${options.label} · ${options.badge}`);
+      if (options.disabled && options.unavailableMessage) {
+        button.setAttribute("aria-description", options.unavailableMessage);
+      } else {
+        button.removeAttribute("aria-description");
+      }
       button.disabled = false;
       button.setAttribute("aria-disabled", String(Boolean(options.disabled)));
       button.dataset.unavailableMessage = options.disabled ? options.unavailableMessage ?? "" : "";
@@ -292,6 +297,8 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
     };
 
     let previousReviewStatus = workflow.getSnapshot().sceneReviewStatus;
+    let previousSceneStale = false;
+    let staleAttentionTimer: number | null = null;
     const syncProfessionalNavigation = () => {
       const snapshot = workflow.getSnapshot();
       const currentId = route === "scene-graph"
@@ -300,6 +307,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       const annotationStatus = annotationPreparationStatus(snapshot);
       const hasCurrentScene = Boolean(snapshot.sceneLayoutPath)
         && snapshot.sceneSourceRevision === snapshot.sourceRevision;
+      const sceneIsStale = Boolean(snapshot.sceneLayoutPath) && !hasCurrentScene;
       const canOpenReview = hasCurrentScene || snapshot.sceneRef?.kind === "starter_demo";
       const currentSceneRequiredMessage = snapshot.sceneLayoutPath
         ? tr("professional.pipeline.currentSceneReviewRequired", "The available 3D scene is from an earlier annotation. Generate the current scene before review or evaluation.")
@@ -342,6 +350,18 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         disabled: !hasCurrentScene,
         unavailableMessage: currentSceneRequiredMessage,
       });
+      const statusSummary = shell.root.querySelector<HTMLElement>("#desktop-shell-status-summary-toggle");
+      statusSummary?.classList.toggle("is-stale-scene", sceneIsStale);
+      if (sceneIsStale && !previousSceneStale) {
+        shell.setStatusSummary(currentSceneRequiredMessage);
+        statusSummary?.classList.remove("is-stale-scene-attention");
+        window.requestAnimationFrame(() => statusSummary?.classList.add("is-stale-scene-attention"));
+        if (staleAttentionTimer !== null) window.clearTimeout(staleAttentionTimer);
+        staleAttentionTimer = window.setTimeout(() => {
+          statusSummary?.classList.remove("is-stale-scene-attention");
+          staleAttentionTimer = null;
+        }, 1500);
+      }
       if (
         route === "viewer"
         && snapshot.sceneReviewStatus === "pending"
@@ -350,6 +370,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         shell.openModalTab("review");
       }
       previousReviewStatus = snapshot.sceneReviewStatus;
+      previousSceneStale = sceneIsStale;
     };
 
     syncProfessionalNavigation();

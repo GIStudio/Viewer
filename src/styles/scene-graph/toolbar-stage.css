@@ -6,6 +6,21 @@
   overflow: visible;
 }
 
+/* During direct OSM selection, the source workflow is working context rather
+   than an overlay. Reserve a real layout column so it cannot cover the study
+   heading or the road-selection controls placed on top of the map. */
+@media (min-width: 721px) {
+  .desktop-shell[data-shell-mode="single_left_overlay"][data-route="scene-graph"]:has(#desktop-shell-tab-panel-source.active):has(#scene-osm-aoi-picker:not([hidden])),
+  .desktop-shell[data-shell-mode="course_single_left"][data-route="scene-graph"]:has(#desktop-shell-tab-panel-source.active):has(#scene-osm-aoi-picker:not([hidden])) {
+    --workbench-layout-track: calc(var(--workbench-menu-track) + var(--workbench-drawer-width));
+  }
+
+  .desktop-shell[data-shell-mode="single_left_overlay"][data-sidebar-rail-expanded="true"][data-route="scene-graph"]:has(#desktop-shell-tab-panel-source.active):has(#scene-osm-aoi-picker:not([hidden])),
+  .desktop-shell[data-shell-mode="course_single_left"][data-sidebar-rail-expanded="true"][data-route="scene-graph"]:has(#desktop-shell-tab-panel-source.active):has(#scene-osm-aoi-picker:not([hidden])) {
+    --workbench-layout-track: calc(var(--workbench-menu-expanded) + var(--workbench-drawer-width));
+  }
+}
+
 .scene-select-label {
   font-size: 0.78rem;
   color: #5b6757;

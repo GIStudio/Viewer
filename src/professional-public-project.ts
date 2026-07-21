@@ -1,4 +1,4 @@
-import type { EvaluationProfile, EvaluationRun, PlatformJob, PublicProject, SceneRevision } from "./course-api";
+import type { EvaluationProfile, EvaluationRun, PlatformJob, PublicProject, SceneRevision, SceneSource } from "./course-api";
 import type { ProfessionalSessionController } from "./professional-session";
 import type { SceneEditCommand } from "./viewer-api";
 import type { SceneLayoutEditResponse } from "./viewer-api";
@@ -9,6 +9,8 @@ import { saveProfessionalSourceToWorkspace } from "./professional-workspace-sync
 import type {
   ProfessionalScenario,
   ProfessionalScenarioAdapter,
+  ProfessionalScenarioGeneration,
+  ProfessionalScenarioOpenTarget,
   ProfessionalScenarioWorkspace,
   ScenarioComparisonItem,
   ScenarioMetric,
@@ -60,6 +62,9 @@ function buildScenarioWorkspace(
   revisions: SceneRevision[],
   evaluations: EvaluationRun[],
   currentRevisionId: string | null,
+  canWrite: boolean,
+  latestProjectSourceId: string | null,
+  hasCurrent2DSource: boolean,
 ): ProfessionalScenarioWorkspace {
   const latestEvaluation = new Map<string, EvaluationRun>();
   evaluations.filter((item) => item.status === "succeeded").forEach((item) => {
@@ -89,6 +94,7 @@ function buildScenarioWorkspace(
       title: revision.label || (shortLabel === "A" ? "OSM baseline" : shortLabel.startsWith("B") ? "Manual edit" : "Metric candidate"),
       branchKind: revision.branch_kind,
       revisionNumber: revision.revision_number,
+      sourceId: revision.source_id ?? null,
       current: revision.id === currentRevisionId,
       scores: {
         walkability: asNumber(result.walkability),
@@ -99,7 +105,31 @@ function buildScenarioWorkspace(
       ...parameters,
     };
   });
-  return { projectId, scenarios };
+  const baselines = scenarios.filter((scenario) => scenario.branchKind === "baseline");
+  const manualEdits = scenarios.filter((scenario) => scenario.branchKind === "human_edit");
+  const parent = manualEdits[manualEdits.length - 1] ?? baselines[baselines.length - 1] ?? null;
+  const hasSource = Boolean(parent?.sourceId || latestProjectSourceId || hasCurrent2DSource);
+  return {
+    projectId,
+    scenarios,
+    canWrite,
+    candidateReadiness: {
+      state: parent ? (hasSource ? "ready" : "needs_source") : "needs_baseline",
+      parentLabel: parent?.shortLabel ?? null,
+    },
+  };
+}
+
+function openTarget(materialized: { manifest: ViewerManifest; manifestUrl: string }): ProfessionalScenarioOpenTarget {
+  return {
+    layoutPath: materialized.manifestUrl,
+    sceneGlbPath: materialized.manifest.final_scene.glb_url,
+  };
+}
+
+function workflowHasCurrent2DSource(workflow: WorkflowController): boolean {
+  const snapshot = workflow.getSnapshot();
+  return Boolean(snapshot.normalized?.geojson ?? snapshot.sourceGeojson);
 }
 
 async function waitForProjectJob(session: ProfessionalSessionController, initial: PlatformJob): Promise<PlatformJob> {
@@ -174,7 +204,7 @@ export async function openProfessionalOwnedRevision(
   projectId: string,
   revision: SceneRevision,
   options: { sourceRevision?: number | null } = {},
-): Promise<void> {
+): Promise<ProfessionalScenarioOpenTarget> {
   const isPublic = session.getSnapshot().workspace?.scope === "public";
   const materialized = await materializeProjectManifest(session, projectId, revision.id, isPublic);
   currentRevisionByProject.set(projectId, revision.id);
@@ -185,6 +215,7 @@ export async function openProfessionalOwnedRevision(
     sceneRevision: materialized.manifest.layout_revision ?? null,
     contextMassing: materialized.manifest.context_massing ?? null,
   });
+  return openTarget(materialized);
 }
 
 async function openProfessionalReadOnlyRevision(
@@ -192,7 +223,7 @@ async function openProfessionalReadOnlyRevision(
   workflow: WorkflowController,
   projectId: string,
   revision: SceneRevision,
-): Promise<void> {
+): Promise<ProfessionalScenarioOpenTarget> {
   const materialized = await materializeProjectManifest(session, projectId, revision.id, true);
   currentRevisionByProject.set(projectId, revision.id);
   workflow.setGeneratedScene({
@@ -202,6 +233,7 @@ async function openProfessionalReadOnlyRevision(
     sceneRevision: materialized.manifest.layout_revision ?? null,
     contextMassing: materialized.manifest.context_massing ?? null,
   });
+  return openTarget(materialized);
 }
 
 export async function persistProfessionalPublicCommands(
@@ -328,25 +360,43 @@ export function createProfessionalScenarioAdapter(
 
   const load = async (): Promise<ProfessionalScenarioWorkspace> => {
     const projectId = currentProjectId();
-    if (!projectId) return { projectId: "", scenarios: [] };
+    if (!projectId) {
+      return {
+        projectId: "",
+        scenarios: [],
+        canWrite: false,
+        candidateReadiness: { state: "needs_baseline", parentLabel: null },
+      };
+    }
     const owned = session.getSnapshot().projects.some((project) => project.id === projectId);
-    const [revisionPayload, evaluationPayload] = await Promise.all([
+    const [revisionPayload, evaluationPayload, sourcePayload] = await Promise.all([
       session.api.request<{ items: SceneRevision[] }>(owned
         ? `/api/v1/projects/${projectId}/revisions`
         : `/api/v1/public/projects/${projectId}/revisions`),
       owned
         ? session.api.request<{ items: EvaluationRun[] }>(`/api/v1/projects/${projectId}/evaluations`)
         : Promise.resolve({ items: [] as EvaluationRun[] }),
+      owned
+        ? session.api.request<{ items: SceneSource[] }>(`/api/v1/projects/${projectId}/sources`)
+        : Promise.resolve({ items: [] as SceneSource[] }),
     ]);
     const sceneRef = workflow.getSnapshot().sceneRef;
     const currentRevisionId = currentRevisionByProject.get(projectId)
       ?? (sceneRef?.kind === "project_revision" && sceneRef.projectId === projectId ? sceneRef.revisionId : null);
-    return buildScenarioWorkspace(projectId, revisionPayload.items, evaluationPayload.items, currentRevisionId);
+    return buildScenarioWorkspace(
+      projectId,
+      revisionPayload.items,
+      evaluationPayload.items,
+      currentRevisionId,
+      owned,
+      sourcePayload.items[0]?.id ?? null,
+      workflowHasCurrent2DSource(workflow),
+    );
   };
 
   return {
     load,
-    async open(revisionId): Promise<void> {
+    async open(revisionId): Promise<ProfessionalScenarioOpenTarget> {
       const projectId = currentProjectId();
       if (!projectId) throw new Error("当前没有可打开的项目场景。");
       const owned = session.getSnapshot().projects.some((project) => project.id === projectId);
@@ -355,21 +405,50 @@ export function createProfessionalScenarioAdapter(
         : `/api/v1/public/projects/${projectId}/revisions`);
       const revision = payload.items.find((item) => item.id === revisionId);
       if (!revision) throw new Error("所选项目版本不存在。");
-      if (owned) await openProfessionalOwnedRevision(session, workflow, projectId, revision);
-      else await openProfessionalReadOnlyRevision(session, workflow, projectId, revision);
+      if (owned) return openProfessionalOwnedRevision(session, workflow, projectId, revision);
+      return openProfessionalReadOnlyRevision(session, workflow, projectId, revision);
     },
-    async generate(metric: ScenarioMetric): Promise<ProfessionalScenarioWorkspace> {
+    async prepareManualEdit(): Promise<ProfessionalScenarioOpenTarget> {
+      const projectId = currentProjectId();
+      if (!projectId) throw new Error("当前没有可编辑的项目场景。");
+      if (!session.getSnapshot().projects.some((project) => project.id === projectId)) {
+        throw new Error("当前公共项目为只读，不能保存人工方案 B。");
+      }
+      const payload = await session.api.request<{ items: SceneRevision[] }>(`/api/v1/projects/${projectId}/revisions`);
+      const baselines = [...payload.items]
+        .sort((a, b) => a.revision_number - b.revision_number)
+        .filter((revision) => revision.branch_kind === "baseline");
+      const baseline = baselines[baselines.length - 1];
+      if (!baseline) throw new Error("请先生成 3D 基线 A，再创建人工方案 B。");
+      return openProfessionalOwnedRevision(session, workflow, projectId, baseline);
+    },
+    async generate(metric: ScenarioMetric): Promise<ProfessionalScenarioGeneration> {
       const sceneRef = workflow.getSnapshot().sceneRef;
       if (sceneRef?.kind !== "project_revision") throw new Error("请先生成并保存 Scene A，再创建 C 候选。");
       if (!session.getSnapshot().projects.some((project) => project.id === sceneRef.projectId)) {
         throw new Error("当前公共项目为只读，不能生成候选方案。");
       }
-      const saved = await saveProfessionalSourceToWorkspace(session, workflow);
-      if (saved.project.id !== sceneRef.projectId) throw new Error("2D 来源与当前项目不一致，请重新打开项目后再生成。");
-      const parentRevisionId = currentRevisionByProject.get(sceneRef.projectId) ?? sceneRef.revisionId;
+      const revisionPayload = await session.api.request<{ items: SceneRevision[] }>(`/api/v1/projects/${sceneRef.projectId}/revisions`);
+      const orderedRevisions = [...revisionPayload.items].sort((a, b) => a.revision_number - b.revision_number);
+      const humanRevisions = orderedRevisions.filter((revision) => revision.branch_kind === "human_edit");
+      const baselineRevisions = orderedRevisions.filter((revision) => revision.branch_kind === "baseline");
+      const parentRevision = humanRevisions[humanRevisions.length - 1]
+        ?? baselineRevisions[baselineRevisions.length - 1];
+      if (!parentRevision) throw new Error("请先生成 3D 基线 A，再创建 C 候选。");
+      const sourcePayload = await session.api.request<{ items: SceneSource[] }>(`/api/v1/projects/${sceneRef.projectId}/sources`);
+      let sourceId = parentRevision.source_id ?? sourcePayload.items[0]?.id ?? null;
+      if (!sourceId && workflowHasCurrent2DSource(workflow)) {
+        const saved = await saveProfessionalSourceToWorkspace(session, workflow);
+        if (saved.project.id !== sceneRef.projectId) throw new Error("2D 来源与当前项目不一致，请重新打开项目后再生成。");
+        sourceId = saved.source.id;
+      }
+      if (!sourceId) {
+        throw new Error("当前 A/B 没有可追溯的 2D 来源。请返回 2D 标注，保存后生成新的 A 基线。");
+      }
+      const parentRevisionId = parentRevision.id;
       const goalWeights = { walkability: 0, safety: 0, beauty: 0, [metric]: 100 };
       const initial = await session.api.post<PlatformJob>(`/api/v1/projects/${sceneRef.projectId}/generate`, {
-        source_id: saved.source.id,
+        source_id: sourceId,
         prompt: `Generate a metric-driven candidate that prioritizes ${metric}. Keep the approved OSM topology and solve explicit street parameters.`,
         generation_mode: "parametric",
         parent_revision_id: parentRevisionId,
@@ -382,9 +461,9 @@ export function createProfessionalScenarioAdapter(
         ?? revisions.items.find((item) => item.parent_id === parentRevisionId && item.branch_kind === "ai_edit")
         ?? revisions.items[0];
       if (!revision) throw new Error("候选生成完成，但没有找到新 revision。");
-      await openProfessionalOwnedRevision(session, workflow, sceneRef.projectId, revision);
+      const target = await openProfessionalOwnedRevision(session, workflow, sceneRef.projectId, revision);
       await session.refreshPublicProjects().catch(() => []);
-      return load();
+      return { workspace: await load(), target };
     },
     async compare(revisionIds: string[]): Promise<ScenarioComparisonItem[]> {
       const projectId = currentProjectId();

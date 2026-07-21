@@ -5,19 +5,15 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 const adapter = read("src/desktop-shell-adapter.ts");
 const styles = read("src/styles/shell/single-left.css");
 
-assert.match(adapter, /roadgen:sidebar-expanded:/, "the user preference must persist per workbench route");
-assert.match(adapter, /workbench-sidebar-rail-toggle/, "the compact rail needs a permanent expand control");
-assert.match(styles, /--workbench-brand-column: 238px/, "expanded rail must match the Studio brand column");
-assert.match(
-  styles,
-  /data-sidebar-rail-expanded="true"\] \.desktop-shell-rail-right \{[\s\S]*inline-size: var\(--workbench-menu-track\)/,
-  "the rail must remain the compact track and never resize the stage grid",
-);
-assert.match(
-  styles,
-  /data-sidebar-rail-expanded="true"\] \.desktop-shell-tab-list \{[\s\S]*position: absolute;[\s\S]*inset: calc\(-1 \* var\(--workbench-brand-header-height\)\) auto 0 0;[\s\S]*width: var\(--workbench-menu-expanded\)/,
-  "expanded navigation must float over the viewport from the brand-aligned edge",
-);
-assert.match(styles, /padding-block-start: calc\(var\(--workbench-brand-header-height\) \+ 0\.35rem\)/, "navigation must begin below the visible wordmark");
+assert.match(adapter, /let sidebarRailExpanded = false/, "professional navigation must start collapsed");
+assert.match(adapter, /workbench-sidebar-rail-toggle/, "the rail must provide an explicit expand control");
+assert.match(adapter, /sidebarRailExpanded = !sidebarRailExpanded/, "the expand control must reveal and hide complete labels");
+assert.doesNotMatch(adapter, /firstChineseCharacter/, "Chinese page names must not collapse to one character");
+assert.match(adapter, /dataset\.sidebarIcon = iconText \? "true" : "false"/);
+assert.match(adapter, /const icons: Record<string, string>/, "the compact rail must use symbols rather than text abbreviations");
+assert.match(adapter, /function createWorkbenchSidebarDrawer\(/, "drawer pages must be created by one shared shell component");
+assert.match(styles, /--workbench-brand-column: 238px/, "the readable rail remains aligned with the Studio brand column");
+assert.match(styles, /data-sidebar-open="true"\][\s\S]*--workbench-layout-track: calc\(var\(--workbench-rail-width\) \+ var\(--workbench-drawer-width\)\)/, "an open drawer must shrink the centre stage instead of overlaying it");
+assert.match(styles, /data-sidebar-icon="false"/, "full-label pages must not reserve an empty icon column");
 
-console.log("sidebar rail expansion contract: ok");
+console.log("sidebar navigation labels contract: ok");

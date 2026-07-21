@@ -90,6 +90,25 @@
 .viewer-scenario-comparison-empty > span { color: #df654f; font: 900 clamp(1.7rem, 5vw, 4.8rem)/1 ui-monospace, monospace; letter-spacing: -0.08em; }
 .viewer-scenario-comparison-empty strong { max-width: 34rem; font: 800 1rem/1.35 var(--rg-display-font, ui-serif, serif); }
 .viewer-scenario-comparison-empty p { max-width: 30rem; margin: 0; color: #58707a; font-size: 0.68rem; }
+.viewer-scenario-next-step { min-height: 2rem; padding: 0.4rem 0.65rem; border: 1px solid #102d3a; background: #174b64; color: #fff; font: 800 0.65rem/1.15 var(--rg-ui-font, sans-serif); cursor: pointer; }
+.viewer-scenario-next-step:disabled { cursor: not-allowed; opacity: 0.52; }
+.viewer-scenario-guides { align-content: center; justify-items: stretch; overflow: auto; }
+.viewer-scenario-guides > span,
+.viewer-scenario-guides > strong,
+.viewer-scenario-guides > p { justify-self: center; text-align: center; }
+.viewer-scenario-guides > span { font-size: clamp(1.5rem, 3.2vw, 3.2rem); }
+.viewer-scenario-guide { display: grid; gap: 0.42rem; width: min(42rem, 100%); padding: 0.85rem; border: 1px solid #102d3a; border-left: 4px solid #2e715f; background: rgba(255, 254, 249, 0.94); text-align: left; }
+.viewer-scenario-guide[data-branch="C"] { border-left-color: #df654f; }
+.viewer-scenario-guide > span { color: #2e715f; font: 850 0.59rem/1 ui-monospace, monospace; letter-spacing: 0.1em; }
+.viewer-scenario-guide[data-branch="C"] > span { color: #df654f; }
+.viewer-scenario-guide > strong { font-size: 0.78rem; }
+.viewer-scenario-guide > p { max-width: none; font-size: 0.65rem; line-height: 1.45; }
+.viewer-scenario-guide > p.viewer-scenario-guide-reason { color: #a63b2b; font-weight: 750; }
+.viewer-scenario-guide > div { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.viewer-scenario-guide button { min-height: 2rem; padding: 0.38rem 0.58rem; border: 1px solid #102d3a; background: #fffef9; color: #102d3a; font: 800 0.65rem/1.15 var(--rg-ui-font, sans-serif); cursor: pointer; }
+.viewer-scenario-guide button:last-child { background: #174b64; color: #fff; }
+.viewer-scenario-guide[data-branch="C"] button:last-child { background: #df654f; }
+.viewer-scenario-guide button:disabled { cursor: not-allowed; opacity: 0.52; }
 .viewer-scenario-empty { padding: 1rem; color: #58707a; font-size: 0.68rem; }
 
 @media (max-width: 900px) {

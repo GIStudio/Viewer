@@ -28,7 +28,7 @@ export type ViewerPanelController = {
   syncFromSidebar: (pageId: string | null) => void;
 };
 
-const SLIDE_PANELS = new Set<ViewerPanelKey>(["design", "evaluate", "compare"]);
+const SLIDE_PANELS = new Set<ViewerPanelKey>(["evaluate", "compare"]);
 
 export function createViewerPanelController(deps: ViewerPanelControllerDeps): ViewerPanelController {
   let focusBeforePanelOpen: HTMLElement | null = null;
@@ -117,7 +117,7 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     state[panel] = true;
     setDataset(panel, true);
     deps.shell.setRightPinned(true);
-    deps.shell.activateRightTab(panel === "consistency" ? null : panel);
+    deps.shell.activateRightTab(panel === "consistency" || panel === "design" ? null : panel);
     if (panel === "settings") {
       deps.onSettingsOpen();
     }

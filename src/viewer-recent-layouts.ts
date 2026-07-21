@@ -1,5 +1,11 @@
 import type { RecentLayout } from "./viewer-types";
-import { compactUiLabel, makeDirectLayoutLabel } from "./viewer-scene-options";
+
+const SCENE_NAME_STORAGE_KEY = "roadgen3d:scene-display-names:v1";
+
+type StoredSceneName = {
+  ordinal: number;
+  name?: string;
+};
 
 export type RecentLayoutSelectorController = {
   populate: (layouts: RecentLayout[], selectedPath: string) => void;
@@ -7,6 +13,8 @@ export type RecentLayoutSelectorController = {
   currentLayouts: () => RecentLayout[];
   labelFor: (layoutPath: string) => string;
   setSelectedPath: (layoutPath: string) => void;
+  rename: (layoutPath: string, name: string) => string;
+  refreshLabels: () => void;
 };
 
 export type RecentLayoutSelectorControllerDeps = {
@@ -16,6 +24,7 @@ export type RecentLayoutSelectorControllerDeps = {
   shouldStopHydration: () => boolean;
   isCompareOpen: () => boolean;
   refreshCompareSelectors: () => void;
+  defaultLabel: (ordinal: number) => string;
   backgroundLimit?: number;
   backgroundBatch?: number;
 };
@@ -28,8 +37,57 @@ export function createRecentLayoutSelectorController(
   deps: RecentLayoutSelectorControllerDeps,
 ): RecentLayoutSelectorController {
   const layoutsByPath = new Map<string, RecentLayout>();
+  const sceneNames = loadStoredSceneNames();
   const backgroundLimit = deps.backgroundLimit ?? DEFAULT_BACKGROUND_LIMIT;
   const backgroundBatch = deps.backgroundBatch ?? DEFAULT_BACKGROUND_BATCH;
+
+  function loadStoredSceneNames(): Record<string, StoredSceneName> {
+    try {
+      const value = JSON.parse(window.localStorage.getItem(SCENE_NAME_STORAGE_KEY) ?? "{}") as unknown;
+      if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+      const names: Record<string, StoredSceneName> = {};
+      for (const [path, candidate] of Object.entries(value as Record<string, unknown>)) {
+        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+        const record = candidate as Record<string, unknown>;
+        const ordinal = Number(record.ordinal);
+        if (!path || !Number.isInteger(ordinal) || ordinal < 1) continue;
+        const name = typeof record.name === "string" ? record.name.trim().slice(0, 48) : "";
+        names[path] = name ? { ordinal, name } : { ordinal };
+      }
+      return names;
+    } catch {
+      return {};
+    }
+  }
+
+  function persistSceneNames(): void {
+    try {
+      window.localStorage.setItem(SCENE_NAME_STORAGE_KEY, JSON.stringify(sceneNames));
+    } catch {
+      // Display names are a convenience. The selector remains usable without storage.
+    }
+  }
+
+  function storedName(layoutPath: string): StoredSceneName {
+    const existing = sceneNames[layoutPath];
+    if (existing) return existing;
+    const ordinal = Math.max(0, ...Object.values(sceneNames).map((item) => item.ordinal)) + 1;
+    const created = { ordinal };
+    sceneNames[layoutPath] = created;
+    persistSceneNames();
+    return created;
+  }
+
+  function displayName(layoutPath: string): string {
+    const entry = storedName(layoutPath);
+    return entry.name || deps.defaultLabel(entry.ordinal);
+  }
+
+  function updateOption(optionEl: HTMLOptionElement): void {
+    const label = displayName(optionEl.value);
+    optionEl.textContent = label;
+    optionEl.title = label;
+  }
 
   function publish(selectedPath: string): void {
     deps.selectEl.disabled = deps.selectEl.options.length === 0;
@@ -40,11 +98,9 @@ export function createRecentLayoutSelectorController(
     if (!selectedPath || Array.from(deps.selectEl.options).some((option) => option.value === selectedPath)) {
       return;
     }
-    const directLabel = makeDirectLayoutLabel(selectedPath);
     const optionEl = document.createElement("option");
     optionEl.value = selectedPath;
-    optionEl.textContent = compactUiLabel(directLabel);
-    optionEl.title = directLabel;
+    updateOption(optionEl);
     deps.selectEl.appendChild(optionEl);
   }
 
@@ -66,8 +122,7 @@ export function createRecentLayoutSelectorController(
       layoutsByPath.set(layout.layout_path, layout);
       const optionEl = document.createElement("option");
       optionEl.value = layout.layout_path;
-      optionEl.textContent = compactUiLabel(layout.label);
-      optionEl.title = layout.label;
+      updateOption(optionEl);
       deps.selectEl.appendChild(optionEl);
     }
     setSelectedPath(selectedPath);
@@ -111,7 +166,23 @@ export function createRecentLayoutSelectorController(
   }
 
   function labelFor(layoutPath: string): string {
-    return layoutsByPath.get(layoutPath)?.label ?? makeDirectLayoutLabel(layoutPath);
+    return displayName(layoutPath);
+  }
+
+  function rename(layoutPath: string, name: string): string {
+    const entry = storedName(layoutPath);
+    const normalized = name.trim().replace(/\s+/g, " ").slice(0, 48);
+    if (normalized) entry.name = normalized;
+    else delete entry.name;
+    persistSceneNames();
+    refreshLabels();
+    return displayName(layoutPath);
+  }
+
+  function refreshLabels(): void {
+    Array.from(deps.selectEl.options).forEach(updateOption);
+    const selectedPath = deps.selectEl.value;
+    deps.selectEl.title = selectedPath ? displayName(selectedPath) : "";
   }
 
   return {
@@ -120,5 +191,7 @@ export function createRecentLayoutSelectorController(
     currentLayouts: () => Array.from(layoutsByPath.values()),
     labelFor,
     setSelectedPath,
+    rename,
+    refreshLabels,
   };
 }

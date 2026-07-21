@@ -7,7 +7,8 @@
 .viewer-parameter-ledger,
 .viewer-furniture-parameter-list {
   display: grid;
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
 }
 
 .viewer-parameter-row,
@@ -23,10 +24,10 @@
 
 .viewer-parameter-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(170px, .8fr) minmax(90px, .45fr);
+  grid-template-columns: minmax(108px, 1fr) minmax(112px, .92fr) minmax(72px, .52fr);
   align-items: center;
-  gap: 10px;
-  padding: 9px 10px;
+  gap: 7px;
+  padding: 7px 8px;
 }
 
 .viewer-parameter-row > div,
@@ -62,10 +63,10 @@
 
 .viewer-parameter-switch-row {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(140px, .55fr) minmax(170px, .65fr);
+  grid-template-columns: minmax(0, 1fr) minmax(105px, .72fr);
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: 7px;
+  padding: 7px 8px;
 }
 
 .viewer-parameter-switch-row > label,
@@ -119,10 +120,10 @@
 
 .viewer-furniture-parameter-row {
   display: grid;
-  grid-template-columns: minmax(210px, 1fr) minmax(160px, .65fr);
+  grid-template-columns: minmax(0, 1fr) minmax(135px, .72fr);
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: 7px;
+  padding: 7px 8px;
 }
 
 .viewer-furniture-parameter-row details {
@@ -162,6 +163,7 @@
 }
 
 .viewer-parameter-summary-board {
+  grid-column: 1 / -1;
   margin: 0 12px 12px;
   padding: 8px 12px;
   border-width: 1px;
@@ -216,6 +218,8 @@
 }
 
 @media (max-width: 900px) {
+  .viewer-parameter-ledger,
+  .viewer-furniture-parameter-list { grid-template-columns: 1fr; }
   .viewer-parameter-row,
   .viewer-parameter-switch-row,
   .viewer-furniture-parameter-row,

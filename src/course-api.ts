@@ -21,7 +21,7 @@ export type PublicProject = {
   latest_bundle: { id: string; download_url: string; media_type: string; byte_size: number } | null;
 };
 export type SceneSource = { id: string; kind: string; quality_report: Record<string, any>; provenance: Record<string, any>; role_counts?: Record<string, number>; warnings?: string[]; normalized_artifact_id: string; annotation_artifact_id?: string };
-export type SceneRevision = { id: string; revision_number: number; branch_kind: string; label: string; parent_id?: string; layout_artifact_id?: string; glb_artifact_id?: string; evaluation_status: string; commands?: Array<Record<string, any>>; provenance?: Record<string, any>; auto_evaluation?: EvaluationRun | null; created_at?: string };
+export type SceneRevision = { id: string; revision_number: number; branch_kind: string; label: string; source_id?: string | null; parent_id?: string; layout_artifact_id?: string; glb_artifact_id?: string; evaluation_status: string; commands?: Array<Record<string, any>>; provenance?: Record<string, any>; auto_evaluation?: EvaluationRun | null; created_at?: string };
 export type EvaluationRun = { id: string; revision_id: string; status: string; weights: Record<string, number>; result: Record<string, unknown>; error: string };
 export type EvaluationProfile = { id: string; name: string; weights: Record<string, number>; is_default: boolean };
 export type JobOperation = { timestamp: string; stage: string; progress: number; message: string; detail: Record<string, unknown> };

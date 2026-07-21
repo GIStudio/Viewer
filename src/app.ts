@@ -98,10 +98,12 @@ import { createSceneObjectEditStatusController } from "./viewer-object-edit-stat
 import { createLocalAssetPaletteAdapter, type SceneAssetPaletteAdapter } from "./viewer-asset-palette";
 import { createSceneAssetDialog } from "./viewer-scene-asset-dialog";
 import { createViewerCommandRegistry } from "./viewer-command-registry";
+import { createSceneClickRoamController } from "./viewer-scene-click-roam";
 import { createScenarioWorkbench, type ProfessionalScenarioAdapter } from "./viewer-scenario-workbench";
 import { createViewerPanelController, type ViewerPanelController } from "./viewer-panel-controller";
 import { organizeViewerSettingsTools } from "./viewer-settings-tool-disclosure";
 import {
+  minimapToWorld,
   sceneBoundsFromManifest,
   type SceneBounds,
 } from "./viewer-minimap";
@@ -325,6 +327,8 @@ type MovementState = {
   backward: boolean;
   left: boolean;
   right: boolean;
+  lookLeft: boolean;
+  lookRight: boolean;
   sprint: boolean;
 };
 
@@ -409,6 +413,8 @@ function isRoamMovementKey(code: string): boolean {
     || code === "KeyA"
     || code === "KeyS"
     || code === "KeyD"
+    || code === "KeyQ"
+    || code === "KeyE"
     || code === "ShiftLeft"
     || code === "ShiftRight";
 }
@@ -526,10 +532,18 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   shell.setStatusSummary({ key: "viewer.status.loading" });
   shell.statusActivityHost.innerHTML = `<div class="desktop-shell-log-entry" data-tone="neutral" data-i18n-key="viewer.status.initialized">${t("Viewer shell initialized.", "查看器框架已初始化。")}</div>`;
   shell.centerStage.innerHTML = createViewerStageHtml();
+  // The generation flow is a modal, not a viewer side panel. Keep it outside
+  // the canvas grid so a scene reload or a sidebar transition cannot change
+  // its containing block and push it out of the viewport.
+  const generationDialogPortal = root.querySelector<HTMLElement>("#viewer-generation-dialog");
+  if (generationDialogPortal) {
+    root.appendChild(generationDialogPortal);
+  }
   root.querySelectorAll<HTMLButtonElement>("[data-viewer-modal-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       const unavailableMessage = button.dataset.unavailableMessage?.trim();
       if (button.getAttribute("aria-disabled") === "true" && unavailableMessage) {
+        shell.setBottomOpen(true);
         shell.setStatusSummary(unavailableMessage);
         shell.pushActivity(unavailableMessage, "warning");
         return;
@@ -679,7 +693,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   const reviewAcceptEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-accept");
   const reviewChangesEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-changes");
   const reviewAnnotationEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-annotation");
-  const reviewAssetsEl = root.querySelector<HTMLButtonElement>("#viewer-result-review-assets");
   const emptyStateEl = root.querySelector<HTMLElement>("#viewer-empty-state");
   const viewerShellEl = root.querySelector<HTMLElement>(".viewer-shell-embedded");
   const starterDemoBannerEl = root.querySelector<HTMLElement>("#viewer-starter-demo-banner");
@@ -949,7 +962,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       if (button) button.disabled = !hasCurrentWorkflowScene || starterPreview;
     });
     if (reviewAnnotationEl) reviewAnnotationEl.disabled = false;
-    if (reviewAssetsEl) reviewAssetsEl.disabled = false;
     if (!hostOptions.embedded) {
       evaluateRunEl.disabled = snapshot.sceneReviewStatus !== "accepted" || Boolean(snapshot.busy.evaluate);
       evaluateRunEl.title = snapshot.sceneReviewStatus === "accepted"
@@ -1009,7 +1021,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     root.querySelector<HTMLButtonElement>("#viewer-edit-toggle")?.click();
   }, { signal });
   reviewAnnotationEl?.addEventListener("click", () => { window.location.hash = "scene-graph"; }, { signal });
-  reviewAssetsEl?.addEventListener("click", () => root.querySelector<HTMLButtonElement>("#viewer-top-assets")?.click(), { signal });
   generationEditCandidatesEl?.addEventListener("click", () => root.querySelector<HTMLButtonElement>("#viewer-top-assets")?.click(), { signal });
   generationEditSourceEl?.addEventListener("click", () => { window.location.hash = "scene-graph"; }, { signal });
   root.querySelectorAll<HTMLButtonElement>("[data-generation-return-source]").forEach((button) => {
@@ -1689,6 +1700,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     backward: false,
     left: false,
     right: false,
+    lookLeft: false,
+    lookRight: false,
     sprint: false,
   };
 
@@ -1900,9 +1913,32 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     shouldStopHydration: () => destroyed,
     isCompareOpen: () => panelController.isOpen("compare"),
     refreshCompareSelectors: populateCompareSelectors,
+    defaultLabel: (ordinal) => currentLang === "zh" ? `场景 ${ordinal}` : `Scene ${ordinal}`,
     backgroundLimit: RECENT_LAYOUT_BACKGROUND_LIMIT,
     backgroundBatch: RECENT_LAYOUT_BACKGROUND_BATCH,
   });
+  const sceneNameInputEl = root.querySelector<HTMLInputElement>("#viewer-scene-name");
+  const sceneNameSaveEl = root.querySelector<HTMLButtonElement>("#viewer-scene-name-save");
+  const syncSceneNameEditor = (): void => {
+    const layoutPath = layoutSelectEl.value.trim();
+    const name = layoutPath ? recentLayoutSelector.labelFor(layoutPath) : "";
+    if (sceneNameInputEl) sceneNameInputEl.value = name;
+    if (sceneNameSaveEl) sceneNameSaveEl.disabled = !layoutPath;
+  };
+  const saveSceneName = (): void => {
+    const layoutPath = layoutSelectEl.value.trim();
+    if (!layoutPath || !sceneNameInputEl) return;
+    const name = recentLayoutSelector.rename(layoutPath, sceneNameInputEl.value);
+    sceneNameInputEl.value = name;
+    layoutSelectEl.title = name;
+    schemeCompareController.setRecentLayouts(recentLayoutSelector.currentLayouts(), layoutPath);
+  };
+  sceneNameSaveEl?.addEventListener("click", saveSceneName, { signal });
+  sceneNameInputEl?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    saveSceneName();
+  }, { signal });
 
   const sceneSelectionController = createViewerSceneSelectionController({
     selectEl,
@@ -2606,8 +2642,10 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     camera.lookAt(centerXZ[0], centerY, centerXZ[1]);
   }
 
+  let pointerOutsideViewer = false;
+
   function updateOverlay(): void {
-    const shouldShow = !isRoamMovementActive();
+    const shouldShow = pointerOutsideViewer && !isRoamMovementActive() && !panelController.isAnyOpen();
     overlayEl.hidden = !shouldShow;
     overlayEl.style.display = shouldShow ? "" : "none";
     overlayEl.setAttribute("aria-hidden", shouldShow ? "false" : "true");
@@ -2694,6 +2732,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (!hostOptions.embedded) {
       const recent = await loadRecentLayouts(20, false).catch(() => []);
       recentLayoutSelector.populate(recent, result.revision.layout_path);
+      syncSceneNameEditor();
     }
     workflow.setSceneRevision({
       revision: result.revision.revision,
@@ -2717,6 +2756,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         : await saveSceneLayoutEdits(layoutPath, base, commands);
       lastSceneEditUndo = { ...result.undo, layoutPath: result.revision.layout_path };
       await loadSceneEditRevision(result, viewSnapshot);
+      window.dispatchEvent(new CustomEvent("roadgen3d:scenario-revision-saved", {
+        detail: { revision: result.revision.revision, layoutPath: result.revision.layout_path },
+      }));
       sceneCommandStatusEl.textContent = `Saved immutable revision ${result.revision.revision}.`;
       if (!hostOptions.embedded && !hostOptions.persistSceneCommands) {
         const savedRevision = result.revision.revision;
@@ -2936,6 +2978,19 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         adapter: hostOptions.scenarioAdapter,
         language: () => currentLang,
         flashStatus,
+        loadScenario: async (target) => {
+          await sceneSelectionController.loadLayoutSelection(target.layoutPath, {
+            sceneGlbPath: target.sceneGlbPath,
+            defaultSceneOptionKey: "final_scene",
+          });
+          frameSceneOverview();
+          renderProfessionalWorkflowState();
+        },
+        enterManualEdit: async () => {
+          if (!(await materializeActiveStarterScene())) return;
+          panelController.closeAll();
+          setObjectEditingEnabled(true);
+        },
       })
     : null;
   if (scenarioToggleEl) scenarioToggleEl.hidden = !scenarioWorkbench;
@@ -3124,6 +3179,20 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (
       active
       && !event.repeat
+      && event.code === "KeyM"
+      && !event.ctrlKey
+      && !event.metaKey
+      && !event.altKey
+      && !isEditableTarget(event.target)
+    ) {
+      event.preventDefault();
+      if (controls.isLocked) controls.unlock();
+      expandedMapController.open();
+      return;
+    }
+    if (
+      active
+      && !event.repeat
       && event.code === "KeyZ"
       && (event.ctrlKey || event.metaKey)
       && !event.altKey
@@ -3184,7 +3253,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       }
     }
     const movementKey = isRoamMovementKey(event.code);
-    const sceneRoamActive = isPointerLookActive() || isThirdPersonKeyboardRoamActive();
+    const sceneRoamActive = isPointerLookActive() || isKeyboardRoamActive();
     if (
       movementKey
       && active
@@ -3234,6 +3303,12 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         break;
       case "KeyD":
         moveState.right = active;
+        break;
+      case "KeyQ":
+        moveState.lookLeft = active;
+        break;
+      case "KeyE":
+        moveState.lookRight = active;
         break;
       case "ShiftLeft":
       case "ShiftRight":
@@ -3288,11 +3363,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     moveState.backward = false;
     moveState.left = false;
     moveState.right = false;
+    moveState.lookLeft = false;
+    moveState.lookRight = false;
     moveState.sprint = false;
   }
 
-  function isThirdPersonKeyboardRoamActive(): boolean {
-    return currentCameraMode === "third_person"
+  function isKeyboardRoamActive(): boolean {
+    return (currentCameraMode === "first_person" || currentCameraMode === "third_person")
+      && !sceneObjectEditor.isEnabled()
       && !panelController.isAnyOpen()
       && document.visibilityState === "visible"
       && document.hasFocus();
@@ -3303,7 +3381,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   }
 
   function isRoamMovementActive(): boolean {
-    return isPointerLookActive() || isThirdPersonKeyboardRoamActive();
+    return isPointerLookActive() || isKeyboardRoamActive();
   }
 
   function configureSceneObjectShadows(rootObject: THREE.Object3D): void {
@@ -3590,6 +3668,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
 
   function populateRecentLayoutOptions(layouts: RecentLayout[], selectedPath: string): void {
     recentLayoutSelector.populate(layouts, selectedPath);
+    syncSceneNameEditor();
   }
 
   function scheduleRecentLayoutHydration(selectedPath: string, initialLoaded: number): void {
@@ -3808,8 +3887,23 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     }
   }
 
-  function flyCameraTo(x: number, y: number, z: number, durationMs = 900): void {
-    if (flyAnimation) return;
+  function flyCameraTo(
+    x: number,
+    y: number,
+    z: number,
+    durationMs = 900,
+    captureMouse = false,
+  ): void {
+    // Map and scene-click destinations always resume at pedestrian eye level.
+    // Do not retain a tilted overview camera when the avatar arrives.
+    const forward = cameraForwardHorizontal();
+    currentCameraMode = "first_person";
+    avatarFigure.visible = false;
+    currentForward.copy(forward);
+    const eye = currentAvatarPosition.clone().add(new THREE.Vector3(0, AVATAR_EYE_HEIGHT_M, 0));
+    camera.position.copy(eye);
+    camera.lookAt(eye.clone().add(forward));
+    camera.updateMatrixWorld();
     flyAnimation = {
       startAvatarPos: currentAvatarPosition.clone(),
       targetAvatarPos: new THREE.Vector3(x, y, z),
@@ -3819,7 +3913,50 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (controls.isLocked) {
       controls.unlock();
     }
+    // Pointer lock must be requested synchronously within the click that
+    // selected a destination. This makes the resulting level view play like
+    // an FPS while retaining Shift-click as a browser-safe fallback.
+    if (captureMouse) requestMouseLook();
   }
+
+  const sceneClickRoamController = createSceneClickRoamController({
+    camera,
+    element: renderer.domElement,
+    getCurrentRoot: () => currentRoot,
+    isEnabled: () => (
+      (currentCameraMode === "frame" || currentCameraMode === "graph_overlay")
+      &&
+      !controls.isLocked
+      && !sceneObjectEditor.isEnabled()
+      && !assetPlacementAsset
+      && !panelController.isAnyOpen()
+      && !compareMode.isCompare3dActive()
+    ),
+    onScenePoint: (point) => {
+      flyCameraTo(point.x, Math.max(0, currentAvatarPosition.y), point.z, 900, true);
+      flashStatus(currentLang === "zh"
+        ? "正在漫游到点击位置；Shift + 点击可捕获鼠标并用 WASD 微调。"
+        : "Moving to the clicked location. Shift-click to capture the mouse and fine-tune with WASD.");
+    },
+  });
+
+  minimapPlanCanvas.addEventListener("click", (event) => {
+    if (sceneObjectEditor.isEnabled() || assetPlacementAsset || panelController.isAnyOpen()) return;
+    const rect = minimapPlanCanvas.getBoundingClientRect();
+    const destination = minimapToWorld(
+      event.clientX - rect.left,
+      event.clientY - rect.top,
+      currentSceneBounds,
+      minimapPlanCanvas,
+    );
+    if (!destination) return;
+    event.preventDefault();
+    event.stopPropagation();
+    flyCameraTo(destination.x, Math.max(0, currentAvatarPosition.y), destination.z, 900, true);
+    flashStatus(currentLang === "zh"
+      ? "正在漫游到小地图选择的位置。"
+      : "Moving to the location selected on the minimap.");
+  }, { signal });
 
   /* ── Metrics Panel in Info Card ──────────────────────────── */
 
@@ -3885,14 +4022,31 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     metricsHost.innerHTML = renderMetricsPanel(summary as Record<string, unknown>);
   }
 
-  const requestPointerLock = (): void => {
+  const requestMouseLook = (): void => {
+    renderer.domElement.focus({ preventScroll: true });
+    if (!controls.isLocked) controls.lock();
+  };
+  const requestPointerLock = (event: MouseEvent): void => {
+    if (!event.shiftKey) return;
+    pointerOutsideViewer = false;
+    updateOverlay();
     if (!sceneObjectEditor.isEnabled() && !panelController.isOpen("settings") && !isPointerLookActive()) {
-      renderer.domElement.focus();
-      controls.lock();
+      requestMouseLook();
     }
   };
   renderer.domElement.addEventListener("click", requestPointerLock, { signal });
   overlayEl.addEventListener("click", requestPointerLock, { signal });
+  canvasHost.addEventListener("pointerenter", () => {
+    pointerOutsideViewer = false;
+    updateOverlay();
+  }, { signal });
+  canvasHost.addEventListener("pointerleave", () => {
+    pointerOutsideViewer = true;
+    updateOverlay();
+  }, { signal });
+  const overlayStateObserver = new MutationObserver(() => updateOverlay());
+  overlayStateObserver.observe(root, { subtree: true, attributes: true, attributeFilter: ["data-open"] });
+  signal.addEventListener("abort", () => overlayStateObserver.disconnect(), { once: true });
 
   sceneGraphLinkEl.addEventListener(
     "click",
@@ -4019,6 +4173,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     lastLaserTargetKey = "";
     clearInfoCard();
     objectEditStatusController.refreshLanguage();
+    recentLayoutSelector.refreshLabels();
+    syncSceneNameEditor();
     renderProfessionalWorkflowState();
   }
 
@@ -4064,6 +4220,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   root.addEventListener("roadgen:workbench-sidebar-change", (event) => {
     const detail = (event as CustomEvent<{ pageId?: string | null }>).detail;
     panelController.syncFromSidebar(detail?.pageId ?? null);
+    updateOverlay();
   }, { signal });
 
   designToggleEl.addEventListener("click", () => panelController.setOpen("design", !panelController.isOpen("design")), { signal });
@@ -4509,10 +4666,16 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     updateOverlay();
   };
   const handlePointerLockChange = () => updateOverlay();
+  const handlePointerLockError = () => {
+    updateOverlay();
+    flashStatus(currentLang === "zh"
+      ? "浏览器未允许鼠标锁定；请在场景内 Shift + 左键重试。"
+      : "Browser mouse lock was blocked. Shift-click inside the scene to retry.");
+  };
   controls.addEventListener("lock", handleControlsLock);
   controls.addEventListener("unlock", handleControlsUnlock);
   document.addEventListener("pointerlockchange", handlePointerLockChange, { signal });
-  document.addEventListener("pointerlockerror", handlePointerLockChange, { signal });
+  document.addEventListener("pointerlockerror", handlePointerLockError, { signal });
 
   window.addEventListener("resize", resizeRenderer, { signal });
   window.addEventListener("blur", resetMoveState, { signal });
@@ -4540,6 +4703,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         await sceneSelectionController.loadLayoutSelection(nextLayoutPath);
         recentLayoutSelector.setSelectedPath(nextLayoutPath);
         schemeCompareController.setRecentLayouts(recentLayoutSelector.currentLayouts(), nextLayoutPath);
+        syncSceneNameEditor();
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to load scene layout.";
         setError(errorEl, message);
@@ -4585,6 +4749,13 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         flyAnimation = null;
       }
     } else if (isRoamMovementActive()) {
+      const lookAxis = Number(moveState.lookLeft) - Number(moveState.lookRight);
+      if (lookAxis !== 0) {
+        // Q/E provide deterministic horizontal look adjustments even when a
+        // browser temporarily refuses Pointer Lock.
+        camera.rotateOnWorldAxis(UP_AXIS, lookAxis * 1.8 * delta);
+        camera.updateMatrixWorld();
+      }
       const moveSpeed = moveState.sprint ? 8.5 : 4.5;
       const forwardAxis = Number(moveState.forward) - Number(moveState.backward);
       const sideAxis = Number(moveState.right) - Number(moveState.left);
@@ -4727,6 +4898,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (controls.isLocked) {
       controls.unlock();
     }
+    sceneClickRoamController.dispose();
     clearGraphOverlay();
     floatingLaneSystem.clearOverlay();
     structuredEvaluationController?.abort();

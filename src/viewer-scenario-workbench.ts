@@ -8,6 +8,7 @@ export type ProfessionalScenario = {
   title: string;
   branchKind: string;
   revisionNumber: number;
+  sourceId: string | null;
   current: boolean;
   scores: Record<string, number | null>;
   skeleton: ScenarioParameter[];
@@ -19,15 +20,31 @@ export type ScenarioComparisonItem = {
   scoreDelta: Record<string, number | null>;
 };
 
+export type ProfessionalScenarioOpenTarget = {
+  layoutPath: string;
+  sceneGlbPath: string;
+};
+
+export type ProfessionalScenarioGeneration = {
+  workspace: ProfessionalScenarioWorkspace;
+  target: ProfessionalScenarioOpenTarget;
+};
+
 export type ProfessionalScenarioWorkspace = {
   projectId: string;
   scenarios: ProfessionalScenario[];
+  canWrite: boolean;
+  candidateReadiness: {
+    state: "ready" | "needs_baseline" | "needs_source";
+    parentLabel: string | null;
+  };
 };
 
 export type ProfessionalScenarioAdapter = {
   load(): Promise<ProfessionalScenarioWorkspace>;
-  open(revisionId: string): Promise<void>;
-  generate(metric: ScenarioMetric): Promise<ProfessionalScenarioWorkspace>;
+  open(revisionId: string): Promise<ProfessionalScenarioOpenTarget>;
+  prepareManualEdit(): Promise<ProfessionalScenarioOpenTarget>;
+  generate(metric: ScenarioMetric): Promise<ProfessionalScenarioGeneration>;
   compare(revisionIds: string[]): Promise<ScenarioComparisonItem[]>;
 };
 
@@ -43,6 +60,8 @@ type Options = {
   adapter: ProfessionalScenarioAdapter;
   language(): "en" | "zh";
   flashStatus(message: string): void;
+  loadScenario(target: ProfessionalScenarioOpenTarget): Promise<void>;
+  enterManualEdit(): Promise<void>;
 };
 
 function escapeHtml(value: unknown): string {
@@ -70,8 +89,65 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
 
   const zh = () => options.language() === "zh";
 
+  function latestScenario(scenarios: ProfessionalScenario[], branchKind: string): ProfessionalScenario | null {
+    const matches = scenarios.filter((scenario) => scenario.branchKind === branchKind);
+    return matches[matches.length - 1] ?? null;
+  }
+
+  function unavailableReason(): string {
+    return zh()
+      ? "该公共项目为只读；请打开自己创建的项目后再生成或保存方案。"
+      : "This public project is read-only. Open a project you created to generate or save a scenario.";
+  }
+
+  function comparisonGuide(scenarios: ProfessionalScenario[]): string {
+    const baseline = latestScenario(scenarios, "baseline");
+    const manual = latestScenario(scenarios, "human_edit");
+    const candidate = latestScenario(scenarios, "ai_edit");
+    if (!baseline) {
+      const disabled = !workspace?.canWrite ? "disabled" : "";
+      return `<div class="viewer-scenario-comparison-empty"><span>A ↔ B ↔ C</span><strong>${zh() ? "请先生成首个 3D 基线 A" : "Generate the first 3D baseline A first"}</strong><p>${zh() ? "完成 2D 标注并通过校验后，从顶部“3D 场景生成”创建可追溯的 A。" : "After validating the 2D annotation, use the top 3D generation action to create a traceable A."}</p><button type="button" class="viewer-scenario-next-step" data-scenario-action="edit-2d" ${disabled}>${zh() ? "前往 2D 标注，生成 A 基线" : "Go to 2D annotation and generate A"}</button>${!workspace?.canWrite ? `<small>${escapeHtml(unavailableReason())}</small>` : ""}</div>`;
+    }
+    const disabled = !workspace?.canWrite;
+    const disabledAttr = disabled || busy ? "disabled" : "";
+    const disabledTitle = disabled ? ` title="${escapeHtml(unavailableReason())}"` : "";
+    const readOnlyNote = disabled ? `<p class="viewer-scenario-guide-reason">${escapeHtml(unavailableReason())}</p>` : "";
+    const guides: string[] = [];
+    if (!manual) {
+      guides.push(`<article class="viewer-scenario-guide" data-branch="B">
+        <span>B · ${zh() ? "人工方案" : "Manual scenario"}</span>
+        <strong>${zh() ? "从最新 A 创建人工方案 B" : "Create a manual B from the latest A"}</strong>
+        <p>${zh() ? `${baseline.shortLabel} 是当前基线。修改 2D 后再次生成会形成新的 A；只有保存 3D 人工编辑才会形成 B。` : `${baseline.shortLabel} is the current baseline. Editing 2D and generating again creates a new A; only saving a 3D manual edit creates B.`}</p>
+        <div><button type="button" data-scenario-action="edit-2d" ${disabledAttr}${disabledTitle}>${zh() ? "修改 2D，生成新的 A 基线" : "Edit 2D and generate a new A"}</button><button type="button" data-scenario-action="edit-3d" ${disabledAttr}${disabledTitle}>${zh() ? "编辑当前 3D，保存为 B" : "Edit current 3D and save as B"}</button></div>${readOnlyNote}
+      </article>`);
+    }
+    if (!candidate) {
+      const parent = manual ?? baseline;
+      const sourceReady = workspace?.candidateReadiness.state === "ready";
+      const sourceMissing = workspace?.candidateReadiness.state === "needs_source";
+      const action = sourceReady ? "generate" : "edit-2d";
+      const cta = sourceReady
+        ? (zh() ? "选择指标并生成 C" : "Choose a metric and generate C")
+        : (zh() ? "前往 2D 标注，生成新的 A 基线" : "Go to 2D annotation and generate a new A");
+      const reason = sourceMissing
+        ? (zh() ? "当前 A 是导入场景，未绑定可追溯的 2D 来源。先保存 2D 标注并生成新的 A，才能安全生成 C。" : "The current A is an imported scene without a traceable 2D source. Save the 2D annotation and generate a new A before creating C.")
+        : (zh() ? `求解会以最新 ${parent.shortLabel} 为父版本，并把所选指标转为可追溯的参数方案。` : `The solver uses the latest ${parent.shortLabel} as its parent and records the selected metric as traceable parameters.`);
+      guides.push(`<article class="viewer-scenario-guide" data-branch="C">
+        <span>C · ${zh() ? "评分候选" : "Metric candidate"}</span>
+        <strong>${sourceReady ? (zh() ? "生成评分导向候选 C" : "Generate a metric-driven C") : (zh() ? "先补齐 C 所需的 2D 来源" : "Add the 2D source required for C")}</strong>
+        <p>${reason}</p>
+        <div><button type="button" data-scenario-action="${action}" ${disabledAttr}${disabledTitle}>${cta}</button></div>${readOnlyNote}
+      </article>`);
+    }
+    return `<div class="viewer-scenario-comparison-empty viewer-scenario-guides"><span>A ↔ B ↔ C</span><strong>${zh() ? "选择版本比较，或按下方引导补齐下一步方案" : "Select versions to compare, or follow the next-step guidance below"}</strong><p>${zh() ? "面板只陈述可追踪差异与评分相关性，不宣称因果。" : "The panel reports traceable differences and score correlation, not causality."}</p>${guides.join("")}</div>`;
+  }
+
   function render(): void {
     const scenarios = workspace?.scenarios ?? [];
+    const baseline = latestScenario(scenarios, "baseline");
+    const manual = latestScenario(scenarios, "human_edit");
+    const candidateReady = workspace?.candidateReadiness.state === "ready";
+    const canGenerate = Boolean(baseline && candidateReady && workspace?.canWrite && !busy);
     const metricOptions: Array<[ScenarioMetric, string, string]> = [
       ["walkability", "步行友好", "Walkability"],
       ["safety", "安全", "Safety"],
@@ -95,10 +171,10 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
           </div>
           <section class="viewer-scenario-solver">
             <span>METRIC → PARAMETERS → C</span>
-            <strong>${zh() ? "按最需要改善的指标求解" : "Solve for the weakest priority"}</strong>
-            <p>${zh() ? "选择指标后，服务器会把目标权重转换为明确的横断面与家具参数，再运行约束求解器。" : "The server converts the priority into explicit cross-section and furniture parameters, then runs the constraint solver."}</p>
+            <strong>${zh() ? "按最需要改善的指标求解 C" : "Solve C for the weakest priority"}</strong>
+            <p>${zh() ? (!baseline ? "请先完成 2D 标注并生成 A 基线。" : !candidateReady ? "当前场景没有可追溯 2D 来源；请返回 2D 标注并生成新的 A。" : `将以最新 ${manual?.shortLabel ?? baseline.shortLabel} 为父版本；服务器会把目标权重转换为明确参数后再求解。`) : (!baseline ? "Complete the 2D annotation and generate baseline A first." : !candidateReady ? "The current scene has no traceable 2D source. Return to 2D annotation and generate a new A." : `The latest ${manual?.shortLabel ?? baseline.shortLabel} will be the parent; the server turns the priority into explicit parameters before solving.`)}</p>
             <label><span>${zh() ? "优先指标" : "Priority"}</span><select data-scenario-metric>${metricOptions.map(([key, cn, en]) => `<option value="${key}">${zh() ? cn : en}</option>`).join("")}</select></label>
-            <button type="button" data-scenario-action="generate" ${busy || !scenarios.length ? "disabled" : ""}>${busy ? (zh() ? "正在生成 C…" : "Generating C…") : (zh() ? "生成评分导向候选 C" : "Generate metric candidate C")}</button>
+            <button type="button" data-scenario-action="generate" ${canGenerate ? "" : "disabled"} ${!workspace?.canWrite && baseline ? `title="${escapeHtml(unavailableReason())}"` : ""}>${busy ? (zh() ? "正在生成 C…" : "Generating C…") : (zh() ? "生成评分导向候选 C" : "Generate metric candidate C")}</button>
           </section>
           <div class="viewer-scenario-message" data-busy="${busy}">${escapeHtml(message || (zh() ? "勾选 2–3 个方案即可比较。" : "Select 2–3 scenarios to compare."))}</div>
         </section>
@@ -110,7 +186,7 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
               <section><h3>${zh() ? "道路骨架" : "Skeleton"}</h3>${parameterRows(scenario.skeleton)}</section>
               <section><h3>${zh() ? "街道家具" : "Furniture"}</h3>${parameterRows(scenario.furniture)}</section>
               <section class="viewer-scenario-score-grid"><h3>${zh() ? "评分" : "Scores"}</h3>${["walkability", "safety", "beauty", "overall"].map((key) => `<p><span>${escapeHtml(key)}</span><strong>${score(scenario.scores[key])}</strong><em>${index === 0 || scoreDelta[key] == null ? "—" : `${Number(scoreDelta[key]) >= 0 ? "+" : ""}${Number(scoreDelta[key]).toFixed(1)}`}</em></p>`).join("")}</section>
-            </article>`).join("")}</div>` : `<div class="viewer-scenario-comparison-empty"><span>A ↔ B ↔ C</span><strong>${zh() ? "选择版本，查看设计变化是否真的改善目标" : "Select versions to inspect whether the design improved the target"}</strong><p>${zh() ? "面板只陈述可追踪差异与评分相关性，不宣称因果。" : "The panel reports traceable differences and score correlation, not causality."}</p></div>`}
+            </article>`).join("")}</div>` : comparisonGuide(scenarios)}
         </section>
       </div>`;
   }
@@ -153,7 +229,10 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
     if (target.dataset.scenarioAction === "refresh") void load(true).catch((error) => { message = String(error); busy = false; render(); });
     if (target.dataset.scenarioOpen) {
       busy = true; message = zh() ? "正在载入所选方案…" : "Opening scenario…"; render();
-      void options.adapter.open(target.dataset.scenarioOpen).then(() => load(true)).catch((error) => { message = String(error); busy = false; render(); });
+      void options.adapter.open(target.dataset.scenarioOpen).then(async (next) => {
+        await options.loadScenario(next);
+        await load(true);
+      }).catch((error) => { message = String(error); busy = false; render(); });
     }
     if (target.dataset.scenarioAction === "compare") {
       busy = true; message = zh() ? "正在计算比较矩阵…" : "Building comparison matrix…"; render();
@@ -162,16 +241,39 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
     if (target.dataset.scenarioAction === "generate") {
       const metric = root.querySelector<HTMLSelectElement>("[data-scenario-metric]")?.value as ScenarioMetric;
       busy = true; message = zh() ? "正在反求参数并生成新的 C 方案…" : "Solving parameters and generating a new C candidate…"; render();
-      void options.adapter.generate(metric).then((next) => {
-        workspace = next;
-        const newest = next.scenarios[next.scenarios.length - 1];
-        if (newest) selected = new Set([next.scenarios[0]?.id, newest.id].filter(Boolean) as string[]);
+      void options.adapter.generate(metric).then(async (generated) => {
+        workspace = generated.workspace;
+        const newest = generated.workspace.scenarios[generated.workspace.scenarios.length - 1];
+        await options.loadScenario(generated.target);
+        if (newest) selected = new Set([generated.workspace.scenarios[0]?.id, newest.id].filter(Boolean) as string[]);
         comparison = [];
         message = zh() ? `已生成并打开 ${newest?.shortLabel ?? "C"}。` : `Generated and opened ${newest?.shortLabel ?? "C"}.`;
         busy = false;
         render();
       }).catch((error) => { message = String(error); busy = false; render(); });
     }
+    if (target.dataset.scenarioAction === "edit-2d") {
+      controller.close();
+      window.location.hash = "scene-graph";
+    }
+    if (target.dataset.scenarioAction === "edit-3d") {
+      busy = true; message = zh() ? "正在打开最新 A 并进入 3D 编辑…" : "Opening the latest A for 3D editing…"; render();
+      void options.adapter.prepareManualEdit().then(async (next) => {
+        await options.loadScenario(next);
+        controller.close();
+        await options.enterManualEdit();
+        options.flashStatus(zh() ? "已打开最新 A；保存 3D 编辑后会创建 B。" : "The latest A is open. Saving a 3D edit will create B.");
+      }).catch((error) => { message = String(error); busy = false; render(); });
+    }
+  }, { signal });
+
+  window.addEventListener("roadgen3d:scenario-revision-saved", () => {
+    if (root.hidden || busy) return;
+    void load(true).catch((error) => {
+      message = String(error);
+      busy = false;
+      render();
+    });
   }, { signal });
 
   toggle.addEventListener("click", () => {

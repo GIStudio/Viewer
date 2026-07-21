@@ -483,15 +483,40 @@
   overflow-y: auto;
 }
 
+.viewer-scene-name-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.55rem;
+}
+
+.viewer-scene-name-editor .desktop-shell-field {
+  min-width: 0;
+}
+
+.viewer-scene-name-editor .viewer-nav-button {
+  min-height: 2.2rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .viewer-scene-name-editor {
+    grid-template-columns: 1fr;
+  }
+}
+
 .viewer-generation-dialog {
   display: none;
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 120;
+  width: 100vw;
+  height: 100dvh;
+  box-sizing: border-box;
   min-width: 0;
   max-width: 100%;
   padding: clamp(0.75rem, 2vw, 1.5rem);
-  overflow: hidden;
+  overflow: auto;
 }
 
 .viewer-generation-dialog[data-open="true"] {
@@ -514,8 +539,8 @@
   width: min(72rem, 100%);
   min-width: 0;
   max-width: 100%;
-  height: min(48rem, 100%);
-  max-height: 100%;
+  height: min(48rem, calc(100dvh - clamp(1.5rem, 4vw, 3rem)));
+  max-height: calc(100dvh - clamp(1.5rem, 4vw, 3rem));
   min-height: 0;
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.28);

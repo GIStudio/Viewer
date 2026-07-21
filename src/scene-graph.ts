@@ -1275,6 +1275,13 @@ function setStatus(element: HTMLElement, message: SceneGraphStatusText, tone: St
     const summary = document.getElementById("desktop-shell-status-summary-text");
     if (summary) {
       applySceneGraphStatusText(summary, message);
+      const unreadBadge = document.getElementById("desktop-shell-status-unread-badge");
+      if (unreadBadge) {
+        const previous = Number.parseInt(unreadBadge.textContent ?? "0", 10);
+        const next = Number.isFinite(previous) ? Math.min(99, previous + 1) : 1;
+        unreadBadge.hidden = false;
+        unreadBadge.textContent = next > 9 ? "9+" : String(next);
+      }
     }
   }
 }
@@ -2447,7 +2454,6 @@ export function mountSceneGraphPage(
   shell.setStatusSummary({ key: "sceneGraph.status.annotationReady" });
   shell.setBottomOpen(true);
   applyViewerTranslations(root, loadViewerLanguage());
-
   const {
     backButton,
     planSelect,
@@ -2835,7 +2841,7 @@ export function mountSceneGraphPage(
     else workflow.setValidatedAnnotation(normalized, fingerprint, { autoApprove: true, expectedDraftFingerprint });
     state.isReferenceImageLoading = false;
     setStatus(sourceStatusEl, status, "success");
-    setStatus(graphStatusEl, "Graph conversion complete through the shared source normalizer.", "success");
+    setStatus(graphStatusEl, { key: "sceneGraph.status.graphNormalizedComplete" }, "success");
     renderScenarioDesignOptions();
     renderAll();
     renderSourceWorkflow();
@@ -2943,21 +2949,45 @@ export function mountSceneGraphPage(
     const indeterminate = job.progress_mode === "indeterminate"
       || String(job.detail?.progress_mode ?? "") === "indeterminate";
     const recent = [...(job.operations ?? [])].slice(-3).reverse();
+    const language = loadViewerLanguage();
+    const text = (key: string, fallback: string, params?: Record<string, string | number>) => (
+      formatViewerKey(language, key, params) ?? fallback
+    );
+    const stage = (value: string) => text(
+      `sceneGraph.osmProgress.stage.${value}`,
+      value.replace(/_/g, " "),
+    );
+    const message = (value: string | null | undefined) => {
+      const source = value?.trim() ?? "";
+      if (!source) return text("sceneGraph.osmProgress.preparing", "Preparing OSM data…");
+      if (language !== "zh") return source;
+      const request = source.match(/^Requesting the complete OSM context \(attempt (\d+)\/(\d+)\)\.?$/i);
+      if (request) return text("sceneGraph.osmProgress.requesting", `正在请求完整的 OSM 上下文（第 ${request[1]}/${request[2]} 次）…`, { attempt: request[1], max: request[2] });
+      const retry = source.match(/^Overpass attempt (\d+) failed; retrying\.?$/i);
+      if (retry) return text("sceneGraph.osmProgress.retrying", `第 ${retry[1]} 次 Overpass 请求失败，正在重试。`, { attempt: retry[1] });
+      if (/^Preparing OSM data…?$/i.test(source)) return text("sceneGraph.osmProgress.preparing", "正在准备 OSM 数据…");
+      if (/^Waiting for the first operation…?$/i.test(source)) return text("sceneGraph.osmProgress.waiting", "正在等待首个处理步骤…");
+      return text("sceneGraph.osmProgress.processing", "正在处理 OSM 数据…");
+    };
+    const elementCount = String(job.detail?.element_count ?? "—");
+    const attempt = String(job.detail?.attempt ?? "—");
+    const maxAttempts = String(job.detail?.max_attempts ?? "—");
+    const elapsed = String(job.detail?.elapsed_seconds ?? "—");
     osmPickerHostEl.innerHTML = `
       <section class="osm-acquisition-progress" data-status="${escapeHtml(job.status)}">
         <div class="osm-acquisition-progress-card">
-          <span class="osm-acquisition-kicker">OSM ACQUISITION · ${escapeHtml(job.stage.replace(/_/g, " "))}</span>
-          <h2>${escapeHtml(job.message || "Preparing OSM data…")}</h2>
+          <span class="osm-acquisition-kicker">${escapeHtml(text("sceneGraph.osmProgress.kicker", "OSM Acquisition"))} · ${escapeHtml(stage(job.stage))}</span>
+          <h2>${escapeHtml(message(job.message))}</h2>
           <div class="osm-acquisition-progress-track" data-indeterminate="${String(indeterminate)}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${job.progress}">
             <i style="--osm-progress:${job.progress}%"></i>
           </div>
           <div class="osm-acquisition-progress-meta">
             <strong>${indeterminate ? "—" : `${job.progress}%`}</strong>
-            <span>${escapeHtml(String(job.detail?.element_count ?? "—"))} elements</span>
-            <span>${escapeHtml(String(job.detail?.attempt ?? "—"))} / ${escapeHtml(String(job.detail?.max_attempts ?? "—"))} attempts</span>
-            <span>${escapeHtml(String(job.detail?.elapsed_seconds ?? "—"))} s elapsed</span>
+            <span>${escapeHtml(text("sceneGraph.osmProgress.elements", `${elementCount} elements`, { count: elementCount }))}</span>
+            <span>${escapeHtml(text("sceneGraph.osmProgress.attempts", `${attempt} / ${maxAttempts} attempts`, { attempt, max: maxAttempts }))}</span>
+            <span>${escapeHtml(text("sceneGraph.osmProgress.elapsed", `${elapsed} s elapsed`, { seconds: elapsed }))}</span>
           </div>
-          <ol>${recent.map((operation) => `<li><b>${escapeHtml(operation.stage.replace(/_/g, " "))}</b><span>${escapeHtml(operation.message)}</span></li>`).join("") || "<li><span>Waiting for the first operation…</span></li>"}</ol>
+          <ol>${recent.map((operation) => `<li><b>${escapeHtml(stage(operation.stage))}</b><span>${escapeHtml(message(operation.message))}</span></li>`).join("") || `<li><span>${escapeHtml(text("sceneGraph.osmProgress.waiting", "Waiting for the first operation…"))}</span></li>`}</ol>
           ${job.error ? `<div class="osm-acquisition-error">${escapeHtml(job.error)}</div>` : ""}
           <div class="osm-acquisition-progress-actions">
             <button type="button" data-osm-job-action="back">返回修改检索范围</button>
@@ -4532,7 +4562,7 @@ export function mountSceneGraphPage(
       : hasAnnotationCanvas()
         ? `${state.annotation.plan_id || "custom"} · ${state.annotation.image_width_px} × ${state.annotation.image_height_px}px · ${state.annotation.pixels_per_meter.toFixed(1)} px/m · ${state.annotation.centerlines.length} roads · ${state.annotation.centerlines.reduce((sum, item) => sum + item.cross_section_strips.length, 0)} strips · ${state.annotation.centerlines.reduce((sum, item) => sum + item.street_furniture_instances.length, 0)} furniture · ${state.annotation.regions.length} regions · ${(state.annotation.derived_regions ?? []).length} auto building regions · ${state.annotation.surface_annotations.length} design surfaces · ${state.annotation.station_strip_patches.length} strip patches`
         : "选择参考 plan 或导入 PNG 后，就可以在图上开始标注。";
-    applyViewerTranslations(shell.rightRail, loadViewerLanguage());
+    applyViewerTranslations(root, loadViewerLanguage());
     finishCenterlineButton.disabled = state.draftCenterline.length < 2;
     selectAllRoadsButton.disabled = state.annotation.centerlines.length === 0;
     selectAllRoadsButton.dataset.active = state.selection?.kind === "road_collection" ? "true" : "false";
@@ -5192,7 +5222,7 @@ export function mountSceneGraphPage(
         station_strip_patch_count: annotationSnapshot.station_strip_patches.length,
       },
     };
-    setStatus(graphStatusEl, "Graph conversion complete.", "success");
+    setStatus(graphStatusEl, { key: "sceneGraph.status.graphComplete" }, "success");
     renderAll();
     return true;
   }

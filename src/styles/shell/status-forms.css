@@ -1,4 +1,5 @@
 .desktop-shell-status-summary {
+  position: relative;
   width: 100%;
   display: flex;
   justify-content: space-between;
@@ -10,6 +11,42 @@
   color: var(--color-text);
   font: inherit;
   cursor: pointer;
+}
+
+.desktop-shell-status-unread-badge {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.45rem;
+  display: grid;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.2rem;
+  place-items: center;
+  border: 2px solid var(--color-panel, #fff);
+  border-radius: 999px;
+  background: var(--color-danger, #d95d4c);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.desktop-shell-status-summary.is-stale-scene {
+  color: #8a250f;
+  font-weight: 850;
+}
+
+.desktop-shell-status-summary.is-stale-scene-attention {
+  animation: desktop-shell-stale-attention 0.5s ease-in-out 3;
+}
+
+@keyframes desktop-shell-stale-attention {
+  0%, 100% { background: transparent; }
+  50% { background: rgba(251, 191, 36, 0.25); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-shell-status-summary.is-stale-scene-attention { animation: none; }
 }
 
 .desktop-shell-status-summary-label {

@@ -25,6 +25,20 @@
   box-shadow: none;
 }
 
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-tools-actions-slot {
+  padding: 0 0 0.35rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-tools-actions-slot .scene-stage-action-bar {
+  gap: 0.28rem;
+}
+
+.desktop-shell-section[data-section-id="annotation-tools"] .scene-tools-actions-slot .scene-stage-action-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.28rem;
+}
+
 .desktop-shell-section[data-section-id="annotation-tools"] .scene-tool-group {
   display: grid;
   gap: 0.22rem;
@@ -129,4 +143,3 @@
   font-size: 0.66rem;
   line-height: 1.35;
 }
-

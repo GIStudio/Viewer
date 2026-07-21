@@ -9,17 +9,17 @@ import {
 
 function createSceneGraphActionToolbarHtml(): string {
   return `
-    <div class="scene-stage-action-bar" aria-label="Annotation actions">
-      <div class="scene-tool-group-label">操作 / Action</div>
+    <div id="annotation-stage-action-toolbar" class="scene-stage-action-bar" aria-label="Annotation actions" data-i18n-aria-label-key="sceneGraph.tools.actions">
+      <div class="scene-tool-group-label" data-i18n-key="sceneGraph.tools.actions">Actions</div>
       <div class="scene-stage-action-row">
-        <button id="annotation-finish-centerline" class="scene-toolbar-button" type="button">Finish Centerline<span class="tool-label-zh">完成中心线</span></button>
-        <button id="annotation-select-all-roads" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">All Roads<span class="tool-label-zh">全部道路</span></button>
-        <button id="annotation-undo-point" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Undo Point<span class="tool-label-zh">撤销节点</span></button>
-        <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary scene-toolbar-button-danger" type="button">Delete Selected<span class="tool-label-zh">删除选中</span></button>
-        <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary scene-toolbar-button-danger" type="button">Reset Annotation<span class="tool-label-zh">重置标注</span></button>
+        <button id="annotation-finish-centerline" class="scene-toolbar-button" type="button" data-i18n-key="sceneGraph.tools.finishCenterline">Finish Centerline</button>
+        <button id="annotation-select-all-roads" class="scene-toolbar-button scene-toolbar-button-secondary" type="button" data-i18n-key="sceneGraph.tools.allRoads">All Roads</button>
+        <button id="annotation-undo-point" class="scene-toolbar-button scene-toolbar-button-secondary" type="button" data-i18n-key="sceneGraph.tools.undoPoint">Undo Point</button>
+        <button id="annotation-delete-selected" class="scene-toolbar-button scene-toolbar-button-secondary scene-toolbar-button-danger" type="button" data-i18n-key="sceneGraph.tools.deleteSelected">Delete Selected</button>
+        <button id="annotation-reset" class="scene-toolbar-button scene-toolbar-button-secondary scene-toolbar-button-danger" type="button" data-i18n-key="sceneGraph.tools.reset">Reset Annotation</button>
         <label class="scene-layer-toggle scene-stage-snap-toggle">
           <input id="annotation-snap-to-road" type="checkbox" checked />
-          <span>Snap to Road<span class="tool-label-zh">吸附到道路</span></span>
+          <span data-i18n-key="sceneGraph.tools.snapToRoad">Snap to Road</span>
         </label>
       </div>
     </div>
@@ -31,53 +31,56 @@ export function createSceneGraphLeftSections(): ShellSection[] {
   return [
     {
       id: "annotation-tools",
-      title: "Annotation Tools",
-      subtitle: "Select and author features",
+      title: { key: "sceneGraph.tools.title" },
+      subtitle: { key: "sceneGraph.tools.subtitle" },
       content: `
         <div class="scene-bottom-toolbar scene-bottom-toolbar-shell">
+          <div id="annotation-tools-actions-slot" class="scene-tools-actions-slot">
+            ${createSceneGraphActionToolbarHtml()}
+          </div>
           <div class="scene-tool-group">
-            <div class="scene-tool-group-label">选择 / Select</div>
+            <div class="scene-tool-group-label" data-i18n-key="sceneGraph.tools.selectGroup">Select</div>
             <div class="scene-tool-row">
-              <button id="annotation-tool-select" class="scene-tool-button" data-tool="select" type="button">Select<span class="tool-label-zh">选择</span></button>
-              <button id="annotation-tool-adjust" class="scene-tool-button" data-tool="adjust" type="button">Adjust<span class="tool-label-zh">调整</span></button>
-              <button id="annotation-tool-control-point" class="scene-tool-button" data-tool="control_point" type="button">Control Point<span class="tool-label-zh">控制点</span></button>
+              <button id="annotation-tool-select" class="scene-tool-button" data-tool="select" type="button" data-i18n-key="sceneGraph.tools.select">Select</button>
+              <button id="annotation-tool-adjust" class="scene-tool-button" data-tool="adjust" type="button" data-i18n-key="sceneGraph.tools.adjust">Adjust</button>
+              <button id="annotation-tool-control-point" class="scene-tool-button" data-tool="control_point" type="button" data-i18n-key="sceneGraph.tools.controlPoint">Control Point</button>
             </div>
           </div>
           <div class="scene-tool-group">
-            <div class="scene-tool-group-label">道路 / Road</div>
+            <div class="scene-tool-group-label" data-i18n-key="sceneGraph.tools.roadGroup">Road</div>
             <div class="scene-tool-row">
-              <button id="annotation-tool-centerline" class="scene-tool-button" data-tool="centerline" type="button">Centerline<span class="tool-label-zh">中心线</span></button>
-              <button id="annotation-tool-branch" class="scene-tool-button" data-tool="branch" type="button">Branch<span class="tool-label-zh">分支</span></button>
-              <button id="annotation-tool-cross" class="scene-tool-button" data-tool="cross" type="button">Cross<span class="tool-label-zh">交叉</span></button>
-              <button id="annotation-tool-roundabout" class="scene-tool-button" data-tool="roundabout" type="button">Roundabout<span class="tool-label-zh">环岛</span></button>
+              <button id="annotation-tool-centerline" class="scene-tool-button" data-tool="centerline" type="button" data-i18n-key="sceneGraph.tools.centerline">Centerline</button>
+              <button id="annotation-tool-branch" class="scene-tool-button" data-tool="branch" type="button" data-i18n-key="sceneGraph.tools.branch">Branch</button>
+              <button id="annotation-tool-cross" class="scene-tool-button" data-tool="cross" type="button" data-i18n-key="sceneGraph.tools.cross">Cross</button>
+              <button id="annotation-tool-roundabout" class="scene-tool-button" data-tool="roundabout" type="button" data-i18n-key="sceneGraph.tools.roundabout">Roundabout</button>
             </div>
           </div>
           <div class="scene-tool-group">
-            <div class="scene-tool-group-label">区域 / Zone</div>
+            <div class="scene-tool-group-label" data-i18n-key="sceneGraph.tools.zoneGroup">Zone</div>
             <div class="scene-tool-row">
-              <button id="annotation-tool-scene-region" class="scene-tool-button" data-tool="scene_region" type="button">Scene Region<span class="tool-label-zh">场景边界</span></button>
-              <button id="annotation-auto-split-regions" class="scene-tool-button" type="button">Auto Split<span class="tool-label-zh">自动切割</span></button>
-              <button id="annotation-tool-functional-zone" class="scene-tool-button" data-tool="functional_zone" type="button">Functional Region<span class="tool-label-zh">功能区域</span></button>
-              <button id="annotation-tool-surface" class="scene-tool-button" data-tool="surface_annotation" type="button">Design Surface<span class="tool-label-zh">设计面</span></button>
-              <button id="annotation-tool-building-region" class="scene-tool-button scene-tool-button-secondary" data-tool="building_region" type="button">Building Region<span class="tool-label-zh">高级手绘</span></button>
+              <button id="annotation-tool-scene-region" class="scene-tool-button" data-tool="scene_region" type="button" data-i18n-key="sceneGraph.tools.sceneRegion">Scene Region</button>
+              <button id="annotation-auto-split-regions" class="scene-tool-button" type="button" data-i18n-key="sceneGraph.tools.autoSplit">Auto Split</button>
+              <button id="annotation-tool-functional-zone" class="scene-tool-button" data-tool="functional_zone" type="button" data-i18n-key="sceneGraph.tools.functionalRegion">Functional Region</button>
+              <button id="annotation-tool-surface" class="scene-tool-button" data-tool="surface_annotation" type="button" data-i18n-key="sceneGraph.tools.designSurface">Design Surface</button>
+              <button id="annotation-tool-building-region" class="scene-tool-button scene-tool-button-secondary" data-tool="building_region" type="button" data-i18n-key="sceneGraph.tools.buildingRegion">Building Region</button>
             </div>
           </div>
           <div class="scene-tool-group">
-            <div class="scene-tool-group-label">家具 / Furniture</div>
+            <div class="scene-tool-group-label" data-i18n-key="sceneGraph.tools.furnitureGroup">Furniture</div>
             <div class="scene-tool-row">
-              <button id="annotation-tool-tree" class="scene-tool-button" data-tool="tree" type="button">Tree<span class="tool-label-zh">树木</span></button>
-              <button id="annotation-tool-lamp" class="scene-tool-button" data-tool="lamp" type="button">Lamp<span class="tool-label-zh">路灯</span></button>
-              <button id="annotation-tool-bench" class="scene-tool-button" data-tool="bench" type="button">Bench<span class="tool-label-zh">长椅</span></button>
-              <button id="annotation-tool-trash" class="scene-tool-button" data-tool="trash" type="button">Trash<span class="tool-label-zh">垃圾桶</span></button>
-              <button id="annotation-tool-bus-stop" class="scene-tool-button" data-tool="bus_stop" type="button">Bus Stop<span class="tool-label-zh">公交站</span></button>
-              <button id="annotation-tool-bollard" class="scene-tool-button" data-tool="bollard" type="button">Bollard<span class="tool-label-zh">隔离桩</span></button>
-              <button id="annotation-tool-mailbox" class="scene-tool-button" data-tool="mailbox" type="button">Mailbox<span class="tool-label-zh">邮筒</span></button>
-              <button id="annotation-tool-hydrant" class="scene-tool-button" data-tool="hydrant" type="button">Hydrant<span class="tool-label-zh">消防栓</span></button>
-              <button id="annotation-tool-sign" class="scene-tool-button" data-tool="sign" type="button">Sign<span class="tool-label-zh">标识牌</span></button>
+              <button id="annotation-tool-tree" class="scene-tool-button" data-tool="tree" type="button" data-i18n-key="sceneGraph.tools.tree">Tree</button>
+              <button id="annotation-tool-lamp" class="scene-tool-button" data-tool="lamp" type="button" data-i18n-key="sceneGraph.tools.lamp">Lamp</button>
+              <button id="annotation-tool-bench" class="scene-tool-button" data-tool="bench" type="button" data-i18n-key="sceneGraph.tools.bench">Bench</button>
+              <button id="annotation-tool-trash" class="scene-tool-button" data-tool="trash" type="button" data-i18n-key="sceneGraph.tools.trash">Trash</button>
+              <button id="annotation-tool-bus-stop" class="scene-tool-button" data-tool="bus_stop" type="button" data-i18n-key="sceneGraph.tools.busStop">Bus Stop</button>
+              <button id="annotation-tool-bollard" class="scene-tool-button" data-tool="bollard" type="button" data-i18n-key="sceneGraph.tools.bollard">Bollard</button>
+              <button id="annotation-tool-mailbox" class="scene-tool-button" data-tool="mailbox" type="button" data-i18n-key="sceneGraph.tools.mailbox">Mailbox</button>
+              <button id="annotation-tool-hydrant" class="scene-tool-button" data-tool="hydrant" type="button" data-i18n-key="sceneGraph.tools.hydrant">Hydrant</button>
+              <button id="annotation-tool-sign" class="scene-tool-button" data-tool="sign" type="button" data-i18n-key="sceneGraph.tools.sign">Sign</button>
             </div>
           </div>
           <div id="annotation-image-meta" class="scene-image-meta" style="margin:0">
-            选择参考 plan 或导入 PNG 后，就可以在图上开始标注。
+            <span data-i18n-key="sceneGraph.tools.referenceHint">Choose a reference plan or import PNG to start annotating.</span>
           </div>
         </div>
       `,
@@ -279,7 +282,6 @@ export function createSceneGraphRightTabs(options: SceneGraphShellOptions = {}):
 export function createSceneGraphStageHtml(): string {
   return `
     <div class="scene-shell-stage">
-      ${createSceneGraphActionToolbarHtml()}
       <div class="scene-canvas-viewport-shell" data-has-canvas="false">
         <div id="scene-osm-aoi-picker" class="scene-osm-aoi-picker" hidden></div>
         <div class="scene-canvas-viewport-controls" role="group" aria-label="Annotation canvas zoom controls">
