@@ -375,8 +375,8 @@ export function mountOsmAoiPicker(host: HTMLElement, options: OsmAoiPickerOption
   map = mapInstance;
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
   map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
-  map.on("load", () => {
-    if (destroyed || !map) return;
+  map.on("style.load", () => {
+    if (destroyed || !map || mapLoaded) return;
     mapLoaded = true;
     map.addSource("roadgen-aoi", { type: "geojson", data: selection ? polygon(selection.bbox) : emptyFeatureCollection() });
     map.addLayer({ id: "roadgen-aoi-fill", type: "fill", source: "roadgen-aoi", paint: { "fill-color": "#f4c430", "fill-opacity": 0.2 } });
@@ -470,7 +470,8 @@ export function mountOsmAoiPicker(host: HTMLElement, options: OsmAoiPickerOption
           setStatus(zh ? `已定位到${city.name_zh}；继续移动地图，满意后再截取研究区。` : `Located ${city.name_en}; keep navigating, then capture the area when ready.`, "success");
         });
       })
-      .catch(() => {
+      .catch((error) => {
+        console.warn("Failed to load China city catalog", error);
         if (!destroyed) citySelect.replaceChildren(new Option(zh ? "城市目录不可用，仍可自由移动地图" : "City catalog unavailable; pan the map freely", ""));
       });
   }
