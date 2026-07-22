@@ -87,6 +87,7 @@ type Deps = {
 
 export type ViewerParameterDesignController = {
   initialize(): Promise<void>;
+  composeConfigPatch(): Record<string, unknown>;
   generationOptions(): Record<string, unknown>;
   currentSpec(): StreetDesignParameterSpec | null;
   validationIssues(): string[];
@@ -403,6 +404,30 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
         knowledge_source: "none",
         street_design_parameter_spec: structuredClone(spec),
         street_design_parameter_field_sources: { ...fieldSources },
+        // The browser performs 3D review captures after loading the result.
+        // Do not make a non-essential server capture block a usable GLB at 99%.
+        capture_3d_views: false,
+        render_presentation_artifacts: false,
+      };
+    },
+    composeConfigPatch() {
+      ensureCurrentSource();
+      if (!spec) return {};
+      return {
+        lane_count: spec.skeleton.laneCount,
+        base_lane_width_m: spec.skeleton.laneWidthM,
+        sidewalk_width_m: spec.skeleton.sidewalkWidthM,
+        furnishing_width_m: spec.skeleton.furnishingWidthM,
+        curb_width_m: spec.skeleton.curbWidthM,
+        median_enabled: spec.skeleton.median.enabled,
+        median_kind: spec.skeleton.median.kind,
+        median_width_m: spec.skeleton.median.widthM,
+        bus_stop_enabled: spec.skeleton.busStop.enabled,
+        bus_stop_placement: spec.skeleton.busStop.placement,
+        density: spec.furniture.globalDensity,
+        furniture_style: spec.furniture.style,
+        building_representation: spec.buildings.representation,
+        seed: spec.seed,
       };
     },
     currentSpec() { ensureCurrentSource(); return spec ? structuredClone(spec) : null; },

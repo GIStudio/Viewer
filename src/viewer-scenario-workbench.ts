@@ -67,6 +67,7 @@ type Options = {
   language(): "en" | "zh";
   flashStatus(message: string): void;
   loadScenario(target: ProfessionalScenarioOpenTarget): Promise<void>;
+  openSplitComparison(scenarios: ProfessionalScenario[]): Promise<boolean>;
   enterManualEdit(): Promise<void>;
 };
 
@@ -133,6 +134,9 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
       : branch === "B"
         ? (zh() ? "尚无人工编辑版本" : "No manual edit yet")
         : (zh() ? "尚无自动参数候选" : "No automated candidate yet");
+    const emptyAction = branch === "B"
+      ? `<button type="button" class="viewer-scenario-lane-action" data-scenario-action="edit-2d">${zh() ? "前往 2D 标注" : "Edit in 2D"}</button><small>${zh() ? "保留当前 OSM 研究区与已保存标注，无需重新获取地图数据。" : "Keeps the current OSM study area and saved annotation; no map download is needed."}</small>`
+      : "";
     return `<section class="viewer-scenario-lane" data-branch="${branch}">
       <header><b>${branch}</b><div><strong>${branchTitle(branch)}</strong><small>${items.length} ${zh() ? "个版本" : items.length === 1 ? "version" : "versions"}</small></div></header>
       <div class="viewer-scenario-lane-items">
@@ -140,7 +144,7 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
           <label title="${zh() ? "加入方案差异比较" : "Add to comparison"}"><input type="checkbox" data-scenario-select="${escapeHtml(item.id)}" ${selected.has(item.id) ? "checked" : ""}/></label>
           <div><strong>${escapeHtml(item.shortLabel)}</strong><small>${escapeHtml(item.title)}</small></div>
           ${item.current ? `<em>${zh() ? "当前" : "CURRENT"}</em>` : ""}
-        </article>`).join("") : `<p class="viewer-scenario-lane-empty">${escapeHtml(empty)}</p>`}
+        </article>`).join("") : `<div class="viewer-scenario-lane-empty"><p>${escapeHtml(empty)}</p>${emptyAction}</div>`}
       </div>
     </section>`;
   }
@@ -153,7 +157,10 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
     return `<div class="viewer-scenario-detail" data-branch="${escapeHtml(branch)}">
       <header>
         <div><span>${escapeHtml(scenario.shortLabel)} · ${escapeHtml(branchTitle(branch as "A" | "B" | "C"))}</span><h3>${escapeHtml(scenario.title)}</h3><p>${scenario.current ? (zh() ? "当前正在主画布中显示" : "Currently shown on the main canvas") : (zh() ? "查看属性后，可确认切换主画布" : "Review the properties before opening it on the main canvas")}</p></div>
-        <button type="button" data-scenario-open="${escapeHtml(scenario.id)}" ${scenario.current || busy ? "disabled" : ""}>${scenario.current ? (zh() ? "当前场景" : "Current scene") : (zh() ? "在主画布打开" : "Open on main canvas")}</button>
+        <div class="viewer-scenario-detail-actions">
+          <button type="button" class="viewer-scenario-split-button" data-scenario-action="split" ${busy || selected.size < 2 ? "disabled" : ""}>${zh() ? `同屏比较 (${selected.size})` : `Split view (${selected.size})`}</button>
+          <button type="button" data-scenario-open="${escapeHtml(scenario.id)}" ${scenario.current || busy ? "disabled" : ""}>${scenario.current ? (zh() ? "当前场景" : "Current scene") : (zh() ? "在主画布打开" : "Open on main canvas")}</button>
+        </div>
       </header>
       <section class="viewer-scenario-trace">
         <h4>${zh() ? "版本与来源" : "Revision & provenance"}</h4>
@@ -259,7 +266,7 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
           <div class="viewer-scenario-message" data-busy="${busy}">${escapeHtml(message || (zh() ? "单击版本查看属性；勾选 2–3 个版本可比较。" : "Click a version for details; select 2–3 versions to compare."))}</div>
         </section>
         <section class="viewer-scenario-comparison">
-          <header><div><span>PROPERTIES + DIFFERENCE</span><strong>${comparison.length ? (zh() ? "方案差异" : "Scenario differences") : (zh() ? "方案属性" : "Scenario properties")}</strong></div><div><button type="button" data-scenario-action="details">${zh() ? "查看属性" : "Properties"}</button><button type="button" data-scenario-action="compare" ${busy || selected.size < 2 ? "disabled" : ""}>${zh() ? `比较所选 (${selected.size})` : `Compare (${selected.size})`}</button></div></header>
+          <header><div><span>PROPERTIES + DIFFERENCE</span><strong>${comparison.length ? (zh() ? "方案差异" : "Scenario differences") : (zh() ? "方案属性" : "Scenario properties")}</strong></div><div><button type="button" data-scenario-action="details">${zh() ? "查看属性" : "Properties"}</button><button type="button" data-scenario-action="compare" ${busy || selected.size < 2 ? "disabled" : ""}>${zh() ? `比较属性 (${selected.size})` : `Compare properties (${selected.size})`}</button></div></header>
           ${comparison.length ? `<div class="viewer-scenario-matrix">${comparison.map(({ scenario, scoreDelta }, index) => `
             <article data-branch="${escapeHtml(scenario.shortLabel.slice(0, 1))}">
               <header><b>${escapeHtml(scenario.shortLabel)}</b><div><strong>${escapeHtml(scenario.title)}</strong><small>${index === 0 ? (zh() ? "比较基准" : "comparison base") : (zh() ? "相对首列" : "vs first column")}</small></div></header>
@@ -338,6 +345,22 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
     if (target.dataset.scenarioAction === "compare") {
       busy = true; message = zh() ? "正在计算比较矩阵…" : "Building comparison matrix…"; render();
       void options.adapter.compare([...selected]).then((items) => { comparison = items; message = ""; busy = false; render(); }).catch((error) => { message = String(error); busy = false; render(); });
+    }
+    if (target.dataset.scenarioAction === "split") {
+      const scenarios = [...selected]
+        .map((id) => workspace?.scenarios.find((scenario) => scenario.id === id))
+        .filter((scenario): scenario is ProfessionalScenario => Boolean(scenario));
+      busy = true; message = zh() ? "正在载入同屏比较…" : "Loading split-screen comparison…"; render();
+      void options.openSplitComparison(scenarios).then((opened) => {
+        busy = false;
+        if (opened) {
+          controller.close();
+          options.flashStatus(zh() ? "已进入同屏比较；视角与漫游操作会同步到所有画面。" : "Split view is active; camera and roaming controls are synchronized.");
+          return;
+        }
+        message = zh() ? "同屏比较未能打开，请检查所选方案的 3D 场景文件。" : "Split view could not open. Check the selected scenarios' 3D scene files.";
+        render();
+      }).catch((error) => { message = String(error); busy = false; render(); });
     }
     if (target.dataset.scenarioAction === "generate") {
       const metrics: ScenarioMetric[] = ["walkability", "safety", "beauty"];

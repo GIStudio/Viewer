@@ -167,6 +167,16 @@ try {
   assert.equal(osmRequestCount, 1, "confirming the AOI submits exactly one OSM request");
   assert.deepEqual(submittedBbox, preciseBbox, "the confirmed coordinate AOI is submitted exactly");
   assert.equal(await page.locator("#annotation-board").isVisible(), false, "road selection precedes the shared annotation canvas");
+  assert.match(
+    await page.locator("#scene-source-status").innerText(),
+    /地图数据获取完成|map data is ready/i,
+    "the source drawer must explain the completed acquisition and next action",
+  );
+  assert.match(
+    await page.locator("#desktop-shell-status-summary-text").innerText(),
+    /地图数据获取完成|map data is ready/i,
+    "the task tray summary must stay synchronized with the source workflow",
+  );
   assert.deepEqual(browserErrors, [], `professional OSM flow must not emit page errors: ${browserErrors.join(" | ")}`);
 
   console.log("professional OSM AOI: explicit capture, single async fetch, road-selection handoff, and no HKUST default verified");

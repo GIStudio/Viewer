@@ -210,3 +210,17 @@
   font-size: 0.66rem;
   line-height: 1.28;
 }
+
+.scene-source-review-step .scene-source-reselect-button {
+  border: 2px solid #b64e3e;
+  color: #8c3026;
+  background: #fff7ed;
+  box-shadow: 3px 3px 0 #f4c430;
+  font-weight: 850;
+}
+
+.scene-source-review-step .scene-source-reselect-button:hover,
+.scene-source-review-step .scene-source-reselect-button:focus-visible {
+  color: #fff;
+  background: #b64e3e;
+}

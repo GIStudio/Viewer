@@ -541,7 +541,6 @@ export function bindDesktopShell(
     leftRail.innerHTML = "";
     leftRail.appendChild(host);
     const idMap: Record<string, { id: string; group: WorkbenchSidebarPage["group"] }> = {
-      "viewer-scene-browser-toggle": { id: "scene", group: "workspace" },
       "viewer-scene-graph-link": { id: "annotation", group: "workspace" },
       "viewer-asset-editor-link": { id: "assets", group: "workspace" },
       "viewer-design-toggle": { id: "design", group: "workspace" },
@@ -550,8 +549,7 @@ export function bindDesktopShell(
     };
     const pages: WorkbenchSidebarPage[] = [];
     Array.from(host.querySelectorAll<HTMLButtonElement>(".viewer-control-menu-item")).forEach((button) => {
-      const implicitId = button.dataset.viewerCenterControl === "browser" ? "viewer-scene-browser-toggle" : button.id;
-      const mapped = idMap[implicitId];
+      const mapped = idMap[button.id];
       if (!mapped) return;
       if (mode === "single_left_overlay" && ["scene", "annotation", "assets", "design", "edit"].includes(mapped.id)) return;
       if (mode === "course_single_left" && !["scene", "edit", "settings"].includes(mapped.id)) return;

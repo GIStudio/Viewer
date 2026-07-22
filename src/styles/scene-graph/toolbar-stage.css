@@ -107,7 +107,7 @@
 
 .scene-generation-confirm-dialog {
   position: fixed;
-  z-index: 1200;
+  z-index: var(--rg-overlay-z-modal);
   inset: 0;
   display: grid;
   place-items: center;

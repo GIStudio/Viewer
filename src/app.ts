@@ -98,7 +98,12 @@ import { createLocalAssetPaletteAdapter, type SceneAssetPaletteAdapter } from ".
 import { createSceneAssetDialog } from "./viewer-scene-asset-dialog";
 import { createViewerCommandRegistry } from "./viewer-command-registry";
 import { createSceneClickRoamController } from "./viewer-scene-click-roam";
-import { createScenarioWorkbench, type ProfessionalScenarioAdapter } from "./viewer-scenario-workbench";
+import {
+  createScenarioWorkbench,
+  type ProfessionalScenarioAdapter,
+  type ProfessionalScenarioOpenTarget,
+} from "./viewer-scenario-workbench";
+import { requestProfessionalOsmPicker } from "./professional-entry-intent";
 import { createViewerPanelController, type ViewerPanelController } from "./viewer-panel-controller";
 import { organizeViewerSettingsTools } from "./viewer-settings-tool-disclosure";
 import {
@@ -199,7 +204,6 @@ import { loadWorkflowCapabilities, normalizeSceneSource, toNormalizedSceneSource
 import { createViewerWorkflowBridge } from "./viewer-workflow-bridge";
 import {
   applyMaterializedStarterScene,
-  legacyStarterSceneIdFromPath,
   loadDefaultStarterScene,
   requestStarterSceneMaterialization,
   type ActiveSceneOrigin,
@@ -498,7 +502,13 @@ export type ViewerHostOptions = {
   modalTabs?: ShellTab[];
   baselineCoordinator?: ProfessionalBaselineCoordinator;
   scenarioAdapter?: ProfessionalScenarioAdapter;
+  copyStarterToProject?: (layoutPath: string) => Promise<ProfessionalScenarioOpenTarget>;
+  onStarterCopied?: () => void;
+  /** The one-time starter review is onboarding only, never a 2D-to-3D detour. */
+  showStarterReviewOnLoad?: boolean;
 };
+
+const STARTER_REVIEW_ONBOARDING_KEY = "roadgen3d:starter-review-onboarding-seen";
 
 function mountViewer(shell: DesktopShell, workflow: WorkflowController, hostOptions: ViewerHostOptions = {}): Promise<() => void> {
   return mountViewerImpl(shell, workflow, hostOptions);
@@ -576,11 +586,13 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     fillInput,
     warmthInput,
     shadowInput,
+    buildingOpacityInput,
     exposureValueEl,
     keyValueEl,
     fillValueEl,
     warmthValueEl,
     shadowValueEl,
+    buildingOpacityValueEl,
     thirdPersonToggleEl,
     frameModeToggleEl,
     assetBboxToggleEl,
@@ -695,10 +707,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   const emptyStateEl = root.querySelector<HTMLElement>("#viewer-empty-state");
   const viewerShellEl = root.querySelector<HTMLElement>(".viewer-shell-embedded");
   const starterDemoBannerEl = root.querySelector<HTMLElement>("#viewer-starter-demo-banner");
-  const legacyStarterWarningEl = root.querySelector<HTMLElement>("#viewer-legacy-starter-warning");
   let activeSceneOrigin: ActiveSceneOrigin | null = workflow.getSnapshot().sceneLayoutPath ? "workflow" : null;
   let activeStarterScene: StarterScenePackage | null = null;
-  let activeLegacyStarterSceneId: string | null = legacyStarterSceneIdFromPath(workflow.getSnapshot().sceneLayoutPath);
   let starterLoading = false;
   let starterLoadError = "";
   let generationWizard: ReturnType<typeof createViewerGenerationWizardController> | null = null;
@@ -901,27 +911,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
           : `Real OSM intersection · ${counts.building ?? 0} transparent buildings · ${Object.values(counts).reduce((sum, count) => sum + count, 0) - (counts.building ?? 0)} representative street assets`;
       }
     }
-    if (legacyStarterWarningEl) {
-      legacyStarterWarningEl.hidden = !activeLegacyStarterSceneId;
-      const title = legacyStarterWarningEl.querySelector<HTMLElement>("[data-legacy-starter-title]");
-      const summary = legacyStarterWarningEl.querySelector<HTMLElement>("[data-legacy-starter-summary]");
-      const upgrade = legacyStarterWarningEl.querySelector<HTMLButtonElement>("[data-starter-action='upgrade']");
-      if (title) {
-        title.textContent = currentLang === "zh"
-          ? "旧版示例存在已知几何问题"
-          : "This legacy starter has known geometry issues";
-      }
-      if (summary && activeLegacyStarterSceneId) {
-        summary.textContent = currentLang === "zh"
-          ? `${activeLegacyStarterSceneId} 可能出现道路缺角、针状铺装或背景地面暴露。`
-          : `${activeLegacyStarterSceneId} may contain road gaps, needle surfaces, or exposed background ground.`;
-      }
-      if (upgrade) {
-        upgrade.textContent = currentLang === "zh"
-          ? "进入已修复的广州 v6 示例"
-          : "Open the repaired Guangzhou v6 starter";
-      }
-    }
     const starterPreview = activeSceneOrigin === "starter_demo";
     if (reviewRootEl) reviewRootEl.dataset.mode = starterPreview ? "starter" : "workflow";
     if (starterReviewGuideEl) starterReviewGuideEl.hidden = !starterPreview;
@@ -975,7 +964,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
           evaluateGateEl.dataset.state = "starter";
           gateTitle.textContent = currentLang === "zh" ? "内置示例为只读评价摘要" : "The built-in demo has a read-only evaluation summary";
           gateDetail.textContent = currentLang === "zh" ? "复制示例后即可保存 revision、运行评价和导出。" : "Copy the demo to save revisions, evaluate, and export.";
-          gateAction.textContent = currentLang === "zh" ? "使用此示例开始" : "Use this demo to start";
+          gateAction.textContent = currentLang === "zh" ? "复制为我的项目" : "Copy to my project";
           gateAction.dataset.evaluateGateAction = "materialize";
         } else if (!hasCurrentWorkflowScene) {
           evaluateGateEl.dataset.state = "empty";
@@ -1013,7 +1002,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   });
   reviewAcceptEl?.addEventListener("click", () => {
     if (!workflow.setSceneReviewStatus("accepted").ok) return;
-    root.querySelector<HTMLButtonElement>('[data-shell-tab="evaluate"]')?.click();
+    mode3dEl.click();
+    reviewAcceptEl.closest<HTMLElement>(".desktop-shell-modal")
+      ?.querySelector<HTMLButtonElement>(".desktop-shell-modal-close")
+      ?.click();
+    flashStatus(currentLang === "zh"
+      ? "结果已接受，正在自动执行评价；你可以继续浏览 3D 场景。"
+      : "Result accepted. Evaluation is running automatically while you browse the 3D scene.");
+    void evaluationRunner.run();
   }, { signal });
   reviewChangesEl?.addEventListener("click", () => {
     if (!workflow.setSceneReviewStatus("changes_requested").ok) return;
@@ -1197,16 +1193,17 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
 
   function currentGenerationSpecBuild(): ReturnType<typeof buildGenerationRequestSpec> {
     const snapshot = workflow.getSnapshot();
+    const parameterOptions = parameterDesignController?.generationOptions() ?? {};
     return buildGenerationRequestSpec({
       normalizedSource: snapshot.normalized,
       graphTemplateId: designTemplateEl.value,
       scenario: null,
       preset: null,
       prompt: "",
-      semanticConfigPatch: {},
+      semanticConfigPatch: parameterDesignController?.composeConfigPatch() ?? {},
       generationOptions: {
         ...selectedAssetGenerationOptions(),
-        ...(parameterDesignController?.generationOptions() ?? {}),
+        ...parameterOptions,
       },
       variantCount: 1,
       baseSeed: designSeedEl.valueAsNumber,
@@ -1683,6 +1680,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   scene.add(laserHitDot);
 
   let currentRoot: THREE.Object3D | null = null;
+  let buildingOpacityOverride: number | null = null;
   let currentLayoutPath = "";
   let currentSpawn = new THREE.Vector3(0, 1.65, 0);
   let currentForward = new THREE.Vector3(1, 0, 0);
@@ -1817,83 +1815,17 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     parameterSummaryEl.innerHTML = `<strong>参数注册表加载失败</strong><small>${escapeHtml(error instanceof Error ? error.message : String(error))}</small>`;
   });
   root.addEventListener("roadgen:workbench-close-active-panel", () => panelController.closeAll(), { signal });
-  const centerControlsEl = root.querySelector<HTMLElement>("#viewer-center-controls");
-  const centerControlsCloseEl = root.querySelector<HTMLButtonElement>("#viewer-center-controls-close");
-  const centerControlsTitleEl = root.querySelector<HTMLElement>("#viewer-center-controls-title");
-  const centerControlsDescriptionEl = root.querySelector<HTMLElement>("#viewer-center-controls-title + p");
-  const centerControlButtons = Array.from(
-    root.querySelectorAll<HTMLButtonElement>("[data-viewer-center-control]"),
-  );
-  if (!centerControlsEl || !centerControlsCloseEl) {
-    throw new Error("Viewer center control surface is incomplete.");
-  }
-  const setCenterControlsOpen = (open: boolean, mode: "browser" | "schemes" = "browser"): void => {
-    centerControlsEl.dataset.open = open ? "true" : "false";
-    centerControlsEl.dataset.mode = mode;
-    if (centerControlsTitleEl && centerControlsDescriptionEl) {
-      centerControlsTitleEl.textContent = mode === "schemes"
-        ? t("Scheme A/B/C", "方案 A/B/C")
-        : t("Scene Browser", "我的场景");
-      centerControlsDescriptionEl.textContent = mode === "schemes"
-        ? t("Select 2-3 generated schemes to compare their scene, metrics and objects.", "选择 2–3 个已生成方案，对比场景、指标与地物差异。")
-        : t("Choose a generated result or scene. The 3D stage remains visible behind this panel.", "切换已保存的场景，并为它们命名。3D 画布会继续显示在该面板后方。");
-    }
-    centerControlButtons.forEach((button) => {
-      const isActive = open && button.dataset.viewerCenterControl === mode;
-      button.dataset.active = isActive ? "true" : "false";
-      button.setAttribute("aria-expanded", isActive ? "true" : "false");
-    });
-  };
-  centerControlButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      const mode = button.dataset.viewerCenterControl === "schemes" ? "schemes" : "browser";
-      const shouldOpen = centerControlsEl.dataset.open !== "true" || centerControlsEl.dataset.mode !== mode;
-      setCenterControlsOpen(shouldOpen, mode);
-    }, { signal });
-  });
-  centerControlsCloseEl.addEventListener("click", () => setCenterControlsOpen(false), { signal });
-  [
-    designToggleEl,
-    settingsToggleEl,
-    sceneGraphLinkEl,
-    assetEditorLinkEl,
-  ].forEach((button) => {
-    button.addEventListener("click", () => setCenterControlsOpen(false), { signal });
-  });
-
   recentLayoutSelector = createRecentLayoutSelectorController({
     selectEl: layoutSelectEl,
     loadRecentLayouts,
     setRecentLayouts: () => {},
     shouldStopHydration: () => destroyed,
-    isCompareOpen: () => centerControlsEl.dataset.open === "true" && centerControlsEl.dataset.mode === "schemes",
+    isCompareOpen: () => false,
     refreshCompareSelectors: populateCompareSelectors,
     defaultLabel: (ordinal) => currentLang === "zh" ? `场景 ${ordinal}` : `Scene ${ordinal}`,
     backgroundLimit: RECENT_LAYOUT_BACKGROUND_LIMIT,
     backgroundBatch: RECENT_LAYOUT_BACKGROUND_BATCH,
   });
-  const sceneNameInputEl = root.querySelector<HTMLInputElement>("#viewer-scene-name");
-  const sceneNameSaveEl = root.querySelector<HTMLButtonElement>("#viewer-scene-name-save");
-  const syncSceneNameEditor = (): void => {
-    const layoutPath = layoutSelectEl.value.trim();
-    const name = layoutPath ? recentLayoutSelector.labelFor(layoutPath) : "";
-    if (sceneNameInputEl) sceneNameInputEl.value = name;
-    if (sceneNameSaveEl) sceneNameSaveEl.disabled = !layoutPath;
-  };
-  const saveSceneName = (): void => {
-    const layoutPath = layoutSelectEl.value.trim();
-    if (!layoutPath || !sceneNameInputEl) return;
-    const name = recentLayoutSelector.rename(layoutPath, sceneNameInputEl.value);
-    sceneNameInputEl.value = name;
-    layoutSelectEl.title = name;
-  };
-  sceneNameSaveEl?.addEventListener("click", saveSceneName, { signal });
-  sceneNameInputEl?.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    saveSceneName();
-  }, { signal });
-
   const sceneSelectionController = createViewerSceneSelectionController({
     selectEl,
     errorEl,
@@ -1928,7 +1860,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       applyAudioProfile();
       scheduleDesignMatrixRefresh();
       syncSceneCommandEditor();
-      activeLegacyStarterSceneId = legacyStarterSceneIdFromPath(currentLayoutPath);
       const workflowSnapshot = workflow.getSnapshot();
       const standaloneLayout = new URLSearchParams(window.location.search).has("layout");
       if (
@@ -1955,18 +1886,21 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     setStatus(currentLang === "zh" ? "正在复制内置示例到专业工作流…" : "Copying the starter demo into the professional workflow…");
     try {
       const materialized = await requestStarterSceneMaterialization(activeStarterScene.id, signal);
-      await sceneSelectionController.loadLayoutSelection(materialized.layout_path, {
+      await applyMaterializedStarterScene(workflow, materialized);
+      const projectTarget = hostOptions.copyStarterToProject
+        ? await hostOptions.copyStarterToProject(materialized.layout_path)
+        : null;
+      await sceneSelectionController.loadLayoutSelection(projectTarget?.layoutPath ?? materialized.layout_path, {
         persistSelectionInUrl: true,
         defaultSceneOptionKey: "final_scene",
       });
       frameSceneOverview();
-      await applyMaterializedStarterScene(workflow, materialized);
       activeSceneOrigin = "workflow";
       activeStarterScene = null;
-      activeLegacyStarterSceneId = legacyStarterSceneIdFromPath(materialized.layout_path);
       starterLoadError = "";
       renderProfessionalWorkflowState();
-      flashStatus(currentLang === "zh" ? "广州道路骨架已复制，可继续审阅或编辑。" : "The Guangzhou road skeleton is now an editable workflow scene.");
+      flashStatus(currentLang === "zh" ? "示例已复制为我的项目，并创建可追溯方案 A。" : "The demo was copied into my project as traceable Scenario A.");
+      hostOptions.onStarterCopied?.();
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1991,10 +1925,19 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       });
       activeStarterScene = starter;
       activeSceneOrigin = "starter_demo";
-      activeLegacyStarterSceneId = null;
       workflow.setStarterPreview(starter.id);
       frameSceneFocus(starter.focus_xz, starter.focus_extent_m);
-      shell.openModalTab("review");
+      const shouldShowStarterReview = hostOptions.showStarterReviewOnLoad !== false
+        && (() => {
+          try {
+            if (localStorage.getItem(STARTER_REVIEW_ONBOARDING_KEY) === "true") return false;
+            localStorage.setItem(STARTER_REVIEW_ONBOARDING_KEY, "true");
+          } catch {
+            // Storage can be unavailable in embedded contexts; preserve the first-open guide.
+          }
+          return true;
+        })();
+      if (shouldShowStarterReview) shell.openModalTab("review");
       setStatus(currentLang === "zh" ? "正在预览内置广州完整十字路口。" : "Viewing the built-in complete Guangzhou intersection.");
     } catch (error) {
       activeStarterScene = null;
@@ -2010,15 +1953,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   root.addEventListener("click", (event) => {
     const action = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-starter-action]")?.dataset.starterAction;
     if (action === "materialize") void materializeActiveStarterScene();
-    if (action === "source") window.location.hash = "scene-graph";
-    if (action === "retry") void loadStarterScenePreview();
-    if (action === "upgrade") {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("layout");
-      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-      activeLegacyStarterSceneId = null;
-      void loadStarterScenePreview();
+    if (action === "source") {
+      requestProfessionalOsmPicker();
+      window.location.hash = "scene-graph";
     }
+    if (action === "retry") void loadStarterScenePreview();
   }, { signal });
   evaluateGateEl.addEventListener("click", (event) => {
     const action = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-evaluate-gate-action]")?.dataset.evaluateGateAction;
@@ -2267,8 +2206,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     onLoaded: () => {
       generationWizard?.close();
       panelController.setOpen("design", false);
-      shell.openModalTab("review");
-      flashStatus("Generated scene loaded. Review the 3D result against the approved source.");
+      mode3dEl.click();
+      flashStatus("Generated scene loaded. You can now preview the corresponding 3D result.");
     },
     setStatus,
   });
@@ -2720,7 +2659,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (!hostOptions.embedded) {
       const recent = await loadRecentLayouts(20, false).catch(() => []);
       recentLayoutSelector.populate(recent, result.revision.layout_path);
-      syncSceneNameEditor();
     }
     workflow.setSceneRevision({
       revision: result.revision.revision,
@@ -2974,6 +2912,22 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
           frameSceneOverview();
           renderProfessionalWorkflowState();
         },
+        openSplitComparison: async (scenarios) => {
+          const targets = await Promise.all(scenarios.map(async (scenario) => ({
+            scenario,
+            target: await hostOptions.scenarioAdapter!.open(scenario.id),
+          })));
+          const opened = await compareMode.enterCompareSceneSet(targets.map(({ scenario, target }) => ({
+            id: scenario.id,
+            label: `${scenario.shortLabel} · ${scenario.title}`,
+            layoutPath: target.layoutPath,
+            glbUrl: target.sceneGlbPath,
+          })), t("Scenario comparison", "方案同屏比较"));
+          if (opened && buildingOpacityOverride !== null) {
+            compareMode.forEachCompareRoot((rootObject) => applyBuildingOpacity(rootObject, null, buildingOpacityOverride!));
+          }
+          return opened;
+        },
         enterManualEdit: async () => {
           if (!(await materializeActiveStarterScene())) return;
           panelController.closeAll();
@@ -2982,7 +2936,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       })
     : null;
   if (scenarioToggleEl) scenarioToggleEl.hidden = !scenarioWorkbench;
-  scenarioToggleEl?.addEventListener("click", () => setCenterControlsOpen(false), { signal });
   const assetPlacementGhost = new THREE.Mesh(
     new THREE.CylinderGeometry(0.48, 0.48, 0.04, 28),
     new THREE.MeshBasicMaterial({ color: 0xb9d9cc, transparent: true, opacity: 0.78, depthWrite: false }),
@@ -3484,6 +3437,56 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     });
   }
 
+  function isBuildingMesh(mesh: THREE.Mesh, manifest: ViewerManifest | null): boolean {
+    const diagnosticRole = manifest?.surface_diagnostic?.node_roles?.[mesh.name] ?? "";
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const descriptor = [
+      diagnosticRole,
+      mesh.userData?.surfaceRole,
+      mesh.userData?.surface_role,
+      mesh.userData?.visual_surface_role,
+      mesh.name,
+      mesh.parent?.name,
+      ...materials.map((material) => material?.name ?? ""),
+    ].map((value) => String(value ?? "")).join(" ");
+    return /(?:building|massing|facade|tower|house)/i.test(descriptor);
+  }
+
+  function buildingMaterials(rootObject: THREE.Object3D, manifest: ViewerManifest | null): THREE.Material[] {
+    const materials = new Set<THREE.Material>();
+    rootObject.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.material || !isBuildingMesh(mesh, manifest)) return;
+      const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      meshMaterials.forEach((material) => { if (material) materials.add(material); });
+    });
+    return [...materials];
+  }
+
+  function applyBuildingOpacity(rootObject: THREE.Object3D, manifest: ViewerManifest | null, opacity: number): void {
+    const nextOpacity = THREE.MathUtils.clamp(opacity, 0.1, 1);
+    buildingMaterials(rootObject, manifest).forEach((material) => {
+      if (typeof material.userData.viewerOriginalTransparent !== "boolean") {
+        material.userData.viewerOriginalTransparent = material.transparent;
+      }
+      material.opacity = nextOpacity;
+      material.transparent = nextOpacity < 0.999 || Boolean(material.userData.viewerOriginalTransparent);
+      material.depthWrite = nextOpacity >= 0.999 && !material.userData.viewerOriginalTransparent;
+      material.needsUpdate = true;
+    });
+  }
+
+  function authoredBuildingOpacity(rootObject: THREE.Object3D, manifest: ViewerManifest | null): number {
+    const material = buildingMaterials(rootObject, manifest)[0];
+    return material ? THREE.MathUtils.clamp(material.opacity, 0.1, 1) : 1;
+  }
+
+  function syncBuildingOpacityUi(): void {
+    const value = buildingOpacityOverride ?? (currentRoot ? authoredBuildingOpacity(currentRoot, currentManifest) : 1);
+    buildingOpacityInput.value = value.toFixed(2);
+    buildingOpacityValueEl.textContent = `${Math.round(value * 100)}%`;
+  }
+
   function updateLaserPointer(): void {
     if (!laserToggleEl.checked || !currentRoot) {
       laserBeam.visible = false;
@@ -3598,6 +3601,10 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     prepareEnvironmentSkyDomes(currentRoot);
     const shadowStart = performance.now();
     configureSceneObjectShadows(currentRoot);
+    if (buildingOpacityOverride !== null) {
+      applyBuildingOpacity(currentRoot, currentManifest, buildingOpacityOverride);
+    }
+    syncBuildingOpacityUi();
     const shadowMs = (performance.now() - shadowStart).toFixed(1);
     console.info(`[viewer-timing] loadScene.shadows (${option.label}): ${shadowMs} ms`);
     if (dioramaFinishToggleEl.checked) {
@@ -3723,7 +3730,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
 
   function populateRecentLayoutOptions(layouts: RecentLayout[], selectedPath: string): void {
     recentLayoutSelector.populate(layouts, selectedPath);
-    syncSceneNameEditor();
   }
 
   function scheduleRecentLayoutHydration(selectedPath: string, initialLoaded: number): void {
@@ -4207,7 +4213,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     clearInfoCard();
     objectEditStatusController.refreshLanguage();
     recentLayoutSelector.refreshLabels();
-    syncSceneNameEditor();
     renderProfessionalWorkflowState();
   }
 
@@ -4233,11 +4238,9 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         panelController.setOpen("settings", true);
       }
     },
-    "tools-open-scenes": () => setCenterControlsOpen(true, "browser"),
     "tools-open-design": () => panelController.setOpen("design", !panelController.isOpen("design")),
     "tools-open-evaluate": () => panelController.setOpen("evaluate", !panelController.isOpen("evaluate")),
     "tools-open-compare": () => {
-      setCenterControlsOpen(false);
       void scenarioWorkbench?.open().catch((error) => flashStatus(String(error)));
     },
     "tools-open-consistency": () => {
@@ -4530,6 +4533,16 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     },
     { signal },
   );
+  buildingOpacityInput.addEventListener(
+    "input",
+    () => {
+      buildingOpacityOverride = THREE.MathUtils.clamp(Number(buildingOpacityInput.value), 0.1, 1);
+      if (currentRoot) applyBuildingOpacity(currentRoot, currentManifest, buildingOpacityOverride);
+      compareMode.forEachCompareRoot((rootObject) => applyBuildingOpacity(rootObject, null, buildingOpacityOverride!));
+      syncBuildingOpacityUi();
+    },
+    { signal },
+  );
   thirdPersonToggleEl.addEventListener(
     "change",
     () => {
@@ -4686,7 +4699,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       try {
         await sceneSelectionController.loadLayoutSelection(nextLayoutPath);
         recentLayoutSelector.setSelectedPath(nextLayoutPath);
-        syncSceneNameEditor();
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to load scene layout.";
         setError(errorEl, message);

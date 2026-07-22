@@ -235,6 +235,27 @@ export async function openProfessionalOwnedRevision(
   return openTarget(materialized);
 }
 
+export async function copyProfessionalStarterToOwnedProject(
+  session: ProfessionalSessionController,
+  workflow: WorkflowController,
+  layoutPath: string,
+): Promise<ProfessionalScenarioOpenTarget> {
+  await session.ensureReady();
+  const project = await session.createProject("广州示例副本");
+  const saved = await saveProfessionalSourceToWorkspace(session, workflow);
+  if (saved.project.id !== project.id) throw new Error("示例来源未保存到新建项目，请重试。");
+  const revision = await session.api.post<SceneRevision>(
+    `/api/v1/projects/${project.id}/revisions/import-layout`,
+    {
+      layout_path: layoutPath,
+      source_id: saved.source.id,
+      label: "方案 A · OSM 示例副本",
+    },
+  );
+  await session.refreshPublicProjects().catch(() => []);
+  return openProfessionalOwnedRevision(session, workflow, project.id, revision);
+}
+
 async function openProfessionalReadOnlyRevision(
   session: ProfessionalSessionController,
   workflow: WorkflowController,

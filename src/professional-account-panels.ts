@@ -178,7 +178,10 @@ export function createProfessionalPublicSpacePanel(
       const project = snapshot.publicProjects.find((item) => item.id === button.dataset.publicOpen);
       if (!project || busyId) return;
       busyId = project.id; message = zh ? "正在载入公共场景…" : "Loading public scene…"; render();
-      void options.onOpen(project).catch((error) => { message = error instanceof Error ? error.message : String(error); }).finally(() => { busyId = ""; render(); });
+      void options.onOpen(project)
+        .then(() => { message = zh ? "已载入公共项目的最新 3D 场景。" : "Loaded the latest public 3D scene."; })
+        .catch((error) => { message = error instanceof Error ? error.message : String(error); })
+        .finally(() => { busyId = ""; render(); });
     }));
     element.querySelectorAll<HTMLButtonElement>("[data-public-export]").forEach((button) => button.addEventListener("click", () => {
       const project = snapshot.publicProjects.find((item) => item.id === button.dataset.publicExport);

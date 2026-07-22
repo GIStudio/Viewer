@@ -20,7 +20,6 @@ export type ViewerPanelElements = {
   errorEl: HTMLElement;
   layoutSelectEl: HTMLSelectElement;
   selectEl: HTMLSelectElement;
-  schemeCompareEl: HTMLElement;
   sceneGraphLinkEl: HTMLButtonElement;
   assetEditorLinkEl: HTMLButtonElement;
   settingsToggleEl: HTMLButtonElement;
@@ -38,11 +37,13 @@ export type ViewerPanelElements = {
   fillInput: HTMLInputElement;
   warmthInput: HTMLInputElement;
   shadowInput: HTMLInputElement;
+  buildingOpacityInput: HTMLInputElement;
   exposureValueEl: HTMLElement;
   keyValueEl: HTMLElement;
   fillValueEl: HTMLElement;
   warmthValueEl: HTMLElement;
   shadowValueEl: HTMLElement;
+  buildingOpacityValueEl: HTMLElement;
   thirdPersonToggleEl: HTMLInputElement;
   frameModeToggleEl: HTMLInputElement;
   assetBboxToggleEl: HTMLInputElement;

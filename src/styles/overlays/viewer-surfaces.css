@@ -86,15 +86,6 @@
   overflow: hidden;
 }
 
-.viewer-legacy-starter-warning {
-  z-index: var(--rg-overlay-z-stage);
-}
-
-.desktop-shell:has(.viewer-settings-panel[data-open="true"]) .viewer-legacy-starter-warning {
-  opacity: 0;
-  pointer-events: none;
-}
-
 /* The active single-left shell owns the drawer frame; inner panels own content. */
 .desktop-shell[data-shell-mode="single_left_overlay"]:has(.viewer-settings-panel[data-open="true"]),
 .desktop-shell[data-shell-mode="course_single_left"]:has(.viewer-settings-panel[data-open="true"]) {

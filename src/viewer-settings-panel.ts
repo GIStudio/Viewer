@@ -59,6 +59,14 @@ export function renderViewerSettingsPanelHtml(): string {
               </label>
               <input id="lighting-shadow" class="viewer-range" type="range" min="0" max="1" step="0.05" />
             </div>
+            <div class="viewer-settings-section viewer-settings-section-wide viewer-building-opacity-control">
+              <label class="viewer-range-label" for="building-opacity">
+                <span data-i18n-key="viewer.settings.buildingOpacity">Building Opacity</span>
+                <span id="building-opacity-value">100%</span>
+              </label>
+              <input id="building-opacity" class="viewer-range" type="range" min="0.1" max="1" step="0.05" value="1" />
+              <small class="viewer-setting-control-hint" data-i18n-key="viewer.settings.buildingOpacityHint">Controls building visibility in the viewer only; it does not modify the scene or exported data.</small>
+            </div>
           </div>
         </section>
 

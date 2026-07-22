@@ -169,6 +169,12 @@ try {
   assert.equal(await page.locator('.desktop-shell-tab-button[data-shell-tab="evaluate"]').count(), 0, "evaluation must leave the left rail");
   assert.equal(await page.locator('.desktop-shell-tab-button[data-shell-tab="consistency"]').count(), 0, "consistency diagnostics must leave the primary navigation rail");
   assert.equal(await page.getByRole("button", { name: "帮助", exact: true }).count(), 0, "help must not occupy a side-rail entry");
+  const helpHitTarget = await page.locator(".desktop-shell-help-button").evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return hit === element || element.contains(hit) ? "self" : `${hit?.tagName ?? "none"}.${hit?.className ?? ""}`;
+  });
+  assert.equal(helpHitTarget, "self", `the recommended next-action header control must not cover the help button (${helpHitTarget})`);
   await page.locator(".desktop-shell-help-button").click();
   const helpDialog = page.locator(".viewer-shortcuts-modal");
   await helpDialog.waitFor({ state: "visible" });
@@ -185,18 +191,16 @@ try {
   assert.equal(await page.locator('[data-shell-tab="model-input-audit"]').count(), 0, "retired model-input audit must not remain in product navigation");
   assert.equal(await page.locator('[data-shell-tab="presets"]').count(), 0, "retired scene presets must not remain in product navigation");
   assert.equal(await page.locator('[data-shell-tab="scene"]').count(), 0, "generic scene browser must not duplicate the production-flow browser");
-  await page.getByRole("button", { name: "工作台菜单", exact: true }).click();
-  const workbenchMenu = page.locator(".ant-dropdown:visible");
-  await workbenchMenu.getByText("我的场景", { exact: true }).click();
-  await page.locator('#viewer-center-controls[data-open="true"]').waitFor();
-  await page.locator("#viewer-center-controls-close").click();
-  await page.locator('#viewer-center-controls[data-open="false"]').waitFor({ state: "hidden" });
+  await page.locator('[data-shell-tab="browse-3d"]').click();
+  await page.locator("#viewer-canvas").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#viewer-center-controls").count(), 0, "3D browsing must stay on the canvas without the retired scene browser panel");
   await page.locator("#viewer-direct-edit").waitFor();
   await page.locator("#viewer-top-assets").waitFor();
   const schemeCompareToggle = page.locator("#viewer-scheme-compare-toggle");
   await schemeCompareToggle.waitFor();
   assert.equal(await page.locator('[data-shell-tab="compare"]').count(), 0, "legacy layout comparison must not remain in the standard drawer");
   await schemeCompareToggle.click();
+  assert.equal(await page.locator("#viewer-scenario-workbench").getAttribute("hidden"), null, "the Scheme A/B/C button must open the formal workbench immediately");
   await page.locator('#viewer-scenario-workbench:not([hidden])').waitFor();
   assert.equal(await page.locator('.viewer-scenario-lane[data-branch="A"]').count(), 1, "the scenario workbench must expose one semantic A lane");
   assert.equal(await page.locator('.viewer-scenario-lane[data-branch="B"]').count(), 1, "the scenario workbench must expose one semantic B lane");
@@ -237,6 +241,8 @@ try {
   const settingsRailButton = page.locator('[data-shell-tab="settings"]');
   await settingsRailButton.click();
   await page.locator('#viewer-settings-panel[data-open="true"]').waitFor();
+  assert.equal(await page.locator("#building-opacity").count(), 1, "display settings must include building opacity control");
+  assert.equal(await page.locator("#building-opacity").getAttribute("min"), "0.1", "building opacity must retain a visible lower bound");
   assert.equal(
     await page.locator("#viewer-settings-panel").evaluate((element) => element.closest(".workbench-sidebar-drawer") !== null),
     true,
@@ -340,7 +346,10 @@ try {
     await page.setViewportSize(viewport);
     const responsiveRail = await rect(".desktop-shell-rail-right");
     const responsiveBrand = await rect(".studio-wordmark");
-    assert.ok(Math.abs(responsiveRail.width - responsiveBrand.width) <= 1, `rail and banner must align at ${viewport.width}x${viewport.height}`);
+    assert.ok(
+      Math.abs(responsiveRail.width - responsiveBrand.width) <= 1,
+      `rail and banner must align at ${viewport.width}x${viewport.height}: ${JSON.stringify({ rail: responsiveRail.width, brand: responsiveBrand.width })}`,
+    );
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `expanded layout must not overflow horizontally at ${viewport.width}x${viewport.height}`);
     const canvasBeforeReview = await rect("#viewer-canvas");
     const reviewToggle = page.locator('#viewer-result-review-toggle');
@@ -380,6 +389,19 @@ try {
   assert.equal(await page.getByText("其他数据来源", { exact: true }).isVisible(), false, "guest users must not see advanced source imports");
   assert.equal(await page.locator("#scene-source-normalize").isVisible(), false, "manual normalization must remain admin-only");
   await page.getByText("浏览 OSM 并截取研究区；车道级细节可继续在画布中编辑。", { exact: true }).waitFor();
+  await page.goto(`${origin}/#viewer`);
+  const recommendedAction = page.locator(".studio-recommended-action");
+  await recommendedAction.waitFor();
+  assert.equal(await recommendedAction.getAttribute("data-recommended-action"), "source", "an empty workflow must recommend the OSM source task");
+  assert.match(await recommendedAction.innerText(), /推荐下一步[\s\S]*选择 OSM 研究区/);
+  await recommendedAction.click();
+  await page.waitForURL(/#scene-graph$/);
+  await page.locator("#scene-osm-aoi-picker .osm-aoi-picker").waitFor({ state: "visible" });
+  assert.equal(
+    await page.evaluate(() => sessionStorage.getItem("roadgen3d:professional-open-osm-picker")),
+    null,
+    "the choose-my-own-OSM action must be consumed after opening the direct AOI workflow",
+  );
   assert.deepEqual(await page.evaluate(() => ({
     guest: localStorage.getItem("roadgen3d-public-session-token"),
     account: localStorage.getItem("roadgen3d-session-token"),

@@ -71,11 +71,6 @@ try {
   assert.deepEqual(pageErrors, [], `viewer initialization errors: ${pageErrors.join(" | ")}`);
 
   const settings = page.locator("#viewer-settings-panel");
-  const warning = page.locator("#viewer-legacy-starter-warning");
-  await page.evaluate(() => {
-    const element = document.querySelector("#viewer-legacy-starter-warning");
-    if (element instanceof HTMLElement) element.hidden = false;
-  });
   await page.locator("#viewer-settings-toggle").waitFor({ state: "attached", timeout: 10_000 });
   console.log("overlay visual: keyboard controller ready");
   await page.keyboard.press("p");
@@ -86,10 +81,7 @@ try {
   );
   console.log("overlay visual: settings opened");
   assert.equal(await settings.getAttribute("aria-hidden"), "false");
-  assert.equal(await page.evaluate(() => {
-    const element = document.querySelector("#viewer-legacy-starter-warning");
-    return element ? getComputedStyle(element).opacity : "missing";
-  }), "0", "stage warning must not cover settings");
+  assert.equal(await page.locator("#viewer-legacy-starter-warning").count(), 0, "retired starter warnings must not be rendered");
   const panelStyle = await settings.evaluate((element) => ({
     backgroundImage: getComputedStyle(element).backgroundImage,
     borderRadius: getComputedStyle(element).borderRadius,

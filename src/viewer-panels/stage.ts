@@ -69,6 +69,9 @@ export function createViewerStageHtml(): string {
       </div>
 
       <div id="viewer-canvas" class="viewer-canvas"></div>
+      <!-- Recent layouts remain available to URL-driven loading, but scene
+           selection and renaming are no longer a user-facing 3D-browse panel. -->
+      <select id="layout-select" hidden aria-hidden="true" tabindex="-1"></select>
 
       <section id="viewer-empty-state" class="viewer-empty-state" aria-live="polite" hidden></section>
 
@@ -79,51 +82,15 @@ export function createViewerStageHtml(): string {
           <small data-starter-demo-summary>真实 OSM · 透明建筑白模 · 代表性街道设施</small>
         </div>
         <div class="viewer-starter-demo-actions">
-          <button type="button" data-starter-action="materialize">使用此示例开始</button>
+          <button type="button" data-starter-action="materialize">复制为我的项目</button>
           <button type="button" data-starter-action="source">选择自己的 OSM 研究区</button>
         </div>
-      </aside>
-
-      <aside id="viewer-legacy-starter-warning" class="viewer-legacy-starter-warning" role="status" aria-live="polite" hidden>
-        <div>
-          <span>GEOMETRY NOTICE</span>
-          <strong data-legacy-starter-title>旧版示例存在已知几何问题</strong>
-          <small data-legacy-starter-summary>当前场景可能出现道路缺角、针状铺装或背景地面暴露。</small>
-        </div>
-        <button type="button" data-starter-action="upgrade">进入已修复的广州 v6 示例</button>
       </aside>
 
       <div id="viewer-design-workspace" class="viewer-design-workspace" hidden></div>
       ${renderConsistencyDebugPanel()}
 
-      <section id="viewer-center-controls" class="viewer-center-controls" data-open="false" aria-labelledby="viewer-center-controls-title">
-        <header class="viewer-center-controls-header">
-          <div>
-            <span class="viewer-center-controls-kicker" data-i18n-key="viewer.sceneBrowser.kicker">SCENE</span>
-            <h2 id="viewer-center-controls-title" data-i18n-key="viewer.sceneBrowser.title">Scene Browser</h2>
-            <p data-i18n-key="viewer.sceneBrowser.description">Choose a generated result or scene. The 3D stage remains visible behind this panel.</p>
-          </div>
-          <button id="viewer-center-controls-close" class="viewer-center-controls-close" type="button" aria-label="Close scene browser" data-i18n-aria-label-key="viewer.sceneBrowser.close">×</button>
-        </header>
-        <div class="viewer-center-controls-body">
-          <label class="desktop-shell-field viewer-scene-browser-only">
-            <span data-i18n-key="viewer.sceneBrowser.myScenes">My scenes</span>
-            <select id="layout-select" class="viewer-select viewer-select-inline" title="My scenes" data-i18n-title-key="viewer.sceneBrowser.myScenes"></select>
-          </label>
-          <div class="viewer-scene-name-editor viewer-scene-browser-only">
-            <label class="desktop-shell-field" for="viewer-scene-name">
-              <span data-i18n-key="viewer.sceneBrowser.name">Scene name</span>
-              <input id="viewer-scene-name" class="viewer-input" type="text" maxlength="48" autocomplete="off" />
-            </label>
-            <button id="viewer-scene-name-save" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="viewer.sceneBrowser.saveName">Save name</button>
-          </div>
-          <label class="desktop-shell-field" hidden>
-            <span data-i18n-key="viewer.left.scene">Scene view</span>
-            <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene view" data-i18n-title-key="viewer.left.scene"></select>
-          </label>
-          <div id="viewer-scheme-compare" class="viewer-scheme-compare" hidden aria-hidden="true"></div>
-        </div>
-      </section>
+      <select id="scene-select" hidden aria-hidden="true" tabindex="-1"></select>
 
       <!-- The comparison engine has no separate UI. Its visible output is
            mounted inside the Scheme A/B/C surface on demand. -->

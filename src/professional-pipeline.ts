@@ -77,7 +77,7 @@ export function renderProfessionalReviewPanelHtml(): string {
         </div>
         <div class="professional-starter-guide-actions">
           <button type="button" data-starter-action="source">从 01A 选择自己的 OSM</button>
-          <button type="button" data-starter-action="materialize">使用此示例开始</button>
+          <button type="button" data-starter-action="materialize">复制为我的项目</button>
         </div>
       </section>
       <ol class="professional-review-checklist">
@@ -91,7 +91,7 @@ export function renderProfessionalReviewPanelHtml(): string {
         <div id="viewer-review-used-assets">生成场景后显示实际放置的资产。</div>
       </section>
       <div class="professional-review-actions">
-        <button id="viewer-result-review-accept" class="viewer-nav-button" type="button" data-i18n-key="professional.review.accept">Accept and continue to evaluation</button>
+        <button id="viewer-result-review-accept" class="viewer-nav-button" type="button" data-i18n-key="professional.review.accept">Accept result and browse 3D scene</button>
         <button id="viewer-result-review-changes" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.edit3d">Edit 3D scene</button>
         <button id="viewer-result-review-annotation" class="viewer-nav-button viewer-nav-button-secondary" type="button" data-i18n-key="professional.review.edit2d">Edit 2D annotation</button>
       </div>

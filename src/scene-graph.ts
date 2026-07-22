@@ -14,6 +14,7 @@ import {
   mountOsmRoadStudyPicker,
   type OsmRoadStudyPickerController,
 } from "./osm-road-study-picker";
+import { consumeProfessionalOsmPickerRequest } from "./professional-entry-intent";
 
 import type {
   AnnotationPoint,
@@ -2881,6 +2882,7 @@ export function mountSceneGraphPage(
     else workflow.setValidatedAnnotation(normalized, fingerprint, { autoApprove: true, expectedDraftFingerprint });
     state.isReferenceImageLoading = false;
     setStatus(sourceStatusEl, status, "success");
+    setStatus(statusEl, status, "success");
     setStatus(graphStatusEl, { key: "sceneGraph.status.graphNormalizedComplete" }, "success");
     renderScenarioDesignOptions();
     renderAll();
@@ -3009,6 +3011,12 @@ export function mountSceneGraphPage(
       if (/^Waiting for the first operation…?$/i.test(source)) return text("sceneGraph.osmProgress.waiting", "正在等待首个处理步骤…");
       return text("sceneGraph.osmProgress.processing", "正在处理 OSM 数据…");
     };
+    const visibleMessage = message(job.message);
+    const visibleTone: StatusTone = job.status === "failed"
+      ? "error"
+      : job.status === "succeeded" ? "success" : "neutral";
+    setStatus(sourceStatusEl, visibleMessage, visibleTone);
+    setStatus(statusEl, visibleMessage, visibleTone);
     const elementCount = String(job.detail?.element_count ?? "—");
     const attempt = String(job.detail?.attempt ?? "—");
     const maxAttempts = String(job.detail?.max_attempts ?? "—");
@@ -3017,7 +3025,7 @@ export function mountSceneGraphPage(
       <section class="osm-acquisition-progress" data-status="${escapeHtml(job.status)}">
         <div class="osm-acquisition-progress-card">
           <span class="osm-acquisition-kicker">${escapeHtml(text("sceneGraph.osmProgress.kicker", "OSM Acquisition"))} · ${escapeHtml(stage(job.stage))}</span>
-          <h2>${escapeHtml(message(job.message))}</h2>
+          <h2>${escapeHtml(visibleMessage)}</h2>
           <div class="osm-acquisition-progress-track" data-indeterminate="${String(indeterminate)}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${job.progress}">
             <i style="--osm-progress:${job.progress}%"></i>
           </div>
@@ -3082,6 +3090,11 @@ export function mountSceneGraphPage(
       },
       onBack: () => mountProfessionalAoiPicker(),
     });
+    const roadSelectionStatus = loadViewerLanguage() === "zh"
+      ? "地图数据获取完成。下一步：在地图上选择一条重点道路。"
+      : "Map data is ready. Next: select a focus road on the map.";
+    setStatus(sourceStatusEl, roadSelectionStatus, "success");
+    setStatus(statusEl, roadSelectionStatus, "success");
     updateOsmPickerVisibility();
   }
 
@@ -3142,7 +3155,11 @@ export function mountSceneGraphPage(
     renderProfessionalAoiSummary();
     const token = workflow.beginRequest("osm");
     workflow.clearError();
-    setStatus(sourceStatusEl, "Starting the OSM acquisition job…", "neutral");
+    const startingStatus = loadViewerLanguage() === "zh"
+      ? "正在启动地图数据获取任务…"
+      : "Starting the map data acquisition job…";
+    setStatus(sourceStatusEl, startingStatus, "neutral");
+    setStatus(statusEl, startingStatus, "neutral");
     try {
       const job = await createOsmAcquisitionJob({
         source_id: `${state.annotation.plan_id || "source"}_osm_context`,
@@ -3231,6 +3248,7 @@ export function mountSceneGraphPage(
       ["必需街道家具", `${furnitureCount} 个`],
       ["输出方式", "创建新的可追溯 3D 版本"],
     ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+    shell.sidebar.close();
     generationConfirmDialog.hidden = false;
     window.requestAnimationFrame(() => generationConfirmOpenButton?.focus());
   }
@@ -7466,11 +7484,16 @@ export function mountSceneGraphPage(
   renderScenarioDesignOptions();
   const initialWorkflowSnapshot = workflow.getSnapshot();
   if (!courseMode && osmPickerHostEl) {
-    if (initialWorkflowSnapshot.normalized) professionalOsmStage = "annotation";
+    const forceOsmPicker = consumeProfessionalOsmPickerRequest();
+    if (forceOsmPicker) {
+      workflow.transition("source");
+      storeProfessionalOsmJob(null);
+      mountProfessionalAoiPicker();
+    } else if (initialWorkflowSnapshot.normalized) professionalOsmStage = "annotation";
     else mountProfessionalAoiPicker();
     let retainedJobId = "";
     try { retainedJobId = window.sessionStorage.getItem(PROFESSIONAL_OSM_JOB_KEY) ?? ""; } catch { retainedJobId = ""; }
-    if (!initialWorkflowSnapshot.normalized && retainedJobId) {
+    if (!forceOsmPicker && !initialWorkflowSnapshot.normalized && retainedJobId) {
       void loadOsmAcquisitionJob(retainedJobId)
         .then((job) => pollProfessionalOsmJob(job))
         .catch(() => {

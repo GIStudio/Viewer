@@ -12,6 +12,8 @@ import {
 } from "../viewer-i18n";
 import type { ViewerLanguage } from "../viewer-i18n";
 import { professionalPipelineStage } from "../professional-pipeline";
+import { requestProfessionalOsmPicker } from "../professional-entry-intent";
+import { resolveProfessionalNextAction } from "../professional-next-action";
 import { WORKFLOW_STEPS, WORKFLOW_UNDO_EVENT, workflowRoute } from "../workflow-controller";
 import type { WorkflowController, WorkflowStep } from "../workflow-controller";
 import type { WorkbenchShellMode } from "../shell-types";
@@ -71,6 +73,24 @@ export function ViewerDesktopShell({
     ? "prepare"
     : professionalPipelineStage(workflowSnapshot);
   const professionalStageLabel = t(`professional.stage.${professionalStage}`, professionalStage);
+  const nextAction = resolveProfessionalNextAction(workflowSnapshot);
+
+  const openRecommendedAction = (): void => {
+    if (nextAction.key === "source") requestProfessionalOsmPicker();
+    if (route !== nextAction.route) navigateTo(nextAction.route);
+    if (!nextAction.selector) return;
+    let attempts = 0;
+    const openWhenReady = (): void => {
+      const target = document.querySelector<HTMLElement>(nextAction.selector!);
+      if (target) {
+        target.click();
+        return;
+      }
+      attempts += 1;
+      if (attempts < 40) window.setTimeout(openWhenReady, 50);
+    };
+    window.setTimeout(openWhenReady, route === nextAction.route ? 0 : 50);
+  };
   const railKeys = route === "scene-graph"
     ? {
       leftKicker: "shell.scene-graph.left.kicker",
@@ -144,6 +164,16 @@ export function ViewerDesktopShell({
                   <strong>{t(`route.${route}.label`, ROUTES[route].label)}</strong>
                 </span>
                 <span className="studio-professional-context-stage">{professionalStageLabel}</span>
+                <button
+                  type="button"
+                  className="studio-recommended-action"
+                  data-recommended-action={nextAction.key}
+                  onClick={openRecommendedAction}
+                >
+                  <small>{language === "zh" ? "推荐下一步" : "NEXT RECOMMENDED"}</small>
+                  <strong>{nextAction.label[language]}</strong>
+                  <span aria-hidden="true">→</span>
+                </button>
               </div>
             )}
             actions={(

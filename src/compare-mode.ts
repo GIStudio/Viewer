@@ -737,11 +737,11 @@ export function createCompareMode(deps: CompareModeDependencies) {
     ], t("Final Scene", "最终场景"));
   }
 
-  async function enterCompareSceneSet(items: CompareSceneSetItem[], stepLabel = ""): Promise<void> {
+  async function enterCompareSceneSet(items: CompareSceneSetItem[], stepLabel = ""): Promise<boolean> {
     const viewableItems = items.filter((item) => item.glbUrl);
     if (viewableItems.length < 2) {
       deps.flashStatus(t("At least two schemes are required for split view.", "至少需要两个方案才能分屏对比。"));
-      return;
+      return false;
     }
     deps.setStatus(t("Loading split-screen comparison...", "正在加载分屏对比..."));
     try {
@@ -758,9 +758,11 @@ export function createCompareMode(deps: CompareModeDependencies) {
       const activeMessage = t("Split-screen mode active. WASD moves all views.", "分屏模式已开启，WASD 会同步移动所有视图。");
       deps.setStatus(activeMessage);
       deps.flashStatus(activeMessage);
+      return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("Failed to load scenes.", "场景加载失败。");
       deps.flashStatus(msg);
+      return false;
     }
   }
 
@@ -847,12 +849,17 @@ export function createCompareMode(deps: CompareModeDependencies) {
     }
   }
 
+  function forEachCompareRoot(callback: (root: THREE.Object3D) => void): void {
+    compareRoots.forEach(callback);
+  }
+
   return {
     runComparison,
     enterCompare3d,
     enterCompareSceneSet,
     exitCompare3d,
     renderCompare3dFrame,
+    forEachCompareRoot,
     refreshLanguage,
     isCompare3dActive: () => compare3dActive,
   };

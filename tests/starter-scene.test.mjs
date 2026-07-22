@@ -25,10 +25,8 @@ assert.match(stage, /data-starter-action="materialize"/, "the demo banner must o
 assert.match(stage, /data-starter-action="source"/, "the demo banner must link to the user's OSM workflow");
 assert.match(stage, /透明建筑白模/, "the starter banner must describe its complete intersection context");
 assert.doesNotMatch(stage, /无家具/, "the complete starter must not be described as furniture-free");
-assert.match(stage, /id="viewer-legacy-starter-warning"/, "legacy starters must display a geometry warning in the stage");
-assert.match(stage, /data-starter-action="upgrade"/, "the legacy warning must link to the repaired default starter");
-assert.match(stage, /广州 v6 示例/, "the legacy warning must name the repaired v6 starter");
-assert.match(starter, /guangzhou_complete_intersection_v5/, "v5 must remain classified as a legacy starter");
+assert.doesNotMatch(stage, /viewer-legacy-starter-warning/, "the stage must not explain retired starters with a geometry-warning banner");
+assert.doesNotMatch(app, /legacyStarterSceneIdFromPath/, "a generated layout path must never be mistaken for a retired starter");
 assert.match(app, /await loadStarterScenePreview\(\)/, "an empty professional workflow must load the starter preview");
 assert.match(
   app,
@@ -42,7 +40,13 @@ assert.doesNotMatch(
 );
 assert.match(app, /workflow\.setStarterPreview\(starter\.id\)/, "starter loading must publish the transient review state");
 assert.match(app, /frameSceneFocus\(starter\.focus_xz, starter\.focus_extent_m\)/, "starter loading must frame the cross junction rather than the full corridor");
-assert.match(app, /shell\.sidebar\.activate\("review"\)/, "first-open onboarding must activate the 03 review page");
+assert.match(app, /STARTER_REVIEW_ONBOARDING_KEY/, "starter review onboarding must be tracked separately from normal 3D navigation");
+assert.match(app, /hostOptions\.showStarterReviewOnLoad !== false/, "the starter review must be suppressible for a 2D-to-3D handoff");
+assert.match(routeIsland, /showStarterReviewOnLoad: pendingViewerTarget === null/, "a pending 2D-to-3D target must suppress the starter review dialog");
+assert.match(app, /copyStarterToProject/, "copying the starter must materialize an owned project revision");
+assert.match(app, /hostOptions\.onStarterCopied\?\.\(\)/, "a successful starter copy must notify the workbench shell");
+assert.match(routeIsland, /onStarterCopied:[\s\S]*desktop-shell-modal-close[\s\S]*shell\.sidebar\.activate\("public-space"\)/, "a successful starter copy must close the review dialog and open the bulletin-board sidebar");
+assert.match(stage, /复制为我的项目/, "the demo copy action must describe the ownership transition");
 assert.match(pipeline, /id="viewer-starter-review-guide"/, "03 must explain how 01A and 02 produce a user scene");
 assert.doesNotMatch(pipeline, /<b>01B<\/b>/, "the hidden asset step must not return in the starter guide");
 assert.match(
@@ -53,8 +57,6 @@ assert.match(
 assert.doesNotMatch(app, /fallbackCandidates/, "startup must never silently substitute an arbitrary recent scene");
 assert.match(app, /The scene contains no usable road geometry or has invalid bounds/, "starter loading must reject empty or invalid scene bounds");
 assert.match(selection, /persistSelectionInUrl !== false/, "preview loading must not write its manifest into the URL");
-assert.match(app, /legacyStarterSceneIdFromPath\(currentLayoutPath\)/, "layout loading must identify retired starter packages");
-assert.match(app, /url\.searchParams\.delete\("layout"\)/, "upgrading a legacy starter must remove its explicit layout URL");
 assert.match(hitInfo, /"context_ground", "context_ground_base"/, "hit inspection must support old and new background-ground node names");
 assert.match(hitInfo, /场景底板；正常情况下仅在道路与铺装范围之外可见。/, "Chinese hit inspection must explain the background-ground contract");
 assert.match(hitInfo, /Selecting this object inside the road area usually indicates a gap/, "English hit inspection must retain the geometry diagnostic");

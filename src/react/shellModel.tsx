@@ -92,7 +92,6 @@ export const menuGroups: ShellMenuGroup[] = [
     id: "tools",
     icon: <ToolOutlined />,
     actions: [
-      { id: "tools-open-scenes", labelKey: "menu.tools.scenes", fallback: "My Scenes" },
       { id: "tools-open-settings", labelKey: "menu.tools.settings", fallback: "Settings", icon: <SlidersOutlined /> },
       { id: "tools-open-design", labelKey: "menu.tools.design", fallback: "Design" },
       { id: "tools-open-evaluate", labelKey: "menu.tools.evaluate", fallback: "Evaluate" },

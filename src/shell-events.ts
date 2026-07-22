@@ -10,7 +10,6 @@ export type ShellMenuActionId =
   | "file-save-context"
   | "view-reset-view"
   | "tools-open-settings"
-  | "tools-open-scenes"
   | "tools-open-design"
   | "tools-open-evaluate"
   | "tools-open-compare"

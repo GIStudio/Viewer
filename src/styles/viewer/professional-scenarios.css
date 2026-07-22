@@ -83,7 +83,11 @@
 .viewer-scenario-version > div strong { font: 900 0.7rem/1 ui-monospace, monospace; }
 .viewer-scenario-version > div small { overflow: hidden; color: #58707a; font-size: 0.59rem; text-overflow: ellipsis; white-space: nowrap; }
 .viewer-scenario-version em { padding: 0.18rem 0.28rem; color: #102d3a; background: #f4c430; font: 850 0.49rem/1 ui-monospace, monospace; font-style: normal; letter-spacing: 0.06em; }
-.viewer-scenario-lane-empty { display: grid; place-items: center; min-height: 100%; margin: 0; padding: 0.55rem; color: #718185; border: 1px dashed #b8c1bf; font-size: 0.59rem; text-align: center; }
+.viewer-scenario-lane-empty { display: grid; place-items: center; align-content: center; gap: 0.45rem; min-height: 100%; margin: 0; padding: 0.55rem; color: #718185; border: 1px dashed #b8c1bf; font-size: 0.59rem; text-align: center; }
+.viewer-scenario-lane-empty p { margin: 0; }
+.viewer-scenario-lane-empty small { color: #58707a; font-size: 0.56rem; line-height: 1.35; }
+.viewer-scenario-lane-action { padding: 0.38rem 0.55rem; border: 1px solid #174b64; color: #fff; background: #174b64; box-shadow: 2px 2px 0 #f4c430; font: 800 0.62rem/1 var(--rg-body-font); cursor: pointer; }
+.viewer-scenario-lane-action:hover, .viewer-scenario-lane-action:focus-visible { color: #102d3a; background: #b9d9cc; }
 
 .viewer-scenario-solver { display: grid; gap: 0.45rem; padding: 0.75rem; border-top: 3px double #102d3a; background: rgba(185, 217, 204, 0.28); }
 .viewer-scenario-solver > strong { font-size: 0.78rem; }
@@ -157,6 +161,8 @@
 .viewer-scenario-detail > header p { margin: 0; color: #58707a; font-size: 0.65rem; }
 .viewer-scenario-detail > header button { flex: 0 0 auto; min-height: 2.25rem; padding: 0.45rem 0.7rem; border: 1px solid #102d3a; color: #fff; background: #174b64; box-shadow: 3px 3px 0 #f4c430; font-size: 0.66rem; font-weight: 850; cursor: pointer; }
 .viewer-scenario-detail > header button:disabled { color: #58707a; background: #e8e7df; box-shadow: none; cursor: default; }
+.viewer-scenario-detail-actions { display: flex; flex: 0 0 auto; align-items: stretch; gap: 0.45rem; }
+.viewer-scenario-detail-actions .viewer-scenario-split-button { color: #102d3a; background: #fffef9; box-shadow: none; }
 .viewer-scenario-detail h4 { margin: 0; color: #df654f; font: 900 0.6rem/1 ui-monospace, monospace; letter-spacing: 0.08em; text-transform: uppercase; }
 .viewer-scenario-trace { display: grid; gap: 0.55rem; padding: 0.85rem 0; }
 .viewer-scenario-trace dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0; background: #a9b5b5; border: 1px solid #a9b5b5; }

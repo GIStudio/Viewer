@@ -34,6 +34,7 @@ import {
   exportOwnedPublicProject,
   evaluateOwnedPublicProject,
   createProfessionalScenarioAdapter,
+  copyProfessionalStarterToOwnedProject,
   openProfessionalPublicProject,
   persistProfessionalPublicCommands,
 } from "../professional-public-project";
@@ -121,9 +122,6 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       }
       if (target === "browse") {
         host.querySelector<HTMLButtonElement>("#viewer-mode-3d")?.click();
-        host.dispatchEvent(new CustomEvent(SHELL_ACTION_EVENT, {
-          detail: { actionId: "tools-open-scenes" },
-        }));
         return;
       }
       if (target === "review") {
@@ -300,7 +298,6 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       if (badge) badge.textContent = options.badge;
     };
 
-    let previousReviewStatus = workflow.getSnapshot().sceneReviewStatus;
     let previousSceneStale = false;
     let staleAttentionTimer: number | null = null;
     const syncProfessionalNavigation = () => {
@@ -366,14 +363,6 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
           staleAttentionTimer = null;
         }, 1500);
       }
-      if (
-        route === "viewer"
-        && snapshot.sceneReviewStatus === "pending"
-        && previousReviewStatus !== "pending"
-      ) {
-        shell.openModalTab("review");
-      }
-      previousReviewStatus = snapshot.sceneReviewStatus;
       previousSceneStale = sceneIsStale;
     };
 
@@ -411,6 +400,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
           routeTeardown = mountAssetEditor(shell, workflow);
           break;
         default:
+          const pendingViewerTarget = consumeProfessionalViewerTarget();
           void mountViewer(shell, workflow, {
             baselineCoordinator,
             persistSceneCommands: (commands, context) => persistProfessionalPublicCommands(
@@ -422,14 +412,23 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
             runProjectEvaluation: (weights) => evaluateOwnedPublicProject(professionalSession, workflow, weights),
             assetPaletteAdapter: createProfessionalAssetPaletteAdapter(professionalSession),
             scenarioAdapter: createProfessionalScenarioAdapter(professionalSession, workflow),
+            copyStarterToProject: (layoutPath) => copyProfessionalStarterToOwnedProject(
+              professionalSession,
+              workflow,
+              layoutPath,
+            ),
+            onStarterCopied: () => {
+              shell.root.querySelector<HTMLButtonElement>(".desktop-shell-modal-close")?.click();
+              shell.sidebar.activate("public-space");
+            },
+            showStarterReviewOnLoad: pendingViewerTarget === null,
             modalTabs: professionalModalTabs,
           })
             .then((teardown) => {
               routeTeardown = teardown;
               if (cancelled) routeTeardown();
               if (!cancelled) {
-                const pendingTarget = consumeProfessionalViewerTarget();
-                if (pendingTarget) activateViewerTarget(pendingTarget);
+                if (pendingViewerTarget) activateViewerTarget(pendingViewerTarget);
                 syncProfessionalNavigation();
               }
             })

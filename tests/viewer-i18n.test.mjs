@@ -57,8 +57,7 @@ try {
   await selectLanguage(page, "zh");
   await page.getByText("3D 场景生成", { exact: true }).first().waitFor();
   await page.getByText("控制菜单", { exact: true }).first().waitFor({ state: "attached" });
-  await page.locator("#viewer-center-controls").evaluate((element) => element.setAttribute("data-open", "true"));
-  await page.locator("#viewer-center-controls-title").getByText("我的场景", { exact: true }).waitFor();
+  assert.equal(await page.locator("#viewer-center-controls").count(), 0, "the retired scene browser panel must not be rendered");
   await page.locator('[data-shell-tab="settings"]').click();
   await page.locator("#viewer-settings-panel[data-open=\"true\"]").waitFor();
   await page.getByText("光照预设、阴影和激光指示器", { exact: true }).waitFor({ state: "attached" });
