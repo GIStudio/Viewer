@@ -49,6 +49,7 @@ export type ProfessionalScenarioWorkspace = {
 export type ProfessionalScenarioAdapter = {
   load(): Promise<ProfessionalScenarioWorkspace>;
   open(revisionId: string): Promise<ProfessionalScenarioOpenTarget>;
+  evaluate(revisionId: string): Promise<void>;
   prepareManualEdit(): Promise<ProfessionalScenarioOpenTarget>;
   generate(goalWeights: ScenarioGoalWeights): Promise<ProfessionalScenarioGeneration>;
   compare(revisionIds: string[]): Promise<ScenarioComparisonItem[]>;
@@ -154,6 +155,9 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
     const parent = scenarios.find((item) => item.id === scenario.parentId);
     const weights = Object.entries(scenario.goalWeights).filter(([, value]) => Number.isFinite(value) && value > 0);
     const branch = scenario.shortLabel.slice(0, 1);
+    const hasScores = ["walkability", "safety", "beauty", "overall"].some((key) => typeof scenario.scores[key] === "number");
+    const evaluationDisabled = !workspace?.canWrite || busy;
+    const evaluationTitle = !workspace?.canWrite ? ` title="${escapeHtml(unavailableReason())}"` : "";
     return `<div class="viewer-scenario-detail" data-branch="${escapeHtml(branch)}">
       <header>
         <div><span>${escapeHtml(scenario.shortLabel)} · ${escapeHtml(branchTitle(branch as "A" | "B" | "C"))}</span><h3>${escapeHtml(scenario.title)}</h3><p>${scenario.current ? (zh() ? "当前正在主画布中显示" : "Currently shown on the main canvas") : (zh() ? "查看属性后，可确认切换主画布" : "Review the properties before opening it on the main canvas")}</p></div>
@@ -177,7 +181,7 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
       <div class="viewer-scenario-property-grid">
         <section><h4>${zh() ? "道路骨架" : "Road skeleton"}</h4>${parameterRows(scenario.skeleton)}</section>
         <section><h4>${zh() ? "街道家具" : "Street furniture"}</h4>${parameterRows(scenario.furniture)}</section>
-        <section class="viewer-scenario-detail-scores"><h4>${zh() ? "场景评分" : "Scene scores"}</h4>${["walkability", "safety", "beauty", "overall"].map((key) => `<p><span>${escapeHtml(key)}</span><strong>${score(scenario.scores[key])}</strong></p>`).join("")}</section>
+        <section class="viewer-scenario-detail-scores"><h4>${zh() ? "场景评分" : "Scene scores"}</h4>${["walkability", "safety", "beauty", "overall"].map((key) => `<p><span>${escapeHtml(key)}</span><strong>${score(scenario.scores[key])}</strong></p>`).join("")}${hasScores ? "" : `<button type="button" class="viewer-scenario-score-fetch" data-scenario-evaluate="${escapeHtml(scenario.id)}" ${evaluationDisabled ? "disabled" : ""}${evaluationTitle}>${busy ? (zh() ? "正在获取评分…" : "Fetching scores…") : (zh() ? "获取评分" : "Fetch scores")}</button>`}</section>
       </div>
     </div>`;
   }
@@ -333,6 +337,16 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
     if (target.dataset.scenarioAction === "details") {
       comparison = [];
       render();
+    }
+    if (target.dataset.scenarioEvaluate) {
+      busy = true;
+      message = zh() ? "正在获取场景评分…" : "Fetching scene scores…";
+      render();
+      void options.adapter.evaluate(target.dataset.scenarioEvaluate).then(async () => {
+        await load(true);
+        message = zh() ? "场景评分已更新。" : "Scene scores updated.";
+        render();
+      }).catch((error) => { message = String(error); busy = false; render(); });
     }
     if (target.dataset.scenarioOpen) {
       busy = true; message = zh() ? "正在载入所选方案…" : "Opening scenario…"; render();

@@ -446,6 +446,22 @@ export function createProfessionalScenarioAdapter(
       if (owned) return openProfessionalOwnedRevision(session, workflow, projectId, revision);
       return openProfessionalReadOnlyRevision(session, workflow, projectId, revision);
     },
+    async evaluate(revisionId): Promise<void> {
+      const projectId = currentProjectId();
+      if (!projectId) throw new Error("当前没有可评价的项目场景。");
+      if (!session.getSnapshot().projects.some((project) => project.id === projectId)) {
+        throw new Error("当前公共项目为只读，不能获取评分。");
+      }
+      const profiles = await session.api.request<{ items: EvaluationProfile[] }>(`/api/v1/projects/${projectId}/evaluation-profiles`);
+      const profile = profiles.items.find((item) => item.is_default) ?? profiles.items[0];
+      if (!profile) throw new Error("当前项目没有可用的评价配置。");
+      const created = await session.api.post<{ evaluation: EvaluationRun; job: PlatformJob | null }>(
+        `/api/v1/projects/${projectId}/evaluations`,
+        { revision_id: revisionId, profile_id: profile.id, evaluation_mode: "full", auto_run: true },
+      );
+      if (created.job) await waitForProjectJob(session, created.job);
+      await session.refreshPublicProjects().catch(() => []);
+    },
     async prepareManualEdit(): Promise<ProfessionalScenarioOpenTarget> {
       const projectId = currentProjectId();
       if (!projectId) throw new Error("当前没有可编辑的项目场景。");

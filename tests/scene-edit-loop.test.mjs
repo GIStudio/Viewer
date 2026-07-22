@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = (name) => readFile(new URL(`../src/${name}`, import.meta.url), "utf8");
-const [api, editor, autosave, assets, commands, course, shortcut, styles, app, stage, editStatus, editStatusStyles, publicProject, routeIsland] = await Promise.all([
+const [api, editor, autosave, assets, commands, course, shortcut, styles, app, stage, editStatus, editStatusStyles, publicProject, routeIsland, sceneHelpers] = await Promise.all([
   read("viewer-api.ts"),
   read("viewer-scene-object-editor.ts"),
   read("viewer-scene-edit-autosave.ts"),
@@ -17,6 +17,7 @@ const [api, editor, autosave, assets, commands, course, shortcut, styles, app, s
   read("styles/viewer/object-edit-status.css"),
   read("professional-public-project.ts"),
   read("react/RouteIsland.tsx"),
+  read("viewer-scene-helpers.ts"),
 ]);
 
 for (const op of ["move_instance", "rotate_instance", "scale_instance", "add_instance", "delete_instance", "duplicate_instance", "replace_asset"]) {
@@ -71,6 +72,9 @@ assert.match(editStatusStyles, /viewer-object-edit-status\[hidden\]/);
 assert.match(app, /function setObjectEditingEnabled\(enabled: boolean/);
 assert.match(app, /sceneObjectEditor\.exit\(\)/);
 assert.match(app, /assetBboxEnabledBeforeEditing/);
+assert.match(app, /showLabels: true/);
+assert.match(app, /showLabels: false/);
+assert.match(sceneHelpers, /options\.showLabels/);
 assert.match(app, /const result = sceneObjectEditor\.cancelStep\(\)/);
 assert.match(app, /result === "nothing_to_cancel"/);
 assert.match(app, /setObjectEditingEnabled\(false, \{ announce: false \}\)/);

@@ -50,7 +50,7 @@ export type StreetDesignParameterSpec = {
 type NumericControl = {
   values: Record<Level, number>;
   minimum: number;
-  maximum: number;
+  maximum?: number;
   unit?: string;
 };
 
@@ -237,12 +237,24 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
     const rows = (["laneCount", "laneWidthM", "sidewalkWidthM", "furnishingWidthM"] as const).map((field) => {
       const value = spec!.skeleton[field];
       const control = controls!.skeleton[field];
-      return `<div class="viewer-parameter-row"><div><strong>${SKELETON_LABELS[field]}</strong><small>${formatNumber(value)}${unitLabel(control.unit)}</small></div>${levelSelect(field, value, sourceValues[field] != null)}${deps.allowCustom ? `<input data-skeleton-custom="${field}" type="number" min="${control.minimum}" max="${control.maximum}" step="${field === "laneCount" ? 1 : 0.05}" value="${value}" />` : ""}</div>`;
+      const maximumAttribute = Number.isFinite(control.maximum) ? ` max="${control.maximum}"` : "";
+      const note = field === "laneWidthM"
+        ? `<small>可参数化调整；仅要求不小于 ${formatNumber(control.minimum)}m。</small>`
+        : "";
+      return `<div class="viewer-parameter-row"><div><strong>${SKELETON_LABELS[field]}</strong><small>${formatNumber(value)}${unitLabel(control.unit)}</small>${note}</div>${levelSelect(field, value, sourceValues[field] != null)}${deps.allowCustom ? `<input data-skeleton-custom="${field}" type="number" min="${control.minimum}"${maximumAttribute} step="${field === "laneCount" ? 1 : 0.05}" value="${value}" />` : ""}</div>`;
     }).join("");
     const radius = spec.skeleton.junctionCornerRadiusM ?? controls.skeleton.junctionCornerRadiusM.values.medium;
     const totalWidth = calculateTotalWidth(spec);
     deps.skeletonHostEl.innerHTML = `
       <div class="viewer-parameter-ledger">${rows}
+        <div class="viewer-parameter-locked-source-row">
+          <div><strong>来源中心线与路口拓扑</strong><small>来自已批准的 2D 标注；改变连接关系会使当前 3D 版本不再可追溯。</small></div>
+          <select disabled aria-label="来源中心线与路口拓扑已锁定"><option>已锁定 · 返回 01A 标注修改</option></select>
+        </div>
+        <div class="viewer-parameter-locked-source-row">
+          <div><strong>既有建筑轮廓</strong><small>用于避让与上下文对齐；生成仅改变 3D 表达，不会移动或覆盖来源 footprint。</small></div>
+          <select disabled aria-label="既有建筑轮廓已锁定"><option>已锁定 · 返回 01A 标注修改</option></select>
+        </div>
         <div class="viewer-parameter-row"><div><strong>${SKELETON_LABELS.junctionCornerRadiusM}</strong><small>${spec.skeleton.junctionCornerPolicy === "source" ? "保持标注" : `${formatNumber(radius)}m`}</small></div>
           <select data-junction-policy><option value="source" ${spec.skeleton.junctionCornerPolicy === "source" ? "selected" : ""}>保持标注</option><option value="auto" ${spec.skeleton.junctionCornerPolicy === "auto" ? "selected" : ""}>自动适配</option><option value="low" ${spec.skeleton.junctionCornerPolicy === "fixed" && levelFor(controls.skeleton.junctionCornerRadiusM, radius) === "low" ? "selected" : ""}>低 · 3.0m</option><option value="medium" ${spec.skeleton.junctionCornerPolicy === "fixed" && levelFor(controls.skeleton.junctionCornerRadiusM, radius) === "medium" ? "selected" : ""}>中 · 5.5m</option><option value="high" ${spec.skeleton.junctionCornerPolicy === "fixed" && levelFor(controls.skeleton.junctionCornerRadiusM, radius) === "high" ? "selected" : ""}>高 · 8.0m</option>${deps.allowCustom ? `<option value="custom" ${spec.skeleton.junctionCornerPolicy === "fixed" && levelFor(controls.skeleton.junctionCornerRadiusM, radius) === "custom" ? "selected" : ""}>自定义 · ${formatNumber(radius)}m</option>` : ""}</select>
           ${deps.allowCustom ? `<input data-junction-radius type="number" min="1" max="20" step="0.1" value="${radius}" />` : ""}</div>
@@ -374,7 +386,12 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
     for (const field of ["laneCount", "laneWidthM", "sidewalkWidthM", "furnishingWidthM"] as const) {
       const value = spec.skeleton[field];
       const control = controls.skeleton[field];
-      if (!Number.isFinite(value) || value < control.minimum || value > control.maximum) issues.push(`${SKELETON_LABELS[field]}超出允许范围。`);
+      if (!Number.isFinite(value) || value < control.minimum || (control.maximum != null && value > control.maximum)) {
+        const range = control.maximum != null
+          ? `${formatNumber(control.minimum)}–${formatNumber(control.maximum)}${unitLabel(control.unit)}`
+          : `不小于 ${formatNumber(control.minimum)}${unitLabel(control.unit)}`;
+        issues.push(`${SKELETON_LABELS[field]}必须${range}。`);
+      }
     }
     if (spec.skeleton.median.enabled && spec.skeleton.laneCount < 2) issues.push("设置中岛至少需要两条车道。 ");
     if (spec.skeleton.busStop.enabled && spec.skeleton.furnishingWidthM < 0.6) issues.push("公交站至少需要0.6m设施带。 ");
@@ -403,7 +420,9 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
         derive_parameters_with_llm: false,
         knowledge_source: "none",
         street_design_parameter_spec: structuredClone(spec),
-        street_design_parameter_field_sources: { ...fieldSources },
+        // The generation endpoint consumes this canonical key while compiling
+        // the submitted spec.  Keep the exact UI provenance with the values.
+        parameter_sources_by_field: { ...fieldSources },
         // The browser performs 3D review captures after loading the result.
         // Do not make a non-essential server capture block a usable GLB at 99%.
         capture_3d_views: false,

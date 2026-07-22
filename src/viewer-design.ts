@@ -213,12 +213,16 @@ export function describeDesignJobProgress(payload: SceneJobStatusPayload): {
     stage = payload.stage || "processing";
   }
 
-  if (typeof payload.progress === "number" && payload.progress > 0) {
-    progress = Math.round(payload.progress);
+  const stageProgressFloor = Math.max(0, Math.min(100, Math.round(progress)));
+  if (typeof payload.progress === "number" && Number.isFinite(payload.progress)) {
+    progress = Math.max(stageProgressFloor, Math.max(0, Math.min(100, Math.round(payload.progress))));
   }
 
   const operations = payload.operations as SceneJobOperation[] | undefined;
   const currentOp = operations?.[operations.length - 1];
+  if (currentOp && typeof currentOp === "object" && typeof currentOp.progress === "number" && Number.isFinite(currentOp.progress)) {
+    progress = Math.max(progress, Math.max(0, Math.min(100, Math.round(currentOp.progress))));
+  }
   if (typeof currentOp === "string" && currentOp.trim()) {
     message = currentOp;
   } else if (currentOp && typeof currentOp === "object") {

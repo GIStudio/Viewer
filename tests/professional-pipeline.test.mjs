@@ -27,6 +27,7 @@ const entryIntent = read("src/professional-entry-intent.ts");
 const nextAction = read("src/professional-next-action.ts");
 const publicPanels = read("src/professional-account-panels.ts");
 const sceneGraphToolbar = read("src/styles/scene-graph/toolbar-stage.css");
+const visualStyle = read("src/viewer-visual-style.ts");
 
 assert.match(workflow, /type AssetPreparationChoice = "current_manifest" \| "default_transparent_massing" \| null/);
 assert.match(workflow, /export type AssetCandidateManifest/);
@@ -46,6 +47,8 @@ assert.match(pipeline, /if \(snapshot\.sceneReviewStatus === "accepted" \|\| sna
 assert.match(routeIsland, /01A/);
 assert.doesNotMatch(routeIsland, /id: "prepare-assets"/);
 assert.match(routeIsland, /storeProfessionalViewerTarget/);
+assert.doesNotMatch(routeIsland, /请先登录，再创建、生成、编辑或评价个人场景。/, "local OSM annotation and 3D generation must not be blocked by account initialization");
+assert.doesNotMatch(routeIsland, /const workspaceReady/, "account status is optional persistence state, not a prerequisite for the local workflow");
 assert.doesNotMatch(routeIsland, /model-input-audit/);
 assert.doesNotMatch(routeIsland, /mountModelInputBrowser/);
 assert.doesNotMatch(designPanel, /strategyTab\("assets"/);
@@ -116,6 +119,11 @@ assert.match(settingsPanel, /id="building-opacity"/);
 assert.match(settingsPanel, /仅调整查看器中的建筑显示|viewer\.settings\.buildingOpacityHint/);
 assert.match(app, /function applyBuildingOpacity/);
 assert.match(app, /viewerOriginalTransparent/);
+assert.match(app, /roadgenMassingOutline/);
+assert.match(app, /child\.visible = nextOpacity < 0\.999/);
+assert.match(visualStyle, /function hasAuthoredBaseColorTexture/);
+assert.match(visualStyle, /authoredTexturePreserved/);
+assert.match(visualStyle, /if \(authoredTexturePreserved\) \{[\s\S]*return;/, "analytical finish must not override authored road and pavement textures");
 assert.match(scenarios, /data-scenario-weight="\$\{key\}"/);
 assert.match(scenarios, /至少两个目标需大于 0/);
 assert.match(scenarios, /three local variants/);

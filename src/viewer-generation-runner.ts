@@ -54,6 +54,47 @@ type ViewerGenerationRunnerDeps = {
 
 const POLL_INTERVAL_MS = 1000;
 const MAX_POLL_ATTEMPTS = 900;
+const STAGE_PROGRESS: Readonly<Record<string, number>> = {
+  queued: 5,
+  context_resolving: 15,
+  asset_loading: 25,
+  graph_parsing: 30,
+  layout_generation: 40,
+  constraint_solving: 50,
+  asset_composition: 65,
+  mesh_generation: 75,
+  glb_export: 88,
+  scene_rendering: 95,
+  finalizing: 96,
+  evaluation: 99,
+  succeeded: 100,
+};
+
+function clampProgress(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function estimateProgress(payload: SceneJobStatusPayload): number {
+  if (payload.status === "succeeded") return 100;
+  const stage = String(payload.stage || payload.status || "running").trim();
+  const stageProgress = STAGE_PROGRESS[stage] ?? 50;
+  let progress = Number(payload.progress ?? stageProgress);
+  if (!Number.isFinite(progress) || progress < stageProgress) {
+    progress = stageProgress;
+  }
+  const operations = payload.operations ?? [];
+  const currentOp = operations[operations.length - 1];
+  if (
+    currentOp
+    && typeof currentOp === "object"
+    && typeof currentOp.progress === "number"
+    && Number.isFinite(currentOp.progress)
+    && currentOp.progress > progress
+  ) {
+    progress = currentOp.progress;
+  }
+  return clampProgress(progress);
+}
 
 export function createViewerGenerationRunner(deps: ViewerGenerationRunnerDeps): ViewerGenerationRunner {
   let abortController: AbortController | null = null;
@@ -102,7 +143,8 @@ export function createViewerGenerationRunner(deps: ViewerGenerationRunnerDeps): 
           row.status = "cancelled";
           break;
         }
-        if (!payload.result?.scene_layout_path) throw new Error("Generation finished without a scene layout path.");
+        const sceneLayoutPath = payload.result?.scene_layout_path || payload.result?.layout_path || "";
+        if (!sceneLayoutPath) throw new Error("Generation finished without a scene layout path.");
         row.status = "succeeded";
         row.result = payload.result;
       } catch (error) {
@@ -149,7 +191,7 @@ export function createViewerGenerationRunner(deps: ViewerGenerationRunnerDeps): 
   async function waitForJob(jobId: string, schemeIndex: number, schemeCount: number, signal: AbortSignal): Promise<SceneJobStatusPayload> {
     for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
       const payload = await apiJson<SceneJobStatusPayload>(`/api/scene/jobs/${encodeURIComponent(jobId)}`, { signal });
-      const jobProgress = Math.max(0, Math.min(100, Number(payload.progress ?? 0)));
+      const jobProgress = estimateProgress(payload);
       const overall = ((schemeIndex + jobProgress / 100) / schemeCount) * 100;
       const latestOperation = payload.operations?.[Math.max(0, (payload.operations?.length ?? 1) - 1)];
       const message = latestOperation?.message || payload.stage || payload.status;

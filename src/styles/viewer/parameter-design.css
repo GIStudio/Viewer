@@ -13,6 +13,7 @@
 
 .viewer-parameter-row,
 .viewer-parameter-switch-row,
+.viewer-parameter-locked-source-row,
 .viewer-furniture-parameter-row,
 .viewer-furniture-global,
 .viewer-parameter-width-summary,
@@ -28,6 +29,37 @@
   align-items: center;
   gap: 7px;
   padding: 7px 8px;
+}
+
+.viewer-parameter-locked-source-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, .85fr);
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 1px dashed #9da9ad;
+  background: rgba(235, 239, 239, .72);
+}
+
+.viewer-parameter-locked-source-row > div {
+  display: grid;
+  gap: 2px;
+}
+
+.viewer-parameter-locked-source-row small {
+  color: var(--color-text-secondary);
+  font-size: .72rem;
+  line-height: 1.35;
+}
+
+.viewer-parameter-locked-source-row select {
+  width: 100%;
+  min-height: 34px;
+  color: #66757b;
+  background: #e9eeee;
+  border: 1px solid #aeb9bb;
+  cursor: not-allowed;
 }
 
 .viewer-parameter-row > div,
@@ -222,6 +254,7 @@
   .viewer-furniture-parameter-list { grid-template-columns: 1fr; }
   .viewer-parameter-row,
   .viewer-parameter-switch-row,
+  .viewer-parameter-locked-source-row,
   .viewer-furniture-parameter-row,
   .viewer-furniture-global { grid-template-columns: 1fr; }
   .viewer-furniture-exact-grid { grid-template-columns: repeat(2, minmax(100px, 1fr)); }

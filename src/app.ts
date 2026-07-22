@@ -514,6 +514,9 @@ export type ViewerHostOptions = {
 };
 
 const STARTER_REVIEW_ONBOARDING_KEY = "roadgen3d:starter-review-onboarding-seen";
+// OSM context massing is a visual reference layer, not a ghost overlay: it
+// stays just translucent enough to distinguish it from authored assets.
+const DEFAULT_WHITE_MASSING_OPACITY = 0.88;
 
 function mountViewer(shell: DesktopShell, workflow: WorkflowController, hostOptions: ViewerHostOptions = {}): Promise<() => void> {
   return mountViewerImpl(shell, workflow, hostOptions);
@@ -2833,7 +2836,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       if (directEditEl) directEditEl.textContent = currentLang === "zh" ? "退出编辑" : "Exit edit";
       setToggleInput(assetMoveToggleEl, true);
       setToggleInput(assetBboxToggleEl, true);
-      createAssetBboxHelpers(scene, currentRoot, currentManifest);
+      createAssetBboxHelpers(scene, currentRoot, currentManifest, { showLabels: true });
       if (laserToggleEl.checked) {
         setToggleInput(laserToggleEl, false);
         crosshairEl.hidden = true;
@@ -2855,7 +2858,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     setToggleInput(assetMoveToggleEl, false);
     if (assetBboxEnabledBeforeEditing !== null) {
       setToggleInput(assetBboxToggleEl, assetBboxEnabledBeforeEditing);
-      if (assetBboxEnabledBeforeEditing) createAssetBboxHelpers(scene, currentRoot, currentManifest);
+      if (assetBboxEnabledBeforeEditing) createAssetBboxHelpers(scene, currentRoot, currentManifest, { showLabels: false });
       else removeAssetBboxHelpers(scene);
     }
     assetBboxEnabledBeforeEditing = null;
@@ -3422,6 +3425,15 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       const isTransparentMassing = materials.some((material) => (
         material?.name === "roadgen3d_transparent_massing"
       ));
+      if (isTransparentMassing) {
+        materials.forEach((material) => {
+          if (!material || material.name !== "roadgen3d_transparent_massing") return;
+          material.opacity = DEFAULT_WHITE_MASSING_OPACITY;
+          material.transparent = true;
+          material.depthWrite = false;
+          material.needsUpdate = true;
+        });
+      }
       if (isTransparentMassing && !mesh.userData.roadgenMassingOutlineAdded) {
         const outline = new THREE.LineSegments(
           new THREE.EdgesGeometry(mesh.geometry, 20),
@@ -3435,6 +3447,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         outline.name = `${mesh.name || "transparent_massing"}__outline`;
         outline.renderOrder = 4;
         outline.userData.isRenderHelper = true;
+        outline.userData.roadgenMassingOutline = true;
         outline.raycast = () => undefined;
         mesh.userData.roadgenMassingOutlineAdded = true;
         mesh.add(outline);
@@ -3478,6 +3491,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       material.transparent = nextOpacity < 0.999 || Boolean(material.userData.viewerOriginalTransparent);
       material.depthWrite = nextOpacity >= 0.999 && !material.userData.viewerOriginalTransparent;
       material.needsUpdate = true;
+    });
+    rootObject.traverse((child) => {
+      if (child.userData.roadgenMassingOutline) {
+        child.visible = nextOpacity < 0.999;
+      }
     });
   }
 
@@ -3623,7 +3641,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     }
 
     if (!captureMode && assetBboxToggleEl.checked && currentRoot) {
-      createAssetBboxHelpers(scene, currentRoot, currentManifest);
+      createAssetBboxHelpers(scene, currentRoot, currentManifest, { showLabels: sceneObjectEditor.isEnabled() });
     }
     if (!captureMode) {
       refreshAnalysisOverlayForSelectedBranch();
@@ -4575,7 +4593,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     "change",
     () => {
       if (assetBboxToggleEl.checked) {
-        createAssetBboxHelpers(scene, currentRoot, currentManifest);
+        createAssetBboxHelpers(scene, currentRoot, currentManifest, { showLabels: sceneObjectEditor.isEnabled() });
       } else {
         removeAssetBboxHelpers(scene);
       }

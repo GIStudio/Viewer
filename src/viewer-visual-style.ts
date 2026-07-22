@@ -72,6 +72,17 @@ function isNaturalAssetMesh(mesh: THREE.Mesh, manifestRecord: Record<string, unk
   return NATURAL_ASSET_PATTERN.test(haystack);
 }
 
+/**
+ * Imported GLB materials can carry their authored road, pavement, facade, or
+ * ground appearance in `map`.  Material color is multiplied with that map by
+ * Three.js, so applying the analytical palette to those materials turns a
+ * correctly exported road texture into a nearly uniform tint.  Keep mapped
+ * materials untouched; the diorama finish is intended for untextured meshes.
+ */
+function hasAuthoredBaseColorTexture(material: THREE.Material): boolean {
+  return "map" in material && Boolean((material as THREE.MeshStandardMaterial).map);
+}
+
 function roleForObject(mesh: THREE.Mesh, material: THREE.Material, manifest?: ViewerManifest): (typeof ROLE_TINTS)[number] | null {
   const manifestRecord = manifestRecordForMesh(mesh, manifest);
   const priorityPieces = [
@@ -101,12 +112,22 @@ function roleForObject(mesh: THREE.Mesh, material: THREE.Material, manifest?: Vi
 function applyMaterialFinish(mesh: THREE.Mesh, material: THREE.Material, manifest?: ViewerManifest): void {
   const manifestRecord = manifestRecordForMesh(mesh, manifest);
   const role = roleForObject(mesh, material, manifest);
-  const preserveAuthoredColor = isNaturalAssetMesh(mesh, manifestRecord);
+  const authoredTexturePreserved = hasAuthoredBaseColorTexture(material);
+  const preserveAuthoredColor = authoredTexturePreserved || isNaturalAssetMesh(mesh, manifestRecord);
   material.userData = {
     ...material.userData,
     analyticalDioramaFinish: true,
     authoredColorPreserved: preserveAuthoredColor,
+    authoredTexturePreserved,
   };
+
+  // Do not modify any PBR property of authored textured materials: the
+  // top-down asphalt and pavement maps are part of the generated scene's
+  // visual contract, not a neutral surface waiting for the diorama palette.
+  if (authoredTexturePreserved) {
+    material.needsUpdate = true;
+    return;
+  }
 
   if (!preserveAuthoredColor && "color" in material && material.color instanceof THREE.Color) {
     clampHslColor(material.color, role);

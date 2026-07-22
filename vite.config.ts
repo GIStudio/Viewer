@@ -528,6 +528,39 @@ function resolveLayoutReferencedPath(rawValue: unknown, layoutPath: string): str
   return resolveAllowedPath(candidate);
 }
 
+function resolvePreferredProductionScenePath(layoutPayload: JsonRecord, layoutPath: string): string | null {
+  const steps = Array.isArray(layoutPayload.production_steps) ? layoutPayload.production_steps : [];
+  // A production preview is the full pipeline result.  The lightweight
+  // `rebuild/scene.glb` only reconstructs a subset of a layout and must not
+  // replace that result when recovery is possible.
+  for (const desiredStepId of ["scene_preview", "complete_scene"]) {
+    const step = steps.find((item) => String((item as JsonRecord)?.step_id ?? "") === desiredStepId) as JsonRecord | undefined;
+    const candidate = step ? resolveLayoutReferencedPath(step.glb_path, layoutPath) : null;
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function isRebuiltLayoutScene(layoutPayload: JsonRecord, scenePath: string | null): boolean {
+  const summary = (layoutPayload.summary ?? {}) as JsonRecord;
+  if (summary.scene_glb_rebuilt_from_layout === true) {
+    return true;
+  }
+  return Boolean(scenePath && path.normalize(scenePath).split(path.sep).includes("rebuild"));
+}
+
+function resolvePreferredLayoutFinalScenePath(layoutPayload: JsonRecord, layoutPath: string): string | null {
+  const outputs = (layoutPayload.outputs ?? {}) as JsonRecord;
+  const referencedScenePath = resolveLayoutReferencedPath(outputs.scene_glb, layoutPath);
+  const productionScenePath = resolvePreferredProductionScenePath(layoutPayload, layoutPath);
+  if (isRebuiltLayoutScene(layoutPayload, referencedScenePath) && productionScenePath) {
+    return productionScenePath;
+  }
+  return referencedScenePath ?? productionScenePath;
+}
+
 function buildLayoutRevision(layoutPath: string, rawLayoutText: string, layoutPayload: JsonRecord): JsonRecord {
   const sha256 = crypto.createHash("sha256").update(rawLayoutText, "utf-8").digest("hex");
   const sceneEdit = (layoutPayload.scene_edit ?? {}) as JsonRecord;
@@ -544,8 +577,7 @@ function buildLayoutRevision(layoutPath: string, rawLayoutText: string, layoutPa
 function isViewableSceneLayout(layoutPath: string): boolean {
   try {
     const layoutPayload = JSON.parse(fs.readFileSync(layoutPath, "utf-8")) as JsonRecord;
-    const outputs = (layoutPayload.outputs ?? {}) as JsonRecord;
-    const finalScenePath = resolveLayoutReferencedPath(outputs.scene_glb, layoutPath);
+    const finalScenePath = resolvePreferredLayoutFinalScenePath(layoutPayload, layoutPath);
     return Boolean(finalScenePath && fs.existsSync(finalScenePath));
   } catch {
     return false;
@@ -1570,7 +1602,7 @@ function viewerApiPlugin(): Plugin {
             const layoutParseMs = (performance.now() - parseStart).toFixed(1);
             const outputs = layoutPayload.outputs ?? {};
             const overrideScenePath = resolveAllowedPath(requestUrl.searchParams.get("scene_glb_path"));
-            const referencedScenePath = resolveLayoutReferencedPath(outputs.scene_glb, layoutPath);
+            const referencedScenePath = resolvePreferredLayoutFinalScenePath(layoutPayload, layoutPath);
             const finalScenePath = (overrideScenePath && fs.existsSync(overrideScenePath))
               ? overrideScenePath
               : referencedScenePath;

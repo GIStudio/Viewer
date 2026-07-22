@@ -176,6 +176,8 @@
 .viewer-scenario-property-grid > section { min-width: 0; padding: 0.7rem; background: #fffef9; }
 .viewer-scenario-property-grid section p { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.45rem; margin: 0; padding: 0.34rem 0; border-bottom: 1px dotted #b8c1bf; font-size: 0.62rem; }
 .viewer-scenario-property-grid section p span { color: #58707a; }
+.viewer-scenario-score-fetch { width: 100%; min-height: 2rem; margin-top: 0.65rem; border: 1px solid #102d3a; background: #f4c430; color: #102d3a; font: 850 0.65rem/1 var(--rg-ui-font, sans-serif); cursor: pointer; }
+.viewer-scenario-score-fetch:disabled { cursor: not-allowed; opacity: 0.52; }
 
 @media (max-width: 900px) {
   .viewer-scenario-workbench { inset: 0.5rem; }

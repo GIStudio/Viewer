@@ -78,7 +78,6 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
     }
 
     const tr = (key: string, fallback: string): string => translateViewerKey(loadViewerLanguage(), key) ?? fallback;
-    const workspaceReady = (): boolean => ["guest", "authenticated"].includes(professionalSession.getSnapshot().status);
     const showAdvancedSourceTools = (): boolean => professionalSession.getSnapshot().user?.system_role === "admin";
     const syncAdvancedSourceTools = (): void => {
       const visible = showAdvancedSourceTools();
@@ -95,15 +94,6 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       }
     };
     const activateViewerTarget = (target: "generate" | "browse" | "review" | "edit" | "deliver"): void => {
-      if (target !== "review" && !workspaceReady()) {
-        const message = language === "zh"
-          ? "请先登录，再创建、生成、编辑或评价个人场景。"
-          : "Sign in before creating, generating, editing, or evaluating a personal scene.";
-        shell.setStatusSummary(message);
-        shell.pushActivity(message, "warning");
-        shell.sidebar.activate("account");
-        return;
-      }
       const snapshot = workflow.getSnapshot();
       if (target !== "generate" && target !== "deliver" && !snapshot.sceneLayoutPath) {
         const message = tr("professional.pipeline.sceneRequired", "Generate and load a scene first.");
@@ -163,10 +153,6 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
         flow: { stage: "01" as const, branch: "annotation" as const, status: annotationPreparationStatus(workflow.getSnapshot()) },
         badge: annotationPreparationStatus(initialWorkflowSnapshot) === "ready" ? "OK" : "—",
         action: () => {
-          if (!workspaceReady()) {
-            shell.sidebar.activate("account");
-            return;
-          }
           if (workflow.getSnapshot().normalized) {
             navigateTo("scene-graph");
             return;
@@ -401,6 +387,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
           break;
         default:
           const pendingViewerTarget = consumeProfessionalViewerTarget();
+          const shouldPreferWorkflowScene = pendingViewerTarget !== null && pendingViewerTarget !== "generate";
           void mountViewer(shell, workflow, {
             baselineCoordinator,
             persistSceneCommands: (commands, context) => persistProfessionalPublicCommands(
@@ -424,7 +411,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
             // 2D actions have an explicit project intent.  Preserve its OSM
             // context and generated revision instead of reopening the public
             // starter just because the viewer is mounted as a standalone app.
-            preferWorkflowScene: pendingViewerTarget !== null,
+            preferWorkflowScene: shouldPreferWorkflowScene,
             showStarterReviewOnLoad: pendingViewerTarget === null,
             modalTabs: professionalModalTabs,
           })

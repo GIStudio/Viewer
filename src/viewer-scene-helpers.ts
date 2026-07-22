@@ -435,6 +435,7 @@ export function createAssetBboxHelpers(
   scene: THREE.Scene,
   root: THREE.Object3D | null,
   manifest: ViewerManifest | null,
+  options: { showLabels?: boolean } = {},
 ): void {
   if (!root || !manifest) return;
 
@@ -461,12 +462,14 @@ export function createAssetBboxHelpers(
       helper.visible = true;
       scene.add(helper);
 
-      const center = new THREE.Vector3();
-      bbox.getCenter(center);
-      const label = createTextSprite(assetId, color);
-      label.position.set(center.x, bbox.max.y + 0.5, center.z);
-      label.userData.isAssetLabel = true;
-      scene.add(label);
+      if (options.showLabels) {
+        const center = new THREE.Vector3();
+        bbox.getCenter(center);
+        const label = createTextSprite(assetId, color);
+        label.position.set(center.x, bbox.max.y + 0.5, center.z);
+        label.userData.isAssetLabel = true;
+        scene.add(label);
+      }
     }
   });
 }

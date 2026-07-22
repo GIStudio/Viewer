@@ -1135,13 +1135,14 @@ export function createViewerDesignController(deps: ViewerDesignControllerDeps): 
           );
           deps.updateDesignStatus(`${variant.name}: job ${createPayload.job_id} submitted${scenario ? ` with ${scenario.scenario_id}` : ""}.`);
           const result = await waitForDesignJob(createPayload.job_id, preset, variant, effectivePrompt, graphTemplateId, structureSource, semanticSummary);
-          if (!result.scene_layout_path) {
+          const layoutPath = result.scene_layout_path || result.layout_path || "";
+          if (!layoutPath) {
             throw new Error("Generation finished without a scene_layout_path.");
           }
           generatedSchemes.push({
             id: variant.id,
             name: variant.name,
-            layoutPath: result.scene_layout_path,
+            layoutPath,
             status: "ready",
             metadata: generatedSchemeMetadata(
               result,

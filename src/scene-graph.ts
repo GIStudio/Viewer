@@ -276,6 +276,7 @@ const ANNOTATION_MAX_ZOOM = 6;
 const ANNOTATION_ZOOM_STEP = 1.25;
 const PROFESSIONAL_OSM_VIEW_KEY = "roadgen3d:professional-osm-view-v1";
 const PROFESSIONAL_OSM_JOB_KEY = "roadgen3d:professional-osm-job-v1";
+const OSM_DIRECT_CANVAS_FALLBACK_SIZE_PX = 1024;
 
 type SceneGraphStatusText = string | {
   key: string;
@@ -2869,6 +2870,7 @@ export function mountSceneGraphPage(
   function applyNormalizedSourcePayload(payload: NormalizedSceneSourceResponse, status: string): void {
     const expectedDraftFingerprint = comparableAnnotationSnapshot(state.annotation);
     state.annotation = normalizeAnnotation(payload.annotation);
+    ensureCompatibleFurnitureStripsForCurrentAnnotation();
     state.graphResult = {
       ...payload,
       annotation: cloneAnnotation(state.annotation),
@@ -3678,11 +3680,87 @@ export function mountSceneGraphPage(
   }
 
   function hasAnnotationCanvas(): boolean {
-    return Boolean(state.currentImageUrl) || (
-      Boolean(workflow.getSnapshot().normalized)
-      && state.annotation.image_width_px > 0
-      && state.annotation.image_height_px > 0
+    if (state.currentImageUrl) {
+      return true;
+    }
+    const snapshot = workflow.getSnapshot();
+    const { width, height } = annotationCanvasDimensions();
+    if (width <= 0 || height <= 0) {
+      return false;
+    }
+    return (
+      snapshot.sourceKind === "osm" ||
+      snapshot.sourceKind === "osm_buildings" ||
+      Boolean(snapshot.normalized)
     );
+  }
+
+  function annotationCanvasDimensions(): { width: number; height: number } {
+    const explicitWidth = Math.max(0, Math.round(state.annotation.image_width_px));
+    const explicitHeight = Math.max(0, Math.round(state.annotation.image_height_px));
+    if (explicitWidth > 0 && explicitHeight > 0) {
+      return { width: explicitWidth, height: explicitHeight };
+    }
+
+    const snapshot = workflow.getSnapshot();
+    const isDirectOsm = snapshot.sourceKind === "osm" || snapshot.sourceKind === "osm_buildings";
+    if (!isDirectOsm) {
+      return { width: 0, height: 0 };
+    }
+
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let hasPoint = false;
+    const trackPoint = (point: AnnotationPoint | null | undefined): void => {
+      if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+        return;
+      }
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+      hasPoint = true;
+    };
+
+    for (const centerline of state.annotation.centerlines) {
+      for (const point of centerline.points) {
+        trackPoint(point);
+      }
+    }
+    for (const junction of state.annotation.junctions) {
+      trackPoint(junction);
+    }
+    for (const roundabout of state.annotation.roundabouts) {
+      trackPoint(roundabout);
+    }
+    for (const controlPoint of state.annotation.control_points) {
+      trackPoint(controlPoint);
+    }
+    for (const region of [...state.annotation.regions, ...(state.annotation.derived_regions ?? [])]) {
+      for (const point of region.points) {
+        trackPoint(point);
+      }
+    }
+    for (const functionalZone of state.annotation.functional_zones) {
+      for (const point of functionalZonePolygonPoints(functionalZone)) {
+        trackPoint(point);
+      }
+    }
+    for (const buildingRegion of state.annotation.building_regions) {
+      for (const point of buildingRegionPolygonPoints(buildingRegion)) {
+        trackPoint(point);
+      }
+    }
+
+    if (!hasPoint) {
+      return {
+        width: OSM_DIRECT_CANVAS_FALLBACK_SIZE_PX,
+        height: OSM_DIRECT_CANVAS_FALLBACK_SIZE_PX,
+      };
+    }
+
+    return {
+      width: Math.max(OSM_DIRECT_CANVAS_FALLBACK_SIZE_PX, Math.ceil(maxX) + 1, 1),
+      height: Math.max(OSM_DIRECT_CANVAS_FALLBACK_SIZE_PX, Math.ceil(maxY) + 1, 1),
+    };
   }
 
   function annotationOsmBbox(): EditableWgs84Bbox | null {
@@ -3769,13 +3847,14 @@ export function mountSceneGraphPage(
   }
 
   function syncViewportLayout(): void {
-    if (!hasAnnotationCanvas()) return;
+    const { width: imageWidth, height: imageHeight } = annotationCanvasDimensions();
+    if (!hasAnnotationCanvas() || imageWidth <= 0 || imageHeight <= 0) {
+      return;
+    }
     const stageStyle = window.getComputedStyle(stageEl);
     const horizontalPadding = Number.parseFloat(stageStyle.paddingLeft || "0")
       + Number.parseFloat(stageStyle.paddingRight || "0");
     const viewportWidth = Math.max(1, stageEl.clientWidth - horizontalPadding);
-    const imageWidth = Math.max(1, state.annotation.image_width_px);
-    const imageHeight = Math.max(1, state.annotation.image_height_px);
     const baseWidth = viewportWidth;
     const baseHeight = baseWidth * imageHeight / imageWidth;
     const scaledWidth = baseWidth * state.viewportScale;
@@ -3855,9 +3934,56 @@ export function mountSceneGraphPage(
     return true;
   }
 
+  function isOsmDerivedCenterline(centerline: AnnotatedCenterline): boolean {
+    const snapshot = workflow.getSnapshot();
+    const sourceRefs = centerline.source_refs ?? {};
+    const osmWayIds = Array.isArray(sourceRefs.osm_way_ids) ? sourceRefs.osm_way_ids : [];
+    const parentOsmWayIds = Array.isArray(sourceRefs.parent_osm_way_ids) ? sourceRefs.parent_osm_way_ids : [];
+    return (
+      snapshot.sourceKind === "osm" ||
+      snapshot.sourceKind === "osm_buildings" ||
+      centerline.source_refs?.kind === "osm_road" ||
+      osmWayIds.length > 0 ||
+      parentOsmWayIds.length > 0
+    );
+  }
+
+  function resolveCompatibleFurnitureStripForRoad(centerline: AnnotatedCenterline): AnnotatedCrossSectionStrip | null {
+    if (!isOsmDerivedCenterline(centerline)) {
+      return centerline.cross_section_strips.find((strip) => FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind)) ?? null;
+    }
+
+    const existingCompatible = centerline.cross_section_strips.find((strip) => FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind));
+    if (existingCompatible) {
+      return existingCompatible;
+    }
+    if (centerline.street_furniture_instances.length > 0) {
+      return null;
+    }
+
+    ensureDetailedCrossSection(centerline);
+    return centerline.cross_section_strips.find((strip) => FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind)) ?? null;
+  }
+
+  function ensureCompatibleFurnitureStripsForCurrentAnnotation(): void {
+    for (const centerline of state.annotation.centerlines) {
+      if (!isOsmDerivedCenterline(centerline)) {
+        continue;
+      }
+      if (centerline.street_furniture_instances.length > 0) {
+        continue;
+      }
+      const hasCompatibleStrip = centerline.cross_section_strips.some((strip) => FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind));
+      if (!hasCompatibleStrip) {
+        ensureDetailedCrossSection(centerline);
+      }
+    }
+  }
+
   function updateStageVisibility(): void {
     const hasImage = Boolean(state.currentImageUrl);
     const hasCanvas = hasAnnotationCanvas();
+    const { width: canvasWidth, height: canvasHeight } = annotationCanvasDimensions();
     stageEl.dataset.hasImage = hasImage ? "true" : "false";
     stageEl.dataset.hasCanvas = hasCanvas ? "true" : "false";
     const viewportShellEl = stageEl.closest<HTMLElement>(".scene-canvas-viewport-shell");
@@ -3867,7 +3993,7 @@ export function mountSceneGraphPage(
     zoomSpaceEl.hidden = !hasCanvas;
     boardEl.hidden = !hasCanvas;
     boardEl.style.aspectRatio = hasCanvas
-      ? `${state.annotation.image_width_px} / ${state.annotation.image_height_px}`
+      ? `${canvasWidth} / ${canvasHeight}`
       : "";
     stageEmptyEl.hidden = hasCanvas;
     if (hasCanvas) window.requestAnimationFrame(syncViewportLayout);
@@ -3909,7 +4035,7 @@ export function mountSceneGraphPage(
     const isDirectOsm = workflow.getSnapshot().sourceKind === "osm" || workflow.getSnapshot().sourceKind === "osm_buildings";
     for (const button of toolButtons) {
       button.dataset.active = button.dataset.tool === state.selectedTool ? "true" : "false";
-      if (["scene_region", "functional_zone", "surface_annotation"].includes(button.dataset.tool ?? "")) {
+      if (["functional_zone", "surface_annotation"].includes(button.dataset.tool ?? "")) {
         button.hidden = isDirectOsm;
       }
     }
@@ -4733,13 +4859,21 @@ export function mountSceneGraphPage(
   }
 
   function renderOverlay(): void {
-    if (!hasAnnotationCanvas() || state.annotation.image_width_px <= 0 || state.annotation.image_height_px <= 0) {
+    if (!hasAnnotationCanvas()) {
       overlayHostEl.innerHTML = "";
       updateStageVisibility();
       return;
     }
+    const { width: canvasWidth, height: canvasHeight } = annotationCanvasDimensions();
+    const overlayAnnotation = (state.annotation.image_width_px > 0 && state.annotation.image_height_px > 0)
+      ? state.annotation
+      : {
+          ...state.annotation,
+          image_width_px: canvasWidth,
+          image_height_px: canvasHeight,
+        };
     overlayHostEl.innerHTML = buildOverlayMarkup(
-      state.annotation,
+      overlayAnnotation,
       state.draftCenterline,
       state.selection,
       state.selectedStripId,
@@ -4798,12 +4932,13 @@ export function mountSceneGraphPage(
     syncJsonTextarea();
     renderInspector();
     renderOverlay();
+    const { width: canvasWidth, height: canvasHeight } = annotationCanvasDimensions();
     const showInlineLoading = state.isReferenceImageLoading && !state.currentImageUrl;
     imageMetaEl.dataset.loading = showInlineLoading ? "true" : "false";
     imageMetaEl.textContent = showInlineLoading
       ? state.referenceImageLoadingMessage
       : hasAnnotationCanvas()
-        ? `${state.annotation.plan_id || "custom"} · ${state.annotation.image_width_px} × ${state.annotation.image_height_px}px · ${state.annotation.pixels_per_meter.toFixed(1)} px/m · ${state.annotation.centerlines.length} roads · ${state.annotation.centerlines.reduce((sum, item) => sum + item.cross_section_strips.length, 0)} strips · ${state.annotation.centerlines.reduce((sum, item) => sum + item.street_furniture_instances.length, 0)} furniture · ${state.annotation.regions.length} regions · ${(state.annotation.derived_regions ?? []).length} auto building regions · ${state.annotation.surface_annotations.length} design surfaces · ${state.annotation.station_strip_patches.length} strip patches`
+        ? `${state.annotation.plan_id || "custom"} · ${canvasWidth} × ${canvasHeight}px · ${state.annotation.pixels_per_meter.toFixed(1)} px/m · ${state.annotation.centerlines.length} roads · ${state.annotation.centerlines.reduce((sum, item) => sum + item.cross_section_strips.length, 0)} strips · ${state.annotation.centerlines.reduce((sum, item) => sum + item.street_furniture_instances.length, 0)} furniture · ${state.annotation.regions.length} regions · ${(state.annotation.derived_regions ?? []).length} auto building regions · ${state.annotation.surface_annotations.length} design surfaces · ${state.annotation.station_strip_patches.length} strip patches`
         : "选择参考 plan 或导入 PNG 后，就可以在图上开始标注。";
     applyViewerTranslations(root, loadViewerLanguage());
     const osmBuildingFootprintButton = root.querySelector<HTMLButtonElement>("#annotation-tool-building-region");
@@ -4881,7 +5016,11 @@ export function mountSceneGraphPage(
   }
 
   function imagePointFromPointer(event: PointerEvent): AnnotationPoint | null {
-    if (!hasAnnotationCanvas() || state.annotation.image_width_px <= 0 || state.annotation.image_height_px <= 0) {
+    if (!hasAnnotationCanvas()) {
+      return null;
+    }
+    const { width, height } = annotationCanvasDimensions();
+    if (width <= 0 || height <= 0) {
       return null;
     }
     const svgEl = overlayHostEl.querySelector<SVGSVGElement>("#annotation-overlay-svg");
@@ -4892,8 +5031,8 @@ export function mountSceneGraphPage(
     if (rect.width <= 0 || rect.height <= 0) {
       return null;
     }
-    const x = clamp(((event.clientX - rect.left) / rect.width) * state.annotation.image_width_px, 0, state.annotation.image_width_px);
-    const y = clamp(((event.clientY - rect.top) / rect.height) * state.annotation.image_height_px, 0, state.annotation.image_height_px);
+    const x = clamp(((event.clientX - rect.left) / rect.width) * width, 0, width);
+    const y = clamp(((event.clientY - rect.top) / rect.height) * height, 0, height);
     return { x, y };
   }
 
@@ -6128,6 +6267,9 @@ export function mountSceneGraphPage(
     if (!strip || !FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind)) {
       strip = centerline.cross_section_strips.find((item) => FURNITURE_COMPATIBLE_STRIP_KINDS.has(item.kind));
     }
+    if (!strip || !FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind)) {
+      strip = resolveCompatibleFurnitureStripForRoad(centerline);
+    }
 
     if (!strip || !FURNITURE_COMPATIBLE_STRIP_KINDS.has(strip.kind)) {
       setStatus(statusEl, "No furnishing strip on this road. Add a nearroad_furnishing or frontage_reserve strip first.", "error");
@@ -6272,6 +6414,9 @@ export function mountSceneGraphPage(
           targetStrip = strip;
         }
       }
+    }
+    if (!targetStrip && targetCenterline) {
+      targetStrip = resolveCompatibleFurnitureStripForRoad(targetCenterline);
     }
 
     if (!targetCenterline || !targetProjection) {
@@ -7353,6 +7498,7 @@ export function mountSceneGraphPage(
         const annotation = normalizeAnnotation(parsed);
         const fallbackImagePath = state.annotation.image_path;
         state.annotation = annotation;
+        ensureCompatibleFurnitureStripsForCurrentAnnotation();
         state.selectedScenarioId = "";
         clearAnnotationEditingState();
         await reconcileImportedAnnotationReferenceImage("Imported", fallbackImagePath);
@@ -7388,6 +7534,7 @@ export function mountSceneGraphPage(
         const annotation = normalizeAnnotation(JSON.parse(jsonTextarea.value));
         const fallbackImagePath = state.annotation.image_path;
         state.annotation = annotation;
+        ensureCompatibleFurnitureStripsForCurrentAnnotation();
         state.selectedScenarioId = "";
         clearAnnotationEditingState();
         await reconcileImportedAnnotationReferenceImage("Applied", fallbackImagePath);
@@ -7508,6 +7655,7 @@ export function mountSceneGraphPage(
         ?? initialWorkflowSnapshot.normalized?.referenceAnnotation
         ?? state.annotation,
     );
+    ensureCompatibleFurnitureStripsForCurrentAnnotation();
     if (initialWorkflowSnapshot.normalized?.graph) {
       state.graphResult = {
         annotation: cloneAnnotation(state.annotation),

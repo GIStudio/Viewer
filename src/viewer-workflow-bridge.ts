@@ -107,9 +107,10 @@ export function createViewerWorkflowBridge(deps: ViewerWorkflowBridgeDeps): View
         if (!token.isCurrent() || disposed) return;
         const payload = await loadSceneJob(created.job_id, token.signal);
         deps.setStatus(`Generation ${payload.stage || payload.status}…`);
-        if (payload.status === "succeeded" && payload.result?.scene_layout_path) {
+        const layoutPath = payload.result?.scene_layout_path || payload.result?.layout_path || "";
+        if (payload.status === "succeeded" && layoutPath) {
           deps.workflow.setGeneratedScene({
-            layoutPath: payload.result.scene_layout_path,
+            layoutPath,
             contextMassing: {
               aligned_building_count: normalized.sourceContext.aligned_buildings?.length ?? 0,
               source_alignment: normalized.sourceContext.source_alignment ?? null,
