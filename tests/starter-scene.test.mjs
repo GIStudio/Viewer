@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const app = fs.readFileSync(new URL("../src/app.ts", import.meta.url), "utf8");
+const app = [
+  "app.ts",
+  "viewer-lifecycle-controller.ts",
+  "viewer-scene-interaction-controller.ts",
+  "viewer-workflow-ui-controller.ts",
+].map((name) => fs.readFileSync(new URL(`../src/${name}`, import.meta.url), "utf8")).join("\n");
 const routeIsland = fs.readFileSync(new URL("../src/react/RouteIsland.tsx", import.meta.url), "utf8");
 const stage = fs.readFileSync(new URL("../src/viewer-panels/stage.ts", import.meta.url), "utf8");
 const starter = fs.readFileSync(new URL("../src/starter-scene.ts", import.meta.url), "utf8");

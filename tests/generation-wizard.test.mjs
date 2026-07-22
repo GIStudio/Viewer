@@ -12,6 +12,8 @@ const wizard = read("src/viewer-generation-wizard.ts");
 const spec = read("src/viewer-generation-spec.ts");
 const runner = read("src/viewer-generation-runner.ts");
 const app = read("src/app.ts");
+const designScenario = read("src/viewer-design-scenario-controller.ts");
+const viewerRuntime = `${app}\n${designScenario}`;
 const parameterDesign = read("src/viewer-parameter-design.ts");
 const css = read("src/styles/viewer/stage-console.css");
 
@@ -34,8 +36,8 @@ assert.match(panel, /viewer-parameter-skeleton-controls/);
 assert.match(panel, /viewer-parameter-furniture-controls/);
 assert.match(panel, /<aside id="viewer-design-panel"[\s\S]*viewer-parameter-summary-board[\s\S]*<\/aside>/);
 assert.match(panel, /生成 1 个确定性场景版本/);
-assert.match(app, /generation_mode: "parametric"|generationOptions\(\)/);
-assert.match(app, /variantCount: 1/);
+assert.match(viewerRuntime, /generation_mode: "parametric"|generationOptions\(\)/);
+assert.match(viewerRuntime, /variantCount: 1/);
 assert.match(parameterDesign, /roadgen3d\.street-design-parameters\.v2/);
 assert.match(parameterDesign, /\/api\/design\/parameter-controls/);
 assert.match(parameterDesign, /generation_mode: "parametric"/);
@@ -58,14 +60,14 @@ assert.match(runner, /payload\?\.operations\?\.slice\(-3\)/);
 assert.match(runner, /function explainGenerationFailure/);
 assert.match(runner, /场景生成失败，请查看下方诊断/);
 assert.doesNotMatch(runner, /没有方案生成成功/);
-assert.match(app, /buildGenerationRequestSpec/);
-assert.match(app, /generationRunner\.run\(spec\)/);
+assert.match(viewerRuntime, /buildGenerationRequestSpec/);
+assert.match(viewerRuntime, /generationRunner\.run\(spec\)/);
 assert.match(
-  app,
+  viewerRuntime,
   /onLoadResult:[\s\S]*?loadLayoutSelection\(layoutPath,[\s\S]*?frameSceneOverview\(\)/,
   "a generated OSM scene must open in a fitted overview instead of an eye-level horizon view",
 );
-assert.doesNotMatch(app, /workflowSnapshot\.normalized\s*\?\s*workflowBridge\.runGeneration/);
+assert.doesNotMatch(viewerRuntime, /workflowSnapshot\.normalized\s*\?\s*workflowBridge\.runGeneration/);
 assert.match(css, /grid-template-rows: minmax\(0, 1fr\) auto/);
 assert.match(css, /\.viewer-generation-primary-panel\[hidden\]/);
 assert.match(css, /overflow-x: auto/);

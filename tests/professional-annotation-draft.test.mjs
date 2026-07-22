@@ -135,7 +135,7 @@ try {
   assert.equal(await page.locator("#scene-source-open-existing").isVisible(), true, "the retained older scene remains browseable");
   await page.locator('.studio-language-toggle [role="radio"]:has-text("EN")').click();
   await page.getByText("Saved and validated annotation", { exact: true }).waitFor({ state: "attached" });
-  assert.equal(await page.locator("#scene-source-generate").textContent(), "Generate current 3D scene");
+  assert.equal(await page.locator("#scene-source-generate").textContent(), "Enter 3D scene");
   console.log("professional annotation draft: dirty, validate, auto-approve, deduplicate, and IndexedDB restore");
 } finally {
   await browser?.close();

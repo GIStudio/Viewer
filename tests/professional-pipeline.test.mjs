@@ -9,8 +9,20 @@ const read = (path) => readFileSync(resolve(root, path), "utf8");
 const workflow = read("src/workflow-controller.ts");
 const pipeline = read("src/professional-pipeline.ts");
 const routeIsland = read("src/react/RouteIsland.tsx");
-const app = read("src/app.ts");
-const assetEditor = read("src/asset-editor.ts");
+const app = [
+  "src/app.ts",
+  "src/viewer-design-scenario-controller.ts",
+  "src/viewer-lifecycle-controller.ts",
+  "src/viewer-output-panel-controller.ts",
+  "src/viewer-scene-interaction-controller.ts",
+  "src/viewer-workflow-ui-controller.ts",
+  "src/viewer-workspace-view-controller.ts",
+].map(read).join("\n");
+const assetEditor = [
+  "src/asset-editor.ts",
+  "src/asset-editor-model.ts",
+  "src/asset-editor-shell.ts",
+].map(read).join("\n");
 const stage = read("src/viewer-panels/stage.ts");
 const designPanel = read("src/viewer-panels/designPanel.ts");
 const baseline = read("src/professional-baseline-coordinator.ts");
@@ -21,7 +33,16 @@ const settingsPanel = read("src/viewer-settings-panel.ts");
 const compareMode = read("src/compare-mode.ts");
 const scenarioStyles = read("src/styles/viewer/professional-scenarios.css");
 const parameterStyles = read("src/styles/viewer/parameter-design.css");
-const sceneGraph = read("src/scene-graph.ts");
+const sceneGraph = [
+  "src/scene-graph.ts",
+  "src/sg-annotation-controller.ts",
+  "src/sg-event-binder.ts",
+  "src/sg-markup-builder.ts",
+  "src/sg-mutation-controller.ts",
+  "src/sg-reference-controller.ts",
+  "src/sg-render-controller.ts",
+  "src/sg-source-workflow-controller.ts",
+].map(read).join("\n");
 const sceneGraphShell = read("src/scene-graph/shell.ts");
 const entryIntent = read("src/professional-entry-intent.ts");
 const nextAction = read("src/professional-next-action.ts");
@@ -85,7 +106,7 @@ assert.match(publicProject, /parent_revision_id: parentRevisionId/);
 assert.match(publicProject, /canWrite: boolean/);
 assert.match(publicProject, /parentRevision\.source_id \?\? sourcePayload\.items\[0\]\?\.id/);
 assert.match(publicProject, /workflowHasCurrent2DSource/);
-assert.match(publicProject, /\/api\/v1\/projects\/\$\{sceneRef\.projectId\}\/sources/);
+assert.match(publicProject, /saveProfessionalSourceToWorkspace/);
 assert.match(publicProject, /branch_kind === "human_edit"/);
 assert.match(publicProject, /branch_kind === "baseline"/);
 assert.match(publicProject, /prepareManualEdit/);
@@ -133,7 +154,7 @@ assert.match(publicProject, /not a claim of global optimality/);
 assert.match(publicProject, /selectedScenarioId: revision\.id/);
 assert.match(scenarios, /scenario\.id === generated\.selectedScenarioId/);
 assert.match(scenarios, /data-scenario-action="edit-2d"/);
-assert.match(scenarios, /保留当前 OSM 研究区与已保存标注/);
+assert.match(scenarios, /2D 修改会创建新的 A 基线/);
 assert.match(scenarios, /viewer-scenario-lane-action/);
 assert.match(scenarios, /data-scenario-action="edit-3d"/);
 assert.match(scenarios, /candidateReadiness/);

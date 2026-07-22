@@ -18,14 +18,29 @@ const brand = read("src/react/StudioBrandHeader.tsx");
 const menus = read("src/react/ShellMenus.tsx");
 const viewerOverlays = read("src/styles/viewer/menus-overlays.css");
 const overlaySurfaces = read("src/styles/overlays/viewer-surfaces.css");
-const viewerApp = read("src/app.ts");
+const viewerApp = [
+  "src/app.ts",
+  "src/viewer-output-panel-controller.ts",
+  "src/viewer-scene-interaction-controller.ts",
+  "src/viewer-workspace-view-controller.ts",
+].map(read).join("\n");
 const viewerStage = read("src/viewer-panels/stage.ts");
 const schemeCompare = read("src/viewer-scheme-compare.ts");
 const stageConsole = read("src/styles/viewer/stage-console.css");
 const sceneToolbar = read("src/styles/scene-graph/toolbar-stage.css");
-const expandedMap = read("src/viewer-expanded-map.ts");
+const expandedMap = [
+  "src/viewer-expanded-map.ts",
+  "src/viewer-plan-map-renderer.ts",
+].map(read).join("\n");
 const sceneShell = read("src/scene-graph/shell.ts");
-const sceneGraph = read("src/scene-graph.ts");
+const sceneGraph = [
+  "src/scene-graph.ts",
+  "src/sg-annotation-controller.ts",
+  "src/sg-event-binder.ts",
+  "src/sg-markup-builder.ts",
+  "src/sg-render-controller.ts",
+  "src/sg-source-workflow-controller.ts",
+].map(read).join("\n");
 const accountPanels = read("src/professional-account-panels.ts");
 const professionalSession = read("src/professional-session.ts");
 
