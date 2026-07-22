@@ -2215,6 +2215,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       generationWizard?.close();
       panelController.setOpen("design", false);
       mode3dEl.click();
+      renderProfessionalWorkflowState();
+      shell.openModalTab("review");
       flashStatus("Generated scene loaded. You can now preview the corresponding 3D result.");
     },
     setStatus,
