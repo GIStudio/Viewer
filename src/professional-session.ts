@@ -2,6 +2,7 @@ import { CourseApi, type CourseProject, type CourseUser, type PublicProject } fr
 
 export type ProfessionalWorkspace = { id: string; name: string; scope: "personal" | "public"; role: string };
 export type ProfessionalSessionStatus = "loading" | "guest" | "authenticated" | "error";
+export type UserDataExportScope = "configuration" | "full";
 
 export type ProfessionalSessionSnapshot = {
   status: ProfessionalSessionStatus;
@@ -152,6 +153,11 @@ export class ProfessionalSessionController {
     this.selectProject(project.id, projects);
     await this.refreshPublicProjects().catch(() => []);
     return project;
+  }
+
+  async exportUserData(scope: UserDataExportScope): Promise<void> {
+    const fallback = scope === "full" ? "roadgen3d-user-full.zip" : "roadgen3d-user-config-2d-history.zip";
+    await this.api.downloadAuthenticatedFile(`/api/v1/workspace/exports/${scope}`, fallback);
   }
 
   selectProject(projectId: string | null, projects = this.snapshot.projects): void {

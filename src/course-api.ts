@@ -129,4 +129,21 @@ export class CourseApi {
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+
+  async downloadAuthenticatedFile(path: string, fallbackFilename: string): Promise<void> {
+    const response = await fetch(path, { headers: { Authorization: `Bearer ${this.token}` } });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({})) as Record<string, any>;
+      const detail = payload.detail;
+      throw new Error(String(detail?.message ?? detail ?? payload.message ?? `${response.status} ${response.statusText}`));
+    }
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] ?? fallbackFilename;
+    const url = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }

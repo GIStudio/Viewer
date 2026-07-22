@@ -16,6 +16,7 @@
     "test:osm-aoi-picker": "node tests/osm-aoi-picker.test.mjs",
     "test:professional-navigation": "node tests/professional-navigation.test.mjs",
     "test:professional-pipeline": "node tests/professional-pipeline.test.mjs",
+    "test:user-data-export": "node tests/user-data-export.test.mjs",
     "test:professional-draft": "node tests/professional-annotation-draft.test.mjs",
     "test:generation-wizard": "node tests/generation-wizard.test.mjs",
     "test:starter-scene": "node tests/starter-scene.test.mjs",

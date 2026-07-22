@@ -48,6 +48,14 @@ export function createProfessionalAccountPanel(
           </form>
           <p class="professional-account-note">${guest ? (zh ? "项目与产物公开可见；只有持有同一浏览器访问凭证的人可以继续编辑。" : "Projects and artifacts are public; only the browser holding the same access credential can continue editing.") : (zh ? "项目、场景版本、资产列表和评价结果仅对你的账户可见。" : "Projects, scene revisions, palettes, and evaluation results are private to your account.")}</p>
         </section>
+        <section class="professional-account-export">
+          <h4>${zh ? "导出我的全部数据" : "Export all my data"}</h4>
+          <p class="professional-account-note">${zh ? "ZIP 文件只包含当前用户拥有的数据，不包含密码或登录令牌。" : "ZIP files contain only data owned by the current user, never passwords or sign-in tokens."}</p>
+          <div class="professional-account-export-actions">
+            <button type="button" data-account-export="configuration" ${busy ? "disabled" : ""}>${zh ? "全部配置、2D 数据与历史" : "All configuration, 2D data & history"}</button>
+            <button type="button" data-account-export="full" ${busy ? "disabled" : ""}>${zh ? "全量文件（包含 3D 结果）" : "Full files (including 3D results)"}</button>
+          </div>
+        </section>
         ${options.onSaveCurrent ? `<button type="button" data-account-save class="professional-account-secondary" ${busy ? "disabled" : ""}>${guest ? (zh ? "保存当前2D标注到公共项目" : "Save current 2D annotation to a public project") : (zh ? "保存当前2D标注到我的项目" : "Save current 2D annotation to my project")}</button>` : ""}
         ${guest ? `<button type="button" data-account-auth-open class="professional-account-secondary">${zh ? "登录私人空间" : "Sign in to a private workspace"}</button>` : `<button type="button" data-account-logout class="professional-account-secondary">${zh ? "退出登录" : "Sign out"}</button>`}
         ${message ? `<p role="status" class="professional-account-message">${message}</p>` : ""}`;
@@ -77,6 +85,19 @@ export function createProfessionalAccountPanel(
           message = error instanceof Error ? error.message : String(error);
         }).finally(() => { busy = false; render(); });
       });
+      element.querySelectorAll<HTMLButtonElement>("[data-account-export]").forEach((button) => button.addEventListener("click", () => {
+        const scope = button.dataset.accountExport === "full" ? "full" : "configuration";
+        busy = true;
+        message = zh ? "正在打包数据，请稍候…" : "Packaging your data…";
+        render();
+        void session.exportUserData(scope).then(() => {
+          message = scope === "full"
+            ? (zh ? "全量 ZIP 已开始下载，包含 3D 生成结果。" : "The full ZIP download has started, including 3D results.")
+            : (zh ? "配置、2D 数据与历史 ZIP 已开始下载。" : "The configuration, 2D data, and history ZIP download has started.");
+        }).catch((error) => {
+          message = error instanceof Error ? error.message : String(error);
+        }).finally(() => { busy = false; render(); });
+      }));
       return;
     }
     const registerMode = mode === "register";
