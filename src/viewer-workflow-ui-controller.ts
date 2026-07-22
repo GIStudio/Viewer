@@ -314,6 +314,7 @@ export type ViewerWorkflowUiControllerContext = {
   reviewStateEl: HTMLElement | null;
   reviewUsedAssetsEl: HTMLElement | null;
   starterDemoBannerEl: HTMLElement | null;
+  starterDemoBannerDismissed: { value: boolean; };
   starterLoadError: { value: string; };
   starterLoading: { value: boolean; };
   starterReviewGuideEl: HTMLElement | null;
@@ -438,7 +439,7 @@ export function createViewerWorkflowUiController(getContext: () => ViewerWorkflo
   };
 
   const renderProfessionalWorkflowState = (): void => {
-    const { activeSceneOrigin, activeStarterScene, currentLang, emptyStateEl, evaluateGateEl, evaluateRunEl, generationRunEl, hostOptions, parameterDesignController, renderCapabilityStatus, reviewAcceptEl, reviewAnnotationEl, reviewChangesEl, reviewRootEl, reviewStateEl, starterDemoBannerEl, starterLoadError, starterLoading, starterReviewGuideEl, viewerShellEl, workflow } = getContext();
+    const { activeSceneOrigin, activeStarterScene, currentLang, emptyStateEl, evaluateGateEl, evaluateRunEl, generationRunEl, hostOptions, parameterDesignController, renderCapabilityStatus, reviewAcceptEl, reviewAnnotationEl, reviewChangesEl, reviewRootEl, reviewStateEl, starterDemoBannerEl, starterDemoBannerDismissed, starterLoadError, starterLoading, starterReviewGuideEl, viewerShellEl, workflow } = getContext();
     renderCapabilityStatus();
     updateGenerationDialogContract();
     renderUsedAssetProvenance();
@@ -512,9 +513,15 @@ export function createViewerWorkflowUiController(getContext: () => ViewerWorkflo
       }
     }
     if (starterDemoBannerEl) {
-      starterDemoBannerEl.hidden = activeSceneOrigin.value !== "starter_demo";
+      starterDemoBannerEl.hidden = activeSceneOrigin.value !== "starter_demo" || starterDemoBannerDismissed.value;
       const label = starterDemoBannerEl.querySelector<HTMLElement>("[data-starter-demo-label]");
       const summary = starterDemoBannerEl.querySelector<HTMLElement>("[data-starter-demo-summary]");
+      const close = starterDemoBannerEl.querySelector<HTMLButtonElement>("[data-starter-action=\"dismiss\"]");
+      if (close) {
+        const closeLabel = currentLang.value === "zh" ? "关闭内置示例提示" : "Close built-in demo notice";
+        close.setAttribute("aria-label", closeLabel);
+        close.title = closeLabel;
+      }
       if (label && activeStarterScene.value) label.textContent = `${currentLang.value === "zh" ? "内置示例" : "Built-in demo"} · ${activeStarterScene.value.label}`;
       if (summary && activeStarterScene.value) {
         const counts = activeStarterScene.value.category_counts;

@@ -39,6 +39,7 @@ try {
         contentType: "application/json",
         body: JSON.stringify({
           access_token: "fixture-guest-token",
+          recovery_key: "RG3D-GUEST-0123456789ABCDEF0123456789ABCDEF",
           user: { id: "guest-a", email: "guest-a@public.invalid", display_name: "访客 TEST", system_role: "guest", is_active: true },
           workspace: { id: "workspace-public", name: "小黑板", scope: "public", role: "owner" },
         }),
@@ -369,7 +370,8 @@ try {
   assert.equal((await page.locator('[data-shell-tab="public-space"] .workbench-sidebar-label').textContent())?.trim(), "小黑板");
   await page.locator('[data-shell-tab="account"]').click();
   await page.getByText("作者身份如何识别？", { exact: true }).click();
-  await page.getByText("首次访问时，服务器签发仅保存在当前浏览器中的访问凭证。", { exact: false }).waitFor();
+  await page.getByText("同一浏览器会通过长期 Cookie 与本地凭证自动恢复此身份。", { exact: false }).waitFor();
+  await page.getByText("RG3D-GUEST-0123456789ABCDEF0123456789ABCDEF", { exact: true }).waitFor();
   await page.locator("#viewer-top-assets").click();
   await page.locator(".viewer-scene-assets-modal:not([hidden])").waitFor();
   await page.getByRole("heading", { name: "全部可用资产 · 点击放置或原位替换" }).waitFor();
@@ -404,8 +406,13 @@ try {
   );
   assert.deepEqual(await page.evaluate(() => ({
     guest: localStorage.getItem("roadgen3d-public-session-token"),
+    recovery: localStorage.getItem("roadgen3d-public-recovery-key"),
     account: localStorage.getItem("roadgen3d-session-token"),
-  })), { guest: "fixture-guest-token", account: null }, "professional navigation must preserve the guest token without creating an account session");
+  })), {
+    guest: "fixture-guest-token",
+    recovery: "RG3D-GUEST-0123456789ABCDEF0123456789ABCDEF",
+    account: null,
+  }, "professional navigation must preserve the guest token and recovery Key without creating an account session");
 
   console.log("professional navigation: tool switching, workflow grouping, scenario workbench, and generation confirmation verified");
 } finally {

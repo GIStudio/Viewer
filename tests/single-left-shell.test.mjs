@@ -77,6 +77,8 @@ assert.match(routeIsland, /group: "flow"/);
 assert.match(viewerStage, /id="viewer-direct-edit"/);
 assert.match(viewerStage, /id="viewer-top-assets"/);
 assert.match(viewerStage, /id="viewer-scheme-compare-toggle"/);
+assert.match(viewerStage, /id="viewer-feature-quality-toggle"[^>]+data-admin-feature-quality[^>]+hidden[^>]+aria-hidden="true"[^>]+aria-controls="viewer-feature-quality-workbench"/, "the stage must keep the micro-feature experiment entry hidden until an administrator is identified");
+assert.match(viewerStage, /id="viewer-feature-quality-workbench"[^>]+role="dialog"/, "the feature experiment must use a dedicated comparison dialog");
 assert.match(viewerStage, /id="viewer-scheme-compare-toggle"[^>]+aria-controls="viewer-scenario-workbench"/, "the A\/B\/C action must open the formal revision workbench");
 assert.doesNotMatch(viewerStage, /id="viewer-scheme-compare-toggle"[^>]+data-viewer-center-control="schemes"/, "the A\/B\/C action must not reopen the generic recent-layout chooser");
 assert.doesNotMatch(viewerStage, /viewer-consistency-toggle/, "consistency diagnostics must not crowd the 3D toolbar");

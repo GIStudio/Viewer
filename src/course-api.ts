@@ -146,4 +146,10 @@ export class CourseApi {
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+
+  async uploadAuthenticatedFile<T>(path: string, file: File): Promise<T> {
+    const body = new FormData();
+    body.append("file", file, file.name);
+    return this.request<T>(path, { method: "POST", body });
+  }
 }

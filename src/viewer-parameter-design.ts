@@ -37,6 +37,7 @@ export type StreetDesignParameterSpec = {
     junctionCornerRadiusM?: number;
     median: { enabled: boolean; kind: "raised" | "planted"; widthM: number };
     busStop: { enabled: boolean; placement: "curbside" | "bay" };
+    curbRamp: { enabled: boolean; side: "left" | "right"; positionRatio: number };
   };
   furniture: {
     globalDensity: number;
@@ -91,6 +92,7 @@ export type ViewerParameterDesignController = {
   generationOptions(): Record<string, unknown>;
   currentSpec(): StreetDesignParameterSpec | null;
   validationIssues(): string[];
+  applyComposeConfigPatch(patch: Record<string, unknown>): void;
   refreshSource(): void;
   destroy(): void;
 };
@@ -128,6 +130,7 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
   let controls: ParameterControls | null = null;
   let spec: StreetDesignParameterSpec | null = null;
   let fieldSources: Record<string, "source" | "manual" | "system_default"> = {};
+  let acceptedFeaturePatch: Record<string, unknown> = {};
 
   function sourceMatches(): boolean {
     const source = deps.getSource();
@@ -172,6 +175,7 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
         junctionCornerPolicy: "source",
         median: { enabled: false, kind: "raised", widthM: controls.skeleton.medianWidthM.values.medium },
         busStop: { enabled: false, placement: "curbside" },
+        curbRamp: { enabled: false, side: "right", positionRatio: 0.5 },
       },
       furniture: { globalDensity: controls.furniture.globalDensity.values.medium, style: "civic_clean", categories },
       buildings: { representation: "transparent_massing", footprintLocked: true },
@@ -181,7 +185,7 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
 
   function persist(): void {
     if (!spec) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ spec, fieldSources }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ spec, fieldSources, acceptedFeaturePatch }));
   }
 
   function restore(): boolean {
@@ -189,12 +193,15 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") as {
         spec?: StreetDesignParameterSpec;
         fieldSources?: Record<string, "source" | "manual" | "system_default">;
+        acceptedFeaturePatch?: Record<string, unknown>;
       } | null;
       const source = deps.getSource();
       if (!stored?.spec || stored.spec.schemaVersion !== "roadgen3d.street-design-parameters.v2" || !source) return false;
       if (stored.spec.source.sourceRevision !== source.revision || stored.spec.source.sourceFingerprint !== source.fingerprint) return false;
       spec = stored.spec;
+      spec.skeleton.curbRamp ??= { enabled: false, side: "right", positionRatio: 0.5 };
       fieldSources = { ...(stored.fieldSources ?? {}) };
+      acceptedFeaturePatch = { ...(stored.acceptedFeaturePatch ?? {}) };
       return true;
     } catch {
       return false;
@@ -260,6 +267,7 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
           ${deps.allowCustom ? `<input data-junction-radius type="number" min="1" max="20" step="0.1" value="${radius}" />` : ""}</div>
         <div class="viewer-parameter-switch-row"><label><input data-median-enabled type="checkbox" ${spec.skeleton.median.enabled ? "checked" : ""}/><span><strong>设置道路中岛</strong><small>关闭时不占用车行宽度</small></span></label><select data-median-kind ${spec.skeleton.median.enabled ? "" : "disabled"}><option value="raised" ${spec.skeleton.median.kind === "raised" ? "selected" : ""}>硬质中岛</option><option value="planted" ${spec.skeleton.median.kind === "planted" ? "selected" : ""}>绿化中岛</option></select>${levelSelect("medianWidthM", spec.skeleton.median.widthM)}</div>
         <div class="viewer-parameter-switch-row"><label><input data-bus-enabled type="checkbox" ${spec.skeleton.busStop.enabled ? "checked" : ""}/><span><strong>设置额外公交站</strong><small>不会删除2D来源中的真实公交点</small></span></label><select data-bus-placement ${spec.skeleton.busStop.enabled ? "" : "disabled"}><option value="curbside" ${spec.skeleton.busStop.placement === "curbside" ? "selected" : ""}>路侧站</option><option value="bay" ${spec.skeleton.busStop.placement === "bay" ? "selected" : ""}>港湾站</option></select></div>
+        <div class="viewer-parameter-switch-row"><label><input data-curb-ramp-enabled type="checkbox" ${spec.skeleton.curbRamp.enabled ? "checked" : ""}/><span><strong>设置独立路缘坡道</strong><small>沿道路方向 1.5m · 坡投影 1m · 不依赖公交车道</small></span></label><select data-curb-ramp-side ${spec.skeleton.curbRamp.enabled ? "" : "disabled"}><option value="left" ${spec.skeleton.curbRamp.side === "left" ? "selected" : ""}>道路左侧</option><option value="right" ${spec.skeleton.curbRamp.side === "right" ? "selected" : ""}>道路右侧</option></select><input data-curb-ramp-position type="number" min="0" max="100" step="5" value="${spec.skeleton.curbRamp.positionRatio * 100}" ${spec.skeleton.curbRamp.enabled ? "" : "disabled"} aria-label="坡道沿道路位置百分比"/></div>
       </div>
       <section class="viewer-parameter-width-summary"><span>预计道路总宽</span><strong>${formatNumber(totalWidth)}m</strong><small>${spec.skeleton.laneCount} × ${formatNumber(spec.skeleton.laneWidthM)}m 车道 + 两侧人行道/设施带/路缘${spec.skeleton.median.enabled ? ` + ${formatNumber(spec.skeleton.median.widthM)}m 中岛` : ""}</small></section>
       <p class="viewer-parameter-locked-note"><strong>中心线、路口拓扑与建筑轮廓保持锁定。</strong><span>若要改变这些事实数据，请返回 01A 标注。</span></p>`;
@@ -292,7 +300,7 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
       return;
     }
     const enabled = Object.entries(spec.furniture.categories).filter(([, value]) => value.enabled);
-    deps.summaryEl.innerHTML = `<strong>确定性参数化生成</strong><dl><div><dt>道路总宽</dt><dd>${formatNumber(calculateTotalWidth(spec))}m</dd></div><div><dt>中岛</dt><dd>${spec.skeleton.median.enabled ? `${spec.skeleton.median.kind === "planted" ? "绿化" : "硬质"} ${formatNumber(spec.skeleton.median.widthM)}m` : "关闭"}</dd></div><div><dt>公交站</dt><dd>${spec.skeleton.busStop.enabled ? (spec.skeleton.busStop.placement === "bay" ? "港湾站" : "路侧站") : "关闭"}</dd></div><div><dt>家具</dt><dd>${enabled.length ? `${enabled.length} 类已开启` : "全部关闭"}</dd></div><div><dt>建筑</dt><dd>透明白模</dd></div><div><dt>Seed</dt><dd>${spec.seed}</dd></div></dl><small>不调用 LLM 或 RAG；每个字段以精确数值写入版本记录。</small>`;
+    deps.summaryEl.innerHTML = `<strong>确定性参数化生成</strong><dl><div><dt>道路总宽</dt><dd>${formatNumber(calculateTotalWidth(spec))}m</dd></div><div><dt>中岛</dt><dd>${spec.skeleton.median.enabled ? `${spec.skeleton.median.kind === "planted" ? "绿化" : "硬质"} ${formatNumber(spec.skeleton.median.widthM)}m` : "关闭"}</dd></div><div><dt>公交站</dt><dd>${spec.skeleton.busStop.enabled ? (spec.skeleton.busStop.placement === "bay" ? "港湾站" : "路侧站") : "关闭"}</dd></div><div><dt>路缘坡道</dt><dd>${spec.skeleton.curbRamp.enabled ? `${spec.skeleton.curbRamp.side === "left" ? "左侧" : "右侧"} · ${formatNumber(spec.skeleton.curbRamp.positionRatio * 100)}%` : "关闭"}</dd></div><div><dt>家具</dt><dd>${enabled.length ? `${enabled.length} 类已开启` : "全部关闭"}</dd></div><div><dt>建筑</dt><dd>透明白模</dd></div><div><dt>Seed</dt><dd>${spec.seed}</dd></div></dl><small>不调用 LLM 或 RAG；每个字段以精确数值写入版本记录。</small>`;
   }
 
   function render(): void {
@@ -354,6 +362,9 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
     deps.skeletonHostEl.querySelector<HTMLSelectElement>("[data-median-kind]")?.addEventListener("change", (event) => { if (spec) { spec.skeleton.median.kind = (event.currentTarget as HTMLSelectElement).value as "raised" | "planted"; changed("skeleton.median.kind"); } });
     deps.skeletonHostEl.querySelector<HTMLInputElement>("[data-bus-enabled]")?.addEventListener("change", (event) => { if (spec) { spec.skeleton.busStop.enabled = (event.currentTarget as HTMLInputElement).checked; spec.furniture.categories.bus_stop!.enabled = spec.skeleton.busStop.enabled; changed("skeleton.busStop.enabled"); } });
     deps.skeletonHostEl.querySelector<HTMLSelectElement>("[data-bus-placement]")?.addEventListener("change", (event) => { if (spec) { spec.skeleton.busStop.placement = (event.currentTarget as HTMLSelectElement).value as "curbside" | "bay"; changed("skeleton.busStop.placement"); } });
+    deps.skeletonHostEl.querySelector<HTMLInputElement>("[data-curb-ramp-enabled]")?.addEventListener("change", (event) => { if (spec) { spec.skeleton.curbRamp.enabled = (event.currentTarget as HTMLInputElement).checked; changed("skeleton.curbRamp.enabled"); } });
+    deps.skeletonHostEl.querySelector<HTMLSelectElement>("[data-curb-ramp-side]")?.addEventListener("change", (event) => { if (spec) { spec.skeleton.curbRamp.side = (event.currentTarget as HTMLSelectElement).value as "left" | "right"; changed("skeleton.curbRamp.side"); } });
+    deps.skeletonHostEl.querySelector<HTMLInputElement>("[data-curb-ramp-position]")?.addEventListener("change", (event) => { if (spec && Number.isFinite((event.currentTarget as HTMLInputElement).valueAsNumber)) { spec.skeleton.curbRamp.positionRatio = (event.currentTarget as HTMLInputElement).valueAsNumber / 100; changed("skeleton.curbRamp.positionRatio"); } });
 
     deps.furnitureHostEl.querySelector<HTMLSelectElement>("[data-global-density]")?.addEventListener("change", (event) => {
       if (!spec || !controls) return;
@@ -395,10 +406,38 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
     }
     if (spec.skeleton.median.enabled && spec.skeleton.laneCount < 2) issues.push("设置中岛至少需要两条车道。 ");
     if (spec.skeleton.busStop.enabled && spec.skeleton.furnishingWidthM < 0.6) issues.push("公交站至少需要0.6m设施带。 ");
+    if (spec.skeleton.curbRamp.positionRatio < 0 || spec.skeleton.curbRamp.positionRatio > 1) issues.push("路缘坡道沿道路位置必须在0到1之间。 ");
     for (const [category, value] of Object.entries(spec.furniture.categories)) {
       if (value.enabled && value.preferredSpacingM < value.minimumSpacingM) issues.push(`${CATEGORY_LABELS[category] ?? category}的首选间距不能小于最小间距。`);
     }
     return issues;
+  }
+
+  function applyComposeConfigPatch(patch: Record<string, unknown>): void {
+    ensureCurrentSource();
+    if (!spec) return;
+    if (typeof patch.bus_stop_enabled === "boolean") {
+      spec.skeleton.busStop.enabled = patch.bus_stop_enabled;
+      if (spec.furniture.categories.bus_stop) spec.furniture.categories.bus_stop.enabled = patch.bus_stop_enabled;
+    }
+    if (patch.bus_stop_placement === "curbside" || patch.bus_stop_placement === "bay") spec.skeleton.busStop.placement = patch.bus_stop_placement;
+    if (typeof patch.curb_ramp_enabled === "boolean") spec.skeleton.curbRamp.enabled = patch.curb_ramp_enabled;
+    if (patch.curb_ramp_side === "left" || patch.curb_ramp_side === "right") spec.skeleton.curbRamp.side = patch.curb_ramp_side;
+    const rampPosition = Number(patch.curb_ramp_position_ratio);
+    if (Number.isFinite(rampPosition) && rampPosition >= 0 && rampPosition <= 1) spec.skeleton.curbRamp.positionRatio = rampPosition;
+    if (patch.furniture_style === "civic_clean" || patch.furniture_style === "lush_natural" || patch.furniture_style === "transit_modern") spec.furniture.style = patch.furniture_style;
+    if (patch.building_representation === "asset" || patch.building_representation === "transparent_massing") spec.buildings.representation = patch.building_representation;
+    const knownExtras = [
+      "building_density", "building_max_per_100m", "surrounding_building_mode", "infill_policy",
+      "building_height_mode", "style_preset", "scene_texture_mode",
+    ];
+    for (const key of knownExtras) {
+      if (patch[key] !== undefined) acceptedFeaturePatch[key] = patch[key];
+    }
+    for (const key of Object.keys(patch)) fieldSources[key] = "manual";
+    persist();
+    render();
+    deps.onChange();
   }
 
   deps.seedEl.addEventListener("input", () => { if (spec && Number.isFinite(deps.seedEl.valueAsNumber)) { spec.seed = Math.round(deps.seedEl.valueAsNumber); changed("seed"); } }, { signal });
@@ -433,6 +472,7 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
       ensureCurrentSource();
       if (!spec) return {};
       return {
+        ...acceptedFeaturePatch,
         lane_count: spec.skeleton.laneCount,
         base_lane_width_m: spec.skeleton.laneWidthM,
         sidewalk_width_m: spec.skeleton.sidewalkWidthM,
@@ -443,6 +483,9 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
         median_width_m: spec.skeleton.median.widthM,
         bus_stop_enabled: spec.skeleton.busStop.enabled,
         bus_stop_placement: spec.skeleton.busStop.placement,
+        curb_ramp_enabled: spec.skeleton.curbRamp.enabled,
+        curb_ramp_side: spec.skeleton.curbRamp.side,
+        curb_ramp_position_ratio: spec.skeleton.curbRamp.positionRatio,
         density: spec.furniture.globalDensity,
         furniture_style: spec.furniture.style,
         building_representation: spec.buildings.representation,
@@ -451,6 +494,7 @@ export function createViewerParameterDesignController(deps: Deps): ViewerParamet
     },
     currentSpec() { ensureCurrentSource(); return spec ? structuredClone(spec) : null; },
     validationIssues,
+    applyComposeConfigPatch,
     refreshSource: ensureCurrentSource,
     destroy() { abortController.abort(); },
   };

@@ -373,7 +373,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.65rem 0.75rem;
+  padding: 0.65rem 3.15rem 0.65rem 0.75rem;
   border: 1px solid #102d3a;
   background: rgba(243, 240, 231, 0.96);
   box-shadow: 4px 4px 0 #f4c430;
@@ -387,6 +387,24 @@
 .viewer-starter-demo-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.45rem; }
 .viewer-starter-demo-actions button { min-height: 2rem; padding: 0.38rem 0.65rem; border: 1px solid #102d3a; border-radius: 3px; background: #174b64; color: white; font-weight: 800; cursor: pointer; }
 .viewer-starter-demo-actions button + button { background: white; color: #102d3a; }
+.viewer-starter-demo-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.55rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid #102d3a;
+  border-radius: 3px;
+  background: #fffdf6;
+  color: #102d3a;
+  font: 800 1.25rem/1 ui-monospace, monospace;
+  cursor: pointer;
+}
+.viewer-starter-demo-close:hover { background: #f4c430; }
+.viewer-starter-demo-close:focus-visible { outline: 3px solid #df654f; outline-offset: 2px; }
 
 @media (max-width: 760px) {
   .viewer-starter-demo-banner { align-items: stretch; flex-direction: column; }

@@ -84,6 +84,16 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       shell.root.querySelectorAll<HTMLElement>("[data-admin-source-tools]").forEach((element) => {
         element.hidden = !visible;
       });
+      shell.root.querySelectorAll<HTMLElement>("[data-admin-feature-quality]").forEach((element) => {
+        element.hidden = !visible;
+        element.setAttribute("aria-hidden", String(!visible));
+      });
+      if (!visible) {
+        const workbench = shell.root.querySelector<HTMLElement>("#viewer-feature-quality-workbench");
+        const toggle = shell.root.querySelector<HTMLButtonElement>("#viewer-feature-quality-toggle");
+        if (workbench) workbench.hidden = true;
+        toggle?.setAttribute("aria-pressed", "false");
+      }
       const sourceStatus = shell.root.querySelector<HTMLElement>("#scene-source-status");
       if (sourceStatus && !visible && sourceStatus.dataset.tone === "neutral") {
         sourceStatus.dataset.i18nKey = "sceneGraph.source.osmInitialStatus";
@@ -399,6 +409,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
             runProjectEvaluation: (weights) => evaluateOwnedPublicProject(professionalSession, workflow, weights),
             assetPaletteAdapter: createProfessionalAssetPaletteAdapter(professionalSession),
             scenarioAdapter: createProfessionalScenarioAdapter(professionalSession, workflow),
+            isFeatureQualityAdmin: showAdvancedSourceTools,
             copyStarterToProject: (layoutPath) => copyProfessionalStarterToOwnedProject(
               professionalSession,
               workflow,
@@ -420,6 +431,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
               if (cancelled) routeTeardown();
               if (!cancelled) {
                 if (pendingViewerTarget) activateViewerTarget(pendingViewerTarget);
+                syncAdvancedSourceTools();
                 syncProfessionalNavigation();
               }
             })

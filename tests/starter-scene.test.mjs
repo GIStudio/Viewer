@@ -26,6 +26,8 @@ assert.match(starter, /\/api\/starter-scenes\/default/, "starter discovery must 
 assert.match(starter, /\/materialize`/, "starter materialization must use the idempotent server endpoint");
 assert.match(starter, /await saveProfessionalWorkflowDraft\(workflow\.getSnapshot\(\)\)/, "materialization must be durable before the preview is dismissed");
 assert.match(stage, /id="viewer-starter-demo-banner"/, "the main stage must identify the bundled demo");
+assert.match(stage, /class="viewer-starter-demo-close"[^>]+data-starter-action="dismiss"/, "the demo banner must provide a manual close button");
+assert.match(stage, /aria-label="关闭内置示例提示"/, "the close button must have an accessible Chinese label before runtime localization");
 assert.match(stage, /data-starter-action="materialize"/, "the demo banner must offer an explicit copy action");
 assert.match(stage, /data-starter-action="source"/, "the demo banner must link to the user's OSM workflow");
 assert.match(stage, /透明建筑白模/, "the starter banner must describe its complete intersection context");
@@ -46,6 +48,7 @@ assert.match(routeIsland, /showStarterReviewOnLoad: pendingViewerTarget === null
 assert.match(routeIsland, /const shouldPreferWorkflowScene = pendingViewerTarget !== null && pendingViewerTarget !== "generate";/, "2D-to-3D handoff should keep workflow scenes for non-generation revisits");
 assert.match(routeIsland, /preferWorkflowScene: shouldPreferWorkflowScene/, "2D-to-3D handoff should evaluate whether workflow scenes should be restored");
 assert.match(app, /copyStarterToProject/, "copying the starter must materialize an owned project revision");
+assert.match(app, /starterDemoBannerDismissed\.value = true/, "closing the banner must persist for the current viewer session");
 assert.match(app, /hostOptions\.onStarterCopied\?\.\(\)/, "a successful starter copy must notify the workbench shell");
 assert.match(routeIsland, /onStarterCopied:[\s\S]*desktop-shell-modal-close[\s\S]*shell\.sidebar\.activate\("public-space"\)/, "a successful starter copy must close the review dialog and open the bulletin-board sidebar");
 assert.match(stage, /复制为我的项目/, "the demo copy action must describe the ownership transition");

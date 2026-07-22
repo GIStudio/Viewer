@@ -56,6 +56,7 @@ export function createViewerStageHtml(): string {
           </div>
           <span class="stage-toolbar-divider" aria-hidden="true"></span>
           <div class="stage-toolbar-cluster" aria-label="质量检查">
+            <button class="stage-toolbar-button" type="button" id="viewer-feature-quality-toggle" data-admin-feature-quality hidden aria-hidden="true" aria-haspopup="dialog" aria-controls="viewer-feature-quality-workbench" aria-pressed="false">要素实验</button>
             <button class="stage-toolbar-button" type="button" id="viewer-open-camera-surface-diagnostic" title="相机局部几何诊断">QA 100m</button>
           </div>
           <span class="stage-toolbar-divider" aria-hidden="true"></span>
@@ -76,6 +77,7 @@ export function createViewerStageHtml(): string {
       <section id="viewer-empty-state" class="viewer-empty-state" aria-live="polite" hidden></section>
 
       <aside id="viewer-starter-demo-banner" class="viewer-starter-demo-banner" aria-live="polite" hidden>
+        <button class="viewer-starter-demo-close" type="button" data-starter-action="dismiss" aria-label="关闭内置示例提示" title="关闭内置示例提示">×</button>
         <div>
           <span>BUILT-IN DEMO</span>
           <strong data-starter-demo-label>内置示例 · 广州完整十字路口</strong>
@@ -126,6 +128,7 @@ export function createViewerStageHtml(): string {
       </aside>
 
       <aside id="viewer-scenario-workbench" class="viewer-scenario-workbench" hidden role="dialog" aria-modal="true" aria-labelledby="viewer-scenario-workbench-title"></aside>
+      <aside id="viewer-feature-quality-workbench" class="viewer-feature-quality-workbench" hidden role="dialog" aria-modal="true" aria-label="微要素三视图实验"></aside>
 
 
       <div id="viewer-generation-dialog" class="viewer-generation-dialog" data-open="false" role="dialog" aria-modal="true" aria-labelledby="viewer-generation-dialog-title" tabindex="-1">

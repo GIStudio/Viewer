@@ -20,6 +20,8 @@ export type GalleryCaptureTarget = {
   target: [number, number, number] | number[];
   priority?: number;
   fov?: number;
+  projection?: "perspective" | "orthographic";
+  orthographic_height_m?: number;
 };
 
 export type GalleryCaptureResult = {
@@ -205,15 +207,26 @@ function makeGalleryCamera(
   target: GalleryCaptureTarget,
   width: number,
   height: number,
-): THREE.PerspectiveCamera {
+): THREE.PerspectiveCamera | THREE.OrthographicCamera {
   const cameraPosition = finiteTriplet(target.camera, [0, 20, 20]);
   const lookTarget = finiteTriplet(target.target, [0, 0, 0]);
-  const renderCamera = new THREE.PerspectiveCamera(
-    Number.isFinite(target.fov) ? Number(target.fov) : 58,
-    width / height,
-    0.05,
-    5000,
-  );
+  const aspect = width / height;
+  const orthographicHeight = Number(target.orthographic_height_m);
+  const renderCamera = target.projection === "orthographic"
+    ? new THREE.OrthographicCamera(
+      -(Number.isFinite(orthographicHeight) ? orthographicHeight : 20) * aspect / 2,
+      (Number.isFinite(orthographicHeight) ? orthographicHeight : 20) * aspect / 2,
+      (Number.isFinite(orthographicHeight) ? orthographicHeight : 20) / 2,
+      -(Number.isFinite(orthographicHeight) ? orthographicHeight : 20) / 2,
+      0.05,
+      5000,
+    )
+    : new THREE.PerspectiveCamera(
+      Number.isFinite(target.fov) ? Number(target.fov) : 58,
+      aspect,
+      0.05,
+      5000,
+    );
   renderCamera.position.set(cameraPosition[0], cameraPosition[1], cameraPosition[2]);
   renderCamera.lookAt(lookTarget[0], lookTarget[1], lookTarget[2]);
   renderCamera.updateProjectionMatrix();
