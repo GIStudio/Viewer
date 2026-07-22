@@ -2654,6 +2654,9 @@ export default defineConfig({
       input: {
         main: path.resolve(viewerRoot, "index.html"),
       },
+      // Keep Rollup's graph-aware chunking. Splitting dependencies by package
+      // name created circular vendor chunks (notably React/Ant Design), which
+      // crashed the production build before React.createContext was available.
     },
   },
 });
