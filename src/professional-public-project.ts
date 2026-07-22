@@ -149,13 +149,64 @@ function workflowHasCurrent2DSource(workflow: WorkflowController): boolean {
   return Boolean(snapshot.normalized?.geojson ?? snapshot.sourceGeojson);
 }
 
-async function waitForProjectJob(session: ProfessionalSessionController, initial: PlatformJob): Promise<PlatformJob> {
+async function ensureActiveOwnedProjectRevision(
+  session: ProfessionalSessionController,
+  workflow: WorkflowController,
+): Promise<{ projectId: string; revision: SceneRevision }> {
+  const sceneRef = workflow.getSnapshot().sceneRef;
+  if (sceneRef?.kind === "project_revision") {
+    if (!session.getSnapshot().projects.some((project) => project.id === sceneRef.projectId)) {
+      throw new Error("当前公共项目为只读；请先复制到自己的项目后再编辑或生成候选。");
+    }
+    const revisions = await session.api.request<{ items: SceneRevision[] }>(`/api/v1/projects/${sceneRef.projectId}/revisions`);
+    const revision = revisions.items.find((item) => item.id === sceneRef.revisionId);
+    if (!revision) throw new Error("当前项目场景版本不存在，请重新打开场景。");
+    return { projectId: sceneRef.projectId, revision };
+  }
+
+  const layoutPath = String(workflow.getSnapshot().sceneLayoutPath || "").trim();
+  if (!layoutPath || /^(?:blob:|https?:)/i.test(layoutPath)) {
+    throw new Error("请先生成一个可保存的 Scene A，再编辑或创建 C 候选。");
+  }
+  const ready = await session.ensureReady();
+  let project = ready.projects.find((item) => item.id === ready.currentProjectId) ?? ready.projects[0] ?? null;
+  if (!project) project = await session.createProject("未命名街道设计");
+  let sourceId: string | undefined;
+  if (workflowHasCurrent2DSource(workflow)) {
+    const saved = await saveProfessionalSourceToWorkspace(session, workflow);
+    if (saved.project.id !== project.id) {
+      throw new Error("当前 2D 标注与目标项目不一致，请重新打开项目后再保存方案 A。");
+    }
+    sourceId = saved.source.id;
+  }
+  const imported = await session.api.post<SceneRevision>(
+    `/api/v1/projects/${project.id}/revisions/import-layout`,
+    { layout_path: layoutPath, source_id: sourceId, label: "方案 A · 当前场景" },
+  );
+  await openProfessionalOwnedRevision(session, workflow, project.id, imported);
+  return { projectId: project.id, revision: imported };
+}
+
+async function waitForProjectJob(
+  session: ProfessionalSessionController,
+  initial: PlatformJob,
+  onProgress?: () => Promise<void> | void,
+): Promise<PlatformJob> {
   let job = initial;
-  for (let attempt = 0; attempt < 360 && !["succeeded", "failed", "cancelled"].includes(job.status); attempt += 1) {
+  const maxAttempts = 1800;
+  for (let attempt = 0; attempt < maxAttempts && !["succeeded", "failed", "cancelled"].includes(job.status); attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     job = await session.api.request<PlatformJob>(`/api/v1/jobs/${job.id}`);
+    if ((attempt + 1) % 4 === 0 || ["succeeded", "failed", "cancelled"].includes(job.status)) {
+      await onProgress?.();
+    }
   }
-  if (job.status !== "succeeded") throw new Error(job.error || "Metric-driven scene generation failed.");
+  if (job.status === "queued" || job.status === "running") {
+    throw new Error(`场景生成仍在后台${job.status === "queued" ? "排队" : "运行"}，已超过 900 秒等待窗口；任务未被判定为失败，可稍后刷新方案版本。`);
+  }
+  if (job.status !== "succeeded") {
+    throw new Error(job.error || job.message || `场景生成任务状态：${job.status}`);
+  }
   return job;
 }
 
@@ -243,13 +294,13 @@ export async function copyProfessionalStarterToOwnedProject(
   await session.ensureReady();
   const project = await session.createProject("广州示例副本");
   const saved = await saveProfessionalSourceToWorkspace(session, workflow);
-  if (saved.project.id !== project.id) throw new Error("示例来源未保存到新建项目，请重试。");
+  if (saved.project.id !== project.id) throw new Error("示例 OSM 标注未保存到新建项目，请重试。");
   const revision = await session.api.post<SceneRevision>(
     `/api/v1/projects/${project.id}/revisions/import-layout`,
     {
       layout_path: layoutPath,
       source_id: saved.source.id,
-      label: "方案 A · OSM 示例副本",
+      label: "方案 A · 内置示例副本",
     },
   );
   await session.refreshPublicProjects().catch(() => []);
@@ -462,38 +513,38 @@ export function createProfessionalScenarioAdapter(
       if (created.job) await waitForProjectJob(session, created.job);
       await session.refreshPublicProjects().catch(() => []);
     },
-    async prepareManualEdit(): Promise<ProfessionalScenarioOpenTarget> {
-      const projectId = currentProjectId();
-      if (!projectId) throw new Error("当前没有可编辑的项目场景。");
-      if (!session.getSnapshot().projects.some((project) => project.id === projectId)) {
-        throw new Error("当前公共项目为只读，不能保存人工方案 B。");
-      }
-      const payload = await session.api.request<{ items: SceneRevision[] }>(`/api/v1/projects/${projectId}/revisions`);
-      const baselines = [...payload.items]
-        .sort((a, b) => a.revision_number - b.revision_number)
-        .filter((revision) => revision.branch_kind === "baseline");
-      const baseline = baselines[baselines.length - 1];
-      if (!baseline) throw new Error("请先生成 3D 基线 A，再创建人工方案 B。");
-      return openProfessionalOwnedRevision(session, workflow, projectId, baseline);
+    async saveCurrentAsBaseline(): Promise<void> {
+      await ensureActiveOwnedProjectRevision(session, workflow);
+      await session.refreshPublicProjects().catch(() => []);
     },
-    async generate(goalWeights: ScenarioGoalWeights): Promise<ProfessionalScenarioGeneration> {
-      const sceneRef = workflow.getSnapshot().sceneRef;
-      if (sceneRef?.kind !== "project_revision") throw new Error("请先生成并保存 Scene A，再创建 C 候选。");
-      if (!session.getSnapshot().projects.some((project) => project.id === sceneRef.projectId)) {
-        throw new Error("当前公共项目为只读，不能生成候选方案。");
-      }
-      const revisionPayload = await session.api.request<{ items: SceneRevision[] }>(`/api/v1/projects/${sceneRef.projectId}/revisions`);
-      const orderedRevisions = [...revisionPayload.items].sort((a, b) => a.revision_number - b.revision_number);
-      const humanRevisions = orderedRevisions.filter((revision) => revision.branch_kind === "human_edit");
-      const baselineRevisions = orderedRevisions.filter((revision) => revision.branch_kind === "baseline");
-      const parentRevision = humanRevisions[humanRevisions.length - 1]
-        ?? baselineRevisions[baselineRevisions.length - 1];
-      if (!parentRevision) throw new Error("请先生成 3D 基线 A，再创建 C 候选。");
-      const sourcePayload = await session.api.request<{ items: SceneSource[] }>(`/api/v1/projects/${sceneRef.projectId}/sources`);
+    async prepareManualEdit(): Promise<ProfessionalScenarioOpenTarget> {
+      const active = await ensureActiveOwnedProjectRevision(session, workflow);
+      const projectId = active.projectId;
+      const branch = await session.api.post<SceneRevision>(
+        `/api/v1/projects/${projectId}/revisions/${active.revision.id}/fork`,
+        {
+          branch_kind: "human_edit",
+          label: "方案 B · 人工编辑起点",
+          provenance: { editor: "professional_scenario_workbench" },
+        },
+      );
+      currentRevisionByProject.set(projectId, branch.id);
+      return openProfessionalOwnedRevision(session, workflow, projectId, branch);
+    },
+    async generate(
+      goalWeights: ScenarioGoalWeights,
+      onProgress?: (workspace: ProfessionalScenarioWorkspace) => void,
+    ): Promise<ProfessionalScenarioGeneration> {
+      const active = await ensureActiveOwnedProjectRevision(session, workflow);
+      const projectId = active.projectId;
+      const revisionPayload = await session.api.request<{ items: SceneRevision[] }>(`/api/v1/projects/${projectId}/revisions`);
+      const parentRevision = revisionPayload.items.find((revision) => revision.id === active.revision.id);
+      if (!parentRevision) throw new Error("当前 Scene A/B 版本不存在，请重新打开后再创建 C 候选。");
+      const sourcePayload = await session.api.request<{ items: SceneSource[] }>(`/api/v1/projects/${projectId}/sources`);
       let sourceId = parentRevision.source_id ?? sourcePayload.items[0]?.id ?? null;
       if (!sourceId && workflowHasCurrent2DSource(workflow)) {
         const saved = await saveProfessionalSourceToWorkspace(session, workflow);
-        if (saved.project.id !== sceneRef.projectId) throw new Error("2D 来源与当前项目不一致，请重新打开项目后再生成。");
+        if (saved.project.id !== projectId) throw new Error("2D 来源与当前项目不一致，请重新打开项目后再生成。");
         sourceId = saved.source.id;
       }
       if (!sourceId) {
@@ -503,7 +554,7 @@ export function createProfessionalScenarioAdapter(
       if (positiveGoals.length < 2) throw new Error("请至少为两个目标设置大于 0 的权重。");
       const parentRevisionId = parentRevision.id;
       const goalSummary = positiveGoals.map(([key, value]) => `${key}=${value}`).join(", ");
-      const initial = await session.api.post<PlatformJob>(`/api/v1/projects/${sceneRef.projectId}/generate`, {
+      const initial = await session.api.post<PlatformJob>(`/api/v1/projects/${projectId}/generate`, {
         source_id: sourceId,
         prompt: `Run a traceable local parameter search from objective weights (${goalSummary}). Keep the approved OSM topology and retain every evaluated candidate. This search is not a claim of global optimality.`,
         generation_mode: "parametric",
@@ -511,14 +562,16 @@ export function createProfessionalScenarioAdapter(
         goal_weights: goalWeights,
         candidate_count: 3,
       });
-      const completed = await waitForProjectJob(session, initial);
+      const completed = await waitForProjectJob(session, initial, async () => {
+        onProgress?.(await load());
+      });
       const revisionId = String(completed.result?.revision?.id ?? "");
-      const revisions = await session.api.request<{ items: SceneRevision[] }>(`/api/v1/projects/${sceneRef.projectId}/revisions`);
+      const revisions = await session.api.request<{ items: SceneRevision[] }>(`/api/v1/projects/${projectId}/revisions`);
       const revision = revisions.items.find((item) => item.id === revisionId)
         ?? revisions.items.find((item) => item.parent_id === parentRevisionId && item.branch_kind === "ai_edit")
         ?? revisions.items[0];
       if (!revision) throw new Error("候选生成完成，但没有找到新 revision。");
-      const target = await openProfessionalOwnedRevision(session, workflow, sceneRef.projectId, revision);
+      const target = await openProfessionalOwnedRevision(session, workflow, projectId, revision);
       await session.refreshPublicProjects().catch(() => []);
       return { workspace: await load(), target, selectedScenarioId: revision.id };
     },

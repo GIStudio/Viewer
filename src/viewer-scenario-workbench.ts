@@ -50,8 +50,12 @@ export type ProfessionalScenarioAdapter = {
   load(): Promise<ProfessionalScenarioWorkspace>;
   open(revisionId: string): Promise<ProfessionalScenarioOpenTarget>;
   evaluate(revisionId: string): Promise<void>;
+  saveCurrentAsBaseline(): Promise<void>;
   prepareManualEdit(): Promise<ProfessionalScenarioOpenTarget>;
-  generate(goalWeights: ScenarioGoalWeights): Promise<ProfessionalScenarioGeneration>;
+  generate(
+    goalWeights: ScenarioGoalWeights,
+    onProgress?: (workspace: ProfessionalScenarioWorkspace) => void,
+  ): Promise<ProfessionalScenarioGeneration>;
   compare(revisionIds: string[]): Promise<ScenarioComparisonItem[]>;
 };
 
@@ -135,8 +139,10 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
       : branch === "B"
         ? (zh() ? "尚无人工编辑版本" : "No manual edit yet")
         : (zh() ? "尚无自动参数候选" : "No automated candidate yet");
-    const emptyAction = branch === "B"
-      ? `<button type="button" class="viewer-scenario-lane-action" data-scenario-action="edit-2d">${zh() ? "前往 2D 标注" : "Edit in 2D"}</button><small>${zh() ? "保留当前 OSM 研究区与已保存标注，无需重新获取地图数据。" : "Keeps the current OSM study area and saved annotation; no map download is needed."}</small>`
+    const emptyAction = branch === "A"
+      ? `<button type="button" class="viewer-scenario-lane-action" data-scenario-action="save-a" ${workspace?.canWrite && !busy ? "" : "disabled"}>${zh() ? "将当前 3D 保存为方案 A" : "Save current 3D as A"}</button><small>${zh() ? "将当前已生成的 3D 场景保存为可追溯 A；如有已保存 2D 标注，会同时绑定其来源。" : "Save the current generated 3D scene as traceable A and bind the saved 2D source when available."}</small>`
+      : branch === "B"
+      ? `<button type="button" class="viewer-scenario-lane-action" data-scenario-action="edit-3d">${zh() ? "将当前 A 保存为 B" : "Save current A as B"}</button><button type="button" class="viewer-scenario-lane-action" data-scenario-action="edit-2d">${zh() ? "修改 2D，生成新 A" : "Edit 2D, generate new A"}</button><small>${zh() ? "先创建 B 分支；需要时再从版本卡片打开 B 进行 3D 编辑。2D 修改会创建新的 A 基线。" : "Create the B branch first, then open B from its version card when you want to edit it in 3D. Editing 2D creates a new A baseline."}</small>`
       : "";
     return `<section class="viewer-scenario-lane" data-branch="${branch}">
       <header><b>${branch}</b><div><strong>${branchTitle(branch)}</strong><small>${items.length} ${zh() ? "个版本" : items.length === 1 ? "version" : "versions"}</small></div></header>
@@ -198,7 +204,7 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
     const candidate = latestScenario(scenarios, "ai_edit");
     if (!baseline) {
       const disabled = !workspace?.canWrite ? "disabled" : "";
-      return `<div class="viewer-scenario-comparison-empty"><span>A ↔ B ↔ C</span><strong>${zh() ? "请先生成首个 3D 基线 A" : "Generate the first 3D baseline A first"}</strong><p>${zh() ? "完成 2D 标注并通过校验后，从顶部“3D 场景生成”创建可追溯的 A。" : "After validating the 2D annotation, use the top 3D generation action to create a traceable A."}</p><button type="button" class="viewer-scenario-next-step" data-scenario-action="edit-2d" ${disabled}>${zh() ? "前往 2D 标注，生成 A 基线" : "Go to 2D annotation and generate A"}</button>${!workspace?.canWrite ? `<small>${escapeHtml(unavailableReason())}</small>` : ""}</div>`;
+      return `<div class="viewer-scenario-comparison-empty"><span>A ↔ B ↔ C</span><strong>${zh() ? "请先生成首个 3D 基线 A" : "Generate the first 3D baseline A first"}</strong><p>${zh() ? "已生成但尚未保存的当前 3D 场景，也可以直接登记为可追溯 A。" : "A generated but unsaved current 3D scene can also be registered directly as traceable A."}</p><button type="button" class="viewer-scenario-next-step" data-scenario-action="save-a" ${disabled}>${zh() ? "将当前 3D 保存为方案 A" : "Save current 3D as A"}</button><button type="button" class="viewer-scenario-next-step" data-scenario-action="edit-2d" ${disabled}>${zh() ? "前往 2D 标注，生成 A 基线" : "Go to 2D annotation and generate A"}</button>${!workspace?.canWrite ? `<small>${escapeHtml(unavailableReason())}</small>` : ""}</div>`;
     }
     const disabled = !workspace?.canWrite;
     const disabledAttr = disabled || busy ? "disabled" : "";
@@ -210,7 +216,7 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
         <span>B · ${zh() ? "人工方案" : "Manual scenario"}</span>
         <strong>${zh() ? "从最新 A 创建人工方案 B" : "Create a manual B from the latest A"}</strong>
         <p>${zh() ? `${baseline.shortLabel} 是当前基线。修改 2D 后再次生成会形成新的 A；只有保存 3D 人工编辑才会形成 B。` : `${baseline.shortLabel} is the current baseline. Editing 2D and generating again creates a new A; only saving a 3D manual edit creates B.`}</p>
-        <div><button type="button" data-scenario-action="edit-2d" ${disabledAttr}${disabledTitle}>${zh() ? "修改 2D，生成新的 A 基线" : "Edit 2D and generate a new A"}</button><button type="button" data-scenario-action="edit-3d" ${disabledAttr}${disabledTitle}>${zh() ? "编辑当前 3D，保存为 B" : "Edit current 3D and save as B"}</button></div>${readOnlyNote}
+        <div><button type="button" data-scenario-action="edit-2d" ${disabledAttr}${disabledTitle}>${zh() ? "修改 2D，生成新的 A 基线" : "Edit 2D and generate a new A"}</button><button type="button" data-scenario-action="edit-3d" ${disabledAttr}${disabledTitle}>${zh() ? "将当前 A 保存为 B" : "Save current A as B"}</button></div>${readOnlyNote}
       </article>`);
     }
     if (!candidate) {
@@ -389,7 +395,14 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
         return;
       }
       busy = true; message = zh() ? "正在生成、评价并筛选 3 个局部 C 候选…" : "Generating, evaluating, and selecting three local C candidates…"; render();
-      void options.adapter.generate(goalWeights).then(async (generated) => {
+      void options.adapter.generate(goalWeights, (nextWorkspace) => {
+        workspace = nextWorkspace;
+        const completedCount = nextWorkspace.scenarios.filter((scenario) => scenario.branchKind === "ai_edit").length;
+        message = zh()
+          ? `正在生成、评价并筛选 3 个局部 C 候选…已保存 ${completedCount}/3 个候选。`
+          : `Generating, evaluating, and selecting 3 local C candidates… ${completedCount}/3 saved.`;
+        render();
+      }).then(async (generated) => {
         workspace = generated.workspace;
         const selectedCandidate = generated.workspace.scenarios.find((scenario) => scenario.id === generated.selectedScenarioId);
         await options.loadScenario(generated.target);
@@ -408,13 +421,20 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
       controller.close();
       window.location.hash = "scene-graph";
     }
+    if (target.dataset.scenarioAction === "save-a") {
+      busy = true; message = zh() ? "正在将当前 3D 保存为方案 A…" : "Saving the current 3D scene as Scenario A…"; render();
+      void options.adapter.saveCurrentAsBaseline().then(async () => {
+        await load(false);
+        message = zh() ? "当前 3D 已保存为可追溯方案 A。" : "The current 3D scene was saved as traceable Scenario A.";
+        render();
+      }).catch((error) => { message = String(error); busy = false; render(); });
+    }
     if (target.dataset.scenarioAction === "edit-3d") {
-      busy = true; message = zh() ? "正在打开最新 A 并进入 3D 编辑…" : "Opening the latest A for 3D editing…"; render();
-      void options.adapter.prepareManualEdit().then(async (next) => {
-        await options.loadScenario(next);
-        controller.close();
-        await options.enterManualEdit();
-        options.flashStatus(zh() ? "已打开最新 A；保存 3D 编辑后会创建 B。" : "The latest A is open. Saving a 3D edit will create B.");
+      busy = true; message = zh() ? "正在将最新 A 保存为 B 分支…" : "Saving the latest A as a B branch…"; render();
+      void options.adapter.prepareManualEdit().then(async () => {
+        await load(false);
+        message = zh() ? "已创建 B 分支；可从 B 版本卡片打开后再编辑。" : "The B branch was created. Open it from its version card when you are ready to edit.";
+        render();
       }).catch((error) => { message = String(error); busy = false; render(); });
     }
   }, { signal });
