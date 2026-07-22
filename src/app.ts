@@ -492,6 +492,11 @@ function createAvatarFigure(): THREE.Group {
 
 export type ViewerHostOptions = {
   embedded?: boolean;
+  /**
+   * Professional 2D → 3D handoffs must keep the current workflow context.
+   * The public root entry remains an intentional, read-only starter preview.
+   */
+  preferWorkflowScene?: boolean;
   persistSceneCommands?: (
     commands: SceneEditCommand[],
     context: { layoutPath: string },
@@ -4806,15 +4811,23 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       // available in the scene browser, but only an explicit layout query may
       // take over the standalone stage. Embedded/project viewers still restore
       // their persisted revision because the project owns that route.
-      const requestedLayoutPath = hostOptions.embedded ? workflowLayoutPath : explicitLayoutPath;
+      // An explicit URL always wins.  During a professional handoff, however,
+      // the workflow owns the scene/source: falling back to the public starter
+      // here would make a current OSM study look like the default Guangzhou
+      // demo and, on Browse, replace the user's generated result visually.
+      const requestedLayoutPath = explicitLayoutPath
+        || ((hostOptions.embedded || hostOptions.preferWorkflowScene) ? workflowLayoutPath : null);
       const recentLayouts: RecentLayout[] = [];
       const initialLayoutCandidates = requestedLayoutPath ? [requestedLayoutPath] : [];
 
       if (initialLayoutCandidates.length === 0) {
         animate();
         updateOverlay();
-        if (hostOptions.embedded) {
-          setStatus(t("Ready for a road baseline.", "等待道路基线。"));
+        if (hostOptions.embedded || hostOptions.preferWorkflowScene) {
+          setStatus(t(
+            "The current project source is ready for 3D generation.",
+            "当前项目的 OSM 与标注版本已就绪，可直接生成 3D 场景。",
+          ));
           renderProfessionalWorkflowState();
         } else {
           await loadStarterScenePreview();

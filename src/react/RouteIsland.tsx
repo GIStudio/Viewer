@@ -421,6 +421,10 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
               shell.root.querySelector<HTMLButtonElement>(".desktop-shell-modal-close")?.click();
               shell.sidebar.activate("public-space");
             },
+            // 2D actions have an explicit project intent.  Preserve its OSM
+            // context and generated revision instead of reopening the public
+            // starter just because the viewer is mounted as a standalone app.
+            preferWorkflowScene: pendingViewerTarget !== null,
             showStarterReviewOnLoad: pendingViewerTarget === null,
             modalTabs: professionalModalTabs,
           })

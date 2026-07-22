@@ -30,19 +30,15 @@ assert.doesNotMatch(app, /legacyStarterSceneIdFromPath/, "a generated layout pat
 assert.match(app, /await loadStarterScenePreview\(\)/, "an empty professional workflow must load the starter preview");
 assert.match(
   app,
-  /const requestedLayoutPath = hostOptions\.embedded \? workflowLayoutPath : explicitLayoutPath/,
-  "a restored local draft must not rewrite the standalone root URL to an old layout",
-);
-assert.doesNotMatch(
-  app,
-  /const requestedLayoutPath = explicitLayoutPath \|\| workflowLayoutPath/,
-  "the standalone root URL must remain the stable starter entry point",
+  /const requestedLayoutPath = explicitLayoutPath\s*\|\| \(\(hostOptions\.embedded \|\| hostOptions\.preferWorkflowScene\) \? workflowLayoutPath : null\)/,
+  "only an explicit professional handoff may restore a workflow scene; the public root remains a starter entry",
 );
 assert.match(app, /workflow\.setStarterPreview\(starter\.id\)/, "starter loading must publish the transient review state");
 assert.match(app, /frameSceneFocus\(starter\.focus_xz, starter\.focus_extent_m\)/, "starter loading must frame the cross junction rather than the full corridor");
 assert.match(app, /STARTER_REVIEW_ONBOARDING_KEY/, "starter review onboarding must be tracked separately from normal 3D navigation");
 assert.match(app, /hostOptions\.showStarterReviewOnLoad !== false/, "the starter review must be suppressible for a 2D-to-3D handoff");
 assert.match(routeIsland, /showStarterReviewOnLoad: pendingViewerTarget === null/, "a pending 2D-to-3D target must suppress the starter review dialog");
+assert.match(routeIsland, /preferWorkflowScene: pendingViewerTarget !== null/, "a pending 2D-to-3D target must retain its current OSM source and scene revision");
 assert.match(app, /copyStarterToProject/, "copying the starter must materialize an owned project revision");
 assert.match(app, /hostOptions\.onStarterCopied\?\.\(\)/, "a successful starter copy must notify the workbench shell");
 assert.match(routeIsland, /onStarterCopied:[\s\S]*desktop-shell-modal-close[\s\S]*shell\.sidebar\.activate\("public-space"\)/, "a successful starter copy must close the review dialog and open the bulletin-board sidebar");
