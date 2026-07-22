@@ -209,9 +209,10 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
     const registerProfessionalNavigation = (): void => {
       unregisterProfessionalNavigation?.();
       const session = professionalSession.getSnapshot();
+      const currentLanguage = loadViewerLanguage();
       const accountPage = {
         id: "account",
-        label: language === "zh" ? "账户" : "Account",
+        label: currentLanguage === "zh" ? "账户" : "Account",
         icon: "AC",
         group: "system" as const,
         content: accountPanel.element,
@@ -219,7 +220,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       };
       const publicSpacePage = {
         id: "public-space",
-        label: language === "zh" ? "小黑板" : "Bulletin board",
+        label: currentLanguage === "zh" ? "小黑板" : "Bulletin board",
         icon: "PS",
         group: "workspace" as const,
         content: publicSpacePanel.element,
@@ -227,7 +228,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       };
       const adminPage = {
         id: "admin",
-        label: language === "zh" ? "系统管理" : "System admin",
+        label: currentLanguage === "zh" ? "系统管理" : "System admin",
         icon: "AD",
         group: "system" as const,
         content: adminPanel.element,
@@ -383,7 +384,16 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       syncProfessionalNavigation();
       syncAdvancedSourceTools();
     });
-    window.addEventListener(VIEWER_LANGUAGE_EVENT, syncProfessionalNavigation);
+    const syncProfessionalLanguage = (): void => {
+      const currentLanguage = loadViewerLanguage();
+      accountPanel.setLanguage(currentLanguage);
+      publicSpacePanel.setLanguage(currentLanguage);
+      adminPanel.setLanguage(currentLanguage);
+      registerProfessionalNavigation();
+      syncProfessionalSessionNavigation();
+      syncProfessionalNavigation();
+    };
+    window.addEventListener(VIEWER_LANGUAGE_EVENT, syncProfessionalLanguage);
 
     function mountRoute() {
       switch (route) {
@@ -450,7 +460,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
 
     return () => {
       cancelled = true;
-      window.removeEventListener(VIEWER_LANGUAGE_EVENT, syncProfessionalNavigation);
+      window.removeEventListener(VIEWER_LANGUAGE_EVENT, syncProfessionalLanguage);
       unsubscribeWorkflow();
       unsubscribeProfessionalSession();
       unregisterProfessionalNavigation?.();
@@ -460,7 +470,7 @@ export function RouteIsland({ route, language, workflow, baselineCoordinator, pr
       routeTeardown?.();
       shell.destroy();
     };
-  }, [baselineCoordinator, language, professionalSession, route, workflow]);
+  }, [baselineCoordinator, professionalSession, route, workflow]);
 
   if (route === "course-studio") {
     return <CourseStudio language={language} workflow={workflow} />;

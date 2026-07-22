@@ -14,6 +14,7 @@ export type ShellMenuActionId =
   | "tools-open-design"
   | "tools-open-evaluate"
   | "tools-open-compare"
+  | "tools-open-consistency"
   | "tools-open-presets"
   | "help-shortcuts";
 

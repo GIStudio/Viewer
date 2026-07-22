@@ -5,7 +5,6 @@ export type ViewerPanelKey =
   | "design"
   | "evaluate"
   | "compare"
-  | "help"
   | "consistency";
 
 export type ViewerPanelText = (en: string, zh: string) => string;
@@ -118,10 +117,6 @@ export type ViewerPanelElements = {
   consistencyContentEl: HTMLElement;
   exportTopdownMapEl: HTMLButtonElement;
   exportTopdownSvgEl: HTMLButtonElement;
-  helpToggleEl: HTMLButtonElement;
-  helpPanelEl: HTMLElement;
-  helpCloseEl: HTMLButtonElement;
-  helpContentEl: HTMLElement;
   graphOverlayToggleEl: HTMLInputElement;
   layoutOverlayToggleEl: HTMLInputElement;
   analysisOverlayToggleEl: HTMLInputElement;

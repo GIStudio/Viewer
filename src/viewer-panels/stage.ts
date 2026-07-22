@@ -1,5 +1,4 @@
 import { renderDesignPanelHtml } from "./designPanel";
-import { renderHelpPanelHtml } from "./helpPanel";
 import { renderViewerSettingsPanelHtml } from "../viewer-settings-panel";
 
 function renderConsistencyDebugPanel(): string {
@@ -50,13 +49,20 @@ export function createViewerStageHtml(): string {
           </button>
         </div>
         <div class="stage-toolbar-group stage-toolbar-output" data-od-id="toolbar-right">
-          <button class="stage-toolbar-button stage-toolbar-button-primary" type="button" id="viewer-direct-edit" aria-pressed="false">编辑地物</button>
-          <button class="stage-toolbar-button" type="button" id="viewer-top-assets">资产库</button>
-          <button class="stage-toolbar-button" type="button" id="viewer-scheme-compare-toggle" data-viewer-center-control="schemes" aria-expanded="false">方案 A/B/C</button>
-          <button class="stage-toolbar-button" type="button" id="viewer-open-camera-surface-diagnostic" title="相机局部几何诊断">QA 100m</button>
-          <button class="stage-toolbar-button" type="button" id="viewer-consistency-toggle" title="调试：查看转换与拓扑检查" data-i18n-key="viewer.stage.consistencyDebug">Consistency debug</button>
-          <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-map" data-shell-action="file-export-png">PNG</button>
-          <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-svg" data-shell-action="file-export-svg">SVG</button>
+          <div class="stage-toolbar-cluster" aria-label="编辑与方案">
+            <button class="stage-toolbar-button stage-toolbar-button-primary" type="button" id="viewer-direct-edit" aria-pressed="false">编辑地物</button>
+            <button class="stage-toolbar-button" type="button" id="viewer-top-assets">资产库</button>
+            <button class="stage-toolbar-button" type="button" id="viewer-scheme-compare-toggle" aria-haspopup="dialog" aria-controls="viewer-scenario-workbench" aria-pressed="false">方案 A/B/C</button>
+          </div>
+          <span class="stage-toolbar-divider" aria-hidden="true"></span>
+          <div class="stage-toolbar-cluster" aria-label="质量检查">
+            <button class="stage-toolbar-button" type="button" id="viewer-open-camera-surface-diagnostic" title="相机局部几何诊断">QA 100m</button>
+          </div>
+          <span class="stage-toolbar-divider" aria-hidden="true"></span>
+          <div class="stage-toolbar-cluster" aria-label="导出">
+            <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-map" data-shell-action="file-export-png">PNG</button>
+            <button class="stage-toolbar-button" type="button" id="viewer-export-topdown-svg" data-shell-action="file-export-svg">SVG</button>
+          </div>
           <span class="stage-pill" data-tone="ok" id="viewer-topology-pill" hidden aria-hidden="true">topology_ok</span>
           <span class="stage-pill" id="viewer-geo-pill" hidden aria-hidden="true">geo_delta —</span>
         </div>
@@ -115,7 +121,7 @@ export function createViewerStageHtml(): string {
             <span data-i18n-key="viewer.left.scene">Scene view</span>
             <select id="scene-select" class="viewer-select viewer-select-inline" title="Scene view" data-i18n-title-key="viewer.left.scene"></select>
           </label>
-          <div id="viewer-scheme-compare" class="viewer-scheme-compare"></div>
+          <div id="viewer-scheme-compare" class="viewer-scheme-compare" hidden aria-hidden="true"></div>
         </div>
       </section>
 
@@ -152,7 +158,7 @@ export function createViewerStageHtml(): string {
         <button id="viewer-object-edit-exit" class="viewer-object-edit-exit" type="button">Exit editing</button>
       </aside>
 
-      <aside id="viewer-scenario-workbench" class="viewer-scenario-workbench" hidden aria-labelledby="viewer-scenario-workbench-title"></aside>
+      <aside id="viewer-scenario-workbench" class="viewer-scenario-workbench" hidden role="dialog" aria-modal="true" aria-labelledby="viewer-scenario-workbench-title"></aside>
 
 
       <div id="viewer-generation-dialog" class="viewer-generation-dialog" data-open="false" role="dialog" aria-modal="true" aria-labelledby="viewer-generation-dialog-title" tabindex="-1">
@@ -185,8 +191,6 @@ export function createViewerStageHtml(): string {
       </div>
 
       ${renderViewerSettingsPanelHtml()}
-
-      ${renderHelpPanelHtml()}
 
       <div id="viewer-error" class="viewer-error" hidden></div>
     </div>

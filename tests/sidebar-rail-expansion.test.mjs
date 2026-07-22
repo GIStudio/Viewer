@@ -8,6 +8,8 @@ const styles = read("src/styles/shell/single-left.css");
 assert.match(adapter, /let sidebarRailExpanded = false/, "professional navigation must start collapsed");
 assert.match(adapter, /workbench-sidebar-rail-toggle/, "the rail must provide an explicit expand control");
 assert.match(adapter, /sidebarRailExpanded = !sidebarRailExpanded/, "the expand control must reveal and hide complete labels");
+assert.match(adapter, /workbench-sidebar-rail-glyph/, "the expand control must use the workbench drawer glyph instead of a bare chevron");
+assert.match(adapter, /展开导航/, "the expand control must expose a clear Chinese action label");
 assert.doesNotMatch(adapter, /firstChineseCharacter/, "Chinese page names must not collapse to one character");
 assert.match(adapter, /dataset\.sidebarIcon = iconText \? "true" : "false"/);
 assert.match(adapter, /const icons: Record<string, string>/, "the compact rail must use symbols rather than text abbreviations");
@@ -15,5 +17,6 @@ assert.match(adapter, /function createWorkbenchSidebarDrawer\(/, "drawer pages m
 assert.match(styles, /--workbench-brand-column: 238px/, "the readable rail remains aligned with the Studio brand column");
 assert.match(styles, /data-sidebar-open="true"\][\s\S]*--workbench-layout-track: calc\(var\(--workbench-rail-width\) \+ var\(--workbench-drawer-width\)\)/, "an open drawer must shrink the centre stage instead of overlaying it");
 assert.match(styles, /data-sidebar-icon="false"/, "full-label pages must not reserve an empty icon column");
+assert.match(styles, /workbench-sidebar-rail-glyph/, "the rail glyph must have dedicated RoadGen3D styling");
 
 console.log("sidebar navigation labels contract: ok");

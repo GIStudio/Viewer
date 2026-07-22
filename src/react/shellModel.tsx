@@ -3,7 +3,6 @@ import {
   EyeOutlined,
   FileSearchOutlined,
   QuestionCircleOutlined,
-  RocketOutlined,
   SaveOutlined,
   SlidersOutlined,
   ToolOutlined,
@@ -98,7 +97,7 @@ export const menuGroups: ShellMenuGroup[] = [
       { id: "tools-open-design", labelKey: "menu.tools.design", fallback: "Design" },
       { id: "tools-open-evaluate", labelKey: "menu.tools.evaluate", fallback: "Evaluate" },
       { id: "tools-open-compare", labelKey: "menu.tools.compare", fallback: "Compare" },
-      { link: "/new-ui/index.html", labelKey: "menu.tools.newUi", fallback: "New UI Prototype", icon: <RocketOutlined /> },
+      { id: "tools-open-consistency", labelKey: "menu.tools.consistency", fallback: "Consistency diagnostics" },
     ],
   },
   {

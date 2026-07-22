@@ -39,10 +39,6 @@ export function createViewerLeftSections(t: ViewerPanelText): ViewerLeftSection[
               <span class="viewer-control-menu-code">ST</span>
               <span><strong>${t("Settings", "设置")}</strong><small>${t("Rendering and runtime options", "渲染与运行选项")}</small></span>
             </button>
-            <button class="viewer-control-menu-item" type="button" id="viewer-help-toggle">
-              <span class="viewer-control-menu-code">?</span>
-              <span><strong>${t("Help", "帮助")}</strong><small>${t("Commands and interface guidance", "命令与界面说明")}</small></span>
-            </button>
           </div>
         </nav>
       `,

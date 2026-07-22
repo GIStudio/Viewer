@@ -26,7 +26,7 @@ export type ViewerPanelController = {
   syncFromSidebar: (pageId: string | null) => void;
 };
 
-const SLIDE_PANELS = new Set<ViewerPanelKey>(["evaluate", "compare"]);
+const SLIDE_PANELS = new Set<ViewerPanelKey>(["evaluate", "compare", "consistency"]);
 
 export function createViewerPanelController(deps: ViewerPanelControllerDeps): ViewerPanelController {
   let focusBeforePanelOpen: HTMLElement | null = null;
@@ -35,7 +35,6 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     design: false,
     evaluate: false,
     compare: false,
-    help: false,
     consistency: false,
   };
 
@@ -53,7 +52,7 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
   }
 
   function activeNonSettingsPanel(): ViewerPanelKey | null {
-    for (const panel of ["design", "evaluate", "compare", "help"] as ViewerPanelKey[]) {
+    for (const panel of ["design", "evaluate", "compare", "consistency"] as ViewerPanelKey[]) {
       if (state[panel]) return panel;
     }
     return null;
@@ -85,7 +84,6 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     closePanel("design");
     closePanel("evaluate");
     closePanel("compare");
-    closePanel("help");
     closePanel("consistency");
     deps.onCloseAllOverlays();
     deps.shell.activateRightTab(null);
@@ -112,7 +110,12 @@ export function createViewerPanelController(deps: ViewerPanelControllerDeps): Vi
     state[panel] = true;
     setDataset(panel, true);
     deps.shell.setRightPinned(true);
-    deps.shell.activateRightTab(panel === "consistency" || panel === "design" ? null : panel);
+    // Design and consistency are stage-owned overlays. Calling
+    // activateRightTab(null) here emits a sidebar-change event that immediately
+    // closes the overlay we just opened.
+    if (panel !== "consistency" && panel !== "design") {
+      deps.shell.activateRightTab(panel);
+    }
     if (panel === "settings") {
       deps.onSettingsOpen();
     }

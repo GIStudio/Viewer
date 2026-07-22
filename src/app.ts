@@ -30,7 +30,6 @@ import type {
   ViewerManifest,
   SceneOption,
   RecentLayout,
-  ComparisonItem,
   DesignPreset,
   SceneJobStatusPayload,
   DesignSchemeVariant,
@@ -117,7 +116,6 @@ import {
   type SurfaceDiagnosticColorMode,
 } from "./viewer-camera-surface-diagnostic";
 import { createExpandedMapController, renderPlanMapCanvas } from "./viewer-expanded-map";
-import { createSchemeCompareController } from "./viewer-scheme-compare";
 import {
   buildDesignStageNodes,
   latestOperationForStage,
@@ -561,7 +559,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     errorEl,
     layoutSelectEl,
     selectEl,
-    schemeCompareEl,
     sceneGraphLinkEl,
     assetEditorLinkEl,
     settingsToggleEl,
@@ -641,10 +638,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     consistencyContentEl,
     exportTopdownMapEl,
     exportTopdownSvgEl,
-    helpToggleEl,
-    helpPanelEl,
-    helpCloseEl,
-    helpContentEl,
     graphOverlayToggleEl,
     layoutOverlayToggleEl,
     analysisOverlayToggleEl,
@@ -1655,49 +1648,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     getLang: () => currentLang,
   });
 
-  function ensureCompareOption(selectEl: HTMLSelectElement, item: ComparisonItem): void {
-    if (Array.from(selectEl.options).some((option) => option.value === item.layout_path)) {
-      return;
-    }
-    const optionEl = document.createElement("option");
-    optionEl.value = item.layout_path;
-    optionEl.textContent = compactUiLabel(item.variant_name || item.metadata?.variant_name || makeDirectLayoutLabel(item.layout_path));
-    optionEl.title = item.layout_path;
-    selectEl.appendChild(optionEl);
-  }
-
-  function syncComparePair(
-    a: ComparisonItem,
-    b: ComparisonItem,
-    openDetails: boolean,
-    detailsHost?: HTMLElement,
-  ): void {
-    populateCompareSelectors();
-    ensureCompareOption(compareSelectAEl, a);
-    ensureCompareOption(compareSelectBEl, b);
-    compareSelectAEl.value = a.layout_path;
-    compareSelectBEl.value = b.layout_path;
-    if (openDetails && detailsHost) {
-      // Keep the complete diff implementation, but render it inside the
-      // Scheme A/B/C surface instead of reopening the legacy Layout A/B panel.
-      detailsHost.replaceChildren(compareResultsEl);
-      void compareMode.runComparison();
-    }
-  }
-
-  const schemeCompareController = createSchemeCompareController({
-    hostEl: schemeCompareEl,
-    loadManifest: (layoutPath) => loadManifest(layoutPath),
-    enterCompareSceneSet: compareMode.enterCompareSceneSet,
-    syncComparePair,
-    escapeHtml,
-    compactUiLabel,
-    makeDirectLayoutLabel,
-    flashStatus,
-    setStatus,
-    text: t,
-  });
-
   const raycaster = new THREE.Raycaster();
   const clock = new THREE.Clock();
   let animationFrameId = 0;
@@ -1794,7 +1744,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       design: generationDialogEl,
       evaluate: evaluatePanelEl,
       compare: comparePanelEl,
-      help: helpPanelEl,
       consistency: consistencyPanelEl,
     },
     settingsToggleEl,
@@ -1908,7 +1857,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     settingsToggleEl,
     sceneGraphLinkEl,
     assetEditorLinkEl,
-    helpToggleEl,
   ].forEach((button) => {
     button.addEventListener("click", () => setCenterControlsOpen(false), { signal });
   });
@@ -1916,7 +1864,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   recentLayoutSelector = createRecentLayoutSelectorController({
     selectEl: layoutSelectEl,
     loadRecentLayouts,
-    setRecentLayouts: schemeCompareController.setRecentLayouts,
+    setRecentLayouts: () => {},
     shouldStopHydration: () => destroyed,
     isCompareOpen: () => centerControlsEl.dataset.open === "true" && centerControlsEl.dataset.mode === "schemes",
     refreshCompareSelectors: populateCompareSelectors,
@@ -1938,7 +1886,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     const name = recentLayoutSelector.rename(layoutPath, sceneNameInputEl.value);
     sceneNameInputEl.value = name;
     layoutSelectEl.title = name;
-    schemeCompareController.setRecentLayouts(recentLayoutSelector.currentLayouts(), layoutPath);
   };
   sceneNameSaveEl?.addEventListener("click", saveSceneName, { signal });
   sceneNameInputEl?.addEventListener("keydown", (event) => {
@@ -2325,8 +2272,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     },
     setStatus,
   });
-
-  schemeCompareController.restoreStoredSelection();
 
   function setStatus(message: string): void {
     if (statusResetHandle !== null) {
@@ -3012,7 +2957,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     if (!(await materializeActiveStarterScene())) return;
     setObjectEditingEnabled(!sceneObjectEditor.isEnabled());
   }, { signal });
-  const scenarioToggleEl = root.querySelector<HTMLButtonElement>("#viewer-scenario-workbench-toggle");
+  const scenarioToggleEl = root.querySelector<HTMLButtonElement>("#viewer-scheme-compare-toggle");
   const scenarioWorkbenchEl = root.querySelector<HTMLElement>("#viewer-scenario-workbench");
   const scenarioWorkbench = hostOptions.scenarioAdapter && scenarioToggleEl && scenarioWorkbenchEl
     ? createScenarioWorkbench({
@@ -3037,6 +2982,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       })
     : null;
   if (scenarioToggleEl) scenarioToggleEl.hidden = !scenarioWorkbench;
+  scenarioToggleEl?.addEventListener("click", () => setCenterControlsOpen(false), { signal });
   const assetPlacementGhost = new THREE.Mesh(
     new THREE.CylinderGeometry(0.48, 0.48, 0.04, 28),
     new THREE.MeshBasicMaterial({ color: 0xb9d9cc, transparent: true, opacity: 0.78, depthWrite: false }),
@@ -3150,7 +3096,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     updateAssetPlacementPreview();
   }, { signal });
   renderer.domElement.addEventListener("pointerdown", (event) => {
-    if (!assetPlacementAsset || event.button !== 0 || event.shiftKey) return;
+    if (!assetPlacementAsset || event.button !== 0) return;
     if (!isPointerLookActive()) {
       const rect = renderer.domElement.getBoundingClientRect();
       assetPlacementPointer.set(
@@ -3163,7 +3109,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     placeAssetAtCurrentTarget();
   }, { capture: true, signal });
   renderer.domElement.addEventListener("click", (event) => {
-    if (!assetPlacementAsset || event.shiftKey) return;
+    if (!assetPlacementAsset) return;
     event.preventDefault();
     event.stopImmediatePropagation();
   }, { capture: true, signal });
@@ -4229,7 +4175,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       ["design", "viewer.tab.design"],
       ["evaluate", "professional.pipeline.deliver"],
       ["compare", "viewer.tab.compare"],
-      ["help", "viewer.tab.help"],
     ];
     for (const [tabId, key] of tabLabels) {
       const button = root.querySelector<HTMLButtonElement>(`[data-shell-tab="${tabId}"]`);
@@ -4262,7 +4207,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     clearInfoCard();
     objectEditStatusController.refreshLanguage();
     recentLayoutSelector.refreshLabels();
-    schemeCompareController.refresh();
     syncSceneNameEditor();
     renderProfessionalWorkflowState();
   }
@@ -4292,7 +4236,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     "tools-open-scenes": () => setCenterControlsOpen(true, "browser"),
     "tools-open-design": () => panelController.setOpen("design", !panelController.isOpen("design")),
     "tools-open-evaluate": () => panelController.setOpen("evaluate", !panelController.isOpen("evaluate")),
-    "tools-open-compare": () => setCenterControlsOpen(true, "schemes"),
+    "tools-open-compare": () => {
+      setCenterControlsOpen(false);
+      void scenarioWorkbench?.open().catch((error) => flashStatus(String(error)));
+    },
+    "tools-open-consistency": () => {
+      panelController.closeAll();
+      panelController.setOpen("consistency", true);
+    },
     "help-shortcuts": () => {
       shell.setBottomOpen(true);
       root.querySelector<HTMLButtonElement>('[data-shell-status-tab="hints"]')?.click();
@@ -4453,9 +4404,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   evaluateRunEl.addEventListener("click", () => void evaluationRunner.run(), { signal });
 
   consistencyCloseEl.addEventListener("click", () => panelController.setOpen("consistency", false), { signal });
-  root.querySelector<HTMLButtonElement>("#viewer-consistency-toggle")?.addEventListener("click", () => {
-    panelController.setOpen("consistency", !panelController.isOpen("consistency"));
-  }, { signal });
   root.querySelector<HTMLButtonElement>("#viewer-open-camera-surface-diagnostic")?.addEventListener("click", () => {
     panelController.closeAll();
     panelController.setOpen("consistency", true);
@@ -4464,39 +4412,14 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     });
   }, { signal });
 
-  // Help panel toggle and close
-  helpToggleEl.addEventListener("click", () => panelController.setOpen("help", !panelController.isOpen("help")), { signal });
-  helpCloseEl.addEventListener("click", () => panelController.setOpen("help", false), { signal });
-
-  // Help icons in Design panel - click to open Help panel
+  // Contextual help buttons open the same top-bar help dialog.
   root.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
-    
-    // Handle help icon clicks in Design panel
     const helpIcon = target.closest<HTMLButtonElement>(".viewer-help-icon");
     if (helpIcon && helpIcon.dataset.help) {
       event.preventDefault();
       event.stopPropagation();
-      panelController.setOpen("help", true);
-      // Optionally scroll to the relevant section
-      return;
-    }
-
-    // Handle help step detail buttons
-    const detailBtn = target.closest<HTMLButtonElement>(".viewer-help-step-detail-btn");
-    if (detailBtn && detailBtn.dataset.detail) {
-      event.preventDefault();
-      const contentEl = helpContentEl.querySelector<HTMLElement>(`[data-detail-content="${detailBtn.dataset.detail}"]`);
-      if (contentEl) {
-        const isHidden = contentEl.hasAttribute("hidden");
-        // Toggle this content and hide all others
-        helpContentEl.querySelectorAll<HTMLElement>("[data-detail-content]").forEach((el) => {
-          el.setAttribute("hidden", "");
-        });
-        if (isHidden) {
-          contentEl.removeAttribute("hidden");
-        }
-      }
+      window.dispatchEvent(new CustomEvent("roadgen3d:open-help-dialog"));
       return;
     }
   }, { signal });
@@ -4763,7 +4686,6 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
       try {
         await sceneSelectionController.loadLayoutSelection(nextLayoutPath);
         recentLayoutSelector.setSelectedPath(nextLayoutPath);
-        schemeCompareController.setRecentLayouts(recentLayoutSelector.currentLayouts(), nextLayoutPath);
         syncSceneNameEditor();
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to load scene layout.";

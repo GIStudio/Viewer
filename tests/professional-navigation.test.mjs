@@ -150,7 +150,11 @@ try {
   assert.deepEqual(pageErrors, [], `viewer initialization errors: ${pageErrors.join(" | ")}`);
 
   assert.equal((await page.locator(".studio-header-context > span").textContent())?.trim(), "当前状态");
-  await page.getByRole("button", { name: "课程教学", exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "课程教学", exact: true }).count(),
+    0,
+    "the retired course-teaching shortcut must not reappear in the professional header",
+  );
   assert.equal(await page.locator(".desktop-shell-workbench-select").count(), 0, "professional tool switching must live only in the left rail");
   await page.getByText("3D 场景工作台", { exact: true }).waitFor();
 
@@ -164,6 +168,14 @@ try {
   assert.equal(await page.locator('.desktop-shell-tab-button[data-shell-tab="review"]').count(), 0, "result review must leave the left rail");
   assert.equal(await page.locator('.desktop-shell-tab-button[data-shell-tab="evaluate"]').count(), 0, "evaluation must leave the left rail");
   assert.equal(await page.locator('.desktop-shell-tab-button[data-shell-tab="consistency"]').count(), 0, "consistency diagnostics must leave the primary navigation rail");
+  assert.equal(await page.getByRole("button", { name: "帮助", exact: true }).count(), 0, "help must not occupy a side-rail entry");
+  await page.locator(".desktop-shell-help-button").click();
+  const helpDialog = page.locator(".viewer-shortcuts-modal");
+  await helpDialog.waitFor({ state: "visible" });
+  assert.equal(await helpDialog.getByRole("tab", { name: "快捷键", exact: true }).getAttribute("aria-selected"), "true");
+  await helpDialog.getByRole("tab", { name: "帮助", exact: true }).click();
+  assert.equal(await helpDialog.getByRole("tab", { name: "帮助", exact: true }).getAttribute("aria-selected"), "true");
+  await helpDialog.getByRole("button", { name: "完成", exact: true }).click();
   assert.equal(await page.locator('#viewer-result-review-toggle').getAttribute("aria-haspopup"), "dialog");
   assert.equal(await page.locator('#viewer-evaluate-modal-toggle').getAttribute("aria-haspopup"), "dialog");
   assert.equal(await page.locator('#viewer-topology-pill').isHidden(), true, "raw topology diagnostics must stay out of the user toolbar");
@@ -178,27 +190,46 @@ try {
   await workbenchMenu.getByText("我的场景", { exact: true }).click();
   await page.locator('#viewer-center-controls[data-open="true"]').waitFor();
   await page.locator("#viewer-center-controls-close").click();
-  await page.locator('#viewer-center-controls[data-open="false"]').waitFor();
+  await page.locator('#viewer-center-controls[data-open="false"]').waitFor({ state: "hidden" });
   await page.locator("#viewer-direct-edit").waitFor();
   await page.locator("#viewer-top-assets").waitFor();
   const schemeCompareToggle = page.locator("#viewer-scheme-compare-toggle");
   await schemeCompareToggle.waitFor();
   assert.equal(await page.locator('[data-shell-tab="compare"]').count(), 0, "legacy layout comparison must not remain in the standard drawer");
   await schemeCompareToggle.click();
-  await page.locator('#viewer-center-controls[data-open="true"][data-mode="schemes"]').waitFor();
+  await page.locator('#viewer-scenario-workbench:not([hidden])').waitFor();
+  assert.equal(await page.locator('.viewer-scenario-lane[data-branch="A"]').count(), 1, "the scenario workbench must expose one semantic A lane");
+  assert.equal(await page.locator('.viewer-scenario-lane[data-branch="B"]').count(), 1, "the scenario workbench must expose one semantic B lane");
+  assert.equal(await page.locator('.viewer-scenario-lane[data-branch="C"]').count(), 1, "the scenario workbench must expose one semantic C lane");
+  assert.equal(await page.locator('[data-scenario-weight]').count(), 3, "C candidates must accept all three objective weights");
+  await page.setViewportSize({ width: 1025, height: 863 });
+  const desktopScenarioColumns = await page.locator(".viewer-scenario-body").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").map(Number.parseFloat));
+  assert.equal(desktopScenarioColumns.length, 2, "the 1025px workbench must retain the A/B/C ledger and property split");
+  assert.ok(desktopScenarioColumns[1] / desktopScenarioColumns[0] > 1.7, "the property area must occupy about two thirds of the desktop workbench");
+  await page.setViewportSize({ width: 815, height: 863 });
+  assert.equal((await page.locator(".viewer-scenario-body").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" "))).length, 1, "the narrow workbench must stack the ledger and properties");
+  await page.setViewportSize({ width: 1576, height: 980 });
+  assert.equal(await page.locator('#viewer-center-controls[data-open="true"][data-mode="schemes"]').count(), 0, "the A/B/C action must not open the generic recent-layout chooser");
   assert.equal(await page.locator("#viewer-compare-panel").isHidden(), true, "legacy Layout A/B panel must remain an invisible comparison engine");
-  await page.locator("#viewer-center-controls-close").click();
-  await page.locator("#viewer-consistency-toggle").click();
+  await page.locator('#viewer-scenario-workbench [data-scenario-action="close"]').click();
+  await page.getByRole("button", { name: "工作台菜单", exact: true }).click();
+  const consistencyMenuItem = page.locator(".ant-dropdown:visible").getByRole("menuitem", { name: "一致性诊断", exact: true });
+  await consistencyMenuItem.click();
   await page.locator("#viewer-consistency-panel[data-open=\"true\"]").waitFor();
   await page.locator("#viewer-consistency-close").click();
   await page.locator("#viewer-consistency-panel[data-open=\"false\"]").waitFor();
+  await page.locator(".workbench-sidebar-rail-toggle").click();
   assert.equal(await page.locator(".desktop-shell").getAttribute("data-sidebar-rail-expanded"), "true");
   await page.getByText("2D 数据与标注", { exact: true }).waitFor();
+  await page.waitForTimeout(220);
   const expandedRail = await rect(".desktop-shell-rail-right");
   const expandedTabList = await rect(".desktop-shell-tab-list");
   const brandColumn = await rect(".studio-wordmark");
   assert.ok(expandedRail && brandColumn);
-  assert.ok(Math.abs(expandedRail.width - brandColumn.width) <= 1, "expanded rail must align with the banner brand column");
+  assert.ok(
+    Math.abs(expandedRail.width - brandColumn.width) <= 1,
+    `expanded rail (${expandedRail.width}px) must align with the banner brand column (${brandColumn.width}px)`,
+  );
   assert.ok(Math.abs(expandedTabList.width - expandedRail.width) <= 1, "expanded navigation list and its yellow edge must align with the rail boundary");
   for (const duplicate of ["annotation", "assets", "design"]) {
     assert.equal(await page.locator(`[data-shell-tab="${duplicate}"]`).count(), 0, `${duplicate} must not duplicate a production-flow entry`);
@@ -224,7 +255,7 @@ try {
   );
   await page.locator("#floating-lane-panel").waitFor({ state: "visible" });
   assert.equal(await page.locator("#flp-enabled").isChecked(), false, "overlay controls remain available while the overlay is disabled");
-  await page.locator("#viewer-settings-close").click();
+  await settingsRailButton.click();
   await settingsRailButton.click();
 
   const openGeneration = page.locator("#viewer-generate-and-load");
@@ -314,8 +345,8 @@ try {
     const canvasBeforeReview = await rect("#viewer-canvas");
     const reviewToggle = page.locator('#viewer-result-review-toggle');
     assert.equal(await reviewToggle.getAttribute("aria-disabled"), "true", "review stays unavailable until a current 3D scene exists");
-    await reviewToggle.click();
-    await page.getByText("请先根据当前已批准的标注生成 3D 场景。", { exact: true }).waitFor();
+    await reviewToggle.click({ force: true });
+    await page.locator("#desktop-shell-status-summary-text").getByText("请先根据当前已批准的标注生成 3D 场景。", { exact: true }).waitFor();
     assert.equal(await page.locator('[data-shell-modal-tab="review"]').isHidden(), true, "an unavailable review action must explain the requirement instead of opening a modal");
     const canvasDuringReview = await rect("#viewer-canvas");
     assert.ok(canvasBeforeReview && canvasDuringReview);
@@ -334,6 +365,13 @@ try {
   await page.locator(".viewer-scene-assets-modal:not([hidden])").waitFor();
   await page.getByRole("heading", { name: "全部可用资产 · 点击放置或原位替换" }).waitFor();
   assert.ok(await page.getByRole("button", { name: "添加到场景", exact: true }).count() > 0, "asset cards must expose click-to-place brush actions");
+  assert.equal(await page.getByRole("button", { name: "预览", exact: true }).count(), 0, "asset preview must be the default card interaction, not a redundant button");
+  const firstAssetCard = page.locator(".viewer-scene-asset-card").first();
+  await firstAssetCard.waitFor();
+  assert.equal(await firstAssetCard.getAttribute("data-preview-active"), "true", "the first available asset must preview automatically");
+  await firstAssetCard.click();
+  assert.equal(await firstAssetCard.getAttribute("data-preview-active"), "true", "clicking an asset card must retain its direct preview state");
+  assert.ok(await page.locator(".viewer-workbench-square-close").count(), "asset dialog must use the square workbench close control");
   assert.equal(await page.locator('.viewer-scene-asset-card[draggable="true"]').count(), 0, "asset placement must not depend on drag and drop");
   await page.locator('.viewer-scene-assets-modal [data-action="close"]').last().click();
   await page.locator('[data-shell-tab="prepare-annotation"]').click();
@@ -342,15 +380,12 @@ try {
   assert.equal(await page.getByText("其他数据来源", { exact: true }).isVisible(), false, "guest users must not see advanced source imports");
   assert.equal(await page.locator("#scene-source-normalize").isVisible(), false, "manual normalization must remain admin-only");
   await page.getByText("浏览 OSM 并截取研究区；车道级细节可继续在画布中编辑。", { exact: true }).waitFor();
-  await page.getByRole("button", { name: "课程教学", exact: true }).click();
-  await page.waitForURL(/#course-studio$/);
-  await page.locator(".course-auth-shell").waitFor();
   assert.deepEqual(await page.evaluate(() => ({
     guest: localStorage.getItem("roadgen3d-public-session-token"),
     account: localStorage.getItem("roadgen3d-session-token"),
-  })), { guest: "fixture-guest-token", account: null }, "Course Studio must not consume or overwrite the guest token");
+  })), { guest: "fixture-guest-token", account: null }, "professional navigation must preserve the guest token without creating an account session");
 
-  console.log("professional navigation: tool switching, workflow grouping, course entry, and generation confirmation verified");
+  console.log("professional navigation: tool switching, workflow grouping, scenario workbench, and generation confirmation verified");
 } finally {
   await browser?.close();
   await server.close();

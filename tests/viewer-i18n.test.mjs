@@ -55,14 +55,15 @@ try {
   const optionTexts = await page.locator('.studio-language-toggle [role="radio"]').allTextContents();
   assert.deepEqual(optionTexts.map((value) => value.trim()), ["中文", "EN"], "the header exposes a direct Chinese/English switch");
   await selectLanguage(page, "zh");
-  await page.getByText("新建生成…", { exact: true }).first().waitFor();
+  await page.getByText("3D 场景生成", { exact: true }).first().waitFor();
   await page.getByText("控制菜单", { exact: true }).first().waitFor({ state: "attached" });
   await page.locator("#viewer-center-controls").evaluate((element) => element.setAttribute("data-open", "true"));
-  await page.locator("#viewer-center-controls-title").getByText("场景浏览器", { exact: true }).waitFor();
-  await page.locator("#viewer-settings-panel").evaluate((element) => element.setAttribute("data-open", "true"));
-  await page.getByText("光照预设、阴影和激光指示器", { exact: true }).waitFor();
+  await page.locator("#viewer-center-controls-title").getByText("我的场景", { exact: true }).waitFor();
+  await page.locator('[data-shell-tab="settings"]').click();
+  await page.locator("#viewer-settings-panel[data-open=\"true\"]").waitFor();
+  await page.getByText("光照预设、阴影和激光指示器", { exact: true }).waitFor({ state: "attached" });
   await page.getByRole("button", { name: "激光笔", exact: true }).waitFor();
-  await page.locator("#viewer-floating-lane-toggle").click();
+  await page.locator("#flp-enabled").waitFor({ state: "visible" });
   await page.getByText("控制", { exact: true }).waitFor();
   await page.getByText("启用叠加层", { exact: true }).waitFor();
   await page.getByText("可见车道类型", { exact: true }).waitFor();
@@ -71,7 +72,7 @@ try {
     localStorage.setItem("viewer-lang", "en");
     window.dispatchEvent(new CustomEvent("roadgen3d:viewer-language-change", { detail: { language: "en" } }));
   });
-  await page.getByText("New generation…", { exact: true }).first().waitFor();
+  await page.getByText("3D scene generation", { exact: true }).first().waitFor();
   await page.getByText("Controls", { exact: true }).waitFor();
 
   await page.goto(`${origin}/#scene-graph`);

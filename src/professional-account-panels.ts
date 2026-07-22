@@ -2,7 +2,7 @@ import type { ViewerLanguage } from "./viewer-i18n";
 import type { ProfessionalSessionController } from "./professional-session";
 import type { PublicProject } from "./course-api";
 
-type Panel = { element: HTMLElement; destroy: () => void };
+type Panel = { element: HTMLElement; setLanguage: (language: ViewerLanguage) => void; destroy: () => void };
 const text = (language: ViewerLanguage, zh: string, en: string): string => language === "zh" ? zh : en;
 const escapeHtml = (value: unknown): string => String(value ?? "").replace(/[&<>'"]/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -14,9 +14,10 @@ function formField(label: string, name: string, type = "text", required = true):
 
 export function createProfessionalAccountPanel(
   session: ProfessionalSessionController,
-  language: ViewerLanguage,
+  initialLanguage: ViewerLanguage,
   options: { onSaveCurrent?: () => Promise<void> } = {},
 ): Panel {
+  let language = initialLanguage;
   const element = document.createElement("div");
   element.className = "professional-account-panel";
   let mode: "login" | "register" | "bootstrap" = "login";
@@ -125,17 +126,22 @@ export function createProfessionalAccountPanel(
     render();
   }).catch(() => undefined);
   const unsubscribe = session.subscribe(render);
-  return { element, destroy: unsubscribe };
+  return {
+    element,
+    setLanguage: (nextLanguage) => { language = nextLanguage; render(); },
+    destroy: unsubscribe,
+  };
 }
 
 export function createProfessionalPublicSpacePanel(
   session: ProfessionalSessionController,
-  language: ViewerLanguage,
+  initialLanguage: ViewerLanguage,
   options: {
     onOpen: (project: PublicProject) => Promise<void>;
     onExportOwned: (project: PublicProject) => Promise<void>;
   },
 ): Panel {
+  let language = initialLanguage;
   const element = document.createElement("div");
   element.className = "professional-public-space";
   let busyId = "";
@@ -183,10 +189,15 @@ export function createProfessionalPublicSpacePanel(
   };
   render();
   const unsubscribe = session.subscribe(render);
-  return { element, destroy: unsubscribe };
+  return {
+    element,
+    setLanguage: (nextLanguage) => { language = nextLanguage; render(); },
+    destroy: unsubscribe,
+  };
 }
 
-export function createProfessionalAdminPanel(session: ProfessionalSessionController, language: ViewerLanguage): Panel {
+export function createProfessionalAdminPanel(session: ProfessionalSessionController, initialLanguage: ViewerLanguage): Panel {
+  let language = initialLanguage;
   const element = document.createElement("div");
   element.className = "professional-admin-panel";
   let busy = false;
@@ -242,5 +253,9 @@ export function createProfessionalAdminPanel(session: ProfessionalSessionControl
   render();
   const unsubscribe = session.subscribe(() => { void load(); });
   void load();
-  return { element, destroy: unsubscribe };
+  return {
+    element,
+    setLanguage: (nextLanguage) => { language = nextLanguage; render(); },
+    destroy: unsubscribe,
+  };
 }

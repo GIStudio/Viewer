@@ -165,43 +165,14 @@ function deriveJunctionStats(annotation: ReferenceAnnotation): {
 }
 
 export function buildAnnotationSummaryMarkup(annotation: ReferenceAnnotation): string {
-  const roadWidths = annotation.centerlines.map((item) => getCenterlineCrossSectionWidth(item));
-  const referenceWidths = annotation.centerlines.map((_, index) => getDisplayReferenceWidthPx(annotation, index));
-  const driveLaneTotal = annotation.centerlines.reduce((sum, item) => sum + deriveLaneProfile(item).total_drive_lane_count, 0);
-  const bikeLaneTotal = annotation.centerlines.reduce((sum, item) => sum + deriveLaneProfile(item).bike_lane_count, 0);
-  const busLaneTotal = annotation.centerlines.reduce((sum, item) => sum + deriveLaneProfile(item).bus_lane_count, 0);
-  const parkingLaneTotal = annotation.centerlines.reduce((sum, item) => sum + deriveLaneProfile(item).parking_lane_count, 0);
-  const detailedRoadCount = annotation.centerlines.filter((item) => resolvedCrossSectionMode(item) === CROSS_SECTION_MODE_DETAILED).length;
-  const stripCount = annotation.centerlines.reduce((sum, item) => sum + item.cross_section_strips.length, 0);
   const furnitureCount = annotation.centerlines.reduce((sum, item) => sum + item.street_furniture_instances.length, 0);
   const zoneFurnitureCount = annotation.functional_zones.reduce((sum, zone) => sum + zone.furniture_instances.length, 0);
-  const sceneRegionCount = annotation.regions.filter((region) => region.region_role === "scene_region").length;
-  const explicitRegionBuildingCount = annotation.regions.filter((region) => region.region_role === "building_region").length;
   const junctionStats = deriveJunctionStats(annotation);
   return `
-    ${metric("Roads", annotation.centerlines.length)}
-    ${metric("Detailed", detailedRoadCount)}
-    ${metric("Explicit Jn", junctionStats.explicitCount)}
-    ${metric("Legacy Jn", junctionStats.legacyCount)}
-    ${metric("Derived Jn", junctionStats.derivedCount)}
-    ${metric("Topology Jn", junctionStats.topologyCount)}
-    ${metric("T / Cross", `${junctionStats.tCount} / ${junctionStats.crossCount}`)}
-    ${metric("Avg Width", `${roadWidths.length ? (roadWidths.reduce((sum, value) => sum + value, 0) / roadWidths.length).toFixed(1) : "0.0"}m`)}
-    ${metric("Max Ref Band", `${referenceWidths.length ? Math.max(...referenceWidths).toFixed(0) : "0"}px`)}
-    ${metric("Drive Lanes", driveLaneTotal)}
-    ${metric("Bike / Bus", `${bikeLaneTotal} / ${busLaneTotal}`)}
-    ${metric("Parking", parkingLaneTotal)}
-    ${metric("Strips", stripCount)}
-    ${metric("Furniture", furnitureCount)}
-    ${zoneFurnitureCount > 0 ? metric("Zone Furn.", zoneFurnitureCount) : ""}
-    ${metric("Scene Regions", sceneRegionCount)}
-    ${metric("Auto Bldg", annotation.derived_regions?.length ?? 0)}
-    ${metric("Region Bldg", explicitRegionBuildingCount)}
-    ${metric("Bldg Regions", annotation.building_regions.length)}
-    ${metric("Func Zones", annotation.functional_zones.length)}
-    ${metric("Design Surfaces", annotation.surface_annotations.length)}
-    ${metric("Strip Patches", annotation.station_strip_patches.length)}
-    ${metric("Scale", `${annotation.pixels_per_meter.toFixed(1)} px/m`)}
+    ${metric("道路", annotation.centerlines.length)}
+    ${metric("路口", junctionStats.topologyCount)}
+    ${metric("建筑足迹", annotation.building_regions.length + (annotation.derived_regions?.length ?? 0))}
+    ${metric("街道家具", furnitureCount + zoneFurnitureCount)}
   `;
 }
 

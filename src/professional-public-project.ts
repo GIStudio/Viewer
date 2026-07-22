@@ -13,7 +13,7 @@ import type {
   ProfessionalScenarioOpenTarget,
   ProfessionalScenarioWorkspace,
   ScenarioComparisonItem,
-  ScenarioMetric,
+  ScenarioGoalWeights,
   ScenarioParameter,
 } from "./viewer-scenario-workbench";
 
@@ -70,24 +70,37 @@ function buildScenarioWorkspace(
   evaluations.filter((item) => item.status === "succeeded").forEach((item) => {
     if (!latestEvaluation.has(item.revision_id)) latestEvaluation.set(item.revision_id, item);
   });
-  let baselineIndex = 0;
   let humanIndex = 0;
   let candidateIndex = 0;
-  const scenarios = [...revisions].sort((a, b) => a.revision_number - b.revision_number).map((revision): ProfessionalScenario => {
+  const orderedRevisions = [...revisions].sort((a, b) => a.revision_number - b.revision_number);
+  const baselineRevisions = orderedRevisions.filter((revision) => revision.branch_kind === "baseline");
+  const latestBaseline = baselineRevisions[baselineRevisions.length - 1];
+  const scenarios = orderedRevisions
+    .filter((revision) => revision.branch_kind === "human_edit"
+      || revision.branch_kind === "ai_edit"
+      || revision.id === latestBaseline?.id)
+    .map((revision): ProfessionalScenario => {
     let shortLabel = "";
     if (revision.branch_kind === "baseline") {
-      baselineIndex += 1;
-      shortLabel = baselineIndex === 1 ? "A" : `A${baselineIndex}`;
+      shortLabel = "A";
     } else if (revision.branch_kind === "human_edit") {
       humanIndex += 1;
       shortLabel = `B${humanIndex}`;
-    } else {
+    } else if (revision.branch_kind === "ai_edit") {
       candidateIndex += 1;
       shortLabel = `C${candidateIndex}`;
     }
     const evaluation = latestEvaluation.get(revision.id);
     const result = evaluation?.result ?? {};
     const parameters = scenarioParameters(revision);
+    const provenance = revision.provenance ?? {};
+    const rawWeights = provenance.goal_weights;
+    const goalWeights = rawWeights && typeof rawWeights === "object" && !Array.isArray(rawWeights)
+      ? Object.fromEntries(Object.entries(rawWeights).flatMap(([key, value]) => {
+          const number = Number(value);
+          return Number.isFinite(number) ? [[key, number]] : [];
+        }))
+      : {};
     return {
       id: revision.id,
       shortLabel,
@@ -95,6 +108,10 @@ function buildScenarioWorkspace(
       branchKind: revision.branch_kind,
       revisionNumber: revision.revision_number,
       sourceId: revision.source_id ?? null,
+      parentId: revision.parent_id ?? null,
+      createdAt: revision.created_at ?? null,
+      generationMethod: String(provenance.generation_method ?? "unknown_legacy"),
+      goalWeights,
       current: revision.id === currentRevisionId,
       scores: {
         walkability: asNumber(result.walkability),
@@ -422,7 +439,7 @@ export function createProfessionalScenarioAdapter(
       if (!baseline) throw new Error("请先生成 3D 基线 A，再创建人工方案 B。");
       return openProfessionalOwnedRevision(session, workflow, projectId, baseline);
     },
-    async generate(metric: ScenarioMetric): Promise<ProfessionalScenarioGeneration> {
+    async generate(goalWeights: ScenarioGoalWeights): Promise<ProfessionalScenarioGeneration> {
       const sceneRef = workflow.getSnapshot().sceneRef;
       if (sceneRef?.kind !== "project_revision") throw new Error("请先生成并保存 Scene A，再创建 C 候选。");
       if (!session.getSnapshot().projects.some((project) => project.id === sceneRef.projectId)) {
@@ -445,11 +462,13 @@ export function createProfessionalScenarioAdapter(
       if (!sourceId) {
         throw new Error("当前 A/B 没有可追溯的 2D 来源。请返回 2D 标注，保存后生成新的 A 基线。");
       }
+      const positiveGoals = Object.entries(goalWeights).filter(([, value]) => Number.isFinite(value) && value > 0);
+      if (positiveGoals.length < 2) throw new Error("请至少为两个目标设置大于 0 的权重。");
       const parentRevisionId = parentRevision.id;
-      const goalWeights = { walkability: 0, safety: 0, beauty: 0, [metric]: 100 };
+      const goalSummary = positiveGoals.map(([key, value]) => `${key}=${value}`).join(", ");
       const initial = await session.api.post<PlatformJob>(`/api/v1/projects/${sceneRef.projectId}/generate`, {
         source_id: sourceId,
-        prompt: `Generate a metric-driven candidate that prioritizes ${metric}. Keep the approved OSM topology and solve explicit street parameters.`,
+        prompt: `Generate one traceable parameter candidate from objective weights (${goalSummary}). Keep the approved OSM topology. This deterministic candidate is not a claim of global optimality.`,
         generation_mode: "parametric",
         parent_revision_id: parentRevisionId,
         goal_weights: goalWeights,

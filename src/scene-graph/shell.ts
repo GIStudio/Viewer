@@ -230,31 +230,28 @@ export function createSceneGraphRightTabs(options: SceneGraphShellOptions = {}):
       label: "Data",
       content: `
         <details class="scene-collapsible-panel" open>
-          <summary class="scene-collapsible-summary">Import / Export</summary>
+          <summary class="scene-collapsible-summary">导入 / 导出场景包</summary>
           <div class="scene-collapsible-body">
             <div class="scene-import-toolbar scene-import-toolbar-compact" style="padding:0">
-              <label class="scene-file-button" for="annotation-json-input">Import Annotation</label>
+              <label class="scene-file-button" for="annotation-json-input">导入场景包</label>
               <input id="annotation-json-input" class="scene-file-input" type="file" accept=".json,application/json" />
-              <button id="annotation-download-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Download Annotation</button>
-              <button id="annotation-copy-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Copy Annotation</button>
-              <button id="annotation-download-graph" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Download Road Graph</button>
+              <button id="annotation-download-json" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">下载场景包</button>
             </div>
+            <p class="scene-micro-note" style="margin:0.65rem 0 0">场景包包含当前标注与 OSM 地图上下文；导入后会自动恢复可继续编辑的场景。</p>
           </div>
         </details>
-        <details class="scene-collapsible-panel">
-          <summary class="scene-collapsible-summary">Graph Conversion</summary>
-          <div class="scene-collapsible-body">
+        <div hidden aria-hidden="true">
+          <button id="annotation-copy-json" type="button">Copy Annotation</button>
+          <button id="annotation-download-graph" type="button">Download road structure data</button>
             <label class="scene-form-field scene-form-field-inline" style="padding:0;background:transparent;box-shadow:none"><span>Segment Length (m)</span><input id="annotation-segment-length" type="number" min="4" step="1" value="${DEFAULT_SEGMENT_LENGTH_M}" /></label>
             <label class="scene-form-field scene-form-field-inline" style="padding:0;background:transparent;box-shadow:none"><span>Sidewalk Width (m)</span><input id="annotation-sidewalk-width" type="number" min="1" step="0.5" value="${DEFAULT_SIDEWALK_WIDTH_M}" /></label>
-            <div class="scene-micro-note">Road graph is generated automatically after annotation edits. Use retry only if the automatic conversion fails.</div>
-            <button id="annotation-convert-graph" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">Retry Graph Conversion</button>
-            <div id="annotation-graph-status" class="scene-status" data-tone="neutral" style="margin:0" data-i18n-key="sceneGraph.status.graphPlaceholder">Road graph results appear here automatically.</div>
+            <button id="annotation-convert-graph" class="scene-toolbar-button scene-toolbar-button-secondary" type="button">重新处理道路结构</button>
+            <div id="annotation-graph-status" class="scene-status" data-tone="neutral" style="margin:0" data-i18n-key="sceneGraph.status.graphPlaceholder">Road structure updates automatically after annotation edits.</div>
             <div id="annotation-graph-summary" class="scene-metric-grid scene-metric-grid-compact"></div>
             <div class="scene-json-wrap scene-json-wrap-compact" style="padding:0"><textarea id="annotation-graph-json" class="scene-json-input" spellcheck="false" readonly></textarea></div>
-          </div>
-        </details>
-        <details class="scene-collapsible-panel">
-          <summary class="scene-collapsible-summary">Annotation Summary</summary>
+        </div>
+        <details class="scene-collapsible-panel" open>
+          <summary class="scene-collapsible-summary">场景概览</summary>
           <div class="scene-collapsible-body"><div id="annotation-summary-grid" class="scene-metric-grid scene-metric-grid-compact"></div></div>
         </details>
         <details class="scene-collapsible-panel">

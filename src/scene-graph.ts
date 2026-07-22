@@ -3317,6 +3317,70 @@ export function mountSceneGraphPage(
     };
   }
 
+  function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function buildScenePackage(): Record<string, unknown> {
+    const normalized = workflow.getSnapshot().normalized;
+    return {
+      schema: "roadgen3d_scene_package_v1",
+      exported_at: new Date().toISOString(),
+      annotation: cloneAnnotation(state.annotation),
+      // Preserve the immutable OSM snapshot alongside RoadGen3D's editable
+      // overlay so that an import can restore the same coordinate frame.
+      osm_annotation_context: normalized?.sourceContext.osm_annotation_context ?? null,
+      normalized_source: normalized
+        ? {
+            ...normalized,
+            referenceAnnotation: cloneAnnotation(state.annotation),
+          }
+        : null,
+    };
+  }
+
+  function restoreScenePackage(value: unknown, annotation: ReferenceAnnotation, fileName: string): boolean {
+    if (!isPlainRecord(value) || value.schema !== "roadgen3d_scene_package_v1") return false;
+    const saved = isPlainRecord(value.normalized_source) ? value.normalized_source : null;
+    const savedSource = saved && isPlainRecord(saved.source) ? saved.source : null;
+    const savedContext = saved && isPlainRecord(saved.sourceContext) ? saved.sourceContext : {};
+    const packageOsmContext = isPlainRecord(value.osm_annotation_context) ? value.osm_annotation_context : null;
+    const sourceContext = {
+      ...savedContext,
+      osm_annotation_context: isPlainRecord(savedContext.osm_annotation_context)
+        ? savedContext.osm_annotation_context
+        : packageOsmContext,
+    };
+    const source = savedSource ?? {
+      schema_version: "roadgen3d_scene_source_v1",
+      source_id: annotation.plan_id || "imported_scene_package",
+      kind: packageOsmContext ? "osm" : "annotation_json",
+      producer: "import",
+      normalized_annotation_version: annotation.version,
+    };
+    const geojson = saved?.geojson && isPlainRecord(saved.geojson) ? saved.geojson : null;
+    const normalized: NormalizedSceneSource = {
+      referenceAnnotation: cloneAnnotation(annotation),
+      graph: saved?.graph && isPlainRecord(saved.graph) ? saved.graph : null,
+      source,
+      geojson,
+      warnings: Array.isArray(saved?.warnings) ? saved.warnings.filter((item): item is string => typeof item === "string") : [],
+      sourceContext,
+      featureCounts: featureCountsForAnnotation(annotation),
+      normalizedAt: typeof saved?.normalizedAt === "string" ? saved.normalizedAt : new Date().toISOString(),
+    };
+    workflow.setSourceDraft({
+      kind: sourceContext.osm_annotation_context ? "osm" : "annotation_json",
+      imageDataUrl: uploadedImageDataUrl || undefined,
+      fileName,
+      geojson,
+    });
+    workflow.setNormalizedSource(normalized);
+    pendingOsmNormalization = null;
+    professionalOsmStage = sourceContext.osm_annotation_context ? "annotation" : professionalOsmStage;
+    return true;
+  }
+
   function markProfessionalAnnotationDirty(): string {
     const fingerprint = comparableAnnotationSnapshot(state.annotation);
     if (courseMode) return fingerprint;
@@ -7267,7 +7331,8 @@ export function mountSceneGraphPage(
       }
       try {
         const text = await file.text();
-        const annotation = normalizeAnnotation(JSON.parse(text));
+        const parsed = JSON.parse(text);
+        const annotation = normalizeAnnotation(parsed);
         const fallbackImagePath = state.annotation.image_path;
         state.annotation = annotation;
         state.selectedScenarioId = "";
@@ -7275,12 +7340,19 @@ export function mountSceneGraphPage(
         await reconcileImportedAnnotationReferenceImage("Imported", fallbackImagePath);
         updateCleanAnnotationSnapshot();
         renderScenarioDesignOptions();
-        workflow.setSourceDraft({
-          kind: "annotation_json",
-          imageDataUrl: uploadedImageDataUrl || undefined,
-          fileName: file.name,
-          geojson: null,
-        });
+        const restoredPackage = restoreScenePackage(parsed, annotation, file.name);
+        if (!restoredPackage) {
+          workflow.setSourceDraft({
+            kind: "annotation_json",
+            imageDataUrl: uploadedImageDataUrl || undefined,
+            fileName: file.name,
+            geojson: null,
+          });
+        }
+        if (restoredPackage) {
+          remountAnnotationOsmBackground();
+          setStatus(statusEl, "场景包已恢复：标注与 OSM 地图数据可继续编辑。", "success");
+        }
         renderSourceWorkflow();
       } catch (error) {
         setStatus(statusEl, error instanceof Error ? error.message : "Failed to import annotation JSON.", "error");
@@ -7320,7 +7392,10 @@ export function mountSceneGraphPage(
   downloadJsonButton.addEventListener(
     "click",
     () => {
-      downloadText(`${state.annotation.plan_id || "reference_annotation"}.json`, stringifyAnnotation(state.annotation));
+      downloadText(
+        `${state.annotation.plan_id || "reference_annotation"}_scene_package.json`,
+        JSON.stringify(buildScenePackage(), null, 2),
+      );
     },
     { signal },
   );

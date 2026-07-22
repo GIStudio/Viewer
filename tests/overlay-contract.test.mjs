@@ -88,7 +88,7 @@ for (const id of [
 }
 assert.match(stage, /id="viewer-top-assets"/, "asset access must remain in the top-right stage toolbar");
 
-assert.equal((settings.match(/class="viewer-settings-group"/g) ?? []).length, 4);
+assert.equal((settings.match(/class="viewer-settings-group"/g) ?? []).length, 5);
 assert.match(settings, /aria-labelledby="viewer-settings-title"/);
 assert.match(panels, /setAttribute\("aria-hidden", open \? "false" : "true"\)/);
 assert.match(panels, /focusBeforePanelOpen/);

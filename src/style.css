@@ -101,7 +101,9 @@
 .viewer-scene-assets-toolbar button { color: #fff; background: #174b64; }
 .viewer-scene-assets-modal main { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr); }
 .viewer-scene-assets-list { min-height: 0; overflow: auto; padding: 14px 18px; border-right: 1px solid #102d3a; }
-.viewer-scene-asset-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-bottom: 9px; padding: 12px; background: rgba(255, 253, 247, 0.94); border: 1px solid #174b64; box-shadow: 3px 3px 0 #b9d9cc; }
+.viewer-scene-asset-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-bottom: 9px; padding: 12px; background: rgba(255, 253, 247, 0.94); border: 1px solid #174b64; box-shadow: 3px 3px 0 #b9d9cc; cursor: pointer; transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
+.viewer-scene-asset-card:hover, .viewer-scene-asset-card:focus-visible { border-color: #df654f; box-shadow: 4px 4px 0 #f4c430; outline: none; transform: translate(-1px, -1px); }
+.viewer-scene-asset-card[data-preview-active="true"] { border-color: #f4c430; background: #fff8dc; box-shadow: inset 4px 0 #f4c430, 3px 3px 0 #174b64; }
 [data-asset-placement-active="true"] canvas { cursor: crosshair; }
 .viewer-scene-asset-card div:first-child { display: grid; gap: 3px; min-width: 0; }
 .viewer-scene-asset-card span { width: fit-content; color: #df654f; font: 700 10px/1 ui-monospace, monospace; text-transform: uppercase; }
@@ -110,13 +112,22 @@
 .viewer-scene-assets-preview { min-height: 0; padding: 16px; background: rgba(185, 217, 204, 0.24); overflow: auto; }
 .viewer-scene-assets-preview [data-preview-canvas] { min-height: 220px; display: grid; place-items: center; border: 1px solid #102d3a; background: #eef3ef; }
 .viewer-scene-assets-preview canvas { max-width: 100%; height: auto; }
+.viewer-workbench-square-close { display: grid; width: 2.55rem; height: 2.55rem; place-items: center; border: 1px solid #102d3a; border-radius: 0; color: #102d3a; background: #fffdf7; box-shadow: 3px 3px 0 #f4c430; font: 900 1.55rem/1 var(--rg-mono-font, ui-monospace, monospace); cursor: pointer; }
+.viewer-workbench-square-close:hover, .viewer-workbench-square-close:focus-visible { color: #fffdf7; background: #174b64; outline: 2px solid #f4c430; outline-offset: 2px; }
 .viewer-scene-assets-empty { padding: 34px; text-align: center; border: 1px dashed #174b64; background: rgba(255, 253, 247, 0.8); }
-.viewer-shortcuts-modal .viewer-workbench-dialog { width: min(760px, calc(100vw - 48px)); height: min(680px, calc(100vh - 48px)); grid-template-rows: auto minmax(0, 1fr) auto; }
+.viewer-shortcuts-modal .viewer-workbench-dialog { width: min(760px, calc(100vw - 48px)); height: min(680px, calc(100vh - 48px)); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.viewer-help-dialog-tabs { display: flex; gap: 8px; padding: 12px 22px 0; border-bottom: 1px solid rgba(16, 45, 58, 0.2); }
+.viewer-help-dialog-tabs button { padding: 8px 13px; color: #174b64; background: transparent; border: 0; border-bottom: 3px solid transparent; font-weight: 800; cursor: pointer; }
+.viewer-help-dialog-tabs button[aria-selected="true"] { color: #102d3a; border-bottom-color: #f4c430; background: rgba(185, 217, 204, 0.28); }
 .roadgen-shortcut-modal { min-height: 0; overflow: auto; padding: 18px 22px; display: grid; gap: 18px; }
+.roadgen-shortcut-modal > div { display: grid; gap: 18px; }
 .roadgen-shortcut-modal section { padding: 14px; background: rgba(255, 253, 247, 0.92); border: 1px solid #174b64; box-shadow: 4px 4px 0 #b9d9cc; }
 .roadgen-shortcut-modal h3 { margin: 0 0 10px; color: #df654f; font: 700 12px/1 ui-monospace, monospace; letter-spacing: 0.1em; text-transform: uppercase; }
 .roadgen-shortcut-modal section > div { display: grid; grid-template-columns: minmax(120px, 0.35fr) 1fr; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid rgba(16, 45, 58, 0.16); }
 .roadgen-shortcut-modal kbd { width: fit-content; padding: 4px 7px; color: #fff; background: #174b64; border: 1px solid #102d3a; border-radius: 2px; box-shadow: 2px 2px 0 #f4c430; font: 700 11px/1.2 ui-monospace, monospace; }
+.viewer-help-dialog-guide ol { display: grid; gap: 12px; margin: 0; padding-left: 1.25rem; }
+.viewer-help-dialog-guide li { display: grid; gap: 3px; }
+.viewer-help-dialog-guide li span, .viewer-help-dialog-guide p { color: #58707a; line-height: 1.6; }
 
 @media (max-width: 760px) {
   .viewer-workbench-modal { padding: 10px; }

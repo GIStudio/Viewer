@@ -1,5 +1,4 @@
 import { DEFAULT_EVALUATION_CONFIG } from "../viewer-evaluation";
-import { renderHelpPanelHtml } from "./helpPanel";
 
 export function EvaluatePanelShell() {
   return (
@@ -137,8 +136,4 @@ export function EvaluatePanelShell() {
       </div>
     </aside>
   );
-}
-
-export function HelpPanelShell() {
-  return <div dangerouslySetInnerHTML={{ __html: renderHelpPanelHtml() }} />;
 }

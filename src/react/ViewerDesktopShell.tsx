@@ -16,7 +16,7 @@ import { WORKFLOW_STEPS, WORKFLOW_UNDO_EVENT, workflowRoute } from "../workflow-
 import type { WorkflowController, WorkflowStep } from "../workflow-controller";
 import type { WorkbenchShellMode } from "../shell-types";
 import { ShellMenus } from "./ShellMenus";
-import { ShortcutModal } from "./ShortcutModal";
+import { ShortcutModal, VIEWER_HELP_DIALOG_EVENT } from "./ShortcutModal";
 import { StudioBrandHeader } from "./StudioBrandHeader";
 import { StudioLanguageToggle } from "./StudioLanguageToggle";
 
@@ -37,7 +37,7 @@ export function ViewerDesktopShell({
   embedded = false,
   mode = "legacy_dual",
 }: ViewerDesktopShellProps) {
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [helpDialog, setHelpDialog] = useState<{ open: boolean; tab: "help" | "shortcuts" }>({ open: false, tab: "shortcuts" });
   const [enabledActions, setEnabledActions] = useState<Set<ShellMenuActionId>>(() => new Set());
   const workflowSnapshot = useSyncExternalStore(
     workflow.subscribe,
@@ -113,6 +113,11 @@ export function ViewerDesktopShell({
     host.addEventListener(SHELL_ACTIONS_CHANGE_EVENT, handleActionsChange);
     return () => host.removeEventListener(SHELL_ACTIONS_CHANGE_EVENT, handleActionsChange);
   }, [hostRef, route]);
+  useEffect(() => {
+    const openHelp = () => setHelpDialog({ open: true, tab: "help" });
+    window.addEventListener(VIEWER_HELP_DIALOG_EVENT, openHelp);
+    return () => window.removeEventListener(VIEWER_HELP_DIALOG_EVENT, openHelp);
+  }, []);
 
   const openWorkflowStep = (step: WorkflowStep): void => {
     const result = workflow.transition(step);
@@ -139,11 +144,6 @@ export function ViewerDesktopShell({
                   <strong>{t(`route.${route}.label`, ROUTES[route].label)}</strong>
                 </span>
                 <span className="studio-professional-context-stage">{professionalStageLabel}</span>
-                {workflowSnapshot.sceneRevision ? (
-                  <span className="studio-professional-context-revision">
-                    {formatViewerKey(language, "workflow.revision", { revision: workflowSnapshot.sceneRevision.revision })}
-                  </span>
-                ) : null}
               </div>
             )}
             actions={(
@@ -153,7 +153,7 @@ export function ViewerDesktopShell({
                   language={language}
                   enabledActions={enabledActions}
                   hostRef={hostRef}
-                  onOpenShortcuts={() => setShortcutsOpen(true)}
+                  onOpenShortcuts={() => setHelpDialog({ open: true, tab: "shortcuts" })}
                 />
               </>
             )}
@@ -315,7 +315,7 @@ export function ViewerDesktopShell({
           </div>
         </section>
       </Layout>
-      <ShortcutModal language={language} open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <ShortcutModal language={language} open={helpDialog.open} initialTab={helpDialog.tab} onClose={() => setHelpDialog((current) => ({ ...current, open: false }))} />
     </div>
   );
 }

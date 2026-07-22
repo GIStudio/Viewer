@@ -444,14 +444,20 @@ export function bindDesktopShell(
     railToggle.type = "button";
     railToggle.className = "workbench-sidebar-rail-toggle";
     railToggle.setAttribute("aria-expanded", String(sidebarRailExpanded));
-    railToggle.setAttribute("aria-label", viewerText(currentLanguage, sidebarRailExpanded ? "Collapse sidebar labels" : "Expand sidebar labels", sidebarRailExpanded ? "收起侧边栏文字" : "展开侧边栏文字"));
-    railToggle.innerHTML = `<span aria-hidden="true">${sidebarRailExpanded ? "‹" : "›"}</span><strong>${viewerText(currentLanguage, sidebarRailExpanded ? "Collapse" : "Expand", sidebarRailExpanded ? "收起" : "展开")}</strong>`;
+    const renderRailToggle = () => {
+      const expanded = sidebarRailExpanded;
+      const label = viewerText(currentLanguage, expanded ? "Collapse navigation" : "Expand navigation", expanded ? "收起导航" : "展开导航");
+      railToggle.setAttribute("aria-label", label);
+      railToggle.title = label;
+      railToggle.dataset.expanded = String(expanded);
+      railToggle.innerHTML = `<span class="workbench-sidebar-rail-glyph" aria-hidden="true"><i></i><i></i></span><span class="workbench-sidebar-rail-copy"><small>${viewerText(currentLanguage, "Workbench", "工作台")}</small><strong>${label}</strong></span>`;
+    };
+    renderRailToggle();
     railToggle.addEventListener("click", () => {
       sidebarRailExpanded = !sidebarRailExpanded;
       shellRoot.dataset.sidebarRailExpanded = String(sidebarRailExpanded);
       railToggle.setAttribute("aria-expanded", String(sidebarRailExpanded));
-      railToggle.setAttribute("aria-label", viewerText(currentLanguage, sidebarRailExpanded ? "Collapse sidebar labels" : "Expand sidebar labels", sidebarRailExpanded ? "收起侧边栏文字" : "展开侧边栏文字"));
-      railToggle.innerHTML = `<span aria-hidden="true">${sidebarRailExpanded ? "‹" : "›"}</span><strong>${viewerText(currentLanguage, sidebarRailExpanded ? "Collapse" : "Expand", sidebarRailExpanded ? "收起" : "展开")}</strong>`;
+      renderRailToggle();
     });
     rightTabButtons.appendChild(railToggle);
     let previousGroup: WorkbenchSidebarPage["group"] | null = null;
@@ -541,7 +547,6 @@ export function bindDesktopShell(
       "viewer-design-toggle": { id: "design", group: "workspace" },
       "viewer-edit-toggle": { id: "edit", group: "workspace" },
       "viewer-settings-toggle": { id: "settings", group: "system" },
-      "viewer-help-toggle": { id: "help", group: "system" },
     };
     const pages: WorkbenchSidebarPage[] = [];
     Array.from(host.querySelectorAll<HTMLButtonElement>(".viewer-control-menu-item")).forEach((button) => {

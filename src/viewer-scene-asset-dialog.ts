@@ -40,11 +40,11 @@ export function createSceneAssetDialog(options: Options): SceneAssetDialogContro
   root.hidden = true;
   root.innerHTML = `
     <section class="viewer-workbench-dialog" role="dialog" aria-modal="true" aria-labelledby="viewer-scene-assets-title">
-      <header><div><span>SCENE ASSETS / 场景资产</span><h2 id="viewer-scene-assets-title">全部可用资产 · 点击放置或原位替换</h2></div><button type="button" data-action="close" aria-label="关闭">×</button></header>
+      <header><div><span>SCENE ASSETS / 场景资产</span><h2 id="viewer-scene-assets-title">全部可用资产 · 点击放置或原位替换</h2></div><button class="viewer-workbench-square-close" type="button" data-action="close" aria-label="关闭">×</button></header>
       <div class="viewer-scene-assets-selection" data-selection-state="empty"><span>当前对象</span><strong data-selected-instance>未选择</strong><small data-selected-hint>先开启编辑并选择树木或街具，即可用同类资产原位替换。</small></div>
       <div class="viewer-scene-assets-toolbar"><input type="search" data-search placeholder="搜索名称、类别或资产 ID" /><select data-category><option value="">全部类别</option><option value="tree">树木</option><option value="bench">座椅</option><option value="lamp">路灯</option><option value="sign">标志</option><option value="bollard">护柱</option><option value="trash">垃圾桶</option></select><button type="button" data-action="search">搜索</button></div>
-      <main><section class="viewer-scene-assets-list" data-list></section><aside class="viewer-scene-assets-preview"><div data-preview-canvas></div><h3 data-preview-title>选择资产查看 GLB</h3><p data-preview-meta>所有用户使用同一受信任资产目录；服务器仍会校验文件指纹与承载面。</p></aside></main>
-      <footer><p>点击“添加到场景”进入放置画笔；普通点击落点，Shift + 点击进入漫游，Esc 退出画笔。原位替换会保留位置、旋转与缩放。</p><button type="button" data-action="close">完成</button></footer>
+      <main><section class="viewer-scene-assets-list" data-list></section><aside class="viewer-scene-assets-preview"><div data-preview-canvas></div><h3 data-preview-title>正在准备资产预览</h3><p data-preview-meta>打开资产库后自动预览第一个可用 GLB；点击资产条目可切换预览。</p></aside></main>
+      <footer><p>点击“添加到场景”进入放置画笔；单击落点，Esc 退出画笔。退出放置后可按住鼠标左键拖动视角。原位替换会保留位置、旋转与缩放。</p><button type="button" data-action="close">完成</button></footer>
     </section>`;
   document.body.appendChild(root);
   const dialog = root.querySelector<HTMLElement>(".viewer-workbench-dialog")!;
@@ -64,6 +64,11 @@ export function createSceneAssetDialog(options: Options): SceneAssetDialogContro
   let previewCamera: THREE.PerspectiveCamera | null = null;
   let previewAnimation = 0;
   let previewObject: THREE.Object3D | null = null;
+  let previewedAssetKey = "";
+
+  function assetKey(asset: SceneAssetRef): string {
+    return `${asset.manifestName}:${asset.assetId}:${asset.fingerprint}`;
+  }
 
   function render(): void {
     const rows = catalog;
@@ -79,10 +84,9 @@ export function createSceneAssetDialog(options: Options): SceneAssetDialogContro
       return;
     }
     list.innerHTML = rows.map((asset, index) => `
-      <article class="viewer-scene-asset-card" data-index="${index}">
+      <article class="viewer-scene-asset-card" data-index="${index}" data-preview-active="${String(assetKey(asset) === previewedAssetKey)}" role="button" tabindex="0" aria-label="预览资产：${escapeHtml(asset.label)}">
         <div><span>${escapeHtml(asset.category)}</span><strong>${escapeHtml(asset.label)}</strong><small>${escapeHtml(asset.manifestName)} · ${escapeHtml(asset.assetId)}</small></div>
         <div class="viewer-scene-asset-card-actions">
-          <button type="button" data-action="preview" data-index="${index}">预览</button>
           <button type="button" data-action="place" data-index="${index}">添加到场景</button>
           ${selectedId ? `<button type="button" data-action="replace" data-index="${index}">原位替换</button>` : ""}
         </div>
@@ -95,6 +99,7 @@ export function createSceneAssetDialog(options: Options): SceneAssetDialogContro
     const payload = await apiJson<{ assets: CatalogAsset[] }>(`/api/asset-catalog/search?${query.toString()}`);
     catalog = payload.assets ?? [];
     render();
+    if (catalog[0]) await preview(catalog[0]).catch((error) => options.flashStatus(String(error)));
   }
 
   function ensurePreview(): void {
@@ -118,6 +123,11 @@ export function createSceneAssetDialog(options: Options): SceneAssetDialogContro
 
   async function preview(asset: SceneAssetRef): Promise<void> {
     ensurePreview();
+    previewedAssetKey = assetKey(asset);
+    list.querySelectorAll<HTMLElement>(".viewer-scene-asset-card").forEach((card) => {
+      const index = Number(card.dataset.index);
+      card.dataset.previewActive = String(assetKey(catalog[index] ?? asset) === previewedAssetKey);
+    });
     previewTitle.textContent = asset.label;
     previewMeta.textContent = `${asset.category} · ${asset.manifestName} · ${asset.assetId}`;
     if (!previewScene || !previewCamera) return;
@@ -137,13 +147,17 @@ export function createSceneAssetDialog(options: Options): SceneAssetDialogContro
 
   root.addEventListener("click", (event) => {
     const target = (event.target as HTMLElement).closest<HTMLElement>("button");
-    if (!target) return;
+    if (!target) {
+      const card = (event.target as HTMLElement).closest<HTMLElement>(".viewer-scene-asset-card");
+      const asset = card ? catalog[Number(card.dataset.index)] : null;
+      if (asset) void preview(asset).catch((error) => options.flashStatus(String(error)));
+      return;
+    }
     if (target.dataset.action === "close") return controller.close();
     if (target.dataset.action === "search") return void search().catch((error) => options.flashStatus(String(error)));
     const index = Number(target.dataset.index);
     const asset = catalog[index];
     if (!asset) return;
-    if (target.dataset.action === "preview") void preview(asset).catch((error) => options.flashStatus(String(error)));
     if (target.dataset.action === "replace" && options.replaceSelected?.(asset)) controller.close();
     if (target.dataset.action === "place") {
       void Promise.resolve(options.placeAsset?.(asset) ?? false)
@@ -152,6 +166,13 @@ export function createSceneAssetDialog(options: Options): SceneAssetDialogContro
     }
   });
   root.addEventListener("keydown", (event) => {
+    const card = (event.target as HTMLElement).closest<HTMLElement>(".viewer-scene-asset-card");
+    if (card && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      const asset = catalog[Number(card.dataset.index)];
+      if (asset) void preview(asset).catch((error) => options.flashStatus(String(error)));
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       controller.close();
