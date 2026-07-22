@@ -468,10 +468,11 @@ export function createProfessionalScenarioAdapter(
       const goalSummary = positiveGoals.map(([key, value]) => `${key}=${value}`).join(", ");
       const initial = await session.api.post<PlatformJob>(`/api/v1/projects/${sceneRef.projectId}/generate`, {
         source_id: sourceId,
-        prompt: `Generate one traceable parameter candidate from objective weights (${goalSummary}). Keep the approved OSM topology. This deterministic candidate is not a claim of global optimality.`,
+        prompt: `Run a traceable local parameter search from objective weights (${goalSummary}). Keep the approved OSM topology and retain every evaluated candidate. This search is not a claim of global optimality.`,
         generation_mode: "parametric",
         parent_revision_id: parentRevisionId,
         goal_weights: goalWeights,
+        candidate_count: 3,
       });
       const completed = await waitForProjectJob(session, initial);
       const revisionId = String(completed.result?.revision?.id ?? "");
@@ -482,7 +483,7 @@ export function createProfessionalScenarioAdapter(
       if (!revision) throw new Error("候选生成完成，但没有找到新 revision。");
       const target = await openProfessionalOwnedRevision(session, workflow, sceneRef.projectId, revision);
       await session.refreshPublicProjects().catch(() => []);
-      return { workspace: await load(), target };
+      return { workspace: await load(), target, selectedScenarioId: revision.id };
     },
     async compare(revisionIds: string[]): Promise<ScenarioComparisonItem[]> {
       const projectId = currentProjectId();

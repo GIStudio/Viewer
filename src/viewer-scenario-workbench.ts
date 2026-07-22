@@ -33,6 +33,7 @@ export type ProfessionalScenarioOpenTarget = {
 export type ProfessionalScenarioGeneration = {
   workspace: ProfessionalScenarioWorkspace;
   target: ProfessionalScenarioOpenTarget;
+  selectedScenarioId: string;
 };
 
 export type ProfessionalScenarioWorkspace = {
@@ -211,10 +212,10 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
         : (zh() ? "前往 2D 标注，生成新的 A 基线" : "Go to 2D annotation and generate a new A");
       const reason = sourceMissing
         ? (zh() ? "当前 A 是导入场景，未绑定可追溯的 2D 来源。先保存 2D 标注并生成新的 A，才能安全生成 C。" : "The current A is an imported scene without a traceable 2D source. Save the 2D annotation and generate a new A before creating C.")
-        : (zh() ? `系统会以最新 ${parent.shortLabel} 为父版本，把多目标权重映射为可追溯的参数候选。` : `The system uses the latest ${parent.shortLabel} as its parent and maps multiple objective weights to a traceable parameter candidate.`);
+        : (zh() ? `系统会以最新 ${parent.shortLabel} 为父版本，生成并评价 3 个可追溯的局部参数候选。` : `The system uses the latest ${parent.shortLabel} as its parent and generates three traceable local candidates for evaluation.`);
       guides.push(`<article class="viewer-scenario-guide" data-branch="C">
         <span>C · ${zh() ? "参数候选" : "Parameter candidate"}</span>
-        <strong>${sourceReady ? (zh() ? "生成多目标参数候选 C" : "Generate a multi-objective C candidate") : (zh() ? "先补齐 C 所需的 2D 来源" : "Add the 2D source required for C")}</strong>
+        <strong>${sourceReady ? (zh() ? "自动搜索场景 C" : "Search Scenario C candidates") : (zh() ? "先补齐 C 所需的 2D 来源" : "Add the 2D source required for C")}</strong>
         <p>${reason}</p>
         <div><button type="button" data-scenario-action="${action}" ${disabledAttr}${disabledTitle}>${cta}</button></div>${readOnlyNote}
       </article>`);
@@ -249,11 +250,11 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
           </div>
           <section class="viewer-scenario-solver">
             <span>OBJECTIVES → PARAMETERS → C</span>
-            <strong>${zh() ? "设置多目标权重，生成可追溯的 C 参数候选" : "Set multiple objective weights for a traceable C candidate"}</strong>
-            <p>${zh() ? (!baseline ? "请先完成 2D 标注并生成 A 基线。" : !candidateReady ? "当前场景没有可追溯 2D 来源；请返回 2D 标注并生成新的 A。" : `将以最新 ${manual?.shortLabel ?? baseline.shortLabel} 为父版本；当前阶段会把目标权重确定性映射为明确参数并生成一个候选，不宣称全局最优。`) : (!baseline ? "Complete the 2D annotation and generate baseline A first." : !candidateReady ? "The current scene has no traceable 2D source. Return to 2D annotation and generate a new A." : `The latest ${manual?.shortLabel ?? baseline.shortLabel} will be the parent. This stage deterministically maps objective weights to explicit parameters and generates one candidate; it does not claim a global optimum.`)}</p>
+            <strong>${zh() ? "设置多目标权重，搜索可追溯的 C 参数候选" : "Set multiple objectives and search traceable C candidates"}</strong>
+            <p>${zh() ? (!baseline ? "请先完成 2D 标注并生成 A 基线。" : !candidateReady ? "当前场景没有可追溯 2D 来源；请返回 2D 标注并生成新的 A。" : `将以最新 ${manual?.shortLabel ?? baseline.shortLabel} 为父版本；系统会生成 3 个局部参数候选，逐一评价后选择当前权重下的最佳可行候选。所有候选均保留，不宣称全局最优。`) : (!baseline ? "Complete the 2D annotation and generate baseline A first." : !candidateReady ? "The current scene has no traceable 2D source. Return to 2D annotation and generate a new A." : `The latest ${manual?.shortLabel ?? baseline.shortLabel} will be the parent. The system generates three local variants, evaluates each, and selects the best feasible candidate for the current weights. Every candidate is retained; this is not a global-optimum claim.`)}</p>
             <div class="viewer-scenario-goal-inputs">${metricOptions.map(([key, cn, en, initial]) => `<label><span>${zh() ? cn : en}</span><input type="number" min="0" max="100" step="5" value="${initial}" data-scenario-weight="${key}"/><em>%</em></label>`).join("")}</div>
             <small>${zh() ? "至少两个目标需大于 0；提交后会自动归一化。" : "At least two objectives must be greater than zero; values are normalized on submission."}</small>
-            <button type="button" data-scenario-action="generate" ${canGenerate ? "" : "disabled"} ${!workspace?.canWrite && baseline ? `title="${escapeHtml(unavailableReason())}"` : ""}>${busy ? (zh() ? "正在生成 C…" : "Generating C…") : (zh() ? "生成多目标参数候选 C" : "Generate multi-objective C candidate")}</button>
+            <button type="button" data-scenario-action="generate" ${canGenerate ? "" : "disabled"} ${!workspace?.canWrite && baseline ? `title="${escapeHtml(unavailableReason())}"` : ""}>${busy ? (zh() ? "正在搜索 C…" : "Searching C…") : (zh() ? "搜索并评价 3 个 C 候选" : "Search and evaluate 3 C candidates")}</button>
           </section>
           <div class="viewer-scenario-message" data-busy="${busy}">${escapeHtml(message || (zh() ? "单击版本查看属性；勾选 2–3 个版本可比较。" : "Click a version for details; select 2–3 versions to compare."))}</div>
         </section>
@@ -350,18 +351,18 @@ export function createScenarioWorkbench(options: Options): ScenarioWorkbenchCont
         render();
         return;
       }
-      busy = true; message = zh() ? "正在映射目标权重并生成新的 C 参数候选…" : "Mapping objective weights and generating a new C parameter candidate…"; render();
+      busy = true; message = zh() ? "正在生成、评价并筛选 3 个局部 C 候选…" : "Generating, evaluating, and selecting three local C candidates…"; render();
       void options.adapter.generate(goalWeights).then(async (generated) => {
         workspace = generated.workspace;
-        const newest = generated.workspace.scenarios[generated.workspace.scenarios.length - 1];
+        const selectedCandidate = generated.workspace.scenarios.find((scenario) => scenario.id === generated.selectedScenarioId);
         await options.loadScenario(generated.target);
         const baseline = latestScenario(generated.workspace.scenarios, "baseline");
-        if (newest) {
-          selected = new Set([baseline?.id, newest.id].filter(Boolean) as string[]);
-          focusedId = newest.id;
+        if (selectedCandidate) {
+          selected = new Set([baseline?.id, selectedCandidate.id].filter(Boolean) as string[]);
+          focusedId = selectedCandidate.id;
         }
         comparison = [];
-        message = zh() ? `已生成并打开 ${newest?.shortLabel ?? "C"}。` : `Generated and opened ${newest?.shortLabel ?? "C"}.`;
+        message = zh() ? `已生成并打开 ${selectedCandidate?.shortLabel ?? "C"}。` : `Generated and opened ${selectedCandidate?.shortLabel ?? "C"}.`;
         busy = false;
         render();
       }).catch((error) => { message = String(error); busy = false; render(); });
