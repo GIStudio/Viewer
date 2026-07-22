@@ -36,6 +36,10 @@ try {
 
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
+  page.on("pageerror", (error) => console.error(`viewer page error: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error") console.error(`viewer console error: ${message.text()}`);
+  });
   let manifestRequests = 0;
   let assetRequests = 0;
   await page.route("**/api/asset-manifests", async (route) => {

@@ -6,7 +6,7 @@ import ts from "typescript";
 
 const viewerRoot = fileURLToPath(new URL("../", import.meta.url));
 const sourceRoot = path.join(viewerRoot, "src");
-const catalogPath = path.join(sourceRoot, "viewer-i18n.ts");
+const catalogPath = path.join(sourceRoot, "viewer-translations.ts");
 const markerAttributes = [
   "data-i18n-key",
   "data-i18n-title-key",
@@ -20,6 +20,13 @@ const activeRoots = [
 ];
 const activeFiles = [
   "app.ts",
+  "viewer-design-scenario-controller.ts",
+  "viewer-input-evaluation-controller.ts",
+  "viewer-lifecycle-controller.ts",
+  "viewer-output-panel-controller.ts",
+  "viewer-scene-interaction-controller.ts",
+  "viewer-workflow-ui-controller.ts",
+  "viewer-workspace-view-controller.ts",
   "asset-editor.ts",
   "scene-graph.ts",
   "model-input-browser.ts",

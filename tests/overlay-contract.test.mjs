@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [theme, overlayEntry, overlayParts, main, app, settings, panels, commands, shortcuts, assets, stage, junction, course] = await Promise.all([
+const [theme, overlayEntry, overlayParts, main, app, sceneInteraction, settings, panels, commands, shortcuts, assets, stage, junction, course] = await Promise.all([
   readFile(new URL("../src/styles/studio-theme.css", import.meta.url), "utf8"),
   readFile(new URL("../src/styles/overlay-system.css", import.meta.url), "utf8"),
   Promise.all([
@@ -13,6 +13,7 @@ const [theme, overlayEntry, overlayParts, main, app, settings, panels, commands,
   ].map((file) => readFile(new URL(`../src/styles/overlays/${file}`, import.meta.url), "utf8"))),
   readFile(new URL("../src/main.tsx", import.meta.url), "utf8"),
   readFile(new URL("../src/app.ts", import.meta.url), "utf8"),
+  readFile(new URL("../src/viewer-scene-interaction-controller.ts", import.meta.url), "utf8"),
   readFile(new URL("../src/viewer-settings-panel.ts", import.meta.url), "utf8"),
   readFile(new URL("../src/viewer-panel-controller.ts", import.meta.url), "utf8"),
   readFile(new URL("../src/viewer-command-registry.ts", import.meta.url), "utf8"),
@@ -23,6 +24,7 @@ const [theme, overlayEntry, overlayParts, main, app, settings, panels, commands,
   readFile(new URL("../src/react/CourseStudio.tsx", import.meta.url), "utf8"),
 ]);
 const overlayStyles = overlayParts.join("\n");
+const viewerRuntime = `${app}\n${sceneInteraction}`;
 
 for (const token of [
   "--rg-overlay-scrim",
@@ -92,7 +94,7 @@ assert.equal((settings.match(/class="viewer-settings-group"/g) ?? []).length, 5)
 assert.match(settings, /aria-labelledby="viewer-settings-title"/);
 assert.match(panels, /setAttribute\("aria-hidden", open \? "false" : "true"\)/);
 assert.match(panels, /focusBeforePanelOpen/);
-assert.match(app, /event\.code === "Escape" && panelController\.isAnyOpen\(\)/);
+assert.match(viewerRuntime, /event\.code === "Escape" && panelController\.isAnyOpen\(\)/);
 
 for (const commandId of ["edit.move", "edit.rotate", "edit.scale", "edit.assets", "viewer.settings", "viewer.overlay"]) {
   assert.ok(commands.includes(`id: "${commandId}"`), `keyboard command lost: ${commandId}`);

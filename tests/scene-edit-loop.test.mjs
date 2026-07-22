@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const read = (name) => readFile(new URL(`../src/${name}`, import.meta.url), "utf8");
-const [api, editor, autosave, assets, commands, course, shortcut, styles, app, stage, editStatus, editStatusStyles, publicProject, routeIsland, sceneHelpers] = await Promise.all([
+const [api, editor, autosave, assets, commands, course, shortcut, styles, app, sceneInteraction, stage, editStatus, editStatusStyles, publicProject, routeIsland, sceneHelpers] = await Promise.all([
   read("viewer-api.ts"),
   read("viewer-scene-object-editor.ts"),
   read("viewer-scene-edit-autosave.ts"),
@@ -12,6 +12,7 @@ const [api, editor, autosave, assets, commands, course, shortcut, styles, app, s
   read("react/ShortcutModal.tsx"),
   read("style.css"),
   read("app.ts"),
+  read("viewer-scene-interaction-controller.ts"),
   read("viewer-panels/stage.ts"),
   read("viewer-object-edit-status.ts"),
   read("styles/viewer/object-edit-status.css"),
@@ -19,6 +20,7 @@ const [api, editor, autosave, assets, commands, course, shortcut, styles, app, s
   read("react/RouteIsland.tsx"),
   read("viewer-scene-helpers.ts"),
 ]);
+const viewerRuntime = `${app}\n${sceneInteraction}`;
 
 for (const op of ["move_instance", "rotate_instance", "scale_instance", "add_instance", "delete_instance", "duplicate_instance", "replace_asset"]) {
   assert.match(api, new RegExp(`op: "${op}"`), `missing ${op} command contract`);
@@ -69,25 +71,25 @@ assert.match(editStatus, /Esc exits editing/);
 assert.match(editStatus, /退出编辑/);
 assert.match(editStatusStyles, /position: absolute/);
 assert.match(editStatusStyles, /viewer-object-edit-status\[hidden\]/);
-assert.match(app, /function setObjectEditingEnabled\(enabled: boolean/);
-assert.match(app, /sceneObjectEditor\.exit\(\)/);
-assert.match(app, /assetBboxEnabledBeforeEditing/);
-assert.match(app, /showLabels: true/);
-assert.match(app, /showLabels: false/);
+assert.match(viewerRuntime, /function setObjectEditingEnabled\(enabled: boolean/);
+assert.match(viewerRuntime, /sceneObjectEditor\.exit\(\)/);
+assert.match(viewerRuntime, /assetBboxEnabledBeforeEditing/);
+assert.match(viewerRuntime, /showLabels: true/);
+assert.match(viewerRuntime, /showLabels: false/);
 assert.match(sceneHelpers, /options\.showLabels/);
-assert.match(app, /const result = sceneObjectEditor\.cancelStep\(\)/);
-assert.match(app, /result === "nothing_to_cancel"/);
-assert.match(app, /setObjectEditingEnabled\(false, \{ announce: false \}\)/);
-assert.match(app, /roadgen3d-asset-placement-ghost/);
-assert.match(app, /function startAssetPlacement/);
-assert.match(app, /function placeAssetAtCurrentTarget/);
+assert.match(viewerRuntime, /const result = sceneObjectEditor\.cancelStep\(\)/);
+assert.match(viewerRuntime, /result === "nothing_to_cancel"/);
+assert.match(viewerRuntime, /setObjectEditingEnabled\(false, \{ announce: false \}\)/);
+assert.match(viewerRuntime, /roadgen3d-asset-placement-ghost/);
+assert.match(viewerRuntime, /function startAssetPlacement/);
+assert.match(viewerRuntime, /function placeAssetAtCurrentTarget/);
 assert.match(assets, /退出放置后可按住鼠标左键拖动视角/);
 assert.doesNotMatch(assets, /Shift \+ 点击进入漫游/);
-assert.match(app, /正在漫游到点击位置；按住左键拖动可调整视角/);
-assert.match(app, /captureSceneViewSnapshot/);
-assert.match(app, /restoreSceneViewSnapshot\(viewSnapshot\)/);
+assert.match(viewerRuntime, /正在漫游到点击位置；按住左键拖动可调整视角/);
+assert.match(viewerRuntime, /captureSceneViewSnapshot/);
+assert.match(viewerRuntime, /restoreSceneViewSnapshot\(viewSnapshot\)/);
 assert.match(styles, /data-asset-placement-active="true"/);
-assert.match(app, /persistSceneCommands\(commands, \{ layoutPath \}\)/, "scene persistence must receive the active local layout path");
+assert.match(viewerRuntime, /persistSceneCommands\(commands, \{ layoutPath \}\)/, "scene persistence must receive the active local layout path");
 assert.match(publicProject, /revisions\/import-layout/, "the first 3D edit must lazily materialize an explicit layout into the project");
 assert.match(publicProject, /await openProfessionalOwnedRevision[\s\S]*sceneRef = workflow\.getSnapshot\(\)\.sceneRef/, "editing must switch to the imported project revision before applying commands");
 assert.match(routeIsland, /context\.layoutPath/, "the professional host must forward the active layout path");
