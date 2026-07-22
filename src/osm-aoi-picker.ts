@@ -364,7 +364,7 @@ export function mountOsmAoiPicker(host: HTMLElement, options: OsmAoiPickerOption
       sources: {
         osm: {
           type: "raster",
-          tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+          tiles: ["/api/geo/osm-tiles/{z}/{x}/{y}.png"],
           tileSize: 256,
           attribution: "© OpenStreetMap contributors",
         },

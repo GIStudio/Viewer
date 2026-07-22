@@ -201,7 +201,7 @@ export function mountOsmRoadStudyPicker(
     style: {
       version: 8,
       sources: {
-        osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256 },
+        osm: { type: "raster", tiles: ["/api/geo/osm-tiles/{z}/{x}/{y}.png"], tileSize: 256 },
       },
       layers: [{ id: "osm", type: "raster", source: "osm", paint: { "raster-saturation": -0.35, "raster-opacity": 0.78 } }],
     },
