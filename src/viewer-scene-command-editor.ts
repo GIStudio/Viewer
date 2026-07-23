@@ -139,7 +139,11 @@ export function parseSceneCommandEnvelope(
       const scale = Number(command.scale ?? 1);
       const yaw = Number(command.yaw_deg ?? 0);
       if (!Number.isFinite(scale) || scale < 0.25 || scale > 4 || !Number.isFinite(yaw)) throw new Error(`Command ${index + 1} has invalid scale or yaw.`);
-      return { ...base, op, asset_id: ref.assetId, category: ref.category, asset_ref: ref, position_xyz: vector(command.position_xyz, `Command ${index + 1} position_xyz`), yaw_deg: yaw, scale };
+      const supportPolicy = String(command.support_policy ?? "strict");
+      if (supportPolicy !== "strict" && supportPolicy !== "manual_override") {
+        throw new Error(`Command ${index + 1} support_policy must be strict or manual_override.`);
+      }
+      return { ...base, op, asset_id: ref.assetId, category: ref.category, asset_ref: ref, position_xyz: vector(command.position_xyz, `Command ${index + 1} position_xyz`), yaw_deg: yaw, scale, support_policy: supportPolicy };
     }
     throw new Error(`Command ${index + 1} has unsupported op '${op}'.`);
   });

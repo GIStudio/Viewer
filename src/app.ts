@@ -1171,6 +1171,10 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
         flashStatus,
       })
     : null;
+  const assetPlacementHighlights = new THREE.Group();
+  assetPlacementHighlights.name = "roadgen3d-asset-placement-highlights";
+  assetPlacementHighlights.userData.viewerHelper = true;
+  scene.add(assetPlacementHighlights);
   const assetPlacementGhost = new THREE.Mesh(
     new THREE.CylinderGeometry(0.48, 0.48, 0.04, 28),
     new THREE.MeshBasicMaterial({ color: 0xb9d9cc, transparent: true, opacity: 0.78, depthWrite: false }),
@@ -1179,6 +1183,11 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
   assetPlacementGhost.visible = false;
   assetPlacementGhost.userData.viewerHelper = true;
   scene.add(assetPlacementGhost);
+  const assetPlacementHintEl = document.createElement("aside");
+  assetPlacementHintEl.className = "viewer-asset-placement-hint";
+  assetPlacementHintEl.hidden = true;
+  assetPlacementHintEl.setAttribute("aria-live", "polite");
+  canvasHost.appendChild(assetPlacementHintEl);
   let assetPlacementAsset: { value: SceneAssetRef | null } = { value: null };
   const assetPlacementPointer = new THREE.Vector2(0, 0);
   renderer.domElement.addEventListener("pointermove", (event) => {
@@ -1201,7 +1210,7 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     }
     event.preventDefault();
     event.stopImmediatePropagation();
-    placeAssetAtCurrentTarget();
+    placeAssetAtCurrentTarget(event.altKey);
   }, { capture: true, signal });
   renderer.domElement.addEventListener("click", (event) => {
     if (!assetPlacementAsset.value) return;
@@ -2002,6 +2011,8 @@ async function mountViewerImpl(shell: DesktopShell, workflow: WorkflowController
     featureQualityWorkbench?.dispose();
     openSceneAssetsEl?.removeEventListener("click", openSceneAssets);
     scene.remove(assetPlacementGhost);
+    scene.remove(assetPlacementHighlights);
+    assetPlacementHintEl.remove();
     assetPlacementGhost.geometry.dispose();
     (assetPlacementGhost.material as THREE.Material).dispose();
     environmentController.dispose();

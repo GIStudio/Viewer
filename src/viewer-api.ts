@@ -299,6 +299,8 @@ export type SceneAddInstanceCommand = {
   yaw_deg: number;
   scale: number;
   height_offset_m?: number;
+  /** Manual authoring may deliberately bypass category-to-surface compatibility. */
+  support_policy?: "strict" | "manual_override";
 };
 
 export type SceneReplaceAssetCommand = {

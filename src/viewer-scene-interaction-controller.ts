@@ -982,6 +982,78 @@ export function createViewerSceneInteractionController(getContext: () => ViewerS
     return "";
   }
 
+  function allowedPlacementRoles(asset: SceneAssetRef | null): Set<string> {
+    return String(asset?.category ?? "").toLowerCase() === "tree"
+      ? new Set(["planting", "furnishing", "frontage"])
+      : new Set(["sidewalk", "furnishing", "frontage"]);
+  }
+
+  function placementRoleLabel(role: string): string {
+    const labels: Record<string, string> = {
+      carriageway: "机动车道",
+      curb: "路缘",
+      sidewalk: "人行道",
+      furnishing: "设施带",
+      frontage: "临街区",
+      planting: "种植带",
+      crossing: "过街区",
+      context_ground: "场景地面",
+      building: "建筑",
+    };
+    return labels[role] || role || "未知表面";
+  }
+
+  function assetPlacementUi(): { highlights: THREE.Group; hint: HTMLElement } {
+    const { canvasHost, scene } = getContext();
+    return {
+      highlights: scene.getObjectByName("roadgen3d-asset-placement-highlights") as THREE.Group,
+      hint: canvasHost.querySelector<HTMLElement>(".viewer-asset-placement-hint")!,
+    };
+  }
+
+  function clearAssetPlacementHighlights(): void {
+    const { highlights } = assetPlacementUi();
+    for (const child of [...highlights.children]) {
+      highlights.remove(child);
+      if (child instanceof THREE.Mesh) {
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((material) => material.dispose());
+      }
+    }
+  }
+
+  function showAssetPlacementHighlights(asset: SceneAssetRef): number {
+    const { currentRoot } = getContext();
+    const { highlights } = assetPlacementUi();
+    clearAssetPlacementHighlights();
+    const allowed = allowedPlacementRoles(asset);
+    currentRoot.value?.updateWorldMatrix(true, true);
+    currentRoot.value?.traverse((child) => {
+      if (!(child instanceof THREE.Mesh) || child.userData?.viewerHelper) return;
+      if (!allowed.has(surfaceRoleForObject(child))) return;
+      const overlay = new THREE.Mesh(
+        child.geometry,
+        new THREE.MeshBasicMaterial({
+          color: 0x41a86d,
+          transparent: true,
+          opacity: 0.28,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+        }),
+      );
+      overlay.name = `roadgen3d-placement-highlight-${child.name}`;
+      overlay.matrix.copy(child.matrixWorld);
+      overlay.matrixAutoUpdate = false;
+      overlay.renderOrder = 900;
+      overlay.userData.viewerHelper = true;
+      overlay.raycast = () => undefined;
+      highlights.add(overlay);
+    });
+    return highlights.children.length;
+  }
+
   function assetPlacementPoint(
     asset: SceneAssetRef | null,
     pointer: THREE.Vector2 | null,
@@ -999,17 +1071,18 @@ export function createViewerSceneInteractionController(getContext: () => ViewerS
     const hit = raycaster.intersectObject(currentRoot.value, true).find((candidate) => !candidate.object.userData?.viewerHelper);
     if (!hit) return null;
     const role = surfaceRoleForObject(hit.object);
-    const allowed = String(asset?.category ?? "").toLowerCase() === "tree"
-      ? new Set(["planting", "furnishing", "frontage"])
-      : new Set(["sidewalk", "furnishing", "frontage"]);
+    const allowed = allowedPlacementRoles(asset);
     return { point: hit.point.clone(), valid: allowed.has(role), role };
   }
 
   function cancelAssetPlacement(announce = true): void {
     const { assetPlacementAsset, assetPlacementGhost, crosshairEl, laserToggleEl, root } = getContext();
+    const { hint } = assetPlacementUi();
     const wasActive = Boolean(assetPlacementAsset.value);
     assetPlacementAsset.value = null;
     assetPlacementGhost.visible = false;
+    hint.hidden = true;
+    clearAssetPlacementHighlights();
     delete root.dataset.assetPlacementActive;
     crosshairEl.hidden = !laserToggleEl.checked;
     if (announce && wasActive) flashStatus("已退出资产放置画笔。");
@@ -1017,19 +1090,26 @@ export function createViewerSceneInteractionController(getContext: () => ViewerS
 
   function startAssetPlacement(asset: SceneAssetRef): void {
     const { assetPlacementAsset, crosshairEl, renderer, root } = getContext();
+    const { hint } = assetPlacementUi();
     setObjectEditingEnabled(false, { announce: false });
     assetPlacementAsset.value = asset;
     root.dataset.assetPlacementActive = "true";
     crosshairEl.hidden = false;
+    hint.hidden = false;
+    const highlightedSurfaceCount = showAssetPlacementHighlights(asset);
     updateAssetPlacementPreview();
     renderer.domElement.focus();
-    flashStatus(`放置 ${asset.label}：点击承载面落点；拖动视角请先按 Esc 退出放置。`);
+    flashStatus(highlightedSurfaceCount > 0
+      ? `放置 ${asset.label}：绿色区域可直接放置；其他实体表面可按住 Alt 点击人工覆盖。`
+      : `未找到规则允许的绿色区域；可按住 Alt 点击实体表面进行人工覆盖。`);
   }
 
   function updateAssetPlacementPreview(): void {
     const { assetPlacementAsset, assetPlacementGhost, assetPlacementPointer } = getContext();
+    const { hint } = assetPlacementUi();
     if (!assetPlacementAsset.value) {
       assetPlacementGhost.visible = false;
+      hint.hidden = true;
       return;
     }
     const placement = assetPlacementPoint(
@@ -1037,17 +1117,30 @@ export function createViewerSceneInteractionController(getContext: () => ViewerS
       isPointerLookActive() ? null : assetPlacementPointer,
     );
     assetPlacementGhost.visible = Boolean(placement);
-    if (!placement) return;
+    hint.hidden = false;
+    if (!placement) {
+      hint.dataset.tone = "invalid";
+      hint.textContent = "未命中实体表面。请对准场景地面或道路空间。";
+      return;
+    }
     assetPlacementGhost.position.copy(placement.point);
     (assetPlacementGhost.material as THREE.MeshBasicMaterial).color.set(placement.valid ? 0x41a86d : 0xdf654f);
+    hint.dataset.tone = placement.valid ? "valid" : "override";
+    hint.textContent = placement.valid
+      ? `可放置 · ${placementRoleLabel(placement.role)}（绿色区域）`
+      : `当前为${placementRoleLabel(placement.role)}，规则不推荐；按住 Alt 点击可人工覆盖。`;
   }
 
-  function placeAssetAtCurrentTarget(): void {
+  function placeAssetAtCurrentTarget(manualOverride = false): void {
     const { assetPlacementAsset, assetPlacementPointer, editAutosave } = getContext();
     const asset = assetPlacementAsset.value;
     const placement = assetPlacementPoint(asset, isPointerLookActive() ? null : assetPlacementPointer);
-    if (!asset || !placement?.valid) {
-      flashStatus(`该地物不能放在 ${placement?.role || "未知承载面"}；请选择人行道、设施带、种植带或临街区。`);
+    if (!asset || !placement) {
+      flashStatus("未命中实体表面；请对准场景地面后再放置。");
+      return;
+    }
+    if (!placement.valid && !manualOverride) {
+      flashStatus(`该地物不能直接放在${placementRoleLabel(placement.role)}；选择绿色区域，或按住 Alt 点击人工覆盖。`);
       return;
     }
     const unique = globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36);
@@ -1063,8 +1156,11 @@ export function createViewerSceneInteractionController(getContext: () => ViewerS
       yaw_deg: 0,
       scale: 1,
       height_offset_m: 0,
+      support_policy: placement.valid ? "strict" : "manual_override",
     }, { debounceMs: 0 });
-    flashStatus(`已放置 ${asset.label}，正在保存；可继续点击放置，Esc 退出。`);
+    flashStatus(placement.valid
+      ? `已放置 ${asset.label}，正在保存；可继续点击放置，Esc 退出。`
+      : `已人工覆盖规则并放置 ${asset.label}；该决策会记录在修订中。`);
   }
 
   async function copyCurrentLaserTargetDetails(): Promise<void> {
