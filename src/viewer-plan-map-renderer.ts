@@ -84,7 +84,7 @@ export const LAYERS: Array<{ key: ExpandedMapLayerKey; en: string; zh: string }>
 export const METRIC_OVERLAYS: Array<{ key: ExpandedMapMetricKey; en: string; zh: string }> = [
   { key: "none", en: "None", zh: "无" },
   { key: "bbox", en: "BBox", zh: "边界框" },
-  { key: "curb_ramps", en: "Curb Ramps", zh: "街角坡道" },
+  { key: "curb_ramps", en: "Crosswalk-end Ramps", zh: "斑马线端点坡道" },
   { key: "feasibility", en: "Feasibility", zh: "可行性" },
   { key: "constraint_penalty", en: "Constraint Penalty", zh: "约束惩罚" },
   { key: "road_edge_distance", en: "Road Edge Distance", zh: "距路缘" },
@@ -1728,10 +1728,10 @@ function drawCurbRampMetric(
   }
 
   return {
-    title: text("Accessible Curb Ramps", "无障碍街角坡道"),
+    title: text("Accessible Crosswalk-end Ramps", "无障碍斑马线端点坡道"),
     subtitle: text(
-      "Pulse marks each ramp; amber circles show the 3m pedestrian influence area",
-      "闪烁定位坡道；琥珀色圆圈表示 3m 行人影响范围",
+      "Each ramp is anchored where a crosswalk endpoint meets the curb; amber circles show the 3m pedestrian influence area",
+      "每个坡道锚定在斑马线端部与路缘的接触位置；琥珀色圆圈表示 3m 行人影响范围",
     ),
     status: ramps.length
       ? `${ramps.length} ${text("ramps", "处坡道")} · 3m ${text("influence radius", "影响半径")}`
