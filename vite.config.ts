@@ -1681,6 +1681,7 @@ function viewerApiPlugin(): Plugin {
               layout_revision: buildLayoutRevision(layoutPath, rawLayoutText, layoutPayload),
               summary,
               visual_style: (layoutPayload.visual_style ?? null) as JsonRecord | null,
+              surface_diagnostic: cleanForJson(layoutPayload.surface_diagnostic ?? {}),
               final_scene: {
                 label: "Final Scene",
                 glb_url: `${apiPrefix}/file?path=${encodeURIComponent(finalScenePath)}`,

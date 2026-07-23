@@ -40,6 +40,17 @@ try {
         ],
       },
     },
+    surface_diagnostic: {
+      schema_version: "roadgen3d.surface-diagnostic.v1",
+      coordinate_space: "local_xz_m",
+      node_roles: { accessible_curb_ramp_corner_0_0: "curb_access_ramp" },
+      curb_access_ramps: [{
+        ramp_id: "accessible_curb_ramp_corner_0_0",
+        center_xz: [0, 0],
+        footprint_xz: [[-0.75, -0.5], [0.75, -0.5], [0.75, 0.5], [-0.75, 0.5]],
+        influence_radius_m: 3,
+      }],
+    },
     layout_overlay: {
       building_footprints: [
         { points_xz: [[-6, -6], [6, -6], [6, 6], [-6, 6]] },
@@ -93,6 +104,56 @@ try {
     canonical.noFootprintPixel,
     "The canonical plan compositor must paint manifest building footprints into the rendered plan.",
   );
+
+  const curbRampMetric = await page.evaluate(async ({ fixtureManifest, fixtureBounds }) => {
+    const { drawPlanViewport, focusPlanViewportForMetric } = await import("/src/viewer-plan-map-renderer.ts");
+    const focusedViewport = focusPlanViewportForMetric(
+      { x: 0, y: 0, width: 640, height: 640, bounds: fixtureBounds, manifest: fixtureManifest, label: "Current" },
+      "curb_ramps",
+    );
+    const renderAt = (animationTimeMs) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = 640;
+      const ctx = canvas.getContext("2d");
+      drawPlanViewport(
+        ctx,
+        focusedViewport,
+        { roads: true, surfaces: true, buildings: false, furniture: false, viewpoint: false },
+        "curb_ramps",
+        { x: 18, y: 0, z: 18 },
+        { x: 1, y: 0, z: 0 },
+        (en) => en,
+        false,
+        animationTimeMs,
+      );
+      return Array.from(ctx.getImageData(0, 0, 640, 640).data);
+    };
+    const frameA = renderAt(0);
+    const frameB = renderAt(625);
+    const orangePixels = frameA.reduce((count, value, index) => (
+      index % 4 === 0
+      && value > 180
+      && frameA[index + 1] > 70
+      && frameA[index + 1] < 210
+      && frameA[index + 2] < 90
+        ? count + 1
+        : count
+    ), 0);
+    let changedPixels = 0;
+    for (let index = 0; index < frameA.length; index += 4) {
+      if (frameA[index] !== frameB[index]
+        || frameA[index + 1] !== frameB[index + 1]
+        || frameA[index + 2] !== frameB[index + 2]
+        || frameA[index + 3] !== frameB[index + 3]) {
+        changedPixels += 1;
+      }
+    }
+    return { orangePixels, changedPixels, focusedExtent: focusedViewport.bounds.extent };
+  }, { fixtureManifest: manifest, fixtureBounds: bounds });
+  assert.ok(curbRampMetric.orangePixels > 10, "curb-ramp metric must paint an amber footprint and influence area");
+  assert.ok(curbRampMetric.changedPixels > 10, "curb-ramp metric must animate its location pulse");
+  assert.ok(curbRampMetric.focusedExtent < bounds.extent, "curb-ramp metric must focus the map around the ramp cluster");
 
   await page.evaluate(async ({ fixtureManifest, fixtureBounds }) => {
     const { exportTopDownMapPng } = await import("/src/viewer-export.ts");

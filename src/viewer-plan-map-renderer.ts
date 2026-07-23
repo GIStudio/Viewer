@@ -26,7 +26,8 @@ export type ExpandedMapMetricKey =
   | "clear_path_conflict"
   | "tree_shade"
   | "lighting"
-  | "amenity_coverage";
+  | "amenity_coverage"
+  | "curb_ramps";
 type JsonRecord = Record<string, unknown>;
 type WorldPoint = { x: number; z: number };
 type WorldSegment = { a: WorldPoint; b: WorldPoint };
@@ -83,6 +84,7 @@ export const LAYERS: Array<{ key: ExpandedMapLayerKey; en: string; zh: string }>
 export const METRIC_OVERLAYS: Array<{ key: ExpandedMapMetricKey; en: string; zh: string }> = [
   { key: "none", en: "None", zh: "无" },
   { key: "bbox", en: "BBox", zh: "边界框" },
+  { key: "curb_ramps", en: "Curb Ramps", zh: "街角坡道" },
   { key: "feasibility", en: "Feasibility", zh: "可行性" },
   { key: "constraint_penalty", en: "Constraint Penalty", zh: "约束惩罚" },
   { key: "road_edge_distance", en: "Road Edge Distance", zh: "距路缘" },
@@ -1611,6 +1613,136 @@ function drawCoverageMetric(
   };
 }
 
+type CurbRampMetricEntry = {
+  id: string;
+  center: WorldPoint;
+  footprint: WorldPoint[];
+  influenceRadiusM: number;
+};
+
+function curbRampMetricEntries(manifest: ViewerManifest): CurbRampMetricEntry[] {
+  const diagnostic = asRecord(manifest.surface_diagnostic) ?? {};
+  return asArray(diagnostic.curb_access_ramps)
+    .map((value) => asRecord(value))
+    .filter((value): value is JsonRecord => value !== null)
+    .map((record) => ({
+      id: recordText(record, ["ramp_id", "id"]),
+      center: readPoint(record.center_xz),
+      footprint: readPointList(record.footprint_xz),
+      influenceRadiusM: finiteNumber(record.influence_radius_m) ?? 3,
+    }))
+    .filter((ramp): ramp is CurbRampMetricEntry => ramp.center !== null);
+}
+
+export function focusPlanViewportForMetric(
+  viewport: PlanViewport,
+  metric: ExpandedMapMetricKey,
+): PlanViewport {
+  if (metric !== "curb_ramps") {
+    return viewport;
+  }
+  const ramps = curbRampMetricEntries(viewport.manifest);
+  if (!ramps.length) {
+    return viewport;
+  }
+  const points = ramps.flatMap((ramp) => ramp.footprint.length ? ramp.footprint : [ramp.center]);
+  const padding = Math.max(5, ...ramps.map((ramp) => ramp.influenceRadiusM + 2));
+  const minX = Math.min(...points.map((point) => point.x)) - padding;
+  const maxX = Math.max(...points.map((point) => point.x)) + padding;
+  const minZ = Math.min(...points.map((point) => point.z)) - padding;
+  const maxZ = Math.max(...points.map((point) => point.z)) + padding;
+  const focusedBounds: SceneBounds = {
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+    center: new THREE.Vector3((minX + maxX) / 2, viewport.bounds.center.y, (minZ + maxZ) / 2),
+    extent: Math.max(maxX - minX, maxZ - minZ) / 2,
+  };
+  return {
+    ...viewport,
+    bounds: fitBoundsToAspect(focusedBounds, viewport.width / Math.max(1, viewport.height)),
+  };
+}
+
+function drawCurbRampMetric(
+  ctx: CanvasRenderingContext2D,
+  manifest: ViewerManifest,
+  bounds: SceneBounds,
+  width: number,
+  height: number,
+  text: (en: string, zh: string) => string,
+  animationTimeMs: number,
+): MetricLegend {
+  const ramps = curbRampMetricEntries(manifest);
+
+  for (const [index, ramp] of ramps.entries()) {
+    const center = ramp.center;
+    drawWorldCircle(
+      ctx,
+      center,
+      ramp.influenceRadiusM,
+      bounds,
+      width,
+      height,
+      "rgba(245, 158, 11, 0.10)",
+      "rgba(217, 119, 6, 0.48)",
+      1.2,
+    );
+    if (ramp.footprint.length >= 3) {
+      drawPolygon(
+        ctx,
+        ramp.footprint,
+        bounds,
+        width,
+        height,
+        "rgba(251, 191, 36, 0.84)",
+        "rgba(146, 64, 14, 0.96)",
+        1.5,
+      );
+    }
+
+    const phase = ((animationTimeMs / 1250) + index * 0.17) % 1;
+    const pulseRadius = ramp.influenceRadiusM * (0.28 + phase * 0.72);
+    drawWorldCircle(
+      ctx,
+      center,
+      pulseRadius,
+      bounds,
+      width,
+      height,
+      "rgba(245, 158, 11, 0)",
+      `rgba(234, 88, 12, ${(0.86 * (1 - phase)).toFixed(3)})`,
+      2.2,
+    );
+    const mapped = project(center, bounds, width, height);
+    ctx.save();
+    ctx.translate(mapped.x, mapped.y);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = "#fff7ed";
+    ctx.strokeStyle = "#c2410c";
+    ctx.lineWidth = 1.6;
+    ctx.fillRect(-3.8, -3.8, 7.6, 7.6);
+    ctx.strokeRect(-3.8, -3.8, 7.6, 7.6);
+    ctx.restore();
+  }
+
+  return {
+    title: text("Accessible Curb Ramps", "无障碍街角坡道"),
+    subtitle: text(
+      "Pulse marks each ramp; amber circles show the 3m pedestrian influence area",
+      "闪烁定位坡道；琥珀色圆圈表示 3m 行人影响范围",
+    ),
+    status: ramps.length
+      ? `${ramps.length} ${text("ramps", "处坡道")} · 3m ${text("influence radius", "影响半径")}`
+      : text("No curb-ramp geometry in this scene", "当前场景没有坡道位置数据"),
+    rows: [
+      { label: text("Ramp footprint", "坡道轮廓"), color: "#f59e0b" },
+      { label: text("Pedestrian influence", "行人影响范围"), color: "#ea580c" },
+    ],
+  };
+}
+
 function drawMetricLegend(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -1691,6 +1823,7 @@ function drawMetricOverlay(
   width: number,
   height: number,
   text: (en: string, zh: string) => string,
+  animationTimeMs = 0,
 ): MetricLegend | null {
   if (metric === "none") {
     return null;
@@ -1738,6 +1871,9 @@ function drawMetricOverlay(
   }
   if (metric === "tree_shade" || metric === "lighting" || metric === "amenity_coverage") {
     return drawCoverageMetric(ctx, manifest, bounds, width, height, metric, text);
+  }
+  if (metric === "curb_ramps") {
+    return drawCurbRampMetric(ctx, manifest, bounds, width, height, text, animationTimeMs);
   }
   return {
     title: metricLabel(metric, text),
@@ -1890,6 +2026,7 @@ export function drawPlanViewport(
   forward: THREE.Vector3,
   text: (en: string, zh: string) => string,
   showDecorations = true,
+  animationTimeMs = 0,
 ): void {
   const { x, y, width, height, manifest, bounds, label } = viewport;
   ctx.save();
@@ -1919,7 +2056,7 @@ export function drawPlanViewport(
   if (layerState.furniture) {
     drawFurniture(ctx, manifest, bounds, width, height);
   }
-  const metricLegend = drawMetricOverlay(ctx, metricOverlay, manifest, bounds, width, height, text);
+  const metricLegend = drawMetricOverlay(ctx, metricOverlay, manifest, bounds, width, height, text, animationTimeMs);
   if (showDecorations && layerState.viewpoint) {
     drawViewpoint(ctx, bounds, width, height, avatarPosition, forward);
   }

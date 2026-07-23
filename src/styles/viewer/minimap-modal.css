@@ -224,6 +224,18 @@
   min-width: max-content;
 }
 
+.viewer-expanded-map-metric:has([data-expanded-map-metric="curb_ramps"]) {
+  border-color: rgba(217, 119, 6, 0.32);
+  background: rgba(255, 247, 237, 0.88);
+}
+
+.viewer-expanded-map-metric:has([data-expanded-map-metric="curb_ramps"])[data-active="true"] {
+  color: #9a3412;
+  border-color: rgba(194, 65, 12, 0.7);
+  background: rgba(255, 237, 213, 0.96);
+  box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.16);
+}
+
 .viewer-expanded-map-comparebar {
   flex: 0 0 auto;
   display: flex;

@@ -66,11 +66,24 @@ export type SurfaceDiagnosticPatch = {
   rings_xz?: Array<Array<[number, number]>>;
 };
 
+export type SurfaceDiagnosticCurbRamp = {
+  ramp_id: string;
+  center_xz: [number, number];
+  outward_axis_xz?: [number, number];
+  footprint_xz?: Array<[number, number]>;
+  length_along_curb_m?: number;
+  run_m?: number;
+  rise_m?: number;
+  influence_radius_m?: number;
+  source_crossing_indices?: number[];
+};
+
 export type SurfaceDiagnosticManifest = {
   schema_version: "roadgen3d.surface-diagnostic.v1";
   coordinate_space: "local_xz_m";
   source?: "final_glb_top_faces" | string;
   node_roles: Record<string, SurfaceDiagnosticRole | string>;
+  curb_access_ramps?: SurfaceDiagnosticCurbRamp[];
   patch_provenance?: SurfaceDiagnosticPatch[];
   junction_arm_profiles?: Array<Record<string, unknown>>;
   geometry_qa?: Record<string, unknown>;

@@ -18,6 +18,7 @@ import {
   canvasToWorldPoint,
   comparisonTagsForManifest,
   drawPlanViewport,
+  focusPlanViewportForMetric,
   setTopDownCamera,
   type ExpandedMapController,
   type ExpandedMapDeps,
@@ -41,6 +42,7 @@ function drawPlanOverlay(
   avatarPosition: THREE.Vector3,
   forward: THREE.Vector3,
   text: (en: string, zh: string) => string,
+  animationTimeMs = 0,
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) {
@@ -61,7 +63,7 @@ function drawPlanOverlay(
     ctx.fillRect(0, 0, cssWidth, cssHeight);
   }
   for (const viewport of viewports) {
-    drawPlanViewport(ctx, viewport, layerState, metricOverlay, avatarPosition, forward, text);
+    drawPlanViewport(ctx, viewport, layerState, metricOverlay, avatarPosition, forward, text, true, animationTimeMs);
   }
   ctx.restore();
 }
@@ -130,6 +132,8 @@ export function createExpandedMapController(deps: ExpandedMapDeps): ExpandedMapC
   let comparisonOptionsLoading = false;
   let comparisonOptionsError = "";
   let comparisonRequestId = 0;
+  let metricAnimationFrame: number | null = null;
+  let lastMetricAnimationMs = 0;
   const camera = new THREE.OrthographicCamera(-20, 20, 20, -20, 0.1, 5000);
   camera.up.set(0, 0, -1);
   const layerState: Record<ExpandedMapLayerKey, boolean> = {
@@ -391,7 +395,7 @@ export function createExpandedMapController(deps: ExpandedMapDeps): ExpandedMapC
         width,
         height,
         deps.text,
-      );
+      ).map((viewport) => focusPlanViewportForMetric(viewport, metricOverlay));
       activeClickViewports = planViewports.map((viewport) => ({
         x: viewport.x,
         y: viewport.y,
@@ -410,6 +414,7 @@ export function createExpandedMapController(deps: ExpandedMapDeps): ExpandedMapC
         deps.getAvatarPosition(),
         deps.cameraForwardHorizontal(),
         deps.text,
+        performance.now(),
       );
     }
     if (mode === "presentation") {
@@ -436,6 +441,59 @@ export function createExpandedMapController(deps: ExpandedMapDeps): ExpandedMapC
               ? deps.text("Plan map · comparison", "平面图 · 对比")
               : deps.text("Plan map", "平面图");
     }
+    scheduleMetricAnimation();
+  }
+
+  function scheduleMetricAnimation(): void {
+    const active = modalEl !== null && mode === "plan" && metricOverlay === "curb_ramps";
+    if (!active || metricAnimationFrame !== null) {
+      return;
+    }
+    metricAnimationFrame = requestAnimationFrame((timestamp) => {
+      metricAnimationFrame = null;
+      if (!modalEl || mode !== "plan" || metricOverlay !== "curb_ramps") {
+        return;
+      }
+      if (timestamp - lastMetricAnimationMs >= 250) {
+        lastMetricAnimationMs = timestamp;
+        drawMetricAnimationFrame(timestamp);
+        scheduleMetricAnimation();
+      } else {
+        scheduleMetricAnimation();
+      }
+    });
+  }
+
+  function drawMetricAnimationFrame(timestamp: number): void {
+    if (!overlayCanvasEl || !webglHostEl || mode !== "plan" || metricOverlay !== "curb_ramps") {
+      return;
+    }
+    const bounds = deps.getBounds();
+    const manifest = deps.getManifest();
+    if (!bounds || !manifest) {
+      return;
+    }
+    const width = Math.max(1, webglHostEl.clientWidth);
+    const height = Math.max(1, webglHostEl.clientHeight);
+    const planViewports = buildPlanViewports(
+      manifest,
+      compareEnabled ? comparisonManifest : null,
+      bounds,
+      width,
+      height,
+      deps.text,
+    ).map((viewport) => focusPlanViewportForMetric(viewport, metricOverlay));
+    drawPlanOverlay(
+      overlayCanvasEl,
+      mode,
+      layerState,
+      metricOverlay,
+      planViewports,
+      deps.getAvatarPosition(),
+      deps.cameraForwardHorizontal(),
+      deps.text,
+      timestamp,
+    );
   }
 
   function setMode(nextMode: ExpandedMapMode): void {
@@ -445,6 +503,10 @@ export function createExpandedMapController(deps: ExpandedMapDeps): ExpandedMapC
   }
 
   function close(): void {
+    if (metricAnimationFrame !== null) {
+      cancelAnimationFrame(metricAnimationFrame);
+      metricAnimationFrame = null;
+    }
     modalEl?.remove();
     modalEl = null;
     panelEl = null;

@@ -16,6 +16,7 @@ const draftStore = fs.readFileSync(new URL("../src/professional-draft-store.ts",
 const selection = fs.readFileSync(new URL("../src/viewer-scene-selection-controller.ts", import.meta.url), "utf8");
 const panelElements = fs.readFileSync(new URL("../src/viewer-panels/elements.ts", import.meta.url), "utf8");
 const hitInfo = fs.readFileSync(new URL("../src/viewer-hit-info.ts", import.meta.url), "utf8");
+const viteConfig = fs.readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
 
 assert.match(workflow, /kind: "starter_demo"; demoId: string/, "workflow scene refs must distinguish immutable starter previews");
 assert.match(workflow, /setStarterPreview\(demoId\)/, "the read-only demo must be represented without materializing a workflow");
@@ -67,5 +68,10 @@ assert.match(hitInfo, /场景底板；正常情况下仅在道路与铺装范围
 assert.match(hitInfo, /Selecting this object inside the road area usually indicates a gap/, "English hit inspection must retain the geometry diagnostic");
 assert.match(routeIsland, /materializeDefaultStarterScene\(workflow\)/, "01A and editing must materialize the preview before mutation");
 assert.doesNotMatch(panelElements, /#viewer-design-close/, "the paged generation dialog must not require its removed legacy close button");
+assert.match(
+  viteConfig,
+  /surface_diagnostic:\s*cleanForJson\(layoutPayload\.surface_diagnostic \?\? \{\}\)/,
+  "the local layout route must preserve curb-ramp and surface diagnostic geometry",
+);
 
 console.log("starter scene: preview priority, explicit materialization, and empty-scene protection verified");
