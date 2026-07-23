@@ -1616,8 +1616,10 @@ function drawCoverageMetric(
 type CurbRampMetricEntry = {
   id: string;
   center: WorldPoint;
+  sourceCenter: WorldPoint | null;
   footprint: WorldPoint[];
   influenceRadiusM: number;
+  placementOffsetM: number;
 };
 
 function curbRampMetricEntries(manifest: ViewerManifest): CurbRampMetricEntry[] {
@@ -1628,8 +1630,10 @@ function curbRampMetricEntries(manifest: ViewerManifest): CurbRampMetricEntry[] 
     .map((record) => ({
       id: recordText(record, ["ramp_id", "id"]),
       center: readPoint(record.center_xz),
+      sourceCenter: readPoint(record.source_center_xz),
       footprint: readPointList(record.footprint_xz),
       influenceRadiusM: finiteNumber(record.influence_radius_m) ?? 3,
+      placementOffsetM: finiteNumber(record.placement_offset_along_curb_m) ?? 0,
     }))
     .filter((ramp): ramp is CurbRampMetricEntry => ramp.center !== null);
 }
@@ -1675,9 +1679,31 @@ function drawCurbRampMetric(
   animationTimeMs: number,
 ): MetricLegend {
   const ramps = curbRampMetricEntries(manifest);
+  const shiftedRamps = ramps.filter((ramp) => Math.abs(ramp.placementOffsetM) > 0.01);
 
   for (const [index, ramp] of ramps.entries()) {
     const center = ramp.center;
+    if (ramp.sourceCenter && Math.abs(ramp.placementOffsetM) > 0.01) {
+      const sourceMapped = project(ramp.sourceCenter, bounds, width, height);
+      const centerMapped = project(center, bounds, width, height);
+      ctx.save();
+      ctx.strokeStyle = "rgba(37, 99, 235, 0.88)";
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(sourceMapped.x, sourceMapped.y);
+      ctx.lineTo(centerMapped.x, centerMapped.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#dbeafe";
+      ctx.strokeStyle = "#1d4ed8";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(sourceMapped.x, sourceMapped.y, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
     drawWorldCircle(
       ctx,
       center,
@@ -1730,13 +1756,14 @@ function drawCurbRampMetric(
   return {
     title: text("Accessible Crosswalk-end Ramps", "无障碍斑马线端点坡道"),
     subtitle: text(
-      "Each ramp is anchored where a crosswalk endpoint meets the curb; amber circles show the 3m pedestrian influence area",
-      "每个坡道锚定在斑马线端部与路缘的接触位置；琥珀色圆圈表示 3m 行人影响范围",
+      "Blue anchors mark crosswalk endpoints; dashed lines show collision-avoidance shifts along the curb",
+      "蓝点表示斑马线端部原始锚点；虚线表示为避免重叠而沿路缘进行的移动",
     ),
     status: ramps.length
-      ? `${ramps.length} ${text("ramps", "处坡道")} · 3m ${text("influence radius", "影响半径")}`
+      ? `${ramps.length} ${text("ramps", "处坡道")} · ${shiftedRamps.length} ${text("shifted", "处已移动")} · ${Math.max(0, ...shiftedRamps.map((ramp) => Math.abs(ramp.placementOffsetM))).toFixed(2)}m ${text("max shift", "最大移动")}`
       : text("No curb-ramp geometry in this scene", "当前场景没有坡道位置数据"),
     rows: [
+      { label: text("Original crosswalk anchor", "斑马线原始锚点"), color: "#2563eb" },
       { label: text("Ramp footprint", "坡道轮廓"), color: "#f59e0b" },
       { label: text("Pedestrian influence", "行人影响范围"), color: "#ea580c" },
     ],

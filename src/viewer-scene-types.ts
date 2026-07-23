@@ -69,6 +69,11 @@ export type SurfaceDiagnosticPatch = {
 export type SurfaceDiagnosticCurbRamp = {
   ramp_id: string;
   center_xz: [number, number];
+  source_center_xz?: [number, number];
+  source_road_edge_xz?: [number, number];
+  road_edge_xz?: [number, number];
+  placement_offset_along_curb_m?: number;
+  placement_rule?: string;
   outward_axis_xz?: [number, number];
   footprint_xz?: Array<[number, number]>;
   length_along_curb_m?: number;
